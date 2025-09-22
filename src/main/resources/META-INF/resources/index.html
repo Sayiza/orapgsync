@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ora to Pg Sync Tool</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div class="header">
+  <h1>Ora to Pg Sync Tool</h1>
+</div>
+
+<div class="progress-message-container">
+  <div id="progress-bar" class="progress-bar-section">
+    <div class="progress-label">Migration Progress</div>
+    <div class="progress-indicator">
+      <div class="progress-fill" style="width: 0%"></div>
+    </div>
+    <div class="progress-status">Ready to start</div>
+  </div>
+  <div id="message-bar" class="message-bar-section">
+    <div class="message-content">System ready for migration</div>
+  </div>
+</div>
+
+<div class="database-comparison-container">
+  <table class="database-comparison-table">
+    <thead>
+      <tr>
+        <th class="topic-column">Component</th>
+        <th class="source-column">Oracle (Source)</th>
+        <th class="target-column">PostgreSQL (Target)</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr class="connection-row">
+        <td class="topic-cell">Connection</td>
+        <td class="source-cell">
+          <div class="connection-status" id="oracle-connection">
+            <span class="status-indicator disconnected"></span>
+            <span class="status-text">Not connected</span>
+            <button class="test-connection-btn" onclick="testOracleConnection()">Test</button>
+          </div>
+        </td>
+        <td class="target-cell">
+          <div class="connection-status" id="postgres-connection">
+            <span class="status-indicator disconnected"></span>
+            <span class="status-text">Not connected</span>
+            <button class="test-connection-btn" onclick="testPostgresConnection()">Test</button>
+          </div>
+        </td>
+      </tr>
+      <tr class="objects-row">
+        <td class="topic-cell">Object Types</td>
+        <td class="source-cell">
+          <div class="component-info" id="oracle-objects">
+            <span class="count-badge">-</span>
+            <span class="component-text">Object types discovered</span>
+          </div>
+        </td>
+        <td class="target-cell">
+          <div class="component-info" id="postgres-objects">
+            <span class="count-badge">-</span>
+            <span class="component-text">Types created</span>
+          </div>
+        </td>
+      </tr>
+      <tr class="tables-row">
+        <td class="topic-cell">Tables</td>
+        <td class="source-cell">
+          <div class="component-info" id="oracle-tables">
+            <span class="count-badge">-</span>
+            <span class="component-text">Tables found</span>
+          </div>
+        </td>
+        <td class="target-cell">
+          <div class="component-info" id="postgres-tables">
+            <span class="count-badge">-</span>
+            <span class="component-text">Tables created</span>
+          </div>
+        </td>
+      </tr>
+      <tr class="data-row">
+        <td class="topic-cell">Data</td>
+        <td class="source-cell">
+          <div class="component-info" id="oracle-data">
+            <span class="count-badge">-</span>
+            <span class="component-text">Records available</span>
+          </div>
+        </td>
+        <td class="target-cell">
+          <div class="component-info" id="postgres-data">
+            <span class="count-badge">-</span>
+            <span class="component-text">Records migrated</span>
+          </div>
+        </td>
+      </tr>
+      <tr class="views-row">
+        <td class="topic-cell">Views</td>
+        <td class="source-cell">
+          <div class="component-info" id="oracle-views">
+            <span class="count-badge">-</span>
+            <span class="component-text">Views found</span>
+          </div>
+        </td>
+        <td class="target-cell">
+          <div class="component-info" id="postgres-views">
+            <span class="count-badge">-</span>
+            <span class="component-text">Views created</span>
+          </div>
+        </td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
