@@ -1,6 +1,6 @@
 package me.christianrobert.orapgsync.table.model;
 
-import me.christianrobert.orapgsync.core.service.State;
+import me.christianrobert.orapgsync.core.service.StateService;
 import me.christianrobert.orapgsync.core.tools.PostgreSqlIdentifierUtils;
 import me.christianrobert.orapgsync.core.tools.TypeConverter;
 
@@ -39,7 +39,7 @@ public class ColumnMetadata {
     return "ColumnMetadata{name='" + columnName + "', type='" + dataType + "', nullable=" + nullable + "}";
   }
 
-  public String toPostgre(State data, String schemaWhereWeAreNow, String myTableName) {
+  public String toPostgre(StateService data, String schemaWhereWeAreNow, String myTableName) {
     StringBuilder colDef = new StringBuilder();
     colDef.append("    ")
             .append(PostgreSqlIdentifierUtils.quoteIdentifier(this.getColumnName()))

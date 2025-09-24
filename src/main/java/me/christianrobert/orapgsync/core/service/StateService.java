@@ -8,12 +8,46 @@ import java.util.ArrayList;
 import java.util.List;
 
 @ApplicationScoped
-public class State {
-  // raw data from the database
-  private List<String> userNames = new ArrayList<>();
-  private List<ObjectDataTypeMetaData> objectDataTypeMetaData = new ArrayList<>();
-  private List<TableMetadata> tableMetadata = new ArrayList<>();
-  
+public class StateService {
+  // raw data from the source database
+  private List<String> oracleSchemaNames = new ArrayList<>();
+  private List<ObjectDataTypeMetaData> oracleObjectDataTypeMetaData = new ArrayList<>();
+  private List<TableMetadata> OracleTableMetadata = new ArrayList<>();
+
+  // raw data from the target database
+  private List<String> postgresSchemaNames = new ArrayList<>();
+
+  // Getter methods
+  public List<String> getOracleSchemaNames() {
+    return new ArrayList<>(oracleSchemaNames);
+  }
+
+  public List<String> getPostgresSchemaNames() {
+    return new ArrayList<>(postgresSchemaNames);
+  }
+
+  public List<ObjectDataTypeMetaData> getOracleObjectDataTypeMetaData() {
+    return new ArrayList<>(oracleObjectDataTypeMetaData);
+  }
+
+  // Management methods for Oracle schemas
+  public void updateOracleSchemaNames(List<String> schemas) {
+    this.oracleSchemaNames.clear();
+    this.oracleSchemaNames.addAll(schemas);
+  }
+
+  // Management methods for PostgreSQL schemas
+  public void updatePostgresSchemaNames(List<String> schemas) {
+    this.postgresSchemaNames.clear();
+    this.postgresSchemaNames.addAll(schemas);
+  }
+
+  // Management methods for Oracle object data types
+  public void updateOracleObjectDataTypeMetaData(List<ObjectDataTypeMetaData> objectDataTypes) {
+    this.oracleObjectDataTypeMetaData.clear();
+    this.oracleObjectDataTypeMetaData.addAll(objectDataTypes);
+  }
+
   /*
   private List<ViewMetadata> viewDefinition = new ArrayList<>();
   private List<SynonymMetadata> synonyms = new ArrayList<>();

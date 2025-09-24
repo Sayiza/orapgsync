@@ -1,6 +1,6 @@
 package me.christianrobert.orapgsync.table.model;
 
-import me.christianrobert.orapgsync.core.service.State;
+import me.christianrobert.orapgsync.core.service.StateService;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -36,7 +36,7 @@ public class TableMetadata {
     return "TODO entity";
   }
 
-  public List<String> toPostgre(State data) {
+  public List<String> toPostgre(StateService data) {
     return null;
   }
 }

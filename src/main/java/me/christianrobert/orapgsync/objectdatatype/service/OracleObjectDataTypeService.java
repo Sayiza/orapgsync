@@ -3,6 +3,7 @@ package me.christianrobert.orapgsync.objectdatatype.service;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import me.christianrobert.orapgsync.config.service.ConfigService;
+import me.christianrobert.orapgsync.core.service.StateService;
 import me.christianrobert.orapgsync.database.service.OracleConnectionService;
 import me.christianrobert.orapgsync.objectdatatype.model.ObjectDataTypeMetaData;
 import me.christianrobert.orapgsync.objectdatatype.model.ObjectDataTypeVariable;
@@ -30,6 +31,9 @@ public class OracleObjectDataTypeService {
     @Inject
     ConfigService configService;
 
+    @Inject
+    StateService stateService;
+
     public Map<String, Object> getObjectDataTypes() {
         Map<String, Object> result = new HashMap<>();
 
@@ -41,6 +45,13 @@ public class OracleObjectDataTypeService {
             }
 
             Map<String, List<ObjectDataTypeMetaData>> objectDataTypesBySchema = fetchObjectDataTypes();
+
+            // Save to global state - flatten the map to a single list
+            List<ObjectDataTypeMetaData> allObjectDataTypes = objectDataTypesBySchema.values().stream()
+                    .flatMap(List::stream)
+                    .toList();
+            stateService.updateOracleObjectDataTypeMetaData(allObjectDataTypes);
+            log.debug("Saved {} Oracle object data types to global state", allObjectDataTypes.size());
 
             result.put("status", "success");
             result.put("objectDataTypesBySchema", objectDataTypesBySchema);

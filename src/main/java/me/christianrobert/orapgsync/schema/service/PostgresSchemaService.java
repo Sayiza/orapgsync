@@ -2,6 +2,7 @@ package me.christianrobert.orapgsync.schema.service;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import me.christianrobert.orapgsync.core.service.StateService;
 import me.christianrobert.orapgsync.database.service.PostgresConnectionService;
 import me.christianrobert.orapgsync.table.tools.UserExcluder;
 import org.slf4j.Logger;
@@ -24,6 +25,9 @@ public class PostgresSchemaService {
     @Inject
     PostgresConnectionService postgresConnectionService;
 
+    @Inject
+    StateService stateService;
+
     public Map<String, Object> getSchemas() {
         Map<String, Object> result = new HashMap<>();
 
@@ -35,6 +39,10 @@ public class PostgresSchemaService {
             }
 
             List<String> schemas = fetchSchemas();
+
+            // Save to global state
+            stateService.updatePostgresSchemaNames(schemas);
+            log.debug("Saved {} PostgreSQL schemas to global state", schemas.size());
 
             result.put("status", "success");
             result.put("schemas", schemas);
