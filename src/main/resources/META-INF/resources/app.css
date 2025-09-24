@@ -302,8 +302,8 @@ body {
     to { transform: translateX(100%); opacity: 0; }
 }
 
-/* Progress and Message Bar Styling */
-.progress-message-container {
+/* Progress Bar Styling */
+.progress-container {
     max-width: 1400px;
     margin: 2rem auto 0;
     padding: 0 2rem;
@@ -315,7 +315,7 @@ body {
     padding: 1.5rem;
     box-shadow: 0 2px 10px rgba(0,0,0,0.1);
     border: 1px solid #e0e0e0;
-    margin-bottom: 1rem;
+    margin-bottom: 2rem;
 }
 
 .progress-label {
@@ -346,18 +346,6 @@ body {
     color: #666;
 }
 
-.message-bar-section {
-    background: #f8f9fa;
-    border-radius: 8px;
-    padding: 1rem 1.5rem;
-    border-left: 4px solid #1976d2;
-    margin-bottom: 2rem;
-}
-
-.message-content {
-    font-size: 0.95rem;
-    color: #444;
-}
 
 /* Database Comparison Table Styling */
 .database-comparison-container {
@@ -377,7 +365,7 @@ body {
 }
 
 .database-comparison-table th {
-    background: #334;
+    background: #445;
     color: white;
     padding: 1rem;
     font-size: 1.1rem;
@@ -385,17 +373,12 @@ body {
     text-align: left;
 }
 
-.topic-column {
-    width: 20%;
-    background: #445 !important;
-}
-
 .source-column {
-    width: 40%;
+    width: 50%;
 }
 
 .target-column {
-    width: 40%;
+    width: 50%;
 }
 
 .database-comparison-table td {
@@ -412,12 +395,6 @@ body {
     background-color: #f8f9fa;
 }
 
-.topic-cell {
-    font-weight: 600;
-    color: #444;
-    background-color: #f8f9fa;
-    font-size: 1rem;
-}
 
 .source-cell, .target-cell {
     background-color: white;
@@ -537,7 +514,7 @@ body {
         grid-template-columns: 1fr;
     }
 
-    .progress-message-container,
+    .progress-container,
     .database-comparison-container {
         padding: 0 1rem;
     }
@@ -548,13 +525,9 @@ body {
         font-size: 0.9rem;
     }
 
-    .topic-column {
-        width: 25%;
-    }
-
     .source-column,
     .target-column {
-        width: 37.5%;
+        width: 50%;
     }
 
     .connection-status {
@@ -567,5 +540,147 @@ body {
         flex-direction: column;
         align-items: flex-start;
         gap: 0.5rem;
+    }
+}
+
+/* Configuration Section Styling */
+.configuration-container {
+    max-width: 1400px;
+    margin: 2rem auto;
+    padding: 0 2rem;
+}
+
+.config-section {
+    background: white;
+    border-radius: 8px;
+    padding: 2rem;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    border: 1px solid #e0e0e0;
+}
+
+.config-title {
+    font-size: 1.4rem;
+    font-weight: 600;
+    color: #334;
+    margin-bottom: 1.5rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 2px solid #f0f0f0;
+}
+
+.config-form {
+    width: 100%;
+}
+
+.config-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+    gap: 1.5rem;
+    margin-bottom: 2rem;
+}
+
+.config-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.config-label {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: #444;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.config-input {
+    padding: 0.75rem;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 0.9rem;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    background: white;
+}
+
+.config-input:focus {
+    outline: none;
+    border-color: #1976d2;
+    box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.1);
+}
+
+.config-checkbox {
+    width: 16px;
+    height: 16px;
+    margin-right: 0.5rem;
+    accent-color: #1976d2;
+}
+
+.config-help {
+    font-size: 0.8rem;
+    color: #666;
+    font-style: italic;
+    margin-top: 0.25rem;
+}
+
+.config-actions {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    justify-content: flex-start;
+    padding-top: 1rem;
+    border-top: 1px solid #f0f0f0;
+}
+
+.btn-secondary {
+    background: #6c757d;
+    color: white;
+    padding: 0.75rem 1.5rem;
+    border: none;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.btn-secondary:hover {
+    background: #5a6268;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.btn-secondary:active {
+    transform: translateY(0);
+}
+
+.btn-secondary:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
+/* Mobile responsiveness for config section */
+@media (max-width: 768px) {
+    .configuration-container {
+        padding: 0 1rem;
+    }
+
+    .config-section {
+        padding: 1.5rem;
+    }
+
+    .config-grid {
+        grid-template-columns: 1fr;
+        gap: 1rem;
+    }
+
+    .config-actions {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .config-actions .btn {
+        width: 100%;
+        text-align: center;
     }
 }

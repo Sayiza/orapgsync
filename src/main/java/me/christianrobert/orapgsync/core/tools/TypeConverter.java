@@ -1,4 +1,4 @@
-package me.christianrobert.orapgsync.core;
+package me.christianrobert.orapgsync.core.tools;
 
 public class TypeConverter {
 

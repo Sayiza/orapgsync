@@ -1,6 +1,6 @@
 package me.christianrobert.orapgsync.table.model;
 
-import me.christianrobert.orapgsync.core.State;
+import me.christianrobert.orapgsync.core.service.State;
 
 import java.util.ArrayList;
 import java.util.List;

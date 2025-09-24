@@ -7,7 +7,7 @@ import org.slf4j.LoggerFactory;
 
 import java.sql.*;
 import java.util.*;
-import me.christianrobert.orapgsync.core.PostgreSqlIdentifierUtils;
+import me.christianrobert.orapgsync.core.tools.PostgreSqlIdentifierUtils;
 
 public class SchemaExtractor {
 

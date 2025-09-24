@@ -11,7 +11,7 @@
   <h1>Ora to Pg Sync Tool</h1>
 </div>
 
-<div class="progress-message-container">
+<div class="progress-container">
   <div id="progress-bar" class="progress-bar-section">
     <div class="progress-label">Migration Progress</div>
     <div class="progress-indicator">
@@ -19,40 +19,34 @@
     </div>
     <div class="progress-status">Ready to start</div>
   </div>
-  <div id="message-bar" class="message-bar-section">
-    <div class="message-content">System ready for migration</div>
-  </div>
 </div>
 
 <div class="database-comparison-container">
   <table class="database-comparison-table">
     <thead>
       <tr>
-        <th class="topic-column">Component</th>
         <th class="source-column">Oracle (Source)</th>
         <th class="target-column">PostgreSQL (Target)</th>
       </tr>
     </thead>
     <tbody>
       <tr class="connection-row">
-        <td class="topic-cell">Connection</td>
         <td class="source-cell">
           <div class="connection-status" id="oracle-connection">
             <span class="status-indicator disconnected"></span>
-            <span class="status-text">Not connected</span>
+            <span class="status-text">Connection: Not connected</span>
             <button class="test-connection-btn" onclick="testOracleConnection()">Test</button>
           </div>
         </td>
         <td class="target-cell">
           <div class="connection-status" id="postgres-connection">
             <span class="status-indicator disconnected"></span>
-            <span class="status-text">Not connected</span>
+            <span class="status-text">Connection: Not connected</span>
             <button class="test-connection-btn" onclick="testPostgresConnection()">Test</button>
           </div>
         </td>
       </tr>
       <tr class="objects-row">
-        <td class="topic-cell">Object Types</td>
         <td class="source-cell">
           <div class="component-info" id="oracle-objects">
             <span class="count-badge">-</span>
@@ -67,7 +61,6 @@
         </td>
       </tr>
       <tr class="tables-row">
-        <td class="topic-cell">Tables</td>
         <td class="source-cell">
           <div class="component-info" id="oracle-tables">
             <span class="count-badge">-</span>
@@ -82,7 +75,6 @@
         </td>
       </tr>
       <tr class="data-row">
-        <td class="topic-cell">Data</td>
         <td class="source-cell">
           <div class="component-info" id="oracle-data">
             <span class="count-badge">-</span>
@@ -97,7 +89,6 @@
         </td>
       </tr>
       <tr class="views-row">
-        <td class="topic-cell">Views</td>
         <td class="source-cell">
           <div class="component-info" id="oracle-views">
             <span class="count-badge">-</span>
@@ -113,6 +104,100 @@
       </tr>
     </tbody>
   </table>
+</div>
+
+<div class="configuration-container">
+  <div class="config-section">
+    <h2 class="config-title">Configuration Settings</h2>
+    <form id="config-form" class="config-form">
+      <div class="config-grid">
+
+        <div class="config-group">
+          <label class="config-label">
+            <input type="checkbox" id="do-all-schemas" class="config-checkbox">
+            Process All Schemas
+          </label>
+          <span class="config-help">Enable to process all schemas instead of specific ones</span>
+        </div>
+
+        <div class="config-group">
+          <label class="config-label" for="do-only-test-schema">Test Schema Only</label>
+          <input type="text" id="do-only-test-schema" class="config-input" value="USER_ROBERT">
+          <span class="config-help">Specific schema to process when not processing all</span>
+        </div>
+
+        <div class="config-group">
+          <label class="config-label" for="oracle-url">Oracle URL</label>
+          <input type="text" id="oracle-url" class="config-input" value="jdbc:oracle:thin:@localhost:1521:sid">
+          <span class="config-help">Oracle database connection URL</span>
+        </div>
+
+        <div class="config-group">
+          <label class="config-label" for="oracle-user">Oracle Username</label>
+          <input type="text" id="oracle-user" class="config-input" value="sys">
+          <span class="config-help">Oracle database username</span>
+        </div>
+
+        <div class="config-group">
+          <label class="config-label" for="oracle-password">Oracle Password</label>
+          <input type="password" id="oracle-password" class="config-input" value="xxx">
+          <span class="config-help">Oracle database password</span>
+        </div>
+
+        <div class="config-group">
+          <label class="config-label" for="java-generated-package-name">Generated Package Name</label>
+          <input type="text" id="java-generated-package-name" class="config-input" value="me.christianrobert.ora2pgsync.autogen">
+          <span class="config-help">Java package name for generated code</span>
+        </div>
+
+        <div class="config-group">
+          <label class="config-label" for="path-target-project-java">Java Source Path</label>
+          <input type="text" id="path-target-project-java" class="config-input" value="/src/main/java">
+          <span class="config-help">Target path for generated Java files</span>
+        </div>
+
+        <div class="config-group">
+          <label class="config-label" for="path-target-project-resources">Resources Path</label>
+          <input type="text" id="path-target-project-resources" class="config-input" value="/src/main/resources">
+          <span class="config-help">Target path for generated resource files</span>
+        </div>
+
+        <div class="config-group">
+          <label class="config-label" for="path-target-project-postgre">PostgreSQL DDL Path</label>
+          <input type="text" id="path-target-project-postgre" class="config-input" value="/postgre/autoddl">
+          <span class="config-help">Target path for PostgreSQL DDL files</span>
+        </div>
+
+        <div class="config-group">
+          <label class="config-label" for="postgre-url">PostgreSQL URL</label>
+          <input type="text" id="postgre-url" class="config-input" value="jdbc:postgresql://localhost:5432/postgres">
+          <span class="config-help">PostgreSQL database connection URL</span>
+        </div>
+
+        <div class="config-group">
+          <label class="config-label" for="postgre-username">PostgreSQL Username</label>
+          <input type="text" id="postgre-username" class="config-input" value="postgres">
+          <span class="config-help">PostgreSQL database username</span>
+        </div>
+
+        <div class="config-group">
+          <label class="config-label" for="postgre-password">PostgreSQL Password</label>
+          <input type="password" id="postgre-password" class="config-input" value="xxx">
+          <span class="config-help">PostgreSQL database password</span>
+        </div>
+
+      </div>
+
+      <div class="config-actions">
+        <button type="button" id="save-config-btn" class="btn btn-primary" onclick="saveConfiguration()">
+          Save Configuration
+        </button>
+        <button type="button" id="reset-config-btn" class="btn btn-secondary" onclick="resetConfiguration()">
+          Reset to Defaults
+        </button>
+      </div>
+    </form>
+  </div>
 </div>
 
 <script src="app.js"></script>

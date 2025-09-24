@@ -1,8 +1,8 @@
 package me.christianrobert.orapgsync.table.model;
 
-import me.christianrobert.orapgsync.core.State;
-import me.christianrobert.orapgsync.core.PostgreSqlIdentifierUtils;
-import me.christianrobert.orapgsync.core.TypeConverter;
+import me.christianrobert.orapgsync.core.service.State;
+import me.christianrobert.orapgsync.core.tools.PostgreSqlIdentifierUtils;
+import me.christianrobert.orapgsync.core.tools.TypeConverter;
 
 // Represents a column's metadata
 public class ColumnMetadata {

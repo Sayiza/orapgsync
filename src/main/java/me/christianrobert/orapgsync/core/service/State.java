@@ -1,4 +1,4 @@
-package me.christianrobert.orapgsync.core;
+package me.christianrobert.orapgsync.core.service;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import me.christianrobert.orapgsync.objectmeta.model.ObjectTypeMetaData;

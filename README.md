@@ -19,3 +19,6 @@ Current focus:
 -Read in the tables that are present in the source db and display theme in the frontend
 -Create the tables in the postgre db is not present
 -To make that work for more custom datatype do the reading on the objectypes but variables only
+
+# Start PostgreSQL test container
+docker rm -f pgtest; docker run --name pgtest -e POSTGRES_PASSWORD=secret -p 5432:5432 -d postgres
