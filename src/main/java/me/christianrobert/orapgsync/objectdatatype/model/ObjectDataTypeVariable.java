@@ -1,10 +1,10 @@
-package me.christianrobert.orapgsync.objectmeta.model;
+package me.christianrobert.orapgsync.objectdatatype.model;
 
-public class ObjectTypeVariable {
+public class ObjectDataTypeVariable {
   private String name;
   private String dataType;
 
-  public ObjectTypeVariable(String name, String dataType) {
+  public ObjectDataTypeVariable(String name, String dataType) {
     this.name = name;
     this.dataType = dataType;
   }

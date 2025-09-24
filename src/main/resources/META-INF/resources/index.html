@@ -46,17 +46,67 @@
           </div>
         </td>
       </tr>
+      <tr class="schemas-row">
+        <td class="source-cell">
+          <div class="component-info" id="oracle-schemas">
+            <span class="count-badge">-</span>
+            <span class="component-text">Schemas found</span>
+            <button class="refresh-btn" onclick="loadOracleSchemas()" title="Refresh Oracle schemas">↻</button>
+            <div class="schema-list" id="oracle-schema-list" style="display: none;">
+              <div class="schema-list-header" onclick="toggleSchemaList('oracle')">
+                <span class="toggle-indicator">▼</span> Schema Names
+              </div>
+              <div class="schema-items" id="oracle-schema-items">
+                <!-- Schema names will be populated here -->
+              </div>
+            </div>
+          </div>
+        </td>
+        <td class="target-cell">
+          <div class="component-info" id="postgres-schemas">
+            <span class="count-badge">-</span>
+            <span class="component-text">Schemas available</span>
+            <button class="refresh-btn" onclick="loadPostgresSchemas()" title="Refresh PostgreSQL schemas">↻</button>
+            <div class="schema-list" id="postgres-schema-list" style="display: none;">
+              <div class="schema-list-header" onclick="toggleSchemaList('postgres')">
+                <span class="toggle-indicator">▼</span> Schema Names
+              </div>
+              <div class="schema-items" id="postgres-schema-items">
+                <!-- Schema names will be populated here -->
+              </div>
+            </div>
+          </div>
+        </td>
+      </tr>
       <tr class="objects-row">
         <td class="source-cell">
           <div class="component-info" id="oracle-objects">
             <span class="count-badge">-</span>
-            <span class="component-text">Object types discovered</span>
+            <span class="component-text">Object data types discovered</span>
+            <button class="refresh-btn" onclick="loadOracleObjectTypes()" title="Refresh Oracle object data types">↻</button>
+            <div class="object-list" id="oracle-object-list" style="display: none;">
+              <div class="object-list-header" onclick="toggleObjectList('oracle')">
+                <span class="toggle-indicator">▼</span> Object Data Types by Schema
+              </div>
+              <div class="object-items" id="oracle-object-items">
+                <!-- Object data types will be populated here grouped by schema -->
+              </div>
+            </div>
           </div>
         </td>
         <td class="target-cell">
           <div class="component-info" id="postgres-objects">
             <span class="count-badge">-</span>
-            <span class="component-text">Types created</span>
+            <span class="component-text">Data types created</span>
+            <button class="refresh-btn" onclick="loadPostgresObjectTypes()" title="Refresh PostgreSQL object data types">↻</button>
+            <div class="object-list" id="postgres-object-list" style="display: none;">
+              <div class="object-list-header" onclick="toggleObjectList('postgres')">
+                <span class="toggle-indicator">▼</span> Object Data Types by Schema
+              </div>
+              <div class="object-items" id="postgres-object-items">
+                <!-- Object data types will be populated here grouped by schema -->
+              </div>
+            </div>
           </div>
         </td>
       </tr>

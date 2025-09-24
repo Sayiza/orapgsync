@@ -1,13 +1,13 @@
-package me.christianrobert.orapgsync.objectmeta.model;
+package me.christianrobert.orapgsync.objectdatatype.model;
 
 import java.util.List;
 
-public class ObjectTypeMetaData {
+public class ObjectDataTypeMetaData {
   private String name;
   private String schema;
 
   // Object
-  private List<ObjectTypeVariable> variables;
+  private List<ObjectDataTypeVariable> variables;
 
   public String getName() {
     return name;
@@ -17,7 +17,7 @@ public class ObjectTypeMetaData {
     return schema;
   }
 
-  public List<ObjectTypeVariable> getVariables() {
+  public List<ObjectDataTypeVariable> getVariables() {
     return variables;
   }
 }

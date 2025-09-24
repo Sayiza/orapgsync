@@ -1,7 +1,7 @@
 package me.christianrobert.orapgsync.core.service;
 
 import jakarta.enterprise.context.ApplicationScoped;
-import me.christianrobert.orapgsync.objectmeta.model.ObjectTypeMetaData;
+import me.christianrobert.orapgsync.objectdatatype.model.ObjectDataTypeMetaData;
 import me.christianrobert.orapgsync.table.model.TableMetadata;
 
 import java.util.ArrayList;
@@ -11,7 +11,7 @@ import java.util.List;
 public class State {
   // raw data from the database
   private List<String> userNames = new ArrayList<>();
-  private List<ObjectTypeMetaData> objectTypeMetaData = new ArrayList<>();
+  private List<ObjectDataTypeMetaData> objectDataTypeMetaData = new ArrayList<>();
   private List<TableMetadata> tableMetadata = new ArrayList<>();
   
   /*
