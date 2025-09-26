@@ -129,7 +129,16 @@
         <td class="target-cell">
           <div class="component-info" id="postgres-tables">
             <span class="count-badge">-</span>
-            <span class="component-text">Tables created</span>
+            <span class="component-text">Tables found</span>
+            <button class="refresh-btn" onclick="extractPostgresTableMetadata()" title="Extract PostgreSQL table metadata">⚙</button>
+            <div class="table-list" id="postgres-table-list" style="display: none;">
+              <div class="table-list-header" onclick="toggleTableList('postgres')">
+                <span class="toggle-indicator">▼</span> Tables by Schema
+              </div>
+              <div class="table-items" id="postgres-table-items">
+                <!-- Table metadata will be populated here -->
+              </div>
+            </div>
           </div>
         </td>
       </tr>

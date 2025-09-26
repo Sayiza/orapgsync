@@ -798,9 +798,9 @@ async function testConnectionsAfterConfigLoad() {
 
 // Table Metadata Extraction Job Management Functions
 
-// Extract table metadata (starts the job)
+// Extract Oracle table metadata (starts the job)
 async function extractTableMetadata() {
-    console.log('Starting table metadata extraction job...');
+    console.log('Starting Oracle table metadata extraction job...');
 
     const button = document.querySelector('#oracle-tables .refresh-btn');
     if (button) {
@@ -808,11 +808,11 @@ async function extractTableMetadata() {
         button.innerHTML = '⏳';
     }
 
-    updateMessage('Starting table metadata extraction...');
-    updateProgress(0, 'Starting table metadata extraction');
+    updateMessage('Starting Oracle table metadata extraction...');
+    updateProgress(0, 'Starting Oracle table metadata extraction');
 
     try {
-        const response = await fetch('/api/jobs/tables/extract', {
+        const response = await fetch('/api/jobs/tables/oracle/extract', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -822,19 +822,65 @@ async function extractTableMetadata() {
         const result = await response.json();
 
         if (result.status === 'success') {
-            console.log('Table extraction job started:', result.jobId);
-            updateMessage('Table extraction job started successfully');
+            console.log('Oracle table extraction job started:', result.jobId);
+            updateMessage('Oracle table extraction job started successfully');
 
             // Start polling for progress
-            pollJobStatus(result.jobId);
+            pollJobStatus(result.jobId, 'oracle');
         } else {
-            throw new Error(result.message || 'Failed to start table extraction job');
+            throw new Error(result.message || 'Failed to start Oracle table extraction job');
         }
 
     } catch (error) {
-        console.error('Error starting table extraction job:', error);
-        updateMessage('Failed to start table extraction: ' + error.message);
-        updateProgress(0, 'Failed to start table extraction');
+        console.error('Error starting Oracle table extraction job:', error);
+        updateMessage('Failed to start Oracle table extraction: ' + error.message);
+        updateProgress(0, 'Failed to start Oracle table extraction');
+
+        // Re-enable button
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = '⚙';
+        }
+    }
+}
+
+// Extract PostgreSQL table metadata (starts the job)
+async function extractPostgresTableMetadata() {
+    console.log('Starting PostgreSQL table metadata extraction job...');
+
+    const button = document.querySelector('#postgres-tables .refresh-btn');
+    if (button) {
+        button.disabled = true;
+        button.innerHTML = '⏳';
+    }
+
+    updateMessage('Starting PostgreSQL table metadata extraction...');
+    updateProgress(0, 'Starting PostgreSQL table metadata extraction');
+
+    try {
+        const response = await fetch('/api/jobs/tables/postgres/extract', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+
+        const result = await response.json();
+
+        if (result.status === 'success') {
+            console.log('PostgreSQL table extraction job started:', result.jobId);
+            updateMessage('PostgreSQL table extraction job started successfully');
+
+            // Start polling for progress
+            pollJobStatus(result.jobId, 'postgres');
+        } else {
+            throw new Error(result.message || 'Failed to start PostgreSQL table extraction job');
+        }
+
+    } catch (error) {
+        console.error('Error starting PostgreSQL table extraction job:', error);
+        updateMessage('Failed to start PostgreSQL table extraction: ' + error.message);
+        updateProgress(0, 'Failed to start PostgreSQL table extraction');
 
         // Re-enable button
         if (button) {
@@ -845,7 +891,7 @@ async function extractTableMetadata() {
 }
 
 // Poll job status until completion
-async function pollJobStatus(jobId) {
+async function pollJobStatus(jobId, database = 'oracle') {
     console.log('Polling job status for:', jobId);
 
     try {
@@ -878,7 +924,7 @@ async function pollJobStatus(jobId) {
                 updateMessage('Table metadata extraction completed');
 
                 // Get job results
-                await getJobResults(jobId);
+                await getJobResults(jobId, database);
             } else if (result.status === 'FAILED') {
                 console.error('Job failed:', result.error);
                 updateProgress(0, 'Job failed');
@@ -886,14 +932,14 @@ async function pollJobStatus(jobId) {
             }
 
             // Re-enable extract button
-            const button = document.querySelector('#oracle-tables .refresh-btn');
+            const button = document.querySelector(`#${database}-tables .refresh-btn`);
             if (button) {
                 button.disabled = false;
                 button.innerHTML = '⚙';
             }
         } else {
             // Continue polling
-            setTimeout(() => pollJobStatus(jobId), 1000);
+            setTimeout(() => pollJobStatus(jobId, database), 1000);
         }
 
     } catch (error) {
@@ -902,7 +948,7 @@ async function pollJobStatus(jobId) {
         updateProgress(0, 'Error checking job status');
 
         // Re-enable button
-        const button = document.querySelector('#oracle-tables .refresh-btn');
+        const button = document.querySelector(`#${database}-tables .refresh-btn`);
         if (button) {
             button.disabled = false;
             button.innerHTML = '⚙';
@@ -911,7 +957,7 @@ async function pollJobStatus(jobId) {
 }
 
 // Get job results and display them
-async function getJobResults(jobId) {
+async function getJobResults(jobId, database = 'oracle') {
     console.log('Getting job results for:', jobId);
 
     try {
@@ -920,7 +966,7 @@ async function getJobResults(jobId) {
 
         if (result.status === 'success') {
             console.log('Job results:', result);
-            displayTableResults(result);
+            displayTableResults(result, database);
         } else {
             throw new Error(result.message || 'Failed to get job results');
         }
@@ -932,29 +978,30 @@ async function getJobResults(jobId) {
 }
 
 // Display table extraction results
-function displayTableResults(result) {
+function displayTableResults(result, database = 'oracle') {
     const summary = result.summary;
 
     if (summary) {
         // Update table count badge
-        updateComponentCount('oracle-tables', summary.totalTables);
+        updateComponentCount(`${database}-tables`, summary.totalTables);
 
         // Show success message
-        updateMessage(`Extracted ${summary.totalTables} tables with ${summary.totalColumns} columns from ${Object.keys(summary.schemaTableCounts).length} schemas`);
+        const databaseName = database === 'oracle' ? 'Oracle' : 'PostgreSQL';
+        updateMessage(`Extracted ${summary.totalTables} ${databaseName} tables with ${summary.totalColumns} columns from ${Object.keys(summary.schemaTableCounts).length} schemas`);
 
         // Populate table list
-        populateTableList(summary);
+        populateTableList(summary, database);
 
         // Show table list
         if (summary.totalTables > 0) {
-            document.getElementById('oracle-table-list').style.display = 'block';
+            document.getElementById(`${database}-table-list`).style.display = 'block';
         }
     }
 }
 
 // Populate table list with extracted table metadata
-function populateTableList(summary) {
-    const tableItemsElement = document.getElementById('oracle-table-items');
+function populateTableList(summary, database = 'oracle') {
+    const tableItemsElement = document.getElementById(`${database}-table-items`);
 
     if (!tableItemsElement) {
         console.warn('Table items element not found');
@@ -972,11 +1019,11 @@ function populateTableList(summary) {
             const schemaHeader = document.createElement('div');
             schemaHeader.className = 'table-schema-header';
             schemaHeader.innerHTML = `<span class="toggle-indicator">▼</span> ${schemaName} (${tableCount} tables)`;
-            schemaHeader.onclick = () => toggleTableSchemaGroup('oracle', schemaName);
+            schemaHeader.onclick = () => toggleTableSchemaGroup(database, schemaName);
 
             const tableItems = document.createElement('div');
             tableItems.className = 'table-items-list';
-            tableItems.id = `oracle-${schemaName}-tables`;
+            tableItems.id = `${database}-${schemaName}-tables`;
 
             // Add individual table entries for this schema
             if (summary.tables) {

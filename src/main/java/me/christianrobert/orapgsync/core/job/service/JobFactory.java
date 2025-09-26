@@ -2,9 +2,12 @@ package me.christianrobert.orapgsync.core.job.service;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import me.christianrobert.orapgsync.config.service.ConfigService;
 import me.christianrobert.orapgsync.core.service.StateService;
 import me.christianrobert.orapgsync.database.service.OracleConnectionService;
-import me.christianrobert.orapgsync.table.job.TableMetadataExtractionJob;
+import me.christianrobert.orapgsync.database.service.PostgresConnectionService;
+import me.christianrobert.orapgsync.table.job.OracleTableMetadataExtractionJob;
+import me.christianrobert.orapgsync.table.job.PostgresTableMetadataExtractionJob;
 
 @ApplicationScoped
 public class JobFactory {
@@ -15,12 +18,30 @@ public class JobFactory {
     @Inject
     OracleConnectionService oracleConnectionService;
 
-    public TableMetadataExtractionJob createTableMetadataExtractionJob() {
-        TableMetadataExtractionJob job = new TableMetadataExtractionJob();
+    @Inject
+    PostgresConnectionService postgresConnectionService;
+
+    @Inject
+    ConfigService configService;
+
+    public OracleTableMetadataExtractionJob createOracleTableMetadataExtractionJob() {
+        OracleTableMetadataExtractionJob job = new OracleTableMetadataExtractionJob();
 
         // Manually inject dependencies since CDI doesn't work on manually created instances
         job.setStateService(stateService);
         job.setOracleConnectionService(oracleConnectionService);
+        job.setConfigService(configService);
+
+        return job;
+    }
+
+    public PostgresTableMetadataExtractionJob createPostgresTableMetadataExtractionJob() {
+        PostgresTableMetadataExtractionJob job = new PostgresTableMetadataExtractionJob();
+
+        // Manually inject dependencies since CDI doesn't work on manually created instances
+        job.setStateService(stateService);
+        job.setPostgresConnectionService(postgresConnectionService);
+        job.setConfigService(configService);
 
         return job;
     }

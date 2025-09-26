@@ -9,7 +9,8 @@ import me.christianrobert.orapgsync.core.job.model.JobProgress;
 import me.christianrobert.orapgsync.core.job.model.JobStatus;
 import me.christianrobert.orapgsync.core.job.service.JobFactory;
 import me.christianrobert.orapgsync.core.job.service.JobService;
-import me.christianrobert.orapgsync.table.job.TableMetadataExtractionJob;
+import me.christianrobert.orapgsync.table.job.OracleTableMetadataExtractionJob;
+import me.christianrobert.orapgsync.table.job.PostgresTableMetadataExtractionJob;
 import me.christianrobert.orapgsync.table.model.TableMetadata;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,29 +34,29 @@ public class JobResource {
     JobFactory jobFactory;
 
     @POST
-    @Path("/tables/extract")
-    public Response startTableMetadataExtraction() {
-        log.info("Starting table metadata extraction job via REST API");
+    @Path("/tables/oracle/extract")
+    public Response startOracleTableMetadataExtraction() {
+        log.info("Starting Oracle table metadata extraction job via REST API");
 
         try {
-            TableMetadataExtractionJob job = jobFactory.createTableMetadataExtractionJob();
+            OracleTableMetadataExtractionJob job = jobFactory.createOracleTableMetadataExtractionJob();
             String jobId = jobService.submitJob(job);
 
             Map<String, Object> result = Map.of(
                     "status", "success",
                     "jobId", jobId,
-                    "message", "Table metadata extraction job started successfully"
+                    "message", "Oracle table metadata extraction job started successfully"
             );
 
-            log.info("Table metadata extraction job started with ID: {}", jobId);
+            log.info("Oracle table metadata extraction job started with ID: {}", jobId);
             return Response.ok(result).build();
 
         } catch (Exception e) {
-            log.error("Failed to start table metadata extraction job", e);
+            log.error("Failed to start Oracle table metadata extraction job", e);
 
             Map<String, Object> errorResult = Map.of(
                     "status", "error",
-                    "message", "Failed to start table metadata extraction: " + e.getMessage()
+                    "message", "Failed to start Oracle table metadata extraction: " + e.getMessage()
             );
 
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
@@ -240,5 +241,37 @@ public class JobResource {
                 "schemaTableCounts", schemaTableCounts,
                 "tables", tableDetails
         );
+    }
+
+    @POST
+    @Path("/tables/postgres/extract")
+    public Response startPostgresTableMetadataExtraction() {
+        log.info("Starting PostgreSQL table metadata extraction job via REST API");
+
+        try {
+            PostgresTableMetadataExtractionJob job = jobFactory.createPostgresTableMetadataExtractionJob();
+            String jobId = jobService.submitJob(job);
+
+            Map<String, Object> result = Map.of(
+                    "status", "success",
+                    "jobId", jobId,
+                    "message", "PostgreSQL table metadata extraction job started successfully"
+            );
+
+            log.info("PostgreSQL table metadata extraction job started with ID: {}", jobId);
+            return Response.ok(result).build();
+
+        } catch (Exception e) {
+            log.error("Failed to start PostgreSQL table metadata extraction job", e);
+
+            Map<String, Object> errorResult = Map.of(
+                    "status", "error",
+                    "message", "Failed to start PostgreSQL table metadata extraction: " + e.getMessage()
+            );
+
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                    .entity(errorResult)
+                    .build();
+        }
     }
 }
