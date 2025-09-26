@@ -560,63 +560,87 @@ function toggleSchemaList(database) {
 
 // Object Type Management Functions
 
-// Load Oracle object data types
+// Extract Oracle object data types using job-based approach
 async function loadOracleObjectTypes() {
-    console.log('Loading Oracle object data types...');
-    updateMessage('Loading Oracle object data types...');
+    console.log('Starting Oracle object data type extraction job...');
+    updateMessage('Starting Oracle object data type extraction...');
 
     try {
-        const response = await fetch('/api/objectdatatypes/oracle');
-        const result = await response.json();
-
-        if (result.status === 'success') {
-            updateComponentCount('oracle-objects', result.totalCount);
-            populateObjectTypeList('oracle', result.objectDataTypesBySchema);
-            updateMessage(`Loaded ${result.totalCount} Oracle object data types`);
-
-            // Show the object list if we have object data types
-            if (result.totalCount > 0) {
-                document.getElementById('oracle-object-list').style.display = 'block';
+        // Start the job
+        const startResponse = await fetch('/api/jobs/objects/oracle/extract', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
             }
+        });
+
+        const startResult = await startResponse.json();
+
+        if (startResult.status === 'success') {
+            console.log('Oracle object data type extraction job started:', startResult.jobId);
+            updateMessage('Oracle object data type extraction started...');
+
+            // Disable refresh button during extraction
+            const button = document.querySelector('#oracle-objects .refresh-btn');
+            if (button) {
+                button.disabled = true;
+                button.innerHTML = '⏳';
+            }
+
+            // Start polling for job status
+            await pollJobUntilComplete(startResult.jobId, 'oracle', 'objects');
+
         } else {
             updateComponentCount('oracle-objects', '!', 'error');
-            updateMessage('Failed to load Oracle object data types: ' + result.message);
+            updateMessage('Failed to start Oracle object data type extraction: ' + startResult.message);
         }
 
     } catch (error) {
-        console.error('Error loading Oracle object data types:', error);
+        console.error('Error starting Oracle object data type extraction:', error);
         updateComponentCount('oracle-objects', '!', 'error');
-        updateMessage('Error loading Oracle object data types: ' + error.message);
+        updateMessage('Error starting Oracle object data type extraction: ' + error.message);
     }
 }
 
-// Load PostgreSQL object data types
+// Extract PostgreSQL object data types using job-based approach
 async function loadPostgresObjectTypes() {
-    console.log('Loading PostgreSQL object data types...');
-    updateMessage('Loading PostgreSQL object data types...');
+    console.log('Starting PostgreSQL object data type extraction job...');
+    updateMessage('Starting PostgreSQL object data type extraction...');
 
     try {
-        const response = await fetch('/api/objectdatatypes/postgres');
-        const result = await response.json();
-
-        if (result.status === 'success') {
-            updateComponentCount('postgres-objects', result.totalCount);
-            populateObjectTypeList('postgres', result.objectDataTypesBySchema);
-            updateMessage(`Loaded ${result.totalCount} PostgreSQL object data types`);
-
-            // Show the object list if we have object data types
-            if (result.totalCount > 0) {
-                document.getElementById('postgres-object-list').style.display = 'block';
+        // Start the job
+        const startResponse = await fetch('/api/jobs/objects/postgres/extract', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
             }
+        });
+
+        const startResult = await startResponse.json();
+
+        if (startResult.status === 'success') {
+            console.log('PostgreSQL object data type extraction job started:', startResult.jobId);
+            updateMessage('PostgreSQL object data type extraction started...');
+
+            // Disable refresh button during extraction
+            const button = document.querySelector('#postgres-objects .refresh-btn');
+            if (button) {
+                button.disabled = true;
+                button.innerHTML = '⏳';
+            }
+
+            // Start polling for job status
+            await pollJobUntilComplete(startResult.jobId, 'postgres', 'objects');
+
         } else {
             updateComponentCount('postgres-objects', '!', 'error');
-            updateMessage('Failed to load PostgreSQL object data types: ' + result.message);
+            updateMessage('Failed to start PostgreSQL object data type extraction: ' + startResult.message);
         }
 
     } catch (error) {
-        console.error('Error loading PostgreSQL object data types:', error);
+        console.error('Error starting PostgreSQL object data type extraction:', error);
         updateComponentCount('postgres-objects', '!', 'error');
-        updateMessage('Error loading PostgreSQL object data types: ' + error.message);
+        updateMessage('Error starting PostgreSQL object data type extraction: ' + error.message);
     }
 }
 
@@ -953,6 +977,114 @@ async function pollJobStatus(jobId, database = 'oracle') {
             button.disabled = false;
             button.innerHTML = '⚙';
         }
+    }
+}
+
+// Poll job status until completion (for object data type extraction)
+async function pollJobUntilComplete(jobId, database, jobType) {
+    console.log('Polling job status for:', jobId, 'database:', database, 'type:', jobType);
+
+    try {
+        const response = await fetch(`/api/jobs/${jobId}/status`);
+        const result = await response.json();
+
+        if (result.status === 'error') {
+            throw new Error(result.message);
+        }
+
+        console.log('Job status:', result);
+
+        // Update progress if available
+        if (result.progress) {
+            const percentage = result.progress.percentage;
+            const currentTask = result.progress.currentTask || 'Processing...';
+            const details = result.progress.details || '';
+
+            updateMessage(`${currentTask}: ${details}`);
+        }
+
+        // Check if job is complete
+        if (result.isComplete) {
+            if (result.status === 'COMPLETED') {
+                console.log('Object data type extraction job completed successfully');
+                updateMessage(`${database.charAt(0).toUpperCase() + database.slice(1)} object data type extraction completed`);
+
+                // Get job results for object data types
+                await getObjectDataTypeJobResults(jobId, database);
+            } else if (result.status === 'FAILED') {
+                console.error('Object data type extraction job failed:', result.error);
+                updateComponentCount(`${database}-objects`, '!', 'error');
+                updateMessage(`Object data type extraction failed: ${result.error || 'Unknown error'}`);
+            }
+
+            // Re-enable refresh button
+            const button = document.querySelector(`#${database}-objects .refresh-btn`);
+            if (button) {
+                button.disabled = false;
+                button.innerHTML = '↻';
+            }
+        } else {
+            // Continue polling
+            setTimeout(() => pollJobUntilComplete(jobId, database, jobType), 1000);
+        }
+
+    } catch (error) {
+        console.error('Error polling object data type job status:', error);
+        updateComponentCount(`${database}-objects`, '!', 'error');
+        updateMessage(`Error checking object data type job status: ${error.message}`);
+
+        // Re-enable button
+        const button = document.querySelector(`#${database}-objects .refresh-btn`);
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = '↻';
+        }
+    }
+}
+
+// Get object data type job results and display them
+async function getObjectDataTypeJobResults(jobId, database) {
+    console.log('Getting object data type job results for:', jobId);
+
+    try {
+        const response = await fetch(`/api/jobs/${jobId}/result`);
+        const result = await response.json();
+
+        if (result.status === 'success') {
+            console.log('Object data type job results:', result);
+
+            // For object data types, we need to process the result differently
+            // The job returns a list of ObjectDataTypeMetaData, we need to group by schema
+            const objectDataTypes = result.result || [];
+            const objectDataTypesBySchema = {};
+
+            objectDataTypes.forEach(objectType => {
+                if (!objectDataTypesBySchema[objectType.schema]) {
+                    objectDataTypesBySchema[objectType.schema] = [];
+                }
+                objectDataTypesBySchema[objectType.schema].push(objectType);
+            });
+
+            // Update component count
+            updateComponentCount(`${database}-objects`, objectDataTypes.length);
+
+            // Populate the object type list
+            populateObjectTypeList(database, objectDataTypesBySchema);
+
+            // Show the object list if we have object data types
+            if (objectDataTypes.length > 0) {
+                document.getElementById(`${database}-object-list`).style.display = 'block';
+            }
+
+            updateMessage(`Loaded ${objectDataTypes.length} ${database} object data types`);
+        } else {
+            throw new Error(result.message || 'Failed to get object data type job results');
+        }
+
+    } catch (error) {
+        console.error('Error getting object data type job results:', error);
+        updateComponentCount(`${database}-objects`, '!', 'error');
+        updateMessage(`Error getting object data type results: ${error.message}`);
     }
 }
 

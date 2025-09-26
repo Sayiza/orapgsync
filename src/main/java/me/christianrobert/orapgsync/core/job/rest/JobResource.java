@@ -9,6 +9,8 @@ import me.christianrobert.orapgsync.core.job.model.JobProgress;
 import me.christianrobert.orapgsync.core.job.model.JobStatus;
 import me.christianrobert.orapgsync.core.job.service.JobFactory;
 import me.christianrobert.orapgsync.core.job.service.JobService;
+import me.christianrobert.orapgsync.objectdatatype.job.OracleObjectDataTypeExtractionJob;
+import me.christianrobert.orapgsync.objectdatatype.job.PostgresObjectDataTypeExtractionJob;
 import me.christianrobert.orapgsync.table.job.OracleTableMetadataExtractionJob;
 import me.christianrobert.orapgsync.table.job.PostgresTableMetadataExtractionJob;
 import me.christianrobert.orapgsync.table.model.TableMetadata;
@@ -267,6 +269,70 @@ public class JobResource {
             Map<String, Object> errorResult = Map.of(
                     "status", "error",
                     "message", "Failed to start PostgreSQL table metadata extraction: " + e.getMessage()
+            );
+
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                    .entity(errorResult)
+                    .build();
+        }
+    }
+
+    @POST
+    @Path("/objects/oracle/extract")
+    public Response startOracleObjectDataTypeExtraction() {
+        log.info("Starting Oracle object data type extraction job via REST API");
+
+        try {
+            OracleObjectDataTypeExtractionJob job = jobFactory.createOracleObjectDataTypeExtractionJob();
+            String jobId = jobService.submitJob(job);
+
+            Map<String, Object> result = Map.of(
+                    "status", "success",
+                    "jobId", jobId,
+                    "message", "Oracle object data type extraction job started successfully"
+            );
+
+            log.info("Oracle object data type extraction job started with ID: {}", jobId);
+            return Response.ok(result).build();
+
+        } catch (Exception e) {
+            log.error("Failed to start Oracle object data type extraction job", e);
+
+            Map<String, Object> errorResult = Map.of(
+                    "status", "error",
+                    "message", "Failed to start Oracle object data type extraction: " + e.getMessage()
+            );
+
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                    .entity(errorResult)
+                    .build();
+        }
+    }
+
+    @POST
+    @Path("/objects/postgres/extract")
+    public Response startPostgresObjectDataTypeExtraction() {
+        log.info("Starting PostgreSQL object data type extraction job via REST API");
+
+        try {
+            PostgresObjectDataTypeExtractionJob job = jobFactory.createPostgresObjectDataTypeExtractionJob();
+            String jobId = jobService.submitJob(job);
+
+            Map<String, Object> result = Map.of(
+                    "status", "success",
+                    "jobId", jobId,
+                    "message", "PostgreSQL object data type extraction job started successfully"
+            );
+
+            log.info("PostgreSQL object data type extraction job started with ID: {}", jobId);
+            return Response.ok(result).build();
+
+        } catch (Exception e) {
+            log.error("Failed to start PostgreSQL object data type extraction job", e);
+
+            Map<String, Object> errorResult = Map.of(
+                    "status", "error",
+                    "message", "Failed to start PostgreSQL object data type extraction: " + e.getMessage()
             );
 
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR)

@@ -6,6 +6,8 @@ import me.christianrobert.orapgsync.config.service.ConfigService;
 import me.christianrobert.orapgsync.core.service.StateService;
 import me.christianrobert.orapgsync.database.service.OracleConnectionService;
 import me.christianrobert.orapgsync.database.service.PostgresConnectionService;
+import me.christianrobert.orapgsync.objectdatatype.job.OracleObjectDataTypeExtractionJob;
+import me.christianrobert.orapgsync.objectdatatype.job.PostgresObjectDataTypeExtractionJob;
 import me.christianrobert.orapgsync.table.job.OracleTableMetadataExtractionJob;
 import me.christianrobert.orapgsync.table.job.PostgresTableMetadataExtractionJob;
 
@@ -40,6 +42,27 @@ public class JobFactory {
 
         // Manually inject dependencies since CDI doesn't work on manually created instances
         job.setStateService(stateService);
+        job.setPostgresConnectionService(postgresConnectionService);
+        job.setConfigService(configService);
+
+        return job;
+    }
+
+    public OracleObjectDataTypeExtractionJob createOracleObjectDataTypeExtractionJob() {
+        OracleObjectDataTypeExtractionJob job = new OracleObjectDataTypeExtractionJob();
+
+        // Manually inject dependencies since CDI doesn't work on manually created instances
+        job.setStateService(stateService);
+        job.setOracleConnectionService(oracleConnectionService);
+        job.setConfigService(configService);
+
+        return job;
+    }
+
+    public PostgresObjectDataTypeExtractionJob createPostgresObjectDataTypeExtractionJob() {
+        PostgresObjectDataTypeExtractionJob job = new PostgresObjectDataTypeExtractionJob();
+
+        // Manually inject dependencies since CDI doesn't work on manually created instances
         job.setPostgresConnectionService(postgresConnectionService);
         job.setConfigService(configService);
 
