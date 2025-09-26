@@ -796,6 +796,253 @@ async function testConnectionsAfterConfigLoad() {
     }
 }
 
+// Table Metadata Extraction Job Management Functions
+
+// Extract table metadata (starts the job)
+async function extractTableMetadata() {
+    console.log('Starting table metadata extraction job...');
+
+    const button = document.querySelector('#oracle-tables .refresh-btn');
+    if (button) {
+        button.disabled = true;
+        button.innerHTML = '⏳';
+    }
+
+    updateMessage('Starting table metadata extraction...');
+    updateProgress(0, 'Starting table metadata extraction');
+
+    try {
+        const response = await fetch('/api/jobs/tables/extract', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+
+        const result = await response.json();
+
+        if (result.status === 'success') {
+            console.log('Table extraction job started:', result.jobId);
+            updateMessage('Table extraction job started successfully');
+
+            // Start polling for progress
+            pollJobStatus(result.jobId);
+        } else {
+            throw new Error(result.message || 'Failed to start table extraction job');
+        }
+
+    } catch (error) {
+        console.error('Error starting table extraction job:', error);
+        updateMessage('Failed to start table extraction: ' + error.message);
+        updateProgress(0, 'Failed to start table extraction');
+
+        // Re-enable button
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = '⚙';
+        }
+    }
+}
+
+// Poll job status until completion
+async function pollJobStatus(jobId) {
+    console.log('Polling job status for:', jobId);
+
+    try {
+        const response = await fetch(`/api/jobs/${jobId}/status`);
+        const result = await response.json();
+
+        if (result.status === 'error') {
+            throw new Error(result.message);
+        }
+
+        console.log('Job status:', result);
+
+        // Update progress if available
+        if (result.progress) {
+            const percentage = result.progress.percentage;
+            const currentTask = result.progress.currentTask || 'Processing...';
+            const details = result.progress.details || '';
+
+            updateProgress(percentage, currentTask);
+            if (details) {
+                updateMessage(details);
+            }
+        }
+
+        // Check if job is complete
+        if (result.isComplete) {
+            if (result.status === 'COMPLETED') {
+                console.log('Job completed successfully');
+                updateProgress(100, 'Job completed successfully');
+                updateMessage('Table metadata extraction completed');
+
+                // Get job results
+                await getJobResults(jobId);
+            } else if (result.status === 'FAILED') {
+                console.error('Job failed:', result.error);
+                updateProgress(0, 'Job failed');
+                updateMessage('Table extraction failed: ' + (result.error || 'Unknown error'));
+            }
+
+            // Re-enable extract button
+            const button = document.querySelector('#oracle-tables .refresh-btn');
+            if (button) {
+                button.disabled = false;
+                button.innerHTML = '⚙';
+            }
+        } else {
+            // Continue polling
+            setTimeout(() => pollJobStatus(jobId), 1000);
+        }
+
+    } catch (error) {
+        console.error('Error polling job status:', error);
+        updateMessage('Error checking job status: ' + error.message);
+        updateProgress(0, 'Error checking job status');
+
+        // Re-enable button
+        const button = document.querySelector('#oracle-tables .refresh-btn');
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = '⚙';
+        }
+    }
+}
+
+// Get job results and display them
+async function getJobResults(jobId) {
+    console.log('Getting job results for:', jobId);
+
+    try {
+        const response = await fetch(`/api/jobs/${jobId}/result`);
+        const result = await response.json();
+
+        if (result.status === 'success') {
+            console.log('Job results:', result);
+            displayTableResults(result);
+        } else {
+            throw new Error(result.message || 'Failed to get job results');
+        }
+
+    } catch (error) {
+        console.error('Error getting job results:', error);
+        updateMessage('Error getting results: ' + error.message);
+    }
+}
+
+// Display table extraction results
+function displayTableResults(result) {
+    const summary = result.summary;
+
+    if (summary) {
+        // Update table count badge
+        updateComponentCount('oracle-tables', summary.totalTables);
+
+        // Show success message
+        updateMessage(`Extracted ${summary.totalTables} tables with ${summary.totalColumns} columns from ${Object.keys(summary.schemaTableCounts).length} schemas`);
+
+        // Populate table list
+        populateTableList(summary);
+
+        // Show table list
+        if (summary.totalTables > 0) {
+            document.getElementById('oracle-table-list').style.display = 'block';
+        }
+    }
+}
+
+// Populate table list with extracted table metadata
+function populateTableList(summary) {
+    const tableItemsElement = document.getElementById('oracle-table-items');
+
+    if (!tableItemsElement) {
+        console.warn('Table items element not found');
+        return;
+    }
+
+    // Clear existing items
+    tableItemsElement.innerHTML = '';
+
+    if (summary.schemaTableCounts && Object.keys(summary.schemaTableCounts).length > 0) {
+        Object.entries(summary.schemaTableCounts).forEach(([schemaName, tableCount]) => {
+            const schemaGroup = document.createElement('div');
+            schemaGroup.className = 'table-schema-group';
+
+            const schemaHeader = document.createElement('div');
+            schemaHeader.className = 'table-schema-header';
+            schemaHeader.innerHTML = `<span class="toggle-indicator">▼</span> ${schemaName} (${tableCount} tables)`;
+            schemaHeader.onclick = () => toggleTableSchemaGroup('oracle', schemaName);
+
+            const tableItems = document.createElement('div');
+            tableItems.className = 'table-items-list';
+            tableItems.id = `oracle-${schemaName}-tables`;
+
+            // Add individual table entries for this schema
+            if (summary.tables) {
+                const schemaTables = Object.entries(summary.tables).filter(([key, table]) =>
+                    table.schema === schemaName);
+
+                schemaTables.forEach(([tableKey, table]) => {
+                    const tableItem = document.createElement('div');
+                    tableItem.className = 'table-item';
+                    tableItem.innerHTML = `${table.name} (${table.columnCount} cols, ${table.constraintCount} constraints)`;
+                    tableItems.appendChild(tableItem);
+                });
+            }
+
+            schemaGroup.appendChild(schemaHeader);
+            schemaGroup.appendChild(tableItems);
+            tableItemsElement.appendChild(schemaGroup);
+        });
+    } else {
+        const noTablesItem = document.createElement('div');
+        noTablesItem.className = 'table-item';
+        noTablesItem.textContent = 'No tables found';
+        noTablesItem.style.fontStyle = 'italic';
+        noTablesItem.style.color = '#999';
+        tableItemsElement.appendChild(noTablesItem);
+    }
+}
+
+// Toggle table list visibility
+function toggleTableList(database) {
+    const tableItems = document.getElementById(`${database}-table-items`);
+    const header = document.querySelector(`#${database}-table-list .table-list-header`);
+
+    if (!tableItems || !header) {
+        console.warn(`Table list elements not found for database: ${database}`);
+        return;
+    }
+
+    if (tableItems.style.display === 'none') {
+        tableItems.style.display = 'block';
+        header.classList.remove('collapsed');
+    } else {
+        tableItems.style.display = 'none';
+        header.classList.add('collapsed');
+    }
+}
+
+// Toggle table schema group visibility
+function toggleTableSchemaGroup(database, schemaName) {
+    const tableItems = document.getElementById(`${database}-${schemaName}-tables`);
+    const header = event.target;
+
+    if (!tableItems || !header) {
+        console.warn(`Table schema group elements not found for: ${database}.${schemaName}`);
+        return;
+    }
+
+    if (tableItems.style.display === 'none') {
+        tableItems.style.display = 'block';
+        header.classList.remove('collapsed');
+    } else {
+        tableItems.style.display = 'none';
+        header.classList.add('collapsed');
+    }
+}
+
 // Load configuration when page loads
 document.addEventListener('DOMContentLoaded', function() {
     // Load configuration after a short delay to ensure all other initialization is complete

@@ -1,0 +1,244 @@
+package me.christianrobert.orapgsync.core.job.rest;
+
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import jakarta.ws.rs.*;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
+import me.christianrobert.orapgsync.core.job.model.JobProgress;
+import me.christianrobert.orapgsync.core.job.model.JobStatus;
+import me.christianrobert.orapgsync.core.job.service.JobFactory;
+import me.christianrobert.orapgsync.core.job.service.JobService;
+import me.christianrobert.orapgsync.table.job.TableMetadataExtractionJob;
+import me.christianrobert.orapgsync.table.model.TableMetadata;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+@ApplicationScoped
+@Path("/api/jobs")
+@Produces(MediaType.APPLICATION_JSON)
+@Consumes(MediaType.APPLICATION_JSON)
+public class JobResource {
+
+    private static final Logger log = LoggerFactory.getLogger(JobResource.class);
+
+    @Inject
+    JobService jobService;
+
+    @Inject
+    JobFactory jobFactory;
+
+    @POST
+    @Path("/tables/extract")
+    public Response startTableMetadataExtraction() {
+        log.info("Starting table metadata extraction job via REST API");
+
+        try {
+            TableMetadataExtractionJob job = jobFactory.createTableMetadataExtractionJob();
+            String jobId = jobService.submitJob(job);
+
+            Map<String, Object> result = Map.of(
+                    "status", "success",
+                    "jobId", jobId,
+                    "message", "Table metadata extraction job started successfully"
+            );
+
+            log.info("Table metadata extraction job started with ID: {}", jobId);
+            return Response.ok(result).build();
+
+        } catch (Exception e) {
+            log.error("Failed to start table metadata extraction job", e);
+
+            Map<String, Object> errorResult = Map.of(
+                    "status", "error",
+                    "message", "Failed to start table metadata extraction: " + e.getMessage()
+            );
+
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                    .entity(errorResult)
+                    .build();
+        }
+    }
+
+    @GET
+    @Path("/{jobId}/status")
+    public Response getJobStatus(@PathParam("jobId") String jobId) {
+        log.debug("Getting job status for: {}", jobId);
+
+        try {
+            JobService.JobExecution<?> execution = jobService.getJobExecution(jobId);
+
+            if (execution == null) {
+                Map<String, Object> errorResult = Map.of(
+                        "status", "error",
+                        "message", "Job not found: " + jobId
+                );
+                return Response.status(Response.Status.NOT_FOUND)
+                        .entity(errorResult)
+                        .build();
+            }
+
+            JobStatus status = execution.getStatus();
+            JobProgress progress = execution.getProgress();
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("jobId", jobId);
+            result.put("jobType", execution.getJob().getJobType());
+            result.put("status", status.name());
+            result.put("isComplete", jobService.isJobComplete(jobId));
+
+            if (progress != null) {
+                Map<String, Object> progressInfo = Map.of(
+                        "percentage", progress.getPercentage(),
+                        "currentTask", progress.getCurrentTask(),
+                        "details", progress.getDetails(),
+                        "lastUpdated", progress.getLastUpdated().toString()
+                );
+                result.put("progress", progressInfo);
+            }
+
+            if (status == JobStatus.FAILED) {
+                Exception error = jobService.getJobError(jobId);
+                if (error != null) {
+                    result.put("error", error.getMessage());
+                }
+            }
+
+            if (execution.getStartTime() != null) {
+                result.put("startTime", execution.getStartTime().toString());
+            }
+
+            if (execution.getEndTime() != null) {
+                result.put("endTime", execution.getEndTime().toString());
+            }
+
+            return Response.ok(result).build();
+
+        } catch (Exception e) {
+            log.error("Error getting job status for: " + jobId, e);
+
+            Map<String, Object> errorResult = Map.of(
+                    "status", "error",
+                    "message", "Error getting job status: " + e.getMessage()
+            );
+
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                    .entity(errorResult)
+                    .build();
+        }
+    }
+
+    @GET
+    @Path("/{jobId}/result")
+    public Response getJobResult(@PathParam("jobId") String jobId) {
+        log.debug("Getting job result for: {}", jobId);
+
+        try {
+            JobService.JobExecution<?> execution = jobService.getJobExecution(jobId);
+
+            if (execution == null) {
+                Map<String, Object> errorResult = Map.of(
+                        "status", "error",
+                        "message", "Job not found: " + jobId
+                );
+                return Response.status(Response.Status.NOT_FOUND)
+                        .entity(errorResult)
+                        .build();
+            }
+
+            if (!jobService.isJobComplete(jobId)) {
+                Map<String, Object> errorResult = Map.of(
+                        "status", "error",
+                        "message", "Job is not yet complete: " + jobId
+                );
+                return Response.status(Response.Status.BAD_REQUEST)
+                        .entity(errorResult)
+                        .build();
+            }
+
+            if (execution.getStatus() == JobStatus.FAILED) {
+                Exception error = jobService.getJobError(jobId);
+                Map<String, Object> errorResult = Map.of(
+                        "status", "failed",
+                        "jobId", jobId,
+                        "message", error != null ? error.getMessage() : "Job failed with unknown error"
+                );
+                return Response.status(Response.Status.BAD_REQUEST)
+                        .entity(errorResult)
+                        .build();
+            }
+
+            Object result = jobService.getJobResult(jobId);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "success");
+            response.put("jobId", jobId);
+            response.put("jobType", execution.getJob().getJobType());
+
+            // Handle table metadata extraction results specifically
+            if (result instanceof List<?>) {
+                @SuppressWarnings("unchecked")
+                List<TableMetadata> tableMetadata = (List<TableMetadata>) result;
+
+                Map<String, Object> summary = generateTableMetadataSummary(tableMetadata);
+                response.put("summary", summary);
+                response.put("tableCount", tableMetadata.size());
+            } else {
+                response.put("result", result);
+            }
+
+            return Response.ok(response).build();
+
+        } catch (Exception e) {
+            log.error("Error getting job result for: " + jobId, e);
+
+            Map<String, Object> errorResult = Map.of(
+                    "status", "error",
+                    "message", "Error getting job result: " + e.getMessage()
+            );
+
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                    .entity(errorResult)
+                    .build();
+        }
+    }
+
+    private Map<String, Object> generateTableMetadataSummary(List<TableMetadata> tableMetadata) {
+        Map<String, Integer> schemaTableCounts = new HashMap<>();
+        Map<String, Object> tableDetails = new HashMap<>();
+
+        int totalColumns = 0;
+        int totalConstraints = 0;
+
+        for (TableMetadata table : tableMetadata) {
+            String schema = table.getSchema();
+            schemaTableCounts.put(schema, schemaTableCounts.getOrDefault(schema, 0) + 1);
+
+            totalColumns += table.getColumns().size();
+            totalConstraints += table.getConstraints().size();
+
+            // Store individual table info
+            Map<String, Object> tableInfo = Map.of(
+                    "schema", table.getSchema(),
+                    "name", table.getTableName(),
+                    "columnCount", table.getColumns().size(),
+                    "constraintCount", table.getConstraints().size()
+            );
+
+            String tableKey = schema + "." + table.getTableName();
+            tableDetails.put(tableKey, tableInfo);
+        }
+
+        return Map.of(
+                "totalTables", tableMetadata.size(),
+                "totalColumns", totalColumns,
+                "totalConstraints", totalConstraints,
+                "schemaTableCounts", schemaTableCounts,
+                "tables", tableDetails
+        );
+    }
+}

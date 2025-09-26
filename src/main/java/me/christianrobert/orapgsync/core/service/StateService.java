@@ -12,7 +12,7 @@ public class StateService {
   // raw data from the source database
   private List<String> oracleSchemaNames = new ArrayList<>();
   private List<ObjectDataTypeMetaData> oracleObjectDataTypeMetaData = new ArrayList<>();
-  private List<TableMetadata> OracleTableMetadata = new ArrayList<>();
+  private List<TableMetadata> oracleTableMetadata = new ArrayList<>();
 
   // raw data from the target database
   private List<String> postgresSchemaNames = new ArrayList<>();
@@ -28,6 +28,10 @@ public class StateService {
 
   public List<ObjectDataTypeMetaData> getOracleObjectDataTypeMetaData() {
     return new ArrayList<>(oracleObjectDataTypeMetaData);
+  }
+
+  public List<TableMetadata> getOracleTableMetadata() {
+    return new ArrayList<>(oracleTableMetadata);
   }
 
   // Management methods for Oracle schemas
@@ -46,6 +50,12 @@ public class StateService {
   public void updateOracleObjectDataTypeMetaData(List<ObjectDataTypeMetaData> objectDataTypes) {
     this.oracleObjectDataTypeMetaData.clear();
     this.oracleObjectDataTypeMetaData.addAll(objectDataTypes);
+  }
+
+  // Management methods for Oracle table metadata
+  public void updateOracleTableMetadata(List<TableMetadata> tableMetadata) {
+    this.oracleTableMetadata.clear();
+    this.oracleTableMetadata.addAll(tableMetadata);
   }
 
   /*

@@ -115,6 +115,15 @@
           <div class="component-info" id="oracle-tables">
             <span class="count-badge">-</span>
             <span class="component-text">Tables found</span>
+            <button class="refresh-btn" onclick="extractTableMetadata()" title="Extract Oracle table metadata">⚙</button>
+            <div class="table-list" id="oracle-table-list" style="display: none;">
+              <div class="table-list-header" onclick="toggleTableList('oracle')">
+                <span class="toggle-indicator">▼</span> Tables by Schema
+              </div>
+              <div class="table-items" id="oracle-table-items">
+                <!-- Table metadata will be populated here -->
+              </div>
+            </div>
           </div>
         </td>
         <td class="target-cell">
