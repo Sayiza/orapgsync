@@ -1,9 +1,9 @@
 package me.christianrobert.orapgsync.objectdatatype.job;
 
-import me.christianrobert.orapgsync.config.service.ConfigService;
-import me.christianrobert.orapgsync.core.job.Job;
+import jakarta.enterprise.context.Dependent;
+import jakarta.inject.Inject;
+import me.christianrobert.orapgsync.core.job.AbstractDatabaseExtractionJob;
 import me.christianrobert.orapgsync.core.job.model.JobProgress;
-import me.christianrobert.orapgsync.core.service.StateService;
 import me.christianrobert.orapgsync.database.service.OracleConnectionService;
 import me.christianrobert.orapgsync.objectdatatype.model.ObjectDataTypeMetaData;
 import me.christianrobert.orapgsync.objectdatatype.model.ObjectDataTypeVariable;
@@ -18,64 +18,38 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 
-public class OracleObjectDataTypeExtractionJob implements Job<List<ObjectDataTypeMetaData>> {
+@Dependent
+public class OracleObjectDataTypeExtractionJob extends AbstractDatabaseExtractionJob<ObjectDataTypeMetaData> {
 
     private static final Logger log = LoggerFactory.getLogger(OracleObjectDataTypeExtractionJob.class);
 
-    private final String jobId;
-
-    private StateService stateService;
+    @Inject
     private OracleConnectionService oracleConnectionService;
-    private ConfigService configService;
 
-    public OracleObjectDataTypeExtractionJob() {
-        this.jobId = "oracle-object-datatype-extraction-" + UUID.randomUUID().toString();
-    }
-
-    public void setStateService(StateService stateService) {
-        this.stateService = stateService;
-    }
-
-    public void setOracleConnectionService(OracleConnectionService oracleConnectionService) {
-        this.oracleConnectionService = oracleConnectionService;
-    }
-
-    public void setConfigService(ConfigService configService) {
-        this.configService = configService;
+    @Override
+    public String getSourceDatabase() {
+        return "ORACLE";
     }
 
     @Override
-    public String getJobId() {
-        return jobId;
+    public String getExtractionType() {
+        return "OBJECT_DATATYPE";
     }
 
     @Override
-    public String getJobType() {
-        return "ORACLE_OBJECT_DATATYPE_EXTRACTION";
+    public Class<ObjectDataTypeMetaData> getResultType() {
+        return ObjectDataTypeMetaData.class;
     }
 
     @Override
-    public String getDescription() {
-        return "Extract object data types from Oracle database and store in global state";
+    protected void saveResultsToState(List<ObjectDataTypeMetaData> results) {
+        stateService.updateOracleObjectDataTypeMetaData(results);
     }
 
     @Override
-    public CompletableFuture<List<ObjectDataTypeMetaData>> execute(Consumer<JobProgress> progressCallback) {
-        return CompletableFuture.supplyAsync(() -> {
-            try {
-                return performExtraction(progressCallback);
-            } catch (Exception e) {
-                log.error("Object data type extraction failed", e);
-                throw new RuntimeException("Object data type extraction failed: " + e.getMessage(), e);
-            }
-        });
-    }
-
-    private List<ObjectDataTypeMetaData> performExtraction(Consumer<JobProgress> progressCallback) throws Exception {
+    protected List<ObjectDataTypeMetaData> performExtraction(Consumer<JobProgress> progressCallback) throws Exception {
         updateProgress(progressCallback, 0, "Initializing", "Starting Oracle object data type extraction");
 
         if (!oracleConnectionService.isConfigured()) {
@@ -180,26 +154,6 @@ public class OracleObjectDataTypeExtractionJob implements Job<List<ObjectDataTyp
             List<ObjectDataTypeMetaData> allObjectDataTypes = objectDataTypesBySchema.values().stream()
                     .flatMap(List::stream)
                     .toList();
-
-            updateProgress(progressCallback, 90, "Storing results", "Saving object data types to global state");
-            stateService.updateOracleObjectDataTypeMetaData(allObjectDataTypes);
-
-            updateProgress(progressCallback, 95, "Preparing summary", "Generating extraction summary");
-
-            int totalAttributes = allObjectDataTypes.stream()
-                    .mapToInt(objectType -> objectType.getVariables().size())
-                    .sum();
-
-            String summaryMessage = String.format(
-                "Extraction completed: %d object data types from %d schemas with %d total attributes",
-                allObjectDataTypes.size(),
-                objectDataTypesBySchema.size(),
-                totalAttributes);
-
-            updateProgress(progressCallback, 100, "Completed", summaryMessage);
-
-            log.info("Object data type extraction completed successfully: {} object data types from {} schemas with {} total attributes",
-                    allObjectDataTypes.size(), objectDataTypesBySchema.size(), totalAttributes);
 
             return allObjectDataTypes;
 
@@ -330,4 +284,18 @@ public class OracleObjectDataTypeExtractionJob implements Job<List<ObjectDataTyp
         }
     }
 
+    @Override
+    protected String generateSummaryMessage(List<ObjectDataTypeMetaData> results) {
+        Map<String, Integer> schemaObjectCounts = new HashMap<>();
+        int totalAttributes = 0;
+
+        for (ObjectDataTypeMetaData objectType : results) {
+            String schema = objectType.getSchema();
+            schemaObjectCounts.put(schema, schemaObjectCounts.getOrDefault(schema, 0) + 1);
+            totalAttributes += objectType.getVariables().size();
+        }
+
+        return String.format("Extraction completed: %d object data types from %d schemas with %d total attributes",
+                           results.size(), schemaObjectCounts.size(), totalAttributes);
+    }
 }
