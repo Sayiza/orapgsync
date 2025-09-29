@@ -147,6 +147,15 @@
           <div class="component-info" id="oracle-data">
             <span class="count-badge">-</span>
             <span class="component-text">Records available</span>
+            <button class="refresh-btn" onclick="extractOracleRowCounts()" title="Extract Oracle row counts">⚙</button>
+            <div class="table-list" id="oracle-rowcount-list" style="display: none;">
+              <div class="table-list-header" onclick="toggleRowCountList('oracle')">
+                <span class="toggle-indicator">▼</span> Row Counts by Schema
+              </div>
+              <div class="table-items" id="oracle-rowcount-items">
+                <!-- Row count data will be populated here -->
+              </div>
+            </div>
           </div>
         </td>
         <td class="target-cell">

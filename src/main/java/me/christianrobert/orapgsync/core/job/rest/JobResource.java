@@ -11,6 +11,7 @@ import me.christianrobert.orapgsync.core.job.model.JobStatus;
 import me.christianrobert.orapgsync.core.job.service.JobRegistry;
 import me.christianrobert.orapgsync.core.job.service.JobService;
 import me.christianrobert.orapgsync.objectdatatype.model.ObjectDataTypeMetaData;
+import me.christianrobert.orapgsync.rowcount.model.RowCountMetadata;
 import me.christianrobert.orapgsync.table.model.TableMetadata;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -193,7 +194,7 @@ public class JobResource {
             // Handle different job result types
             String jobType = execution.getJob().getJobType();
             if (result instanceof List<?>) {
-                if (jobType.contains("TABLE_METADATA_EXTRACTION")) {
+                if (jobType.contains("TABLE_METADATA")) {
                     // Handle table metadata extraction results
                     @SuppressWarnings("unchecked")
                     List<TableMetadata> tableMetadata = (List<TableMetadata>) result;
@@ -201,7 +202,7 @@ public class JobResource {
                     Map<String, Object> summary = generateTableMetadataSummary(tableMetadata);
                     response.put("summary", summary);
                     response.put("tableCount", tableMetadata.size());
-                } else if (jobType.contains("OBJECT_DATATYPE_EXTRACTION")) {
+                } else if (jobType.contains("OBJECT_DATATYPE")) {
                     // Handle object data type extraction results
                     @SuppressWarnings("unchecked")
                     List<ObjectDataTypeMetaData> objectDataTypes = (List<ObjectDataTypeMetaData>) result;
@@ -209,6 +210,15 @@ public class JobResource {
                     Map<String, Object> summary = generateObjectDataTypeSummary(objectDataTypes);
                     response.put("summary", summary);
                     response.put("objectDataTypeCount", objectDataTypes.size());
+                    response.put("result", result); // Include raw result for frontend compatibility
+                } else if (jobType.contains("ROW_COUNT")) {
+                    // Handle row count extraction results
+                    @SuppressWarnings("unchecked")
+                    List<RowCountMetadata> rowCounts = (List<RowCountMetadata>) result;
+
+                    Map<String, Object> summary = generateRowCountSummary(rowCounts);
+                    response.put("summary", summary);
+                    response.put("rowCountDataCount", rowCounts.size());
                     response.put("result", result); // Include raw result for frontend compatibility
                 } else {
                     // Generic list result
@@ -300,6 +310,47 @@ public class JobResource {
         );
     }
 
+    private Map<String, Object> generateRowCountSummary(List<RowCountMetadata> rowCounts) {
+        Map<String, Integer> schemaTableCounts = new HashMap<>();
+        Map<String, Long> schemaRowCounts = new HashMap<>();
+        Map<String, Object> tableDetails = new HashMap<>();
+
+        long totalRows = 0;
+        int errorTables = 0;
+
+        for (RowCountMetadata rowCount : rowCounts) {
+            String schema = rowCount.getSchema();
+            schemaTableCounts.put(schema, schemaTableCounts.getOrDefault(schema, 0) + 1);
+
+            if (rowCount.getRowCount() >= 0) {
+                totalRows += rowCount.getRowCount();
+                schemaRowCounts.put(schema, schemaRowCounts.getOrDefault(schema, 0L) + rowCount.getRowCount());
+            } else {
+                errorTables++;
+            }
+
+            // Store individual table row count info
+            Map<String, Object> tableInfo = Map.of(
+                    "schema", rowCount.getSchema(),
+                    "tableName", rowCount.getTableName(),
+                    "rowCount", rowCount.getRowCount(),
+                    "extractionTimestamp", rowCount.getExtractionTimestamp()
+            );
+
+            String tableKey = schema + "." + rowCount.getTableName();
+            tableDetails.put(tableKey, tableInfo);
+        }
+
+        return Map.of(
+                "totalTables", rowCounts.size(),
+                "totalRows", totalRows,
+                "errorTables", errorTables,
+                "schemaTableCounts", schemaTableCounts,
+                "schemaRowCounts", schemaRowCounts,
+                "tables", tableDetails
+        );
+    }
+
     @POST
     @Path("/tables/postgres/extract")
     public Response startPostgresTableMetadataExtraction() {
@@ -316,5 +367,11 @@ public class JobResource {
     @Path("/objects/postgres/extract")
     public Response startPostgresObjectDataTypeExtraction() {
         return startExtractionJob("POSTGRES", "OBJECT_DATATYPE", "PostgreSQL object data type extraction");
+    }
+
+    @POST
+    @Path("/oracle/row_count/extract")
+    public Response startOracleRowCountExtraction() {
+        return startExtractionJob("ORACLE", "ROW_COUNT", "Oracle row count extraction");
     }
 }

@@ -4,12 +4,15 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Event;
 import jakarta.inject.Inject;
 import me.christianrobert.orapgsync.core.event.ObjectDataTypeUpdatedEvent;
+import me.christianrobert.orapgsync.core.event.RowCountUpdatedEvent;
 import me.christianrobert.orapgsync.core.event.SchemaListUpdatedEvent;
 import me.christianrobert.orapgsync.core.event.TableMetadataUpdatedEvent;
 import me.christianrobert.orapgsync.core.state.ObjectDataTypeStateManager;
+import me.christianrobert.orapgsync.core.state.RowCountStateManager;
 import me.christianrobert.orapgsync.core.state.SchemaStateManager;
 import me.christianrobert.orapgsync.core.state.TableMetadataStateManager;
 import me.christianrobert.orapgsync.objectdatatype.model.ObjectDataTypeMetaData;
+import me.christianrobert.orapgsync.rowcount.model.RowCountMetadata;
 import me.christianrobert.orapgsync.table.model.TableMetadata;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,6 +41,9 @@ public class StateService {
     private Event<SchemaListUpdatedEvent> schemaListEvent;
 
     @Inject
+    private Event<RowCountUpdatedEvent> rowCountEvent;
+
+    @Inject
     private TableMetadataStateManager tableMetadataStateManager;
 
     @Inject
@@ -45,6 +51,9 @@ public class StateService {
 
     @Inject
     private SchemaStateManager schemaStateManager;
+
+    @Inject
+    private RowCountStateManager rowCountStateManager;
 
     // ==================== Query Methods (delegate to state managers) ====================
 
@@ -70,6 +79,14 @@ public class StateService {
 
     public List<TableMetadata> getPostgresTableMetadata() {
         return tableMetadataStateManager.getPostgresTableMetadata();
+    }
+
+    public List<RowCountMetadata> getOracleRowCounts() {
+        return rowCountStateManager.getOracleRowCounts();
+    }
+
+    public List<RowCountMetadata> getPostgresRowCounts() {
+        return rowCountStateManager.getPostgresRowCounts();
     }
 
     // ==================== Update Methods (fire events) ====================
@@ -102,6 +119,16 @@ public class StateService {
     public void updatePostgresTableMetadata(List<TableMetadata> tableMetadata) {
         log.info("Firing PostgreSQL table metadata update event with {} tables", tableMetadata.size());
         tableMetadataEvent.fire(TableMetadataUpdatedEvent.forPostgres(tableMetadata));
+    }
+
+    public void updateOracleRowCounts(List<RowCountMetadata> rowCountMetadata) {
+        log.info("Firing Oracle row count update event with {} tables", rowCountMetadata.size());
+        rowCountEvent.fire(RowCountUpdatedEvent.forOracle(rowCountMetadata));
+    }
+
+    public void updatePostgresRowCounts(List<RowCountMetadata> rowCountMetadata) {
+        log.info("Firing PostgreSQL row count update event with {} tables", rowCountMetadata.size());
+        rowCountEvent.fire(RowCountUpdatedEvent.forPostgres(rowCountMetadata));
     }
 
 }

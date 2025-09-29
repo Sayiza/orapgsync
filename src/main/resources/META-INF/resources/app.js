@@ -1222,6 +1222,275 @@ function toggleTableSchemaGroup(database, schemaName) {
     }
 }
 
+// Row Count Extraction Functions
+
+// Extract Oracle row counts (starts the job)
+async function extractOracleRowCounts() {
+    console.log('Starting Oracle row count extraction job...');
+
+    const button = document.querySelector('#oracle-data .refresh-btn');
+    if (button) {
+        button.disabled = true;
+        button.innerHTML = '⏳';
+    }
+
+    updateMessage('Starting Oracle row count extraction...');
+    updateProgress(0, 'Starting Oracle row count extraction');
+
+    try {
+        const response = await fetch('/api/jobs/oracle/row_count/extract', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+
+        const result = await response.json();
+
+        if (result.status === 'success') {
+            console.log('Oracle row count extraction job started:', result.jobId);
+            updateMessage('Oracle row count extraction job started successfully');
+
+            // Start polling for progress
+            pollRowCountJobStatus(result.jobId, 'oracle');
+        } else {
+            throw new Error(result.message || 'Failed to start Oracle row count extraction job');
+        }
+
+    } catch (error) {
+        console.error('Error starting Oracle row count extraction job:', error);
+        updateMessage('Failed to start Oracle row count extraction: ' + error.message);
+        updateProgress(0, 'Failed to start Oracle row count extraction');
+
+        // Re-enable button
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = '⚙';
+        }
+    }
+}
+
+// Poll row count job status until completion
+async function pollRowCountJobStatus(jobId, database = 'oracle') {
+    console.log('Polling row count job status for:', jobId);
+
+    try {
+        const response = await fetch(`/api/jobs/${jobId}/status`);
+        const result = await response.json();
+
+        if (result.status === 'error') {
+            throw new Error(result.message);
+        }
+
+        console.log('Row count job status:', result);
+
+        // Update progress if available
+        if (result.progress) {
+            const percentage = result.progress.percentage;
+            const currentTask = result.progress.currentTask || 'Processing...';
+            const details = result.progress.details || '';
+
+            updateProgress(percentage, currentTask);
+            if (details) {
+                updateMessage(details);
+            }
+        }
+
+        // Check if job is complete
+        if (result.isComplete) {
+            if (result.status === 'COMPLETED') {
+                console.log('Row count job completed successfully');
+                updateProgress(100, 'Row count extraction completed successfully');
+                updateMessage('Row count extraction completed');
+
+                // Get job results
+                await getRowCountJobResults(jobId, database);
+            } else if (result.status === 'FAILED') {
+                console.error('Row count job failed:', result.error);
+                updateProgress(0, 'Row count extraction failed');
+                updateMessage('Row count extraction failed: ' + (result.error || 'Unknown error'));
+            }
+
+            // Re-enable extract button
+            const button = document.querySelector(`#${database}-data .refresh-btn`);
+            if (button) {
+                button.disabled = false;
+                button.innerHTML = '⚙';
+            }
+        } else {
+            // Continue polling
+            setTimeout(() => pollRowCountJobStatus(jobId, database), 1000);
+        }
+
+    } catch (error) {
+        console.error('Error polling row count job status:', error);
+        updateMessage('Error checking row count job status: ' + error.message);
+        updateProgress(0, 'Error checking row count job status');
+
+        // Re-enable button
+        const button = document.querySelector(`#${database}-data .refresh-btn`);
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = '⚙';
+        }
+    }
+}
+
+// Get row count job results and display them
+async function getRowCountJobResults(jobId, database) {
+    console.log('Getting row count job results for:', jobId);
+
+    try {
+        const response = await fetch(`/api/jobs/${jobId}/result`);
+        const result = await response.json();
+
+        if (result.status === 'success') {
+            console.log('Row count job results:', result);
+            displayRowCountResults(result, database);
+        } else {
+            throw new Error(result.message || 'Failed to get row count job results');
+        }
+
+    } catch (error) {
+        console.error('Error getting row count job results:', error);
+        updateMessage('Error getting row count results: ' + error.message);
+    }
+}
+
+// Display row count extraction results
+function displayRowCountResults(result, database = 'oracle') {
+    const summary = result.summary;
+
+    if (summary) {
+        // Extract total row count from summary message
+        const rowCounts = result.result || [];
+        const totalRows = rowCounts.reduce((sum, rc) => sum + (rc.rowCount >= 0 ? rc.rowCount : 0), 0);
+
+        // Format the total row count
+        const formattedTotal = totalRows.toLocaleString();
+
+        // Update row count badge with formatted number
+        updateComponentCount(`${database}-data`, formattedTotal);
+
+        // Show success message
+        const databaseName = database === 'oracle' ? 'Oracle' : 'PostgreSQL';
+        updateMessage(`Extracted row counts for ${rowCounts.length} ${databaseName} tables: ${formattedTotal} total rows`);
+
+        // Populate row count list
+        populateRowCountList(rowCounts, database);
+
+        // Show row count list
+        if (rowCounts.length > 0) {
+            document.getElementById(`${database}-rowcount-list`).style.display = 'block';
+        }
+    }
+}
+
+// Populate row count list with extracted row count data
+function populateRowCountList(rowCounts, database = 'oracle') {
+    const rowCountItemsElement = document.getElementById(`${database}-rowcount-items`);
+
+    if (!rowCountItemsElement) {
+        console.warn('Row count items element not found');
+        return;
+    }
+
+    // Clear existing items
+    rowCountItemsElement.innerHTML = '';
+
+    if (rowCounts && rowCounts.length > 0) {
+        // Group row counts by schema
+        const rowCountsBySchema = {};
+        rowCounts.forEach(rowCount => {
+            if (!rowCountsBySchema[rowCount.schema]) {
+                rowCountsBySchema[rowCount.schema] = [];
+            }
+            rowCountsBySchema[rowCount.schema].push(rowCount);
+        });
+
+        Object.entries(rowCountsBySchema).forEach(([schemaName, schemaRowCounts]) => {
+            const schemaGroup = document.createElement('div');
+            schemaGroup.className = 'table-schema-group';
+
+            // Calculate total rows for this schema
+            const schemaTotalRows = schemaRowCounts.reduce((sum, rc) => sum + (rc.rowCount >= 0 ? rc.rowCount : 0), 0);
+
+            const schemaHeader = document.createElement('div');
+            schemaHeader.className = 'table-schema-header';
+            schemaHeader.innerHTML = `<span class="toggle-indicator">▼</span> ${schemaName} (${schemaRowCounts.length} tables, ${schemaTotalRows.toLocaleString()} rows)`;
+            schemaHeader.onclick = () => toggleRowCountSchemaGroup(database, schemaName);
+
+            const rowCountItems = document.createElement('div');
+            rowCountItems.className = 'table-items-list';
+            rowCountItems.id = `${database}-${schemaName}-rowcounts`;
+
+            // Add individual table row counts for this schema
+            schemaRowCounts.forEach(rowCount => {
+                const rowCountItem = document.createElement('div');
+                rowCountItem.className = 'table-item';
+
+                if (rowCount.rowCount >= 0) {
+                    rowCountItem.innerHTML = `${rowCount.tableName}: ${rowCount.rowCount.toLocaleString()} rows`;
+                } else {
+                    rowCountItem.innerHTML = `${rowCount.tableName}: <span style="color: #d73502;">Error counting rows</span>`;
+                    rowCountItem.style.color = '#666';
+                }
+
+                rowCountItems.appendChild(rowCountItem);
+            });
+
+            schemaGroup.appendChild(schemaHeader);
+            schemaGroup.appendChild(rowCountItems);
+            rowCountItemsElement.appendChild(schemaGroup);
+        });
+    } else {
+        const noRowCountsItem = document.createElement('div');
+        noRowCountsItem.className = 'table-item';
+        noRowCountsItem.textContent = 'No row count data found';
+        noRowCountsItem.style.fontStyle = 'italic';
+        noRowCountsItem.style.color = '#999';
+        rowCountItemsElement.appendChild(noRowCountsItem);
+    }
+}
+
+// Toggle row count list visibility
+function toggleRowCountList(database) {
+    const rowCountItems = document.getElementById(`${database}-rowcount-items`);
+    const header = document.querySelector(`#${database}-rowcount-list .table-list-header`);
+
+    if (!rowCountItems || !header) {
+        console.warn(`Row count list elements not found for database: ${database}`);
+        return;
+    }
+
+    if (rowCountItems.style.display === 'none') {
+        rowCountItems.style.display = 'block';
+        header.classList.remove('collapsed');
+    } else {
+        rowCountItems.style.display = 'none';
+        header.classList.add('collapsed');
+    }
+}
+
+// Toggle row count schema group visibility
+function toggleRowCountSchemaGroup(database, schemaName) {
+    const rowCountItems = document.getElementById(`${database}-${schemaName}-rowcounts`);
+    const header = event.target;
+
+    if (!rowCountItems || !header) {
+        console.warn(`Row count schema group elements not found for: ${database}.${schemaName}`);
+        return;
+    }
+
+    if (rowCountItems.style.display === 'none') {
+        rowCountItems.style.display = 'block';
+        header.classList.remove('collapsed');
+    } else {
+        rowCountItems.style.display = 'none';
+        header.classList.add('collapsed');
+    }
+}
+
 // Load configuration when page loads
 document.addEventListener('DOMContentLoaded', function() {
     // Load configuration after a short delay to ensure all other initialization is complete

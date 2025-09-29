@@ -63,7 +63,7 @@ public abstract class AbstractDatabaseExtractionJob<T> implements DatabaseExtrac
     public CompletableFuture<List<T>> execute(Consumer<JobProgress> progressCallback) {
         return CompletableFuture.supplyAsync(() -> {
             try {
-                return performExtraction(progressCallback);
+                return performExtractionWithStateSaving(progressCallback);
             } catch (Exception e) {
                 log.error("{} extraction failed", getExtractionType(), e);
                 throw new RuntimeException(String.format("%s extraction failed: %s",
