@@ -6,7 +6,7 @@ import me.christianrobert.orapgsync.config.service.ConfigService;
 import me.christianrobert.orapgsync.database.service.PostgresConnectionService;
 import me.christianrobert.orapgsync.objectdatatype.model.ObjectDataTypeMetaData;
 import me.christianrobert.orapgsync.objectdatatype.model.ObjectDataTypeVariable;
-import me.christianrobert.orapgsync.table.tools.UserExcluder;
+import me.christianrobert.orapgsync.core.tools.UserExcluder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

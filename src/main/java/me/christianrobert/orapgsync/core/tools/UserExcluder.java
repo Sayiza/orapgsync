@@ -1,4 +1,4 @@
-package me.christianrobert.orapgsync.table.tools;
+package me.christianrobert.orapgsync.core.tools;
 
 public class UserExcluder {
   public static boolean is2BeExclueded(String user) {

@@ -1,4 +1,4 @@
-package me.christianrobert.orapgsync.table.tools;
+package me.christianrobert.orapgsync.core.tools;
 
 /**
  * Utility class for normalizing Oracle identifier names.

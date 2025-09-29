@@ -7,13 +7,11 @@ import me.christianrobert.orapgsync.core.service.StateService;
 import me.christianrobert.orapgsync.database.service.OracleConnectionService;
 import me.christianrobert.orapgsync.table.model.TableMetadata;
 import me.christianrobert.orapgsync.table.service.TableExtractor;
-import me.christianrobert.orapgsync.table.tools.UserExcluder;
+import me.christianrobert.orapgsync.core.tools.UserExcluder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.sql.Connection;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;

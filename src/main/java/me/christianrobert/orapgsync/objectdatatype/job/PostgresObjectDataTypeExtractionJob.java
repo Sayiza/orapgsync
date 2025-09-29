@@ -3,17 +3,17 @@ package me.christianrobert.orapgsync.objectdatatype.job;
 import me.christianrobert.orapgsync.config.service.ConfigService;
 import me.christianrobert.orapgsync.core.job.Job;
 import me.christianrobert.orapgsync.core.job.model.JobProgress;
+import me.christianrobert.orapgsync.core.service.StateService;
 import me.christianrobert.orapgsync.database.service.PostgresConnectionService;
 import me.christianrobert.orapgsync.objectdatatype.model.ObjectDataTypeMetaData;
 import me.christianrobert.orapgsync.objectdatatype.model.ObjectDataTypeVariable;
-import me.christianrobert.orapgsync.table.tools.UserExcluder;
+import me.christianrobert.orapgsync.core.tools.UserExcluder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -28,11 +28,16 @@ public class PostgresObjectDataTypeExtractionJob implements Job<List<ObjectDataT
 
     private final String jobId;
 
+    private StateService stateService;
     private PostgresConnectionService postgresConnectionService;
     private ConfigService configService;
 
     public PostgresObjectDataTypeExtractionJob() {
         this.jobId = "postgres-object-datatype-extraction-" + UUID.randomUUID().toString();
+    }
+
+    public void setStateService(StateService stateService) {
+        this.stateService = stateService;
     }
 
     public void setPostgresConnectionService(PostgresConnectionService postgresConnectionService) {
@@ -151,15 +156,22 @@ public class PostgresObjectDataTypeExtractionJob implements Job<List<ObjectDataT
                             continue;
                         }
 
-                        // Create object data type metadata with empty variables list (since we're just getting basic info)
-                        ObjectDataTypeMetaData objectDataType = createObjectDataTypeMetaData(schemaName, typeName, new ArrayList<>());
+                        // Extract detailed attributes for this composite type
+                        updateProgress(progressCallback, 30 + (processedCount * 40 / Math.max(1, processedCount + 50)),
+                            "Extracting attributes", String.format("Getting attributes for %s.%s", schemaName, typeName));
+
+                        List<ObjectDataTypeVariable> attributes = extractCompositeTypeAttributes(connection, schemaName, typeName);
+
+                        // Create object data type metadata with detailed attributes
+                        ObjectDataTypeMetaData objectDataType = createObjectDataTypeMetaData(schemaName, typeName, attributes);
                         objectDataTypesBySchema.computeIfAbsent(schemaName, k -> new ArrayList<>()).add(objectDataType);
 
                         processedCount++;
-                        if (processedCount % 10 == 0) {
-                            int progress = 30 + (processedCount * 50 / Math.max(1, processedCount + 50)); // Estimate progress
-                            updateProgress(progressCallback, progress, "Processing results",
-                                String.format("Processed %d object data types", processedCount));
+                        if (processedCount % 5 == 0) {
+                            int progress = 30 + (processedCount * 50 / Math.max(1, processedCount + 25)); // Better progress estimation
+                            updateProgress(progressCallback, progress, "Processing composite types",
+                                String.format("Processed %d object data types with %d total attributes",
+                                    processedCount, countTotalAttributes(objectDataTypesBySchema)));
                         }
                     }
 
@@ -173,23 +185,158 @@ public class PostgresObjectDataTypeExtractionJob implements Job<List<ObjectDataT
                     .flatMap(List::stream)
                     .toList();
 
+            updateProgress(progressCallback, 90, "Storing results", "Saving object data types to global state");
+            stateService.updatePostgresObjectDataTypeMetaData(allObjectDataTypes);
+
             updateProgress(progressCallback, 95, "Preparing summary", "Generating extraction summary");
 
+            int totalAttributes = allObjectDataTypes.stream()
+                    .mapToInt(objectType -> objectType.getVariables().size())
+                    .sum();
+
             String summaryMessage = String.format(
-                "Extraction completed: %d object data types from %d schemas",
+                "Extraction completed: %d object data types from %d schemas with %d total attributes",
                 allObjectDataTypes.size(),
-                objectDataTypesBySchema.size());
+                objectDataTypesBySchema.size(),
+                totalAttributes);
 
             updateProgress(progressCallback, 100, "Completed", summaryMessage);
 
-            log.info("PostgreSQL object data type extraction completed successfully: {} object data types from {} schemas",
-                    allObjectDataTypes.size(), objectDataTypesBySchema.size());
+            log.info("PostgreSQL object data type extraction completed successfully: {} object data types from {} schemas with {} total attributes",
+                    allObjectDataTypes.size(), objectDataTypesBySchema.size(), totalAttributes);
 
             return allObjectDataTypes;
 
         } catch (Exception e) {
             updateProgress(progressCallback, -1, "Failed", "PostgreSQL object data type extraction failed: " + e.getMessage());
             throw e;
+        }
+    }
+
+    private List<ObjectDataTypeVariable> extractCompositeTypeAttributes(Connection connection, String schemaName, String typeName) throws Exception {
+        List<ObjectDataTypeVariable> attributes = new ArrayList<>();
+
+        String attributeQuery = """
+            SELECT
+                a.attname as attr_name,
+                t.typname as attr_type_name,
+                CASE
+                    WHEN a.atttypmod > 0 AND t.typname IN ('varchar', 'char', 'bpchar')
+                    THEN a.atttypmod - 4
+                    WHEN t.typname = 'numeric' AND a.atttypmod > 0
+                    THEN ((a.atttypmod - 4) >> 16) & 65535
+                    ELSE NULL
+                END as length,
+                CASE
+                    WHEN t.typname = 'numeric' AND a.atttypmod > 0
+                    THEN ((a.atttypmod - 4) >> 16) & 65535
+                    ELSE NULL
+                END as precision,
+                CASE
+                    WHEN t.typname = 'numeric' AND a.atttypmod > 0
+                    THEN (a.atttypmod - 4) & 65535
+                    ELSE NULL
+                END as scale,
+                a.attnum as attr_no
+            FROM pg_attribute a
+            JOIN pg_type pt ON pt.typname = ?
+            JOIN pg_namespace pn ON pn.nspname = ? AND pt.typnamespace = pn.oid
+            JOIN pg_type t ON t.oid = a.atttypid
+            WHERE a.attrelid = pt.typrelid
+              AND a.attnum > 0
+              AND NOT a.attisdropped
+            ORDER BY a.attnum
+            """;
+
+        try (PreparedStatement stmt = connection.prepareStatement(attributeQuery)) {
+            stmt.setString(1, typeName);
+            stmt.setString(2, schemaName);
+
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    String attrName = rs.getString("attr_name");
+                    String attrTypeName = rs.getString("attr_type_name");
+                    Integer length = rs.getObject("length", Integer.class);
+                    Integer precision = rs.getObject("precision", Integer.class);
+                    Integer scale = rs.getObject("scale", Integer.class);
+                    int attrNo = rs.getInt("attr_no");
+
+                    // Format the data type with size information if available
+                    String formattedDataType = formatPostgresDataType(attrTypeName, length, precision, scale);
+
+                    ObjectDataTypeVariable variable = new ObjectDataTypeVariable(attrName, formattedDataType);
+                    attributes.add(variable);
+
+                    log.debug("Found attribute {} for {}.{}: {} (formatted as: {})",
+                        attrName, schemaName, typeName, attrTypeName, formattedDataType);
+                }
+            }
+        }
+
+        log.debug("Extracted {} attributes for composite type {}.{}", attributes.size(), schemaName, typeName);
+        return attributes;
+    }
+
+    private int countTotalAttributes(Map<String, List<ObjectDataTypeMetaData>> objectDataTypesBySchema) {
+        return objectDataTypesBySchema.values().stream()
+                .flatMap(List::stream)
+                .mapToInt(objectType -> objectType.getVariables().size())
+                .sum();
+    }
+
+    private String formatPostgresDataType(String typeName, Integer length, Integer precision, Integer scale) {
+        if (typeName == null) {
+            return "UNKNOWN";
+        }
+
+        // Handle different PostgreSQL data types with their size specifications
+        switch (typeName.toLowerCase()) {
+            case "varchar":
+            case "character varying":
+                return length != null ? String.format("VARCHAR(%d)", length) : "VARCHAR";
+
+            case "char":
+            case "bpchar":
+            case "character":
+                return length != null ? String.format("CHAR(%d)", length) : "CHAR";
+
+            case "numeric":
+            case "decimal":
+                if (precision != null && scale != null) {
+                    return String.format("NUMERIC(%d,%d)", precision, scale);
+                } else if (precision != null) {
+                    return String.format("NUMERIC(%d)", precision);
+                } else {
+                    return "NUMERIC";
+                }
+
+            case "real":
+                return "REAL";
+
+            case "double precision":
+                return "DOUBLE PRECISION";
+
+            case "text":
+                return "TEXT";
+
+            case "bytea":
+                return "BYTEA";
+
+            case "boolean":
+                return "BOOLEAN";
+
+            case "date":
+                return "DATE";
+
+            case "timestamp":
+                return "TIMESTAMP";
+
+            case "timestamptz":
+                return "TIMESTAMP WITH TIME ZONE";
+
+            default:
+                // For other types, return as-is but uppercase for consistency
+                return typeName.toUpperCase();
         }
     }
 

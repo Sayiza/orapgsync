@@ -13,6 +13,7 @@ import me.christianrobert.orapgsync.objectdatatype.job.OracleObjectDataTypeExtra
 import me.christianrobert.orapgsync.objectdatatype.job.PostgresObjectDataTypeExtractionJob;
 import me.christianrobert.orapgsync.table.job.OracleTableMetadataExtractionJob;
 import me.christianrobert.orapgsync.table.job.PostgresTableMetadataExtractionJob;
+import me.christianrobert.orapgsync.objectdatatype.model.ObjectDataTypeMetaData;
 import me.christianrobert.orapgsync.table.model.TableMetadata;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -182,14 +183,30 @@ public class JobResource {
             response.put("jobId", jobId);
             response.put("jobType", execution.getJob().getJobType());
 
-            // Handle table metadata extraction results specifically
+            // Handle different job result types
+            String jobType = execution.getJob().getJobType();
             if (result instanceof List<?>) {
-                @SuppressWarnings("unchecked")
-                List<TableMetadata> tableMetadata = (List<TableMetadata>) result;
+                if (jobType.contains("TABLE_METADATA_EXTRACTION")) {
+                    // Handle table metadata extraction results
+                    @SuppressWarnings("unchecked")
+                    List<TableMetadata> tableMetadata = (List<TableMetadata>) result;
 
-                Map<String, Object> summary = generateTableMetadataSummary(tableMetadata);
-                response.put("summary", summary);
-                response.put("tableCount", tableMetadata.size());
+                    Map<String, Object> summary = generateTableMetadataSummary(tableMetadata);
+                    response.put("summary", summary);
+                    response.put("tableCount", tableMetadata.size());
+                } else if (jobType.contains("OBJECT_DATATYPE_EXTRACTION")) {
+                    // Handle object data type extraction results
+                    @SuppressWarnings("unchecked")
+                    List<ObjectDataTypeMetaData> objectDataTypes = (List<ObjectDataTypeMetaData>) result;
+
+                    Map<String, Object> summary = generateObjectDataTypeSummary(objectDataTypes);
+                    response.put("summary", summary);
+                    response.put("objectDataTypeCount", objectDataTypes.size());
+                    response.put("result", result); // Include raw result for frontend compatibility
+                } else {
+                    // Generic list result
+                    response.put("result", result);
+                }
             } else {
                 response.put("result", result);
             }
@@ -242,6 +259,37 @@ public class JobResource {
                 "totalConstraints", totalConstraints,
                 "schemaTableCounts", schemaTableCounts,
                 "tables", tableDetails
+        );
+    }
+
+    private Map<String, Object> generateObjectDataTypeSummary(List<ObjectDataTypeMetaData> objectDataTypes) {
+        Map<String, Integer> schemaObjectCounts = new HashMap<>();
+        Map<String, Object> objectDetails = new HashMap<>();
+
+        int totalVariables = 0;
+
+        for (ObjectDataTypeMetaData objectType : objectDataTypes) {
+            String schema = objectType.getSchema();
+            schemaObjectCounts.put(schema, schemaObjectCounts.getOrDefault(schema, 0) + 1);
+
+            totalVariables += objectType.getVariables().size();
+
+            // Store individual object type info
+            Map<String, Object> objectInfo = Map.of(
+                    "schema", objectType.getSchema(),
+                    "name", objectType.getName(),
+                    "variableCount", objectType.getVariables().size()
+            );
+
+            String objectKey = schema + "." + objectType.getName();
+            objectDetails.put(objectKey, objectInfo);
+        }
+
+        return Map.of(
+                "totalObjectDataTypes", objectDataTypes.size(),
+                "totalVariables", totalVariables,
+                "schemaObjectCounts", schemaObjectCounts,
+                "objectDataTypes", objectDetails
         );
     }
 

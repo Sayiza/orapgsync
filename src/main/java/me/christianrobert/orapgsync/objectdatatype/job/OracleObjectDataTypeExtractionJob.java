@@ -7,14 +7,13 @@ import me.christianrobert.orapgsync.core.service.StateService;
 import me.christianrobert.orapgsync.database.service.OracleConnectionService;
 import me.christianrobert.orapgsync.objectdatatype.model.ObjectDataTypeMetaData;
 import me.christianrobert.orapgsync.objectdatatype.model.ObjectDataTypeVariable;
-import me.christianrobert.orapgsync.table.tools.UserExcluder;
+import me.christianrobert.orapgsync.core.tools.UserExcluder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -153,15 +152,22 @@ public class OracleObjectDataTypeExtractionJob implements Job<List<ObjectDataTyp
                             continue;
                         }
 
-                        // Create object data type metadata with empty variables list (since we're just getting basic info)
-                        ObjectDataTypeMetaData objectDataType = createObjectDataTypeMetaData(owner, objectName, new ArrayList<>());
+                        // Extract detailed attributes for this object type
+                        updateProgress(progressCallback, 30 + (processedCount * 40 / Math.max(1, processedCount + 50)),
+                            "Extracting attributes", String.format("Getting attributes for %s.%s", owner, objectName));
+
+                        List<ObjectDataTypeVariable> attributes = extractObjectTypeAttributes(connection, owner, objectName);
+
+                        // Create object data type metadata with detailed attributes
+                        ObjectDataTypeMetaData objectDataType = createObjectDataTypeMetaData(owner, objectName, attributes);
                         objectDataTypesBySchema.computeIfAbsent(owner, k -> new ArrayList<>()).add(objectDataType);
 
                         processedCount++;
-                        if (processedCount % 10 == 0) {
-                            int progress = 30 + (processedCount * 50 / Math.max(1, processedCount + 50)); // Estimate progress
-                            updateProgress(progressCallback, progress, "Processing results",
-                                String.format("Processed %d object data types", processedCount));
+                        if (processedCount % 5 == 0) {
+                            int progress = 30 + (processedCount * 50 / Math.max(1, processedCount + 25)); // Better progress estimation
+                            updateProgress(progressCallback, progress, "Processing object types",
+                                String.format("Processed %d object data types with %d total attributes",
+                                    processedCount, countTotalAttributes(objectDataTypesBySchema)));
                         }
                     }
 
@@ -180,21 +186,123 @@ public class OracleObjectDataTypeExtractionJob implements Job<List<ObjectDataTyp
 
             updateProgress(progressCallback, 95, "Preparing summary", "Generating extraction summary");
 
+            int totalAttributes = allObjectDataTypes.stream()
+                    .mapToInt(objectType -> objectType.getVariables().size())
+                    .sum();
+
             String summaryMessage = String.format(
-                "Extraction completed: %d object data types from %d schemas",
+                "Extraction completed: %d object data types from %d schemas with %d total attributes",
                 allObjectDataTypes.size(),
-                objectDataTypesBySchema.size());
+                objectDataTypesBySchema.size(),
+                totalAttributes);
 
             updateProgress(progressCallback, 100, "Completed", summaryMessage);
 
-            log.info("Object data type extraction completed successfully: {} object data types from {} schemas",
-                    allObjectDataTypes.size(), objectDataTypesBySchema.size());
+            log.info("Object data type extraction completed successfully: {} object data types from {} schemas with {} total attributes",
+                    allObjectDataTypes.size(), objectDataTypesBySchema.size(), totalAttributes);
 
             return allObjectDataTypes;
 
         } catch (Exception e) {
             updateProgress(progressCallback, -1, "Failed", "Object data type extraction failed: " + e.getMessage());
             throw e;
+        }
+    }
+
+    private List<ObjectDataTypeVariable> extractObjectTypeAttributes(Connection connection, String owner, String typeName) throws Exception {
+        List<ObjectDataTypeVariable> attributes = new ArrayList<>();
+
+        String attributeQuery = """
+            SELECT
+                attr_name,
+                attr_type_name,
+                length,
+                precision,
+                scale,
+                attr_no
+            FROM all_type_attrs
+            WHERE owner = ?
+              AND type_name = ?
+            ORDER BY attr_no
+            """;
+
+        try (PreparedStatement stmt = connection.prepareStatement(attributeQuery)) {
+            stmt.setString(1, owner);
+            stmt.setString(2, typeName);
+
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    String attrName = rs.getString("attr_name");
+                    String attrTypeName = rs.getString("attr_type_name");
+                    Integer length = rs.getObject("length", Integer.class);
+                    Integer precision = rs.getObject("precision", Integer.class);
+                    Integer scale = rs.getObject("scale", Integer.class);
+                    int attrNo = rs.getInt("attr_no");
+
+                    // Format the data type with size information if available
+                    String formattedDataType = formatDataType(attrTypeName, length, precision, scale);
+
+                    ObjectDataTypeVariable variable = new ObjectDataTypeVariable(attrName, formattedDataType);
+                    attributes.add(variable);
+
+                    log.debug("Found attribute {} for {}.{}: {} (formatted as: {})",
+                        attrName, owner, typeName, attrTypeName, formattedDataType);
+                }
+            }
+        }
+
+        log.debug("Extracted {} attributes for object type {}.{}", attributes.size(), owner, typeName);
+        return attributes;
+    }
+
+    private int countTotalAttributes(Map<String, List<ObjectDataTypeMetaData>> objectDataTypesBySchema) {
+        return objectDataTypesBySchema.values().stream()
+                .flatMap(List::stream)
+                .mapToInt(objectType -> objectType.getVariables().size())
+                .sum();
+    }
+
+    private String formatDataType(String typeName, Integer length, Integer precision, Integer scale) {
+        if (typeName == null) {
+            return "UNKNOWN";
+        }
+
+        // Handle different Oracle data types with their size specifications
+        switch (typeName.toUpperCase()) {
+            case "VARCHAR2":
+            case "CHAR":
+            case "NVARCHAR2":
+            case "NCHAR":
+                return length != null ? String.format("%s(%d)", typeName, length) : typeName;
+
+            case "NUMBER":
+                if (precision != null && scale != null) {
+                    return String.format("%s(%d,%d)", typeName, precision, scale);
+                } else if (precision != null) {
+                    return String.format("%s(%d)", typeName, precision);
+                } else {
+                    return typeName;
+                }
+
+            case "DECIMAL":
+            case "NUMERIC":
+                if (precision != null && scale != null) {
+                    return String.format("%s(%d,%d)", typeName, precision, scale);
+                } else if (precision != null) {
+                    return String.format("%s(%d)", typeName, precision);
+                } else {
+                    return typeName;
+                }
+
+            case "FLOAT":
+                return precision != null ? String.format("%s(%d)", typeName, precision) : typeName;
+
+            case "RAW":
+                return length != null ? String.format("%s(%d)", typeName, length) : typeName;
+
+            default:
+                // For other types (DATE, TIMESTAMP, CLOB, BLOB, etc.), return as-is
+                return typeName;
         }
     }
 

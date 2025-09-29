@@ -63,6 +63,7 @@ public class JobFactory {
         PostgresObjectDataTypeExtractionJob job = new PostgresObjectDataTypeExtractionJob();
 
         // Manually inject dependencies since CDI doesn't work on manually created instances
+        job.setStateService(stateService);
         job.setPostgresConnectionService(postgresConnectionService);
         job.setConfigService(configService);
 
