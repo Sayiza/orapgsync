@@ -67,12 +67,21 @@
             <span class="count-badge">-</span>
             <span class="component-text">Schemas available</span>
             <button class="refresh-btn" onclick="loadPostgresSchemas()" title="Refresh PostgreSQL schemas">↻</button>
+            <button class="action-btn" onclick="createPostgresSchemas()" title="Create missing Oracle schemas in PostgreSQL">Create Schemas</button>
             <div class="schema-list" id="postgres-schema-list" style="display: none;">
               <div class="schema-list-header" onclick="toggleSchemaList('postgres')">
                 <span class="toggle-indicator">▼</span> Schema Names
               </div>
               <div class="schema-items" id="postgres-schema-items">
                 <!-- Schema names will be populated here -->
+              </div>
+            </div>
+            <div class="schema-creation-results" id="postgres-schema-creation-results" style="display: none;">
+              <div class="schema-creation-header" onclick="toggleSchemaCreationResults('postgres')">
+                <span class="toggle-indicator">▼</span> Schema Creation Results
+              </div>
+              <div class="schema-creation-details" id="postgres-schema-creation-details">
+                <!-- Schema creation results will be populated here -->
               </div>
             </div>
           </div>

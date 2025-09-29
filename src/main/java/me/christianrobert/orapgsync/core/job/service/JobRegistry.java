@@ -5,6 +5,8 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import me.christianrobert.orapgsync.core.job.DatabaseExtractionJob;
+import me.christianrobert.orapgsync.core.job.DatabaseWriteJob;
+import me.christianrobert.orapgsync.core.job.Job;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -13,8 +15,8 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Registry for database extraction jobs using CDI-based discovery.
- * Automatically discovers and registers all DatabaseExtractionJob implementations.
+ * Registry for database jobs using CDI-based discovery.
+ * Automatically discovers and registers all DatabaseExtractionJob and DatabaseWriteJob implementations.
  */
 @ApplicationScoped
 public class JobRegistry {
@@ -22,61 +24,87 @@ public class JobRegistry {
     private static final Logger log = LoggerFactory.getLogger(JobRegistry.class);
 
     @Inject
-    private Instance<DatabaseExtractionJob<?>> jobInstances;
+    private Instance<DatabaseExtractionJob<?>> extractionJobInstances;
 
-    private final Map<String, Class<? extends DatabaseExtractionJob<?>>> jobTypeMap = new HashMap<>();
-    private final Map<String, DatabaseExtractionJob<?>> jobProviders = new HashMap<>();
+    @Inject
+    private Instance<DatabaseWriteJob<?>> writeJobInstances;
+
+    private final Map<String, Class<? extends Job<?>>> jobTypeMap = new HashMap<>();
+    private final Map<String, Job<?>> jobProviders = new HashMap<>();
 
     @PostConstruct
     public void initialize() {
-        log.info("Initializing JobRegistry and discovering database extraction jobs");
+        log.info("Initializing JobRegistry and discovering database jobs (extraction and write)");
 
         int discoveredJobCount = 0;
-        for (DatabaseExtractionJob<?> job : jobInstances) {
+
+        // Discover extraction jobs
+        for (DatabaseExtractionJob<?> job : extractionJobInstances) {
             String jobTypeKey = createJobTypeKey(job.getSourceDatabase(), job.getExtractionType());
-
-            // Store the class type for later instantiation
-            @SuppressWarnings("unchecked")
-            Class<? extends DatabaseExtractionJob<?>> jobClass = (Class<? extends DatabaseExtractionJob<?>>) job.getClass();
-            jobTypeMap.put(jobTypeKey, jobClass);
-
-            // Store a provider instance for metadata queries
-            jobProviders.put(jobTypeKey, job);
-
-            log.info("Registered job: {} -> {} ({})",
-                    jobTypeKey,
-                    jobClass.getSimpleName(),
-                    job.getDescription());
-
+            registerJob(jobTypeKey, job, "extraction");
             discoveredJobCount++;
         }
 
-        log.info("JobRegistry initialization completed. Discovered {} database extraction jobs", discoveredJobCount);
+        // Discover write jobs
+        for (DatabaseWriteJob<?> job : writeJobInstances) {
+            String jobTypeKey = createJobTypeKey(job.getTargetDatabase(), job.getWriteOperationType());
+            registerJob(jobTypeKey, job, "write");
+            discoveredJobCount++;
+        }
+
+        log.info("JobRegistry initialization completed. Discovered {} database jobs", discoveredJobCount);
 
         if (discoveredJobCount == 0) {
-            log.warn("No database extraction jobs were discovered. Check that job classes are properly annotated with CDI scopes.");
+            log.warn("No database jobs were discovered. Check that job classes are properly annotated with CDI scopes.");
         }
     }
 
+    private void registerJob(String jobTypeKey, Job<?> job, String jobCategory) {
+        // Store the class type for later instantiation
+        @SuppressWarnings("unchecked")
+        Class<? extends Job<?>> jobClass = (Class<? extends Job<?>>) job.getClass();
+        jobTypeMap.put(jobTypeKey, jobClass);
+
+        // Store a provider instance for metadata queries
+        jobProviders.put(jobTypeKey, job);
+
+        log.info("Registered {} job: {} -> {} ({})",
+                jobCategory, jobTypeKey, jobClass.getSimpleName(), job.getDescription());
+    }
+
     /**
-     * Creates a new job instance for the specified database and extraction type.
+     * Creates a new job instance for the specified database and operation type.
      *
-     * @param sourceDatabase The source database ("ORACLE" or "POSTGRES")
-     * @param extractionType The extraction type ("TABLE_METADATA", "OBJECT_DATATYPE", etc.)
+     * @param database The database ("ORACLE" or "POSTGRES")
+     * @param operationType The operation type ("TABLE_METADATA", "SCHEMA_CREATION", etc.)
      * @return A new job instance, or empty if no matching job is found
      */
-    public Optional<DatabaseExtractionJob<?>> createJob(String sourceDatabase, String extractionType) {
-        String jobTypeKey = createJobTypeKey(sourceDatabase, extractionType);
+    public Optional<Job<?>> createJob(String database, String operationType) {
+        String jobTypeKey = createJobTypeKey(database, operationType);
 
-        Class<? extends DatabaseExtractionJob<?>> jobClass = jobTypeMap.get(jobTypeKey);
+        Class<? extends Job<?>> jobClass = jobTypeMap.get(jobTypeKey);
         if (jobClass == null) {
             log.warn("No job registered for key: {}", jobTypeKey);
             return Optional.empty();
         }
 
         try {
-            // Use CDI to create a new instance - this ensures proper dependency injection
-            DatabaseExtractionJob<?> jobInstance = jobInstances.select(jobClass).get();
+            // Determine if it's an extraction job or write job and use appropriate CDI instance
+            Job<?> jobInstance;
+            if (DatabaseExtractionJob.class.isAssignableFrom(jobClass)) {
+                @SuppressWarnings("unchecked")
+                Class<? extends DatabaseExtractionJob<?>> extractionJobClass =
+                    (Class<? extends DatabaseExtractionJob<?>>) jobClass;
+                jobInstance = extractionJobInstances.select(extractionJobClass).get();
+            } else if (DatabaseWriteJob.class.isAssignableFrom(jobClass)) {
+                @SuppressWarnings("unchecked")
+                Class<? extends DatabaseWriteJob<?>> writeJobClass =
+                    (Class<? extends DatabaseWriteJob<?>>) jobClass;
+                jobInstance = writeJobInstances.select(writeJobClass).get();
+            } else {
+                throw new IllegalStateException("Unknown job type: " + jobClass);
+            }
+
             log.debug("Created new job instance: {} for key: {}", jobClass.getSimpleName(), jobTypeKey);
             return Optional.of(jobInstance);
         } catch (Exception e) {
@@ -86,26 +114,51 @@ public class JobRegistry {
     }
 
     /**
+     * @deprecated Use {@link #createJob(String, String)} instead
+     */
+    @Deprecated
+    public Optional<DatabaseExtractionJob<?>> createExtractionJob(String sourceDatabase, String extractionType) {
+        Optional<Job<?>> job = createJob(sourceDatabase, extractionType);
+        if (job.isPresent() && job.get() instanceof DatabaseExtractionJob<?>) {
+            return Optional.of((DatabaseExtractionJob<?>) job.get());
+        }
+        return Optional.empty();
+    }
+
+    /**
      * Gets metadata about a job type without creating an instance.
      *
-     * @param sourceDatabase The source database
-     * @param extractionType The extraction type
+     * @param database The database
+     * @param operationType The operation type
      * @return Job metadata, or empty if no matching job is found
      */
-    public Optional<JobMetadata> getJobMetadata(String sourceDatabase, String extractionType) {
-        String jobTypeKey = createJobTypeKey(sourceDatabase, extractionType);
+    public Optional<JobMetadata> getJobMetadata(String database, String operationType) {
+        String jobTypeKey = createJobTypeKey(database, operationType);
 
-        DatabaseExtractionJob<?> provider = jobProviders.get(jobTypeKey);
+        Job<?> provider = jobProviders.get(jobTypeKey);
         if (provider == null) {
             return Optional.empty();
         }
 
+        String jobCategory = "unknown";
+        String resultTypeName = "Object";
+
+        if (provider instanceof DatabaseExtractionJob<?> extractionJob) {
+            jobCategory = "extraction";
+            resultTypeName = extractionJob.getResultType().getSimpleName();
+        } else if (provider instanceof DatabaseWriteJob<?> writeJob) {
+            jobCategory = "write";
+            resultTypeName = writeJob.getResultType().getSimpleName();
+        }
+
         return Optional.of(new JobMetadata(
-                sourceDatabase,
-                extractionType,
-                provider.getJobTypeIdentifier(),
+                database,
+                operationType,
+                provider.getJobType(),
                 provider.getDescription(),
-                provider.getResultType()
+                provider.getClass(), // Use the job class instead of result type
+                jobCategory,
+                resultTypeName
         ));
     }
 
@@ -116,7 +169,7 @@ public class JobRegistry {
      */
     public Map<String, String> getAvailableJobTypes() {
         Map<String, String> result = new HashMap<>();
-        for (Map.Entry<String, Class<? extends DatabaseExtractionJob<?>>> entry : jobTypeMap.entrySet()) {
+        for (Map.Entry<String, Class<? extends Job<?>>> entry : jobTypeMap.entrySet()) {
             result.put(entry.getKey(), entry.getValue().getSimpleName());
         }
         return result;
@@ -125,42 +178,54 @@ public class JobRegistry {
     /**
      * Checks if a job type is supported.
      *
-     * @param sourceDatabase The source database
-     * @param extractionType The extraction type
+     * @param database The database
+     * @param operationType The operation type
      * @return true if the job type is supported
      */
-    public boolean isJobTypeSupported(String sourceDatabase, String extractionType) {
-        String jobTypeKey = createJobTypeKey(sourceDatabase, extractionType);
+    public boolean isJobTypeSupported(String database, String operationType) {
+        String jobTypeKey = createJobTypeKey(database, operationType);
         return jobTypeMap.containsKey(jobTypeKey);
     }
 
-    private String createJobTypeKey(String sourceDatabase, String extractionType) {
-        return sourceDatabase.toUpperCase() + "_" + extractionType.toUpperCase();
+    private String createJobTypeKey(String database, String operationType) {
+        return database.toUpperCase() + "_" + operationType.toUpperCase();
     }
 
     /**
      * Metadata about a registered job type.
      */
     public static class JobMetadata {
-        private final String sourceDatabase;
-        private final String extractionType;
+        private final String database;
+        private final String operationType;
         private final String jobTypeIdentifier;
         private final String description;
-        private final Class<?> resultType;
+        private final Class<?> jobClass;
+        private final String jobCategory;
+        private final String resultTypeName;
 
-        public JobMetadata(String sourceDatabase, String extractionType, String jobTypeIdentifier,
-                          String description, Class<?> resultType) {
-            this.sourceDatabase = sourceDatabase;
-            this.extractionType = extractionType;
+        public JobMetadata(String database, String operationType, String jobTypeIdentifier,
+                          String description, Class<?> jobClass, String jobCategory, String resultTypeName) {
+            this.database = database;
+            this.operationType = operationType;
             this.jobTypeIdentifier = jobTypeIdentifier;
             this.description = description;
-            this.resultType = resultType;
+            this.jobClass = jobClass;
+            this.jobCategory = jobCategory;
+            this.resultTypeName = resultTypeName;
         }
 
-        public String getSourceDatabase() { return sourceDatabase; }
-        public String getExtractionType() { return extractionType; }
+        public String getDatabase() { return database; }
+        public String getOperationType() { return operationType; }
         public String getJobTypeIdentifier() { return jobTypeIdentifier; }
         public String getDescription() { return description; }
-        public Class<?> getResultType() { return resultType; }
+        public Class<?> getJobClass() { return jobClass; }
+        public String getJobCategory() { return jobCategory; }
+        public String getResultTypeName() { return resultTypeName; }
+
+        @Override
+        public String toString() {
+            return String.format("JobMetadata{database='%s', operationType='%s', category='%s', class='%s'}",
+                               database, operationType, jobCategory, jobClass.getSimpleName());
+        }
     }
 }

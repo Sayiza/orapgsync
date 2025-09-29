@@ -6,6 +6,8 @@ import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import me.christianrobert.orapgsync.core.job.DatabaseExtractionJob;
+import me.christianrobert.orapgsync.core.job.Job;
+import me.christianrobert.orapgsync.schema.model.SchemaCreationResult;
 import me.christianrobert.orapgsync.core.job.model.JobProgress;
 import me.christianrobert.orapgsync.core.job.model.JobStatus;
 import me.christianrobert.orapgsync.core.job.service.JobRegistry;
@@ -41,15 +43,15 @@ public class JobResource {
     }
 
     /**
-     * Generic method to start any extraction job.
+     * Generic method to start any job (extraction or write).
      */
-    private Response startExtractionJob(String sourceDatabase, String extractionType, String friendlyName) {
+    private Response startJob(String database, String operationType, String friendlyName) {
         log.info("Starting {} job via REST API", friendlyName);
 
         try {
-            DatabaseExtractionJob<?> job = jobRegistry.createJob(sourceDatabase, extractionType)
+            Job<?> job = jobRegistry.createJob(database, operationType)
                     .orElseThrow(() -> new IllegalArgumentException(
-                            String.format("No job available for %s %s extraction", sourceDatabase, extractionType)));
+                            String.format("No job available for %s %s operation", database, operationType)));
 
             String jobId = jobService.submitJob(job);
 
@@ -74,6 +76,14 @@ public class JobResource {
                     .entity(errorResult)
                     .build();
         }
+    }
+
+    /**
+     * @deprecated Use {@link #startJob(String, String, String)} instead
+     */
+    @Deprecated
+    private Response startExtractionJob(String sourceDatabase, String extractionType, String friendlyName) {
+        return startJob(sourceDatabase, extractionType, friendlyName);
     }
 
     @GET
@@ -224,6 +234,17 @@ public class JobResource {
                     // Generic list result
                     response.put("result", result);
                 }
+            } else if (result instanceof SchemaCreationResult) {
+                // Handle schema creation results
+                SchemaCreationResult schemaResult = (SchemaCreationResult) result;
+
+                Map<String, Object> summary = generateSchemaCreationSummary(schemaResult);
+                response.put("summary", summary);
+                response.put("createdCount", schemaResult.getCreatedCount());
+                response.put("skippedCount", schemaResult.getSkippedCount());
+                response.put("errorCount", schemaResult.getErrorCount());
+                response.put("isSuccessful", schemaResult.isSuccessful());
+                response.put("result", result); // Include raw result for frontend compatibility
             } else {
                 response.put("result", result);
             }
@@ -351,6 +372,52 @@ public class JobResource {
         );
     }
 
+    private Map<String, Object> generateSchemaCreationSummary(SchemaCreationResult schemaResult) {
+        Map<String, Object> createdDetails = new HashMap<>();
+        Map<String, Object> skippedDetails = new HashMap<>();
+        Map<String, Object> errorDetails = new HashMap<>();
+
+        // Created schemas details
+        for (String schema : schemaResult.getCreatedSchemas()) {
+            createdDetails.put(schema, Map.of(
+                    "schema", schema,
+                    "status", "created",
+                    "timestamp", schemaResult.getExecutionDateTime().toString()
+            ));
+        }
+
+        // Skipped schemas details
+        for (String schema : schemaResult.getSkippedSchemas()) {
+            skippedDetails.put(schema, Map.of(
+                    "schema", schema,
+                    "status", "skipped",
+                    "reason", "already exists"
+            ));
+        }
+
+        // Error details
+        for (SchemaCreationResult.SchemaCreationError error : schemaResult.getErrors()) {
+            errorDetails.put(error.getSchemaName(), Map.of(
+                    "schema", error.getSchemaName(),
+                    "status", "error",
+                    "error", error.getErrorMessage(),
+                    "sql", error.getSqlStatement()
+            ));
+        }
+
+        return Map.of(
+                "totalProcessed", schemaResult.getTotalProcessed(),
+                "createdCount", schemaResult.getCreatedCount(),
+                "skippedCount", schemaResult.getSkippedCount(),
+                "errorCount", schemaResult.getErrorCount(),
+                "isSuccessful", schemaResult.isSuccessful(),
+                "executionTimestamp", schemaResult.getExecutionTimestamp(),
+                "createdSchemas", createdDetails,
+                "skippedSchemas", skippedDetails,
+                "errors", errorDetails
+        );
+    }
+
     @POST
     @Path("/tables/postgres/extract")
     public Response startPostgresTableMetadataExtraction() {
@@ -379,5 +446,11 @@ public class JobResource {
     @Path("/postgres/row_count/extract")
     public Response startPostgresRowCountExtraction() {
         return startExtractionJob("POSTGRES", "ROW_COUNT", "PostgreSQL row count extraction");
+    }
+
+    @POST
+    @Path("/postgres/schema/create")
+    public Response startPostgresSchemaCreation() {
+        return startJob("POSTGRES", "SCHEMA_CREATION", "PostgreSQL schema creation");
     }
 }

@@ -5,14 +5,17 @@ import jakarta.enterprise.event.Event;
 import jakarta.inject.Inject;
 import me.christianrobert.orapgsync.core.event.ObjectDataTypeUpdatedEvent;
 import me.christianrobert.orapgsync.core.event.RowCountUpdatedEvent;
+import me.christianrobert.orapgsync.core.event.SchemaCreationCompletedEvent;
 import me.christianrobert.orapgsync.core.event.SchemaListUpdatedEvent;
 import me.christianrobert.orapgsync.core.event.TableMetadataUpdatedEvent;
 import me.christianrobert.orapgsync.core.state.ObjectDataTypeStateManager;
 import me.christianrobert.orapgsync.core.state.RowCountStateManager;
+import me.christianrobert.orapgsync.core.state.SchemaCreationStateManager;
 import me.christianrobert.orapgsync.core.state.SchemaStateManager;
 import me.christianrobert.orapgsync.core.state.TableMetadataStateManager;
 import me.christianrobert.orapgsync.objectdatatype.model.ObjectDataTypeMetaData;
 import me.christianrobert.orapgsync.rowcount.model.RowCountMetadata;
+import me.christianrobert.orapgsync.schema.model.SchemaCreationResult;
 import me.christianrobert.orapgsync.table.model.TableMetadata;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,6 +47,9 @@ public class StateService {
     private Event<RowCountUpdatedEvent> rowCountEvent;
 
     @Inject
+    private Event<SchemaCreationCompletedEvent> schemaCreationEvent;
+
+    @Inject
     private TableMetadataStateManager tableMetadataStateManager;
 
     @Inject
@@ -54,6 +60,9 @@ public class StateService {
 
     @Inject
     private RowCountStateManager rowCountStateManager;
+
+    @Inject
+    private SchemaCreationStateManager schemaCreationStateManager;
 
     // ==================== Query Methods (delegate to state managers) ====================
 
@@ -87,6 +96,14 @@ public class StateService {
 
     public List<RowCountMetadata> getPostgresRowCounts() {
         return rowCountStateManager.getPostgresRowCounts();
+    }
+
+    public SchemaCreationResult getLastPostgresSchemaCreationResult() {
+        return schemaCreationStateManager.getLastPostgresCreationResult();
+    }
+
+    public boolean hasPostgresSchemaCreationHistory() {
+        return schemaCreationStateManager.hasPostgresCreationHistory();
     }
 
     // ==================== Update Methods (fire events) ====================
@@ -129,6 +146,12 @@ public class StateService {
     public void updatePostgresRowCounts(List<RowCountMetadata> rowCountMetadata) {
         log.info("Firing PostgreSQL row count update event with {} tables", rowCountMetadata.size());
         rowCountEvent.fire(RowCountUpdatedEvent.forPostgres(rowCountMetadata));
+    }
+
+    public void updateSchemaCreationResult(SchemaCreationResult result) {
+        log.info("Firing schema creation completed event: created={}, skipped={}, errors={}",
+                result.getCreatedCount(), result.getSkippedCount(), result.getErrorCount());
+        schemaCreationEvent.fire(SchemaCreationCompletedEvent.forPostgres(result));
     }
 
 }

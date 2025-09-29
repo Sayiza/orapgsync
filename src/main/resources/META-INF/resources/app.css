@@ -1103,3 +1103,121 @@ body {
 .table-item:hover {
     background: #f6f7f8;
 }
+
+/* Schema Creation Styles */
+.action-btn {
+    background: #28a745;
+    border: 1px solid #1e7e34;
+    border-radius: 4px;
+    color: white;
+    cursor: pointer;
+    font-size: 0.7rem;
+    margin-left: 0.25rem;
+    padding: 0.25rem 0.5rem;
+    transition: background-color 0.15s;
+}
+
+.action-btn:hover {
+    background: #218838;
+}
+
+.action-btn:disabled {
+    background: #6c757d;
+    border-color: #6c757d;
+    cursor: not-allowed;
+}
+
+.schema-creation-results {
+    background: #fcfcfd;
+    border: 1px solid #e9ecef;
+    border-radius: 4px;
+    margin-top: 0.5rem;
+}
+
+.schema-creation-header {
+    background: #f8f9fa;
+    border-bottom: 1px solid #e9ecef;
+    cursor: pointer;
+    font-size: 0.75rem;
+    font-weight: 500;
+    padding: 0.5rem;
+    user-select: none;
+}
+
+.schema-creation-header:hover {
+    background: #e9ecef;
+}
+
+.schema-creation-details {
+    padding: 0.5rem;
+}
+
+.schema-creation-summary {
+    margin-bottom: 1rem;
+}
+
+.summary-stats {
+    display: flex;
+    gap: 1rem;
+}
+
+.stat-item {
+    background: #f8f9fa;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 500;
+    padding: 0.25rem 0.5rem;
+}
+
+.stat-item.created {
+    background: #d4edda;
+    color: #155724;
+}
+
+.stat-item.skipped {
+    background: #fff3cd;
+    color: #856404;
+}
+
+.stat-item.errors {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+.created-schemas-section,
+.skipped-schemas-section,
+.error-schemas-section {
+    margin-bottom: 1rem;
+}
+
+.created-schemas-section h4,
+.skipped-schemas-section h4,
+.error-schemas-section h4 {
+    color: #495057;
+    font-size: 0.75rem;
+    margin-bottom: 0.5rem;
+}
+
+.schema-item {
+    background: #f8f9fa;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 0.7rem;
+    margin-bottom: 0.25rem;
+    padding: 0.25rem 0.5rem;
+}
+
+.schema-item.created {
+    background: #d4edda;
+    color: #155724;
+}
+
+.schema-item.skipped {
+    background: #fff3cd;
+    color: #856404;
+}
+
+.schema-item.error {
+    background: #f8d7da;
+    color: #721c24;
+}

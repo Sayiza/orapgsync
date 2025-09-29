@@ -1537,6 +1537,210 @@ async function extractPostgresRowCounts() {
     }
 }
 
+// Schema Creation Functions
+async function createPostgresSchemas() {
+    console.log('Starting PostgreSQL schema creation job...');
+    const button = document.querySelector('#postgres-schemas .action-btn');
+    if (button) {
+        button.disabled = true;
+        button.innerHTML = '⏳';
+    }
+    updateMessage('Starting PostgreSQL schema creation...');
+    updateProgress(0, 'Starting PostgreSQL schema creation');
+
+    try {
+        const response = await fetch('/api/jobs/postgres/schema/create', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+
+        const result = await response.json();
+
+        if (result.status === 'success') {
+            console.log('PostgreSQL schema creation job started:', result.jobId);
+            updateMessage('PostgreSQL schema creation job started successfully');
+
+            // Start polling for progress
+            pollSchemaCreationJobStatus(result.jobId, 'postgres');
+        } else {
+            throw new Error(result.message || 'Failed to start PostgreSQL schema creation job');
+        }
+
+    } catch (error) {
+        console.error('Error starting PostgreSQL schema creation job:', error);
+        updateMessage('Failed to start PostgreSQL schema creation: ' + error.message);
+        updateProgress(0, 'Failed to start PostgreSQL schema creation');
+
+        // Re-enable button
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = 'Create Schemas';
+        }
+    }
+}
+
+async function pollSchemaCreationJobStatus(jobId, database) {
+    console.log(`Polling schema creation job status for ${database}:`, jobId);
+
+    try {
+        const response = await fetch(`/api/jobs/${jobId}/status`);
+        const status = await response.json();
+
+        if (status.status === 'error') {
+            throw new Error(status.message || 'Job status check failed');
+        }
+
+        console.log(`Schema creation job status for ${database}:`, status);
+
+        if (status.progress) {
+            updateProgress(status.progress.percentage, status.progress.currentTask);
+            updateMessage(`${status.progress.currentTask}: ${status.progress.details}`);
+        }
+
+        if (status.isComplete) {
+            console.log(`Schema creation job completed for ${database}`);
+
+            // Get final results
+            const resultResponse = await fetch(`/api/jobs/${jobId}/result`);
+            const result = await resultResponse.json();
+
+            if (result.status === 'success') {
+                handleSchemaCreationJobComplete(result, database);
+            } else {
+                throw new Error(result.message || 'Job completed with errors');
+            }
+
+            // Re-enable button
+            const button = document.querySelector(`#${database}-schemas .action-btn`);
+            if (button) {
+                button.disabled = false;
+                button.innerHTML = 'Create Schemas';
+            }
+
+        } else {
+            // Continue polling
+            setTimeout(() => pollSchemaCreationJobStatus(jobId, database), 1000);
+        }
+
+    } catch (error) {
+        console.error('Error polling schema creation job status:', error);
+        updateMessage('Error checking schema creation progress: ' + error.message);
+        updateProgress(0, 'Error checking progress');
+
+        // Re-enable button
+        const button = document.querySelector(`#${database}-schemas .action-btn`);
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = 'Create Schemas';
+        }
+    }
+}
+
+function handleSchemaCreationJobComplete(result, database) {
+    console.log(`Schema creation job results for ${database}:`, result);
+
+    const createdCount = result.createdCount || 0;
+    const skippedCount = result.skippedCount || 0;
+    const errorCount = result.errorCount || 0;
+
+    updateProgress(100, `Schema creation completed: ${createdCount} created, ${skippedCount} skipped, ${errorCount} errors`);
+
+    if (result.isSuccessful) {
+        updateMessage(`Schema creation completed successfully: ${createdCount} schemas created, ${skippedCount} already existed`);
+    } else {
+        updateMessage(`Schema creation completed with errors: ${createdCount} created, ${skippedCount} skipped, ${errorCount} errors`);
+    }
+
+    // Update schema creation results section
+    displaySchemaCreationResults(result, database);
+
+    // Refresh PostgreSQL schemas to show newly created ones
+    setTimeout(() => {
+        loadPostgresSchemas();
+    }, 1000);
+}
+
+function displaySchemaCreationResults(result, database) {
+    const resultsDiv = document.getElementById(`${database}-schema-creation-results`);
+    const detailsDiv = document.getElementById(`${database}-schema-creation-details`);
+
+    if (!resultsDiv || !detailsDiv) {
+        console.error('Schema creation results container not found');
+        return;
+    }
+
+    let html = '';
+
+    if (result.summary) {
+        const summary = result.summary;
+
+        html += '<div class="schema-creation-summary">';
+        html += `<div class="summary-stats">`;
+        html += `<span class="stat-item created">Created: ${summary.createdCount}</span>`;
+        html += `<span class="stat-item skipped">Skipped: ${summary.skippedCount}</span>`;
+        html += `<span class="stat-item errors">Errors: ${summary.errorCount}</span>`;
+        html += `</div>`;
+        html += '</div>';
+
+        // Show created schemas
+        if (summary.createdCount > 0) {
+            html += '<div class="created-schemas-section">';
+            html += '<h4>Created Schemas:</h4>';
+            html += '<div class="schema-items">';
+            Object.values(summary.createdSchemas).forEach(schema => {
+                html += `<div class="schema-item created">${schema.schema} ✓</div>`;
+            });
+            html += '</div>';
+            html += '</div>';
+        }
+
+        // Show skipped schemas
+        if (summary.skippedCount > 0) {
+            html += '<div class="skipped-schemas-section">';
+            html += '<h4>Skipped Schemas (already exist):</h4>';
+            html += '<div class="schema-items">';
+            Object.values(summary.skippedSchemas).forEach(schema => {
+                html += `<div class="schema-item skipped">${schema.schema} (${schema.reason})</div>`;
+            });
+            html += '</div>';
+            html += '</div>';
+        }
+
+        // Show errors
+        if (summary.errorCount > 0) {
+            html += '<div class="error-schemas-section">';
+            html += '<h4>Failed Schemas:</h4>';
+            html += '<div class="schema-items">';
+            Object.values(summary.errors).forEach(error => {
+                html += `<div class="schema-item error">${error.schema}: ${error.error}</div>`;
+            });
+            html += '</div>';
+            html += '</div>';
+        }
+    }
+
+    detailsDiv.innerHTML = html;
+
+    // Show the results section
+    resultsDiv.style.display = 'block';
+}
+
+function toggleSchemaCreationResults(database) {
+    const resultsDiv = document.getElementById(`${database}-schema-creation-results`);
+    const detailsDiv = document.getElementById(`${database}-schema-creation-details`);
+    const toggleIndicator = resultsDiv.querySelector('.toggle-indicator');
+
+    if (detailsDiv.style.display === 'none' || !detailsDiv.style.display) {
+        detailsDiv.style.display = 'block';
+        toggleIndicator.textContent = '▲';
+    } else {
+        detailsDiv.style.display = 'none';
+        toggleIndicator.textContent = '▼';
+    }
+}
+
 // Load configuration when page loads
 document.addEventListener('DOMContentLoaded', function() {
     // Load configuration after a short delay to ensure all other initialization is complete
