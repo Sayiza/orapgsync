@@ -162,6 +162,15 @@
           <div class="component-info" id="postgres-data">
             <span class="count-badge">-</span>
             <span class="component-text">Records migrated</span>
+            <button class="refresh-btn" onclick="extractPostgresRowCounts()" title="Extract PostgreSQL row counts">⚙</button>
+            <div class="table-list" id="postgres-rowcount-list" style="display: none;">
+              <div class="table-list-header" onclick="toggleRowCountList('postgres')">
+                <span class="toggle-indicator">▼</span> Row Counts by Schema
+              </div>
+              <div class="table-items" id="postgres-rowcount-items">
+                <!-- Row count data will be populated here -->
+              </div>
+            </div>
           </div>
         </td>
       </tr>

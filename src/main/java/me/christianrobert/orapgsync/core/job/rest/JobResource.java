@@ -374,4 +374,10 @@ public class JobResource {
     public Response startOracleRowCountExtraction() {
         return startExtractionJob("ORACLE", "ROW_COUNT", "Oracle row count extraction");
     }
+
+    @POST
+    @Path("/postgres/row_count/extract")
+    public Response startPostgresRowCountExtraction() {
+        return startExtractionJob("POSTGRES", "ROW_COUNT", "PostgreSQL row count extraction");
+    }
 }

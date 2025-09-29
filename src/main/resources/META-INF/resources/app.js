@@ -1491,6 +1491,52 @@ function toggleRowCountSchemaGroup(database, schemaName) {
     }
 }
 
+// Extract PostgreSQL row counts (starts the job)
+async function extractPostgresRowCounts() {
+    console.log('Starting PostgreSQL row count extraction job...');
+
+    const button = document.querySelector('#postgres-data .refresh-btn');
+    if (button) {
+        button.disabled = true;
+        button.innerHTML = '⏳';
+    }
+
+    updateMessage('Starting PostgreSQL row count extraction...');
+    updateProgress(0, 'Starting PostgreSQL row count extraction');
+
+    try {
+        const response = await fetch('/api/jobs/postgres/row_count/extract', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+
+        const result = await response.json();
+
+        if (result.status === 'success') {
+            console.log('PostgreSQL row count extraction job started:', result.jobId);
+            updateMessage('PostgreSQL row count extraction job started successfully');
+
+            // Start polling for progress
+            pollRowCountJobStatus(result.jobId, 'postgres');
+        } else {
+            throw new Error(result.message || 'Failed to start PostgreSQL row count extraction job');
+        }
+
+    } catch (error) {
+        console.error('Error starting PostgreSQL row count extraction job:', error);
+        updateMessage('Failed to start PostgreSQL row count extraction: ' + error.message);
+        updateProgress(0, 'Failed to start PostgreSQL row count extraction');
+
+        // Re-enable button
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = '⚙';
+        }
+    }
+}
+
 // Load configuration when page loads
 document.addEventListener('DOMContentLoaded', function() {
     // Load configuration after a short delay to ensure all other initialization is complete
