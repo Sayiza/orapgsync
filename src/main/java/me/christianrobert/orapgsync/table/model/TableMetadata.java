@@ -1,12 +1,14 @@
 package me.christianrobert.orapgsync.table.model;
 
-import me.christianrobert.orapgsync.core.service.StateService;
-
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Represents metadata for a database table including its columns and constraints.
+ * This is a pure data model without dependencies on other services.
+ */
 public class TableMetadata {
-  private String schema; // Oracle schema (user)
+  private String schema; // Database schema (user)
   private String tableName;
   private List<ColumnMetadata> columns;
   private List<ConstraintMetadata> constraints;
@@ -30,13 +32,5 @@ public class TableMetadata {
   @Override
   public String toString() {
     return "TableMetadata{schema='" + schema + "', tableName='" + tableName + "', columns=" + columns.size() + ", constraints=" + constraints.size() + "}";
-  }
-
-  public String toJava(String javaPackageName) {
-    return "TODO entity";
-  }
-
-  public List<String> toPostgre(StateService data) {
-    return null;
   }
 }

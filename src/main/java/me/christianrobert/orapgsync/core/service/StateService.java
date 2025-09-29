@@ -1,105 +1,107 @@
 package me.christianrobert.orapgsync.core.service;
 
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.event.Event;
+import jakarta.inject.Inject;
+import me.christianrobert.orapgsync.core.event.ObjectDataTypeUpdatedEvent;
+import me.christianrobert.orapgsync.core.event.SchemaListUpdatedEvent;
+import me.christianrobert.orapgsync.core.event.TableMetadataUpdatedEvent;
+import me.christianrobert.orapgsync.core.state.ObjectDataTypeStateManager;
+import me.christianrobert.orapgsync.core.state.SchemaStateManager;
+import me.christianrobert.orapgsync.core.state.TableMetadataStateManager;
 import me.christianrobert.orapgsync.objectdatatype.model.ObjectDataTypeMetaData;
 import me.christianrobert.orapgsync.table.model.TableMetadata;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Central state coordination service that acts as an event dispatcher and query coordinator.
+ * This service fires CDI events for state updates and delegates queries to specific state managers.
+ *
+ * Note: This service is being kept for backward compatibility during the refactoring process.
+ * New code should use the specific state managers directly or listen to events.
+ */
 @ApplicationScoped
 public class StateService {
-  // raw data from the source database
-  private List<String> oracleSchemaNames = new ArrayList<>();
-  private List<ObjectDataTypeMetaData> oracleObjectDataTypeMetaData = new ArrayList<>();
-  private List<TableMetadata> oracleTableMetadata = new ArrayList<>();
 
-  // raw data from the target database
-  private List<String> postgresSchemaNames = new ArrayList<>();
-  private List<ObjectDataTypeMetaData> postgresObjectDataTypeMetaData = new ArrayList<>();
-  private List<TableMetadata> postgresTableMetadata = new ArrayList<>();
+    private static final Logger log = LoggerFactory.getLogger(StateService.class);
 
-  // Getter methods
-  public List<String> getOracleSchemaNames() {
-    return new ArrayList<>(oracleSchemaNames);
-  }
+    @Inject
+    private Event<TableMetadataUpdatedEvent> tableMetadataEvent;
 
-  public List<String> getPostgresSchemaNames() {
-    return new ArrayList<>(postgresSchemaNames);
-  }
+    @Inject
+    private Event<ObjectDataTypeUpdatedEvent> objectDataTypeEvent;
 
-  public List<ObjectDataTypeMetaData> getPostgresObjectDataTypeMetaData() {
-    return new ArrayList<>(postgresObjectDataTypeMetaData);
-  }
+    @Inject
+    private Event<SchemaListUpdatedEvent> schemaListEvent;
 
-  public List<ObjectDataTypeMetaData> getOracleObjectDataTypeMetaData() {
-    return new ArrayList<>(oracleObjectDataTypeMetaData);
-  }
+    @Inject
+    private TableMetadataStateManager tableMetadataStateManager;
 
-  public List<TableMetadata> getOracleTableMetadata() {
-    return new ArrayList<>(oracleTableMetadata);
-  }
+    @Inject
+    private ObjectDataTypeStateManager objectDataTypeStateManager;
 
-  public List<TableMetadata> getPostgresTableMetadata() {
-    return new ArrayList<>(postgresTableMetadata);
-  }
+    @Inject
+    private SchemaStateManager schemaStateManager;
 
-  // Management methods for Oracle schemas
-  public void updateOracleSchemaNames(List<String> schemas) {
-    this.oracleSchemaNames.clear();
-    this.oracleSchemaNames.addAll(schemas);
-  }
+    // ==================== Query Methods (delegate to state managers) ====================
 
-  // Management methods for PostgreSQL schemas
-  public void updatePostgresSchemaNames(List<String> schemas) {
-    this.postgresSchemaNames.clear();
-    this.postgresSchemaNames.addAll(schemas);
-  }
+    public List<String> getOracleSchemaNames() {
+        return schemaStateManager.getOracleSchemaNames();
+    }
 
-  // Management methods for Oracle object data types
-  public void updateOracleObjectDataTypeMetaData(List<ObjectDataTypeMetaData> objectDataTypes) {
-    this.oracleObjectDataTypeMetaData.clear();
-    this.oracleObjectDataTypeMetaData.addAll(objectDataTypes);
-  }
+    public List<String> getPostgresSchemaNames() {
+        return schemaStateManager.getPostgresSchemaNames();
+    }
 
-  // Management methods for PostgreSQL object data types
-  public void updatePostgresObjectDataTypeMetaData(List<ObjectDataTypeMetaData> objectDataTypes) {
-    this.postgresObjectDataTypeMetaData.clear();
-    this.postgresObjectDataTypeMetaData.addAll(objectDataTypes);
-  }
+    public List<ObjectDataTypeMetaData> getPostgresObjectDataTypeMetaData() {
+        return objectDataTypeStateManager.getPostgresObjectDataTypeMetaData();
+    }
 
-  // Management methods for Oracle table metadata
-  public void updateOracleTableMetadata(List<TableMetadata> tableMetadata) {
-    this.oracleTableMetadata.clear();
-    this.oracleTableMetadata.addAll(tableMetadata);
-  }
+    public List<ObjectDataTypeMetaData> getOracleObjectDataTypeMetaData() {
+        return objectDataTypeStateManager.getOracleObjectDataTypeMetaData();
+    }
 
-  // Management methods for PostgreSQL table metadata
-  public void updatePostgresTableMetadata(List<TableMetadata> tableMetadata) {
-    this.postgresTableMetadata.clear();
-    this.postgresTableMetadata.addAll(tableMetadata);
-  }
+    public List<TableMetadata> getOracleTableMetadata() {
+        return tableMetadataStateManager.getOracleTableMetadata();
+    }
 
-  /*
-  private List<ViewMetadata> viewDefinition = new ArrayList<>();
-  private List<SynonymMetadata> synonyms = new ArrayList<>();
-  private List<IndexMetadata> indexes = new ArrayList<>();
-  private List<PlsqlCode> objectTypeSpecPlsql = new ArrayList<>();
-  private List<PlsqlCode> objectTypeBodyPlsql = new ArrayList<>();
-  private List<PlsqlCode> packageSpecPlsql = new ArrayList<>();
-  private List<PlsqlCode> packageBodyPlsql = new ArrayList<>();
-  private List<PlsqlCode> standaloneFunctionPlsql = new ArrayList<>();
-  private List<PlsqlCode> standaloneProcedurePlsql = new ArrayList<>();
-  private List<PlsqlCode> triggerPlsql = new ArrayList<>();
+    public List<TableMetadata> getPostgresTableMetadata() {
+        return tableMetadataStateManager.getPostgresTableMetadata();
+    }
 
-  // parsed data
-  private List<ViewSpecAndQuery> viewSpecAndQueries = new ArrayList<>();
-  private List<ObjectType> objectTypeSpecAst = new ArrayList<>();
-  private List<ObjectType> objectTypeBodyAst = new ArrayList<>();
-  private List<OraclePackage> packageSpecAst = new ArrayList<>();
-  private List<OraclePackage> packageBodyAst = new ArrayList<>();
-  private List<Function> standaloneFunctionAst = new ArrayList<>();
-  private List<Procedure> standaloneProcedureAst = new ArrayList<>();
-  private List<Trigger> triggerAst = new ArrayList<>();
-  */
+    // ==================== Update Methods (fire events) ====================
+
+    public void updateOracleSchemaNames(List<String> schemas) {
+        log.info("Firing Oracle schema list update event with {} schemas", schemas.size());
+        schemaListEvent.fire(SchemaListUpdatedEvent.forOracle(schemas));
+    }
+
+    public void updatePostgresSchemaNames(List<String> schemas) {
+        log.info("Firing PostgreSQL schema list update event with {} schemas", schemas.size());
+        schemaListEvent.fire(SchemaListUpdatedEvent.forPostgres(schemas));
+    }
+
+    public void updateOracleObjectDataTypeMetaData(List<ObjectDataTypeMetaData> objectDataTypes) {
+        log.info("Firing Oracle object data type update event with {} types", objectDataTypes.size());
+        objectDataTypeEvent.fire(ObjectDataTypeUpdatedEvent.forOracle(objectDataTypes));
+    }
+
+    public void updatePostgresObjectDataTypeMetaData(List<ObjectDataTypeMetaData> objectDataTypes) {
+        log.info("Firing PostgreSQL object data type update event with {} types", objectDataTypes.size());
+        objectDataTypeEvent.fire(ObjectDataTypeUpdatedEvent.forPostgres(objectDataTypes));
+    }
+
+    public void updateOracleTableMetadata(List<TableMetadata> tableMetadata) {
+        log.info("Firing Oracle table metadata update event with {} tables", tableMetadata.size());
+        tableMetadataEvent.fire(TableMetadataUpdatedEvent.forOracle(tableMetadata));
+    }
+
+    public void updatePostgresTableMetadata(List<TableMetadata> tableMetadata) {
+        log.info("Firing PostgreSQL table metadata update event with {} tables", tableMetadata.size());
+        tableMetadataEvent.fire(TableMetadataUpdatedEvent.forPostgres(tableMetadata));
+    }
+
 }
