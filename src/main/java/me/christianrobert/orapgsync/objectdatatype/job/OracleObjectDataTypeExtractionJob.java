@@ -71,17 +71,14 @@ public class OracleObjectDataTypeExtractionJob extends AbstractDatabaseExtractio
             String sql;
             if (doAllSchemas) {
                 sql = """
-                    SELECT x.owner, x.object_name
-                    FROM all_objects x
-                    WHERE x.object_type = 'TYPE'
-                      AND x.owner NOT IN ('SYS', 'SYSTEM', 'CTXSYS', 'DBSNMP', 'EXFSYS', 'LBACSYS', 'MDSYS', 'MGMT_VIEW', 'OLAPSYS', 'ORDDATA', 'OWBSYS', 'ORDPLUGINS', 'ORDSYS', 'OUTLN', 'SI_INFORMTN_SCHEMA', 'SYS', 'SYSMAN', 'SYSTEM', 'TSMSYS', 'WK_TEST', 'WKPROXY', 'WMSYS', 'XDB', 'APEX_040000', 'APEX_PUBLIC_USER', 'DIP', 'FLOWS_30000', 'FLOWS_FILES', 'MDDATA', 'ORACLE_OCM', 'XS$NULL', 'SPATIAL_CSW_ADMIN_USR', 'SPATIAL_WFS_ADMIN_USR', 'PUBLIC')
-                      AND x.object_name IN (
-                        SELECT DISTINCT y.data_type
-                        FROM all_tab_cols y
-                        WHERE y.data_type_owner IS NOT NULL
-                          AND y.data_type_owner NOT IN ('SYS', 'SYSTEM', 'CTXSYS', 'DBSNMP', 'EXFSYS', 'LBACSYS', 'MDSYS', 'MGMT_VIEW', 'OLAPSYS', 'ORDDATA', 'OWBSYS', 'ORDPLUGINS', 'ORDSYS', 'OUTLN', 'SI_INFORMTN_SCHEMA', 'SYS', 'SYSMAN', 'SYSTEM', 'TSMSYS', 'WK_TEST', 'WKPROXY', 'WMSYS', 'XDB', 'APEX_040000', 'APEX_PUBLIC_USER', 'DIP', 'FLOWS_30000', 'FLOWS_FILES', 'MDDATA', 'ORACLE_OCM', 'XS$NULL', 'SPATIAL_CSW_ADMIN_USR', 'SPATIAL_WFS_ADMIN_USR', 'PUBLIC')
-                      )
-                    ORDER BY x.owner, x.object_name
+                    SELECT DISTINCT o.owner, o.object_name
+                    FROM all_objects o
+                    JOIN all_tab_cols c
+                      ON c.data_type = o.object_name
+                      AND c.data_type_owner = o.owner
+                    WHERE o.object_type = 'TYPE'
+                     AND o.owner NOT IN ('SYS', 'SYSTEM', 'CTXSYS', 'DBSNMP', 'EXFSYS', 'LBACSYS', 'MDSYS', 'MGMT_VIEW', 'OLAPSYS', 'ORDDATA', 'OWBSYS', 'ORDPLUGINS', 'ORDSYS', 'OUTLN', 'SI_INFORMTN_SCHEMA', 'SYS', 'SYSMAN', 'SYSTEM', 'TSMSYS', 'WK_TEST', 'WKPROXY', 'WMSYS', 'XDB', 'APEX_040000', 'APEX_PUBLIC_USER', 'DIP', 'FLOWS_30000', 'FLOWS_FILES', 'MDDATA', 'ORACLE_OCM', 'XS$NULL', 'SPATIAL_CSW_ADMIN_USR', 'SPATIAL_WFS_ADMIN_USR', 'PUBLIC')
+                    ORDER BY o.owner, o.object_name
                     """;
             } else {
                 if (testSchema == null || testSchema.trim().isEmpty()) {
@@ -89,17 +86,15 @@ public class OracleObjectDataTypeExtractionJob extends AbstractDatabaseExtractio
                     throw new IllegalStateException("Test schema not configured but do.all-schemas is false");
                 }
                 sql = """
-                    SELECT x.owner, x.object_name
-                    FROM all_objects x
-                    WHERE x.object_type = 'TYPE'
-                      AND x.owner = ?
-                      AND x.object_name IN (
-                        SELECT DISTINCT y.data_type
-                        FROM all_tab_cols y
-                        WHERE y.data_type_owner = ?
-                      )
-                    ORDER BY x.owner, x.object_name
-                    """;
+                   SELECT DISTINCT o.owner, o.object_name
+                   FROM all_objects o
+                   JOIN all_tab_cols c
+                     ON c.data_type = o.object_name
+                     AND c.data_type_owner = o.owner
+                   WHERE o.object_type = 'TYPE'
+                     AND o.owner = ?
+                   ORDER BY o.owner, o.object_name
+                   """;
             }
 
             updateProgress(progressCallback, 20, "Executing query", "Fetching object data types from Oracle");
@@ -109,7 +104,6 @@ public class OracleObjectDataTypeExtractionJob extends AbstractDatabaseExtractio
             try (PreparedStatement stmt = connection.prepareStatement(sql)) {
                 if (!doAllSchemas && testSchema != null) {
                     stmt.setString(1, testSchema.toUpperCase());
-                    stmt.setString(2, testSchema.toUpperCase());
                 }
 
                 try (ResultSet rs = stmt.executeQuery()) {

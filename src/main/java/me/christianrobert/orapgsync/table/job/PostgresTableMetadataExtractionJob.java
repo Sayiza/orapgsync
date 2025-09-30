@@ -31,6 +31,39 @@ public class PostgresTableMetadataExtractionJob extends AbstractDatabaseExtracti
     }
 
     @Override
+    protected List<String> getAvailableSchemas() {
+        // For PostgreSQL extraction, query the database directly instead of relying on state
+        // This ensures we can discover tables even if state is empty
+        log.debug("Querying PostgreSQL database for available schemas");
+        try (Connection connection = postgresConnectionService.getConnection()) {
+            return fetchSchemasFromPostgres(connection);
+        } catch (Exception e) {
+            log.error("Failed to fetch schemas from PostgreSQL, falling back to state", e);
+            return stateService.getPostgresSchemaNames();
+        }
+    }
+
+    private List<String> fetchSchemasFromPostgres(Connection connection) throws Exception {
+        List<String> schemas = new ArrayList<>();
+        String sql = """
+            SELECT schema_name
+            FROM information_schema.schemata
+            WHERE schema_name NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
+            ORDER BY schema_name
+            """;
+
+        try (var stmt = connection.createStatement();
+             var rs = stmt.executeQuery(sql)) {
+            while (rs.next()) {
+                schemas.add(rs.getString("schema_name"));
+            }
+        }
+
+        log.debug("Found {} schemas in PostgreSQL database", schemas.size());
+        return schemas;
+    }
+
+    @Override
     public String getExtractionType() {
         return "TABLE_METADATA";
     }

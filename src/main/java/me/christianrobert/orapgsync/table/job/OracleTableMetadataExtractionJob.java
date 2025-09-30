@@ -6,7 +6,7 @@ import me.christianrobert.orapgsync.core.job.AbstractDatabaseExtractionJob;
 import me.christianrobert.orapgsync.core.job.model.JobProgress;
 import me.christianrobert.orapgsync.database.service.OracleConnectionService;
 import me.christianrobert.orapgsync.table.model.TableMetadata;
-import me.christianrobert.orapgsync.table.service.TableExtractor;
+import me.christianrobert.orapgsync.table.service.OracleTableExtractor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -110,7 +110,7 @@ public class OracleTableMetadataExtractionJob extends AbstractDatabaseExtraction
                                                      int currentSchemaIndex, int totalSchemas) throws Exception {
 
         List<String> singleSchemaList = List.of(schema);
-        return TableExtractor.extractAllTables(oracleConnection, singleSchemaList);
+        return OracleTableExtractor.extractAllTables(oracleConnection, singleSchemaList);
     }
 
     @Override

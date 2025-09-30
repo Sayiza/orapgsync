@@ -14,9 +14,9 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 
-public class TableExtractor {
+public class OracleTableExtractor {
 
-  private static final Logger log = LoggerFactory.getLogger(TableExtractor.class);
+  private static final Logger log = LoggerFactory.getLogger(OracleTableExtractor.class);
 
   public static List<TableMetadata> extractAllTables(Connection oracleConn, List<String> users) throws SQLException {
     List<TableMetadata> tableMetadataList = new ArrayList<>();

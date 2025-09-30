@@ -1964,10 +1964,97 @@ function handleTableCreationJobComplete(result, database) {
         updateMessage(`Table creation completed with errors: ${createdCount} created, ${skippedCount} skipped, ${errorCount} errors`);
     }
 
+    // Update table creation results section
+    displayTableCreationResults(result, database);
+
     // Refresh PostgreSQL tables to show newly created ones
     setTimeout(() => {
         extractPostgresTableMetadata();
     }, 1000);
+}
+
+function displayTableCreationResults(result, database) {
+    const resultsDiv = document.getElementById(`${database}-table-creation-results`);
+    const detailsDiv = document.getElementById(`${database}-table-creation-details`);
+
+    if (!resultsDiv || !detailsDiv) {
+        console.error('Table creation results container not found');
+        return;
+    }
+
+    let html = '';
+
+    if (result.summary) {
+        const summary = result.summary;
+
+        html += '<div class="table-creation-summary">';
+        html += `<div class="summary-stats">`;
+        html += `<span class="stat-item created">Created: ${summary.createdCount}</span>`;
+        html += `<span class="stat-item skipped">Skipped: ${summary.skippedCount}</span>`;
+        html += `<span class="stat-item errors">Errors: ${summary.errorCount}</span>`;
+        html += `</div>`;
+        html += '</div>';
+
+        // Show created tables
+        if (summary.createdCount > 0) {
+            html += '<div class="created-tables-section">';
+            html += '<h4>Created Tables:</h4>';
+            html += '<div class="table-items">';
+            Object.values(summary.createdTables).forEach(table => {
+                html += `<div class="table-item created">${table.tableName} ✓</div>`;
+            });
+            html += '</div>';
+            html += '</div>';
+        }
+
+        // Show skipped tables
+        if (summary.skippedCount > 0) {
+            html += '<div class="skipped-tables-section">';
+            html += '<h4>Skipped Tables (already exist):</h4>';
+            html += '<div class="table-items">';
+            Object.values(summary.skippedTables).forEach(table => {
+                html += `<div class="table-item skipped">${table.tableName} (${table.reason})</div>`;
+            });
+            html += '</div>';
+            html += '</div>';
+        }
+
+        // Show errors
+        if (summary.errorCount > 0) {
+            html += '<div class="error-tables-section">';
+            html += '<h4>Failed Tables:</h4>';
+            html += '<div class="table-items">';
+            Object.values(summary.errors).forEach(error => {
+                html += `<div class="table-item error">`;
+                html += `<strong>${error.tableName}</strong>: ${error.error}`;
+                if (error.sql) {
+                    html += `<div class="sql-statement"><pre>${error.sql}</pre></div>`;
+                }
+                html += `</div>`;
+            });
+            html += '</div>';
+            html += '</div>';
+        }
+    }
+
+    detailsDiv.innerHTML = html;
+
+    // Show the results section
+    resultsDiv.style.display = 'block';
+}
+
+function toggleTableCreationResults(database) {
+    const resultsDiv = document.getElementById(`${database}-table-creation-results`);
+    const detailsDiv = document.getElementById(`${database}-table-creation-details`);
+    const toggleIndicator = resultsDiv.querySelector('.toggle-indicator');
+
+    if (detailsDiv.style.display === 'none' || !detailsDiv.style.display) {
+        detailsDiv.style.display = 'block';
+        toggleIndicator.textContent = '▲';
+    } else {
+        detailsDiv.style.display = 'none';
+        toggleIndicator.textContent = '▼';
+    }
 }
 
 // Load configuration when page loads
