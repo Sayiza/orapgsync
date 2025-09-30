@@ -1741,6 +1741,235 @@ function toggleSchemaCreationResults(database) {
     }
 }
 
+// Object Type Creation Functions
+async function createPostgresObjectTypes() {
+    console.log('Starting PostgreSQL object type creation job...');
+    const button = document.querySelector('#postgres-objects .action-btn');
+    if (button) {
+        button.disabled = true;
+        button.innerHTML = '⏳';
+    }
+    updateMessage('Starting PostgreSQL object type creation...');
+    updateProgress(0, 'Starting PostgreSQL object type creation');
+
+    try {
+        const response = await fetch('/api/jobs/postgres/object-type/create', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+
+        const result = await response.json();
+        if (result.status === 'success') {
+            console.log('PostgreSQL object type creation job started:', result.jobId);
+            updateMessage('PostgreSQL object type creation job started successfully');
+            // Start polling for progress
+            pollObjectTypeCreationJobStatus(result.jobId, 'postgres');
+        } else {
+            throw new Error(result.message || 'Failed to start PostgreSQL object type creation job');
+        }
+    } catch (error) {
+        console.error('Error starting PostgreSQL object type creation job:', error);
+        updateMessage('Failed to start PostgreSQL object type creation: ' + error.message);
+        updateProgress(0, 'Failed to start PostgreSQL object type creation');
+        // Re-enable button
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = 'Create Types';
+        }
+    }
+}
+
+async function pollObjectTypeCreationJobStatus(jobId, database) {
+    console.log(`Polling object type creation job status for ${database}:`, jobId);
+
+    try {
+        const response = await fetch(`/api/jobs/${jobId}/status`);
+        const status = await response.json();
+
+        if (status.status === 'error') {
+            throw new Error(status.message || 'Job status check failed');
+        }
+
+        console.log(`Object type creation job status for ${database}:`, status);
+
+        if (status.progress) {
+            updateProgress(status.progress.percentage, status.progress.currentTask);
+            updateMessage(`${status.progress.currentTask}: ${status.progress.details}`);
+        }
+
+        if (status.isComplete) {
+            console.log(`Object type creation job completed for ${database}`);
+            // Get final results
+            const resultResponse = await fetch(`/api/jobs/${jobId}/result`);
+            const result = await resultResponse.json();
+
+            if (result.status === 'success') {
+                handleObjectTypeCreationJobComplete(result, database);
+            } else {
+                throw new Error(result.message || 'Job completed with errors');
+            }
+
+            // Re-enable button
+            const button = document.querySelector(`#${database}-objects .action-btn`);
+            if (button) {
+                button.disabled = false;
+                button.innerHTML = 'Create Types';
+            }
+        } else {
+            // Continue polling
+            setTimeout(() => pollObjectTypeCreationJobStatus(jobId, database), 1000);
+        }
+    } catch (error) {
+        console.error('Error polling object type creation job status:', error);
+        updateMessage('Error checking object type creation progress: ' + error.message);
+        updateProgress(0, 'Error checking progress');
+        // Re-enable button
+        const button = document.querySelector(`#${database}-objects .action-btn`);
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = 'Create Types';
+        }
+    }
+}
+
+function handleObjectTypeCreationJobComplete(result, database) {
+    console.log(`Object type creation job results for ${database}:`, result);
+
+    const createdCount = result.createdCount || 0;
+    const skippedCount = result.skippedCount || 0;
+    const errorCount = result.errorCount || 0;
+
+    updateProgress(100, `Object type creation completed: ${createdCount} created, ${skippedCount} skipped, ${errorCount} errors`);
+
+    if (result.isSuccessful) {
+        updateMessage(`Object type creation completed successfully: ${createdCount} types created, ${skippedCount} already existed`);
+    } else {
+        updateMessage(`Object type creation completed with errors: ${createdCount} created, ${skippedCount} skipped, ${errorCount} errors`);
+    }
+
+    // Refresh PostgreSQL object types to show newly created ones
+    setTimeout(() => {
+        loadPostgresObjectTypes();
+    }, 1000);
+}
+
+
+// Table Creation Functions
+async function createPostgresTables() {
+    console.log('Starting PostgreSQL table creation job...');
+    const button = document.querySelector('#postgres-tables .action-btn');
+    if (button) {
+        button.disabled = true;
+        button.innerHTML = '⏳';
+    }
+    updateMessage('Starting PostgreSQL table creation...');
+    updateProgress(0, 'Starting PostgreSQL table creation');
+
+    try {
+        const response = await fetch('/api/jobs/postgres/table/create', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+
+        const result = await response.json();
+        if (result.status === 'success') {
+            console.log('PostgreSQL table creation job started:', result.jobId);
+            updateMessage('PostgreSQL table creation job started successfully');
+            // Start polling for progress
+            pollTableCreationJobStatus(result.jobId, 'postgres');
+        } else {
+            throw new Error(result.message || 'Failed to start PostgreSQL table creation job');
+        }
+    } catch (error) {
+        console.error('Error starting PostgreSQL table creation job:', error);
+        updateMessage('Failed to start PostgreSQL table creation: ' + error.message);
+        updateProgress(0, 'Failed to start PostgreSQL table creation');
+        // Re-enable button
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = 'Create Tables';
+        }
+    }
+}
+
+async function pollTableCreationJobStatus(jobId, database) {
+    console.log(`Polling table creation job status for ${database}:`, jobId);
+
+    try {
+        const response = await fetch(`/api/jobs/${jobId}/status`);
+        const status = await response.json();
+
+        if (status.status === 'error') {
+            throw new Error(status.message || 'Job status check failed');
+        }
+
+        console.log(`Table creation job status for ${database}:`, status);
+
+        if (status.progress) {
+            updateProgress(status.progress.percentage, status.progress.currentTask);
+            updateMessage(`${status.progress.currentTask}: ${status.progress.details}`);
+        }
+
+        if (status.isComplete) {
+            console.log(`Table creation job completed for ${database}`);
+            // Get final results
+            const resultResponse = await fetch(`/api/jobs/${jobId}/result`);
+            const result = await resultResponse.json();
+
+            if (result.status === 'success') {
+                handleTableCreationJobComplete(result, database);
+            } else {
+                throw new Error(result.message || 'Job completed with errors');
+            }
+
+            // Re-enable button
+            const button = document.querySelector(`#${database}-tables .action-btn`);
+            if (button) {
+                button.disabled = false;
+                button.innerHTML = 'Create Tables';
+            }
+        } else {
+            // Continue polling
+            setTimeout(() => pollTableCreationJobStatus(jobId, database), 1000);
+        }
+    } catch (error) {
+        console.error('Error polling table creation job status:', error);
+        updateMessage('Error checking table creation progress: ' + error.message);
+        updateProgress(0, 'Error checking progress');
+        // Re-enable button
+        const button = document.querySelector(`#${database}-tables .action-btn`);
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = 'Create Tables';
+        }
+    }
+}
+
+function handleTableCreationJobComplete(result, database) {
+    console.log(`Table creation job results for ${database}:`, result);
+
+    const createdCount = result.createdCount || 0;
+    const skippedCount = result.skippedCount || 0;
+    const errorCount = result.errorCount || 0;
+
+    updateProgress(100, `Table creation completed: ${createdCount} created, ${skippedCount} skipped, ${errorCount} errors`);
+
+    if (result.isSuccessful) {
+        updateMessage(`Table creation completed successfully: ${createdCount} tables created, ${skippedCount} already existed`);
+    } else {
+        updateMessage(`Table creation completed with errors: ${createdCount} created, ${skippedCount} skipped, ${errorCount} errors`);
+    }
+
+    // Refresh PostgreSQL tables to show newly created ones
+    setTimeout(() => {
+        extractPostgresTableMetadata();
+    }, 1000);
+}
+
 // Load configuration when page loads
 document.addEventListener('DOMContentLoaded', function() {
     // Load configuration after a short delay to ensure all other initialization is complete

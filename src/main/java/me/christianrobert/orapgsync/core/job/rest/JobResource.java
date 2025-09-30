@@ -13,7 +13,9 @@ import me.christianrobert.orapgsync.core.job.model.JobStatus;
 import me.christianrobert.orapgsync.core.job.service.JobRegistry;
 import me.christianrobert.orapgsync.core.job.service.JobService;
 import me.christianrobert.orapgsync.objectdatatype.model.ObjectDataTypeMetaData;
+import me.christianrobert.orapgsync.objectdatatype.model.ObjectTypeCreationResult;
 import me.christianrobert.orapgsync.rowcount.model.RowCountMetadata;
+import me.christianrobert.orapgsync.table.model.TableCreationResult;
 import me.christianrobert.orapgsync.table.model.TableMetadata;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -245,6 +247,28 @@ public class JobResource {
                 response.put("errorCount", schemaResult.getErrorCount());
                 response.put("isSuccessful", schemaResult.isSuccessful());
                 response.put("result", result); // Include raw result for frontend compatibility
+            } else if (result instanceof ObjectTypeCreationResult) {
+                // Handle object type creation results
+                ObjectTypeCreationResult objectTypeResult = (ObjectTypeCreationResult) result;
+
+                Map<String, Object> summary = generateObjectTypeCreationSummary(objectTypeResult);
+                response.put("summary", summary);
+                response.put("createdCount", objectTypeResult.getCreatedCount());
+                response.put("skippedCount", objectTypeResult.getSkippedCount());
+                response.put("errorCount", objectTypeResult.getErrorCount());
+                response.put("isSuccessful", objectTypeResult.isSuccessful());
+                response.put("result", result); // Include raw result for frontend compatibility
+            } else if (result instanceof TableCreationResult) {
+                // Handle table creation results
+                TableCreationResult tableResult = (TableCreationResult) result;
+
+                Map<String, Object> summary = generateTableCreationSummary(tableResult);
+                response.put("summary", summary);
+                response.put("createdCount", tableResult.getCreatedCount());
+                response.put("skippedCount", tableResult.getSkippedCount());
+                response.put("errorCount", tableResult.getErrorCount());
+                response.put("isSuccessful", tableResult.isSuccessful());
+                response.put("result", result); // Include raw result for frontend compatibility
             } else {
                 response.put("result", result);
             }
@@ -418,6 +442,98 @@ public class JobResource {
         );
     }
 
+    private Map<String, Object> generateObjectTypeCreationSummary(ObjectTypeCreationResult objectTypeResult) {
+        Map<String, Object> createdDetails = new HashMap<>();
+        Map<String, Object> skippedDetails = new HashMap<>();
+        Map<String, Object> errorDetails = new HashMap<>();
+
+        // Created object types details
+        for (String typeName : objectTypeResult.getCreatedTypes()) {
+            createdDetails.put(typeName, Map.of(
+                    "typeName", typeName,
+                    "status", "created",
+                    "timestamp", objectTypeResult.getExecutionDateTime().toString()
+            ));
+        }
+
+        // Skipped object types details
+        for (String typeName : objectTypeResult.getSkippedTypes()) {
+            skippedDetails.put(typeName, Map.of(
+                    "typeName", typeName,
+                    "status", "skipped",
+                    "reason", "already exists"
+            ));
+        }
+
+        // Error details
+        for (ObjectTypeCreationResult.ObjectTypeCreationError error : objectTypeResult.getErrors()) {
+            errorDetails.put(error.getTypeName(), Map.of(
+                    "typeName", error.getTypeName(),
+                    "status", "error",
+                    "error", error.getErrorMessage(),
+                    "sql", error.getSqlStatement()
+            ));
+        }
+
+        return Map.of(
+                "totalProcessed", objectTypeResult.getTotalProcessed(),
+                "createdCount", objectTypeResult.getCreatedCount(),
+                "skippedCount", objectTypeResult.getSkippedCount(),
+                "errorCount", objectTypeResult.getErrorCount(),
+                "isSuccessful", objectTypeResult.isSuccessful(),
+                "executionTimestamp", objectTypeResult.getExecutionTimestamp(),
+                "createdTypes", createdDetails,
+                "skippedTypes", skippedDetails,
+                "errors", errorDetails
+        );
+    }
+
+    private Map<String, Object> generateTableCreationSummary(TableCreationResult tableResult) {
+        Map<String, Object> createdDetails = new HashMap<>();
+        Map<String, Object> skippedDetails = new HashMap<>();
+        Map<String, Object> errorDetails = new HashMap<>();
+
+        // Created tables details
+        for (String tableName : tableResult.getCreatedTables()) {
+            createdDetails.put(tableName, Map.of(
+                    "tableName", tableName,
+                    "status", "created",
+                    "timestamp", tableResult.getExecutionDateTime().toString()
+            ));
+        }
+
+        // Skipped tables details
+        for (String tableName : tableResult.getSkippedTables()) {
+            skippedDetails.put(tableName, Map.of(
+                    "tableName", tableName,
+                    "status", "skipped",
+                    "reason", "already exists"
+            ));
+        }
+
+        // Error details
+        for (TableCreationResult.TableCreationError error : tableResult.getErrors()) {
+            errorDetails.put(error.getTableName(), Map.of(
+                    "tableName", error.getTableName(),
+                    "status", "error",
+                    "error", error.getErrorMessage(),
+                    "sql", error.getSqlStatement()
+            ));
+        }
+
+        return Map.of(
+                "totalProcessed", tableResult.getTotalProcessed(),
+                "createdCount", tableResult.getCreatedCount(),
+                "skippedCount", tableResult.getSkippedCount(),
+                "errorCount", tableResult.getErrorCount(),
+                "isSuccessful", tableResult.isSuccessful(),
+                "executionTimestamp", tableResult.getExecutionTimestamp(),
+                "createdTables", createdDetails,
+                "skippedTables", skippedDetails,
+                "errors", errorDetails
+        );
+    }
+
     @POST
     @Path("/tables/postgres/extract")
     public Response startPostgresTableMetadataExtraction() {
@@ -452,5 +568,17 @@ public class JobResource {
     @Path("/postgres/schema/create")
     public Response startPostgresSchemaCreation() {
         return startJob("POSTGRES", "SCHEMA_CREATION", "PostgreSQL schema creation");
+    }
+
+    @POST
+    @Path("/postgres/object-type/create")
+    public Response startPostgresObjectTypeCreation() {
+        return startJob("POSTGRES", "OBJECT_TYPE_CREATION", "PostgreSQL object type creation");
+    }
+
+    @POST
+    @Path("/postgres/table/create")
+    public Response startPostgresTableCreation() {
+        return startJob("POSTGRES", "TABLE_CREATION", "PostgreSQL table creation");
     }
 }

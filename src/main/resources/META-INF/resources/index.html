@@ -108,6 +108,7 @@
             <span class="count-badge">-</span>
             <span class="component-text">Data types created</span>
             <button class="refresh-btn" onclick="loadPostgresObjectTypes()" title="Refresh PostgreSQL object data types">↻</button>
+            <button class="action-btn" onclick="createPostgresObjectTypes()" title="Create missing Oracle object types in PostgreSQL">Create Types</button>
             <div class="object-list" id="postgres-object-list" style="display: none;">
               <div class="object-list-header" onclick="toggleObjectList('postgres')">
                 <span class="toggle-indicator">▼</span> Object Data Types by Schema
@@ -140,6 +141,7 @@
             <span class="count-badge">-</span>
             <span class="component-text">Tables found</span>
             <button class="refresh-btn" onclick="extractPostgresTableMetadata()" title="Extract PostgreSQL table metadata">⚙</button>
+            <button class="action-btn" onclick="createPostgresTables()" title="Create missing Oracle tables in PostgreSQL">Create Tables</button>
             <div class="table-list" id="postgres-table-list" style="display: none;">
               <div class="table-list-header" onclick="toggleTableList('postgres')">
                 <span class="toggle-indicator">▼</span> Tables by Schema

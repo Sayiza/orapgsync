@@ -4,18 +4,24 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Event;
 import jakarta.inject.Inject;
 import me.christianrobert.orapgsync.core.event.ObjectDataTypeUpdatedEvent;
+import me.christianrobert.orapgsync.core.event.ObjectTypeCreationCompletedEvent;
 import me.christianrobert.orapgsync.core.event.RowCountUpdatedEvent;
 import me.christianrobert.orapgsync.core.event.SchemaCreationCompletedEvent;
 import me.christianrobert.orapgsync.core.event.SchemaListUpdatedEvent;
+import me.christianrobert.orapgsync.core.event.TableCreationCompletedEvent;
 import me.christianrobert.orapgsync.core.event.TableMetadataUpdatedEvent;
 import me.christianrobert.orapgsync.core.state.ObjectDataTypeStateManager;
+import me.christianrobert.orapgsync.core.state.ObjectTypeCreationStateManager;
 import me.christianrobert.orapgsync.core.state.RowCountStateManager;
 import me.christianrobert.orapgsync.core.state.SchemaCreationStateManager;
 import me.christianrobert.orapgsync.core.state.SchemaStateManager;
+import me.christianrobert.orapgsync.core.state.TableCreationStateManager;
 import me.christianrobert.orapgsync.core.state.TableMetadataStateManager;
 import me.christianrobert.orapgsync.objectdatatype.model.ObjectDataTypeMetaData;
+import me.christianrobert.orapgsync.objectdatatype.model.ObjectTypeCreationResult;
 import me.christianrobert.orapgsync.rowcount.model.RowCountMetadata;
 import me.christianrobert.orapgsync.schema.model.SchemaCreationResult;
+import me.christianrobert.orapgsync.table.model.TableCreationResult;
 import me.christianrobert.orapgsync.table.model.TableMetadata;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -50,6 +56,12 @@ public class StateService {
     private Event<SchemaCreationCompletedEvent> schemaCreationEvent;
 
     @Inject
+    private Event<ObjectTypeCreationCompletedEvent> objectTypeCreationEvent;
+
+    @Inject
+    private Event<TableCreationCompletedEvent> tableCreationEvent;
+
+    @Inject
     private TableMetadataStateManager tableMetadataStateManager;
 
     @Inject
@@ -63,6 +75,12 @@ public class StateService {
 
     @Inject
     private SchemaCreationStateManager schemaCreationStateManager;
+
+    @Inject
+    private ObjectTypeCreationStateManager objectTypeCreationStateManager;
+
+    @Inject
+    private TableCreationStateManager tableCreationStateManager;
 
     // ==================== Query Methods (delegate to state managers) ====================
 
@@ -152,6 +170,18 @@ public class StateService {
         log.info("Firing schema creation completed event: created={}, skipped={}, errors={}",
                 result.getCreatedCount(), result.getSkippedCount(), result.getErrorCount());
         schemaCreationEvent.fire(SchemaCreationCompletedEvent.forPostgres(result));
+    }
+
+    public void updateObjectTypeCreationResult(ObjectTypeCreationResult result) {
+        log.info("Firing object type creation completed event: created={}, skipped={}, errors={}",
+                result.getCreatedCount(), result.getSkippedCount(), result.getErrorCount());
+        objectTypeCreationEvent.fire(ObjectTypeCreationCompletedEvent.forPostgres(result));
+    }
+
+    public void updateTableCreationResult(TableCreationResult result) {
+        log.info("Firing table creation completed event: created={}, skipped={}, errors={}",
+                result.getCreatedCount(), result.getSkippedCount(), result.getErrorCount());
+        tableCreationEvent.fire(TableCreationCompletedEvent.forPostgres(result));
     }
 
 }
