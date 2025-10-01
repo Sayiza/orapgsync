@@ -80,7 +80,7 @@ public class OracleTableExtractor {
     TableMetadata tableMetadata = new TableMetadata(owner.toLowerCase(), table.toLowerCase());
 
     // Fetch column metadata (exclude hidden, virtual, and system-generated columns)
-    String columnSql = "SELECT column_name, data_type, char_length, data_precision, data_scale, nullable, data_default " +
+    String columnSql = "SELECT column_name, data_type, data_type_owner, char_length, data_precision, data_scale, nullable, data_default " +
             "FROM all_tab_cols WHERE owner = ? AND table_name = ? " +
             "AND hidden_column = 'NO' AND virtual_column = 'NO' AND user_generated = 'YES' " +
             "ORDER BY column_id";
@@ -91,6 +91,13 @@ public class OracleTableExtractor {
         while (rs.next()) {
           String columnName = rs.getString("column_name").toLowerCase();
           String dataType = rs.getString("data_type");
+          String dataTypeOwner = rs.getString("data_type_owner");
+          // Normalize data type owner to lowercase (null for built-in types)
+          if (dataTypeOwner != null && !dataTypeOwner.isEmpty()) {
+            dataTypeOwner = dataTypeOwner.toLowerCase();
+          } else {
+            dataTypeOwner = null;
+          }
           Integer charLength = rs.getInt("char_length");
           if (rs.wasNull()) charLength = null;
           Integer precision = rs.getInt("data_precision");
@@ -103,7 +110,7 @@ public class OracleTableExtractor {
             defaultValue = defaultValue.trim();
           }
 
-          ColumnMetadata column = new ColumnMetadata(columnName, dataType, charLength, precision, scale, nullable, defaultValue);
+          ColumnMetadata column = new ColumnMetadata(columnName, dataType, dataTypeOwner, charLength, precision, scale, nullable, defaultValue);
           tableMetadata.addColumn(column);
         }
       }

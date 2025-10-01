@@ -338,12 +338,20 @@ public class PostgresTableCreationJob extends AbstractDatabaseWriteJob<TableCrea
         StringBuilder def = new StringBuilder();
         def.append(column.getColumnName().toLowerCase());
 
-        // Convert Oracle data type to PostgreSQL
-        String postgresType = TypeConverter.toPostgre(column.getDataType());
-        if (postgresType == null) {
-            postgresType = "text"; // Fallback for unknown types
-            log.warn("Unknown data type '{}' for column '{}', using 'text' as fallback",
-                    column.getDataType(), column.getColumnName());
+        // Check if this is a custom (user-defined) data type
+        String postgresType;
+        if (column.isCustomDataType()) {
+            // Use the fully qualified type name (schema.typename) for custom types
+            postgresType = column.getDataTypeOwner().toLowerCase() + "." + column.getDataType().toLowerCase();
+            log.debug("Using custom data type '{}' for column '{}'", postgresType, column.getColumnName());
+        } else {
+            // Convert Oracle built-in data type to PostgreSQL
+            postgresType = TypeConverter.toPostgre(column.getDataType());
+            if (postgresType == null) {
+                postgresType = "text"; // Fallback for unknown types
+                log.warn("Unknown data type '{}' for column '{}', using 'text' as fallback",
+                        column.getDataType(), column.getColumnName());
+            }
         }
 
         def.append(" ").append(postgresType);

@@ -74,7 +74,8 @@ public class PostgresTableExtractor {
 
         // Fetch column metadata
         String columnSql = """
-            SELECT column_name, data_type, character_maximum_length, numeric_precision, numeric_scale,
+            SELECT column_name, data_type, udt_schema, udt_name,
+                   character_maximum_length, numeric_precision, numeric_scale,
                    is_nullable, column_default
             FROM information_schema.columns
             WHERE table_schema = ? AND table_name = ?
@@ -88,6 +89,19 @@ public class PostgresTableExtractor {
                 while (rs.next()) {
                     String columnName = rs.getString("column_name").toLowerCase();
                     String dataType = rs.getString("data_type");
+                    String udtSchema = rs.getString("udt_schema");
+                    String udtName = rs.getString("udt_name");
+
+                    // For user-defined types, data_type is "USER-DEFINED" and actual type is in udt_name
+                    // Check if this is a custom type (not in pg_catalog or information_schema)
+                    String dataTypeOwner = null;
+                    if ("USER-DEFINED".equals(dataType) && udtSchema != null && udtName != null) {
+                        if (!udtSchema.equals("pg_catalog") && !udtSchema.equals("information_schema")) {
+                            dataTypeOwner = udtSchema.toLowerCase();
+                            dataType = udtName.toLowerCase(); // Use actual type name
+                        }
+                    }
+
                     Integer charLength = rs.getInt("character_maximum_length");
                     if (rs.wasNull()) charLength = null;
                     Integer precision = rs.getInt("numeric_precision");
@@ -100,7 +114,7 @@ public class PostgresTableExtractor {
                         defaultValue = defaultValue.trim();
                     }
 
-                    ColumnMetadata column = new ColumnMetadata(columnName, dataType, charLength, precision, scale, nullable, defaultValue);
+                    ColumnMetadata column = new ColumnMetadata(columnName, dataType, dataTypeOwner, charLength, precision, scale, nullable, defaultValue);
                     tableMetadata.addColumn(column);
                 }
             }
