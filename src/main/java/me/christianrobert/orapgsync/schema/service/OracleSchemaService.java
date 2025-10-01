@@ -82,7 +82,7 @@ public class OracleSchemaService {
                 while (rs.next()) {
                     String username = rs.getString("username");
                     if (!UserExcluder.is2BeExclueded(username)) {
-                        result.add(username);
+                        result.add(username.toLowerCase());
                     } else {
                         log.debug("Excluding Oracle schema: {}", username);
                     }

@@ -309,7 +309,7 @@ public class PostgresTableCreationJob extends AbstractDatabaseWriteJob<TableCrea
     private String generateCreateTableSQL(TableMetadata table) {
         StringBuilder sql = new StringBuilder();
         sql.append("CREATE TABLE ");
-        sql.append(String.format("\"%s\".\"%s\" (", table.getSchema(), table.getTableName()));
+        sql.append(String.format("%s.%s (", table.getSchema().toLowerCase(), table.getTableName().toLowerCase()));
 
         List<String> columnDefinitions = new ArrayList<>();
 
@@ -336,7 +336,7 @@ public class PostgresTableCreationJob extends AbstractDatabaseWriteJob<TableCrea
 
     private String generateColumnDefinition(ColumnMetadata column) {
         StringBuilder def = new StringBuilder();
-        def.append(String.format("\"%s\"", column.getColumnName()));
+        def.append(column.getColumnName().toLowerCase());
 
         // Convert Oracle data type to PostgreSQL
         String postgresType = TypeConverter.toPostgre(column.getDataType());
@@ -363,14 +363,14 @@ public class PostgresTableCreationJob extends AbstractDatabaseWriteJob<TableCrea
 
     private String generateConstraintSQL(ConstraintMetadata constraint) {
         StringBuilder sql = new StringBuilder();
-        String constraintName = String.format("\"pg_%s\"", constraint.getConstraintName().toLowerCase());
+        String constraintName = String.format("pg_%s", constraint.getConstraintName().toLowerCase());
 
         switch (constraint.getConstraintType()) {
             case ConstraintMetadata.PRIMARY_KEY:
                 sql.append("CONSTRAINT ").append(constraintName)
                    .append(" PRIMARY KEY (")
                    .append(constraint.getColumnNames().stream()
-                           .map(col -> String.format("\"%s\"", col))
+                           .map(col -> col.toLowerCase())
                            .collect(Collectors.joining(", ")))
                    .append(")");
                 break;
@@ -379,7 +379,7 @@ public class PostgresTableCreationJob extends AbstractDatabaseWriteJob<TableCrea
                 sql.append("CONSTRAINT ").append(constraintName)
                    .append(" UNIQUE (")
                    .append(constraint.getColumnNames().stream()
-                           .map(col -> String.format("\"%s\"", col))
+                           .map(col -> col.toLowerCase())
                            .collect(Collectors.joining(", ")))
                    .append(")");
                 break;
@@ -400,25 +400,25 @@ public class PostgresTableCreationJob extends AbstractDatabaseWriteJob<TableCrea
 
     private String generateForeignKeyConstraintSQL(TableMetadata table, ConstraintMetadata constraint) {
         StringBuilder sql = new StringBuilder();
-        String constraintName = String.format("\"pg_%s\"", constraint.getConstraintName().toLowerCase());
+        String constraintName = String.format("pg_%s", constraint.getConstraintName().toLowerCase());
 
         sql.append("ALTER TABLE ");
-        sql.append(String.format("\"%s\".\"%s\"", table.getSchema(), table.getTableName()));
+        sql.append(String.format("%s.%s", table.getSchema().toLowerCase(), table.getTableName().toLowerCase()));
         sql.append(" ADD CONSTRAINT ").append(constraintName);
         sql.append(" FOREIGN KEY (");
         sql.append(constraint.getColumnNames().stream()
-                   .map(col -> String.format("\"%s\"", col))
+                   .map(col -> col.toLowerCase())
                    .collect(Collectors.joining(", ")));
         sql.append(") REFERENCES ");
 
         String referencedSchema = constraint.getReferencedSchema() != null ?
                                  constraint.getReferencedSchema() : table.getSchema();
-        sql.append(String.format("\"%s\".\"%s\"", referencedSchema, constraint.getReferencedTable()));
+        sql.append(String.format("%s.%s", referencedSchema.toLowerCase(), constraint.getReferencedTable().toLowerCase()));
 
         if (!constraint.getReferencedColumns().isEmpty()) {
             sql.append(" (");
             sql.append(constraint.getReferencedColumns().stream()
-                       .map(col -> String.format("\"%s\"", col))
+                       .map(col -> col.toLowerCase())
                        .collect(Collectors.joining(", ")));
             sql.append(")");
         }

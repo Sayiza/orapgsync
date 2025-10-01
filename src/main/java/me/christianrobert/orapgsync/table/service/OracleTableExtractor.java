@@ -77,7 +77,7 @@ public class OracleTableExtractor {
   }
 
   private static TableMetadata fetchTableMetadata(Connection oracleConn, String owner, String table) throws SQLException {
-    TableMetadata tableMetadata = new TableMetadata(owner, table);
+    TableMetadata tableMetadata = new TableMetadata(owner.toLowerCase(), table.toLowerCase());
 
     // Fetch column metadata (exclude hidden, virtual, and system-generated columns)
     String columnSql = "SELECT column_name, data_type, char_length, data_precision, data_scale, nullable, data_default " +
@@ -89,7 +89,7 @@ public class OracleTableExtractor {
       ps.setString(2, table);
       try (ResultSet rs = ps.executeQuery()) {
         while (rs.next()) {
-          String columnName = rs.getString("column_name");
+          String columnName = rs.getString("column_name").toLowerCase();
           String dataType = rs.getString("data_type");
           Integer charLength = rs.getInt("char_length");
           if (rs.wasNull()) charLength = null;
@@ -159,15 +159,15 @@ public class OracleTableExtractor {
             // Foreign key constraint - need to resolve referenced table
             String[] referencedTableInfo = resolveReferencedTable(oracleConn, referencedOwner, referencedConstraintName);
             if (referencedTableInfo != null) {
-              constraint = new ConstraintMetadata(constraintName, constraintType, 
-                                                referencedOwner, referencedTableInfo[0]);
+              constraint = new ConstraintMetadata(constraintName.toLowerCase(), constraintType,
+                                                referencedOwner.toLowerCase(), referencedTableInfo[0].toLowerCase());
             } else {
-              log.warn("Could not resolve referenced table for foreign key constraint {}.{}", 
+              log.warn("Could not resolve referenced table for foreign key constraint {}.{}",
                       owner, constraintName);
               continue;
             }
           } else {
-            constraint = new ConstraintMetadata(constraintName, constraintType);
+            constraint = new ConstraintMetadata(constraintName.toLowerCase(), constraintType);
           }
 
           // Set constraint properties
@@ -175,7 +175,7 @@ public class OracleTableExtractor {
           constraint.setDeferrable("DEFERRABLE".equals(deferrable));
           constraint.setInitiallyDeferred("DEFERRED".equals(deferred));
           constraint.setValidated("VALIDATED".equals(validated));
-          constraint.setIndexName(indexName);
+          constraint.setIndexName(indexName != null ? indexName.toLowerCase() : null);
           
           if ("R".equals(constraintType)) {
             constraint.setDeleteRule(deleteRule);
@@ -221,7 +221,7 @@ public class OracleTableExtractor {
       
       try (ResultSet rsCols = psCols.executeQuery()) {
         while (rsCols.next()) {
-          constraint.addColumnName(rsCols.getString("column_name"));
+          constraint.addColumnName(rsCols.getString("column_name").toLowerCase());
         }
       }
     }
@@ -268,7 +268,7 @@ public class OracleTableExtractor {
       
       try (ResultSet rs = ps.executeQuery()) {
         while (rs.next()) {
-          constraint.addReferencedColumnName(rs.getString("column_name"));
+          constraint.addReferencedColumnName(rs.getString("column_name").toLowerCase());
         }
       }
     }

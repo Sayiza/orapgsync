@@ -95,8 +95,8 @@ public class PostgresSchemaCreationJob extends AbstractDatabaseWriteJob<SchemaCr
 
             // Mark already existing schemas as skipped
             for (String schema : schemasAlreadyExisting) {
-                result.addSkippedSchema(schema);
-                log.info("Schema '{}' already exists in PostgreSQL, skipping", schema);
+                result.addSkippedSchema(schema.toLowerCase());
+                log.info("Schema '{}' already exists in PostgreSQL, skipping", schema.toLowerCase());
             }
 
             updateProgress(progressCallback, 40, "Planning creation",
@@ -121,12 +121,12 @@ public class PostgresSchemaCreationJob extends AbstractDatabaseWriteJob<SchemaCr
 
                 try {
                     createSchema(postgresConnection, schemaName);
-                    result.addCreatedSchema(schemaName);
-                    log.info("Successfully created PostgreSQL schema: {}", schemaName);
+                    result.addCreatedSchema(schemaName.toLowerCase());
+                    log.info("Successfully created PostgreSQL schema: {}", schemaName.toLowerCase());
                 } catch (SQLException e) {
-                    String errorMessage = String.format("Failed to create schema '%s': %s", schemaName, e.getMessage());
-                    String sqlStatement = String.format("CREATE SCHEMA IF NOT EXISTS \"%s\"", schemaName);
-                    result.addError(schemaName, errorMessage, sqlStatement);
+                    String errorMessage = String.format("Failed to create schema '%s': %s", schemaName.toLowerCase(), e.getMessage());
+                    String sqlStatement = String.format("CREATE SCHEMA IF NOT EXISTS %s", schemaName.toLowerCase());
+                    result.addError(schemaName.toLowerCase(), errorMessage, sqlStatement);
                     log.error("Failed to create schema: {}", schemaName, e);
                 }
 
@@ -169,8 +169,8 @@ public class PostgresSchemaCreationJob extends AbstractDatabaseWriteJob<SchemaCr
 
     private void createSchema(Connection connection, String schemaName) throws SQLException {
         // Use IF NOT EXISTS to avoid errors if schema exists
-        // Quote the schema name to handle special characters and case sensitivity
-        String sql = String.format("CREATE SCHEMA IF NOT EXISTS \"%s\"", schemaName);
+        // Use lowercase unquoted identifier - PostgreSQL will fold to lowercase automatically
+        String sql = String.format("CREATE SCHEMA IF NOT EXISTS %s", schemaName.toLowerCase());
 
         try (PreparedStatement stmt = connection.prepareStatement(sql)) {
             stmt.executeUpdate();

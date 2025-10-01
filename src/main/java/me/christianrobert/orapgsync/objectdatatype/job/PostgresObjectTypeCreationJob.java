@@ -205,7 +205,7 @@ public class PostgresObjectTypeCreationJob extends AbstractDatabaseWriteJob<Obje
     }
 
     private String getQualifiedTypeName(ObjectDataTypeMetaData objectType) {
-        return String.format("%s.%s", objectType.getSchema(), objectType.getName());
+        return String.format("%s.%s", objectType.getSchema().toLowerCase(), objectType.getName().toLowerCase());
     }
 
     private void createObjectType(Connection connection, ObjectDataTypeMetaData objectType) throws SQLException {
@@ -221,11 +221,11 @@ public class PostgresObjectTypeCreationJob extends AbstractDatabaseWriteJob<Obje
     private String generateCreateTypeSQL(ObjectDataTypeMetaData objectType) {
         StringBuilder sql = new StringBuilder();
         sql.append("CREATE TYPE ");
-        sql.append(String.format("\"%s\".\"%s\" AS (", objectType.getSchema(), objectType.getName()));
+        sql.append(String.format("%s.%s AS (", objectType.getSchema().toLowerCase(), objectType.getName().toLowerCase()));
 
         List<String> fields = new ArrayList<>();
         for (ObjectDataTypeVariable variable : objectType.getVariables()) {
-            String fieldName = String.format("\"%s\"", variable.getName());
+            String fieldName = variable.getName().toLowerCase();
             String fieldType = TypeConverter.toPostgre(variable.getDataType());
             if (fieldType == null) {
                 fieldType = "text"; // Fallback for unknown types

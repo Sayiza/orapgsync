@@ -70,7 +70,7 @@ public class PostgresTableExtractor {
     }
 
     private static TableMetadata fetchTableMetadata(Connection postgresConn, String schema, String table) throws SQLException {
-        TableMetadata tableMetadata = new TableMetadata(schema, table);
+        TableMetadata tableMetadata = new TableMetadata(schema.toLowerCase(), table.toLowerCase());
 
         // Fetch column metadata
         String columnSql = """
@@ -83,10 +83,10 @@ public class PostgresTableExtractor {
 
         try (PreparedStatement ps = postgresConn.prepareStatement(columnSql)) {
             ps.setString(1, schema.toLowerCase());
-            ps.setString(2, table);
+            ps.setString(2, table.toLowerCase());
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
-                    String columnName = rs.getString("column_name");
+                    String columnName = rs.getString("column_name").toLowerCase();
                     String dataType = rs.getString("data_type");
                     Integer charLength = rs.getInt("character_maximum_length");
                     if (rs.wasNull()) charLength = null;
@@ -145,19 +145,23 @@ public class PostgresTableExtractor {
 
         try (PreparedStatement ps = postgresConn.prepareStatement(constraintSql)) {
             ps.setString(1, schema.toLowerCase());
-            ps.setString(2, table);
+            ps.setString(2, table.toLowerCase());
 
             try (ResultSet rs = ps.executeQuery()) {
                 String currentConstraintName = null;
                 ConstraintMetadata currentConstraint = null;
 
                 while (rs.next()) {
-                    String constraintName = rs.getString("constraint_name");
+                    String constraintName = rs.getString("constraint_name").toLowerCase();
                     String constraintType = rs.getString("constraint_type");
                     String columnName = rs.getString("column_name");
+                    if (columnName != null) columnName = columnName.toLowerCase();
                     String referencedSchema = rs.getString("referenced_table_schema");
+                    if (referencedSchema != null) referencedSchema = referencedSchema.toLowerCase();
                     String referencedTable = rs.getString("referenced_table_name");
+                    if (referencedTable != null) referencedTable = referencedTable.toLowerCase();
                     String referencedColumn = rs.getString("referenced_column_name");
+                    if (referencedColumn != null) referencedColumn = referencedColumn.toLowerCase();
                     String updateRule = rs.getString("update_rule");
                     String deleteRule = rs.getString("delete_rule");
                     String checkClause = rs.getString("check_clause");

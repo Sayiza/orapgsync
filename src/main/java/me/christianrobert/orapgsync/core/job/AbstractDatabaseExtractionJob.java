@@ -102,7 +102,7 @@ public abstract class AbstractDatabaseExtractionJob<T> implements DatabaseExtrac
                 throw new IllegalStateException("Test schema not configured but do.all-schemas is false");
             }
 
-            String normalizedTestSchema = testSchema.trim().toUpperCase();
+            String normalizedTestSchema = testSchema.trim().toLowerCase();
             List<String> availableSchemas = getAvailableSchemas();
 
             if (!availableSchemas.contains(normalizedTestSchema)) {

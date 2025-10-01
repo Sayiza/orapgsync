@@ -57,53 +57,47 @@ public class OracleObjectDataTypeExtractionJob extends AbstractDatabaseExtractio
             throw new IllegalStateException("Oracle connection not configured");
         }
 
+        // Determine which schemas to process based on configuration
+        List<String> schemasToProcess = determineSchemasToProcess(progressCallback);
+
+        if (schemasToProcess.isEmpty()) {
+            updateProgress(progressCallback, 100, "No schemas to process",
+                          "No schemas available for object data type extraction based on current configuration");
+            return new ArrayList<>();
+        }
+
         updateProgress(progressCallback, 5, "Connecting to Oracle", "Establishing database connection");
 
         try (Connection connection = oracleConnectionService.getConnection()) {
             updateProgress(progressCallback, 10, "Connected", "Successfully connected to Oracle database");
 
-            // Check configuration settings
-            boolean doAllSchemas = Boolean.TRUE.equals(configService.getConfigValueAsBoolean("do.all-schemas"));
-            String testSchema = configService.getConfigValueAsString("do.only-test-schema");
+            updateProgress(progressCallback, 15, "Building query",
+                          String.format("Processing %d schema(s) for object data types", schemasToProcess.size()));
 
-            updateProgress(progressCallback, 15, "Building query", "Determining schemas to process based on configuration");
+            // Build SQL with IN clause for multiple schemas
+            String schemaPlaceholders = schemasToProcess.stream()
+                .map(s -> "?")
+                .collect(java.util.stream.Collectors.joining(", "));
 
-            String sql;
-            if (doAllSchemas) {
-                sql = """
-                    SELECT DISTINCT o.owner, o.object_name
-                    FROM all_objects o
-                    JOIN all_tab_cols c
-                      ON c.data_type = o.object_name
-                      AND c.data_type_owner = o.owner
-                    WHERE o.object_type = 'TYPE'
-                     AND o.owner NOT IN ('SYS', 'SYSTEM', 'CTXSYS', 'DBSNMP', 'EXFSYS', 'LBACSYS', 'MDSYS', 'MGMT_VIEW', 'OLAPSYS', 'ORDDATA', 'OWBSYS', 'ORDPLUGINS', 'ORDSYS', 'OUTLN', 'SI_INFORMTN_SCHEMA', 'SYS', 'SYSMAN', 'SYSTEM', 'TSMSYS', 'WK_TEST', 'WKPROXY', 'WMSYS', 'XDB', 'APEX_040000', 'APEX_PUBLIC_USER', 'DIP', 'FLOWS_30000', 'FLOWS_FILES', 'MDDATA', 'ORACLE_OCM', 'XS$NULL', 'SPATIAL_CSW_ADMIN_USR', 'SPATIAL_WFS_ADMIN_USR', 'PUBLIC')
-                    ORDER BY o.owner, o.object_name
-                    """;
-            } else {
-                if (testSchema == null || testSchema.trim().isEmpty()) {
-                    updateProgress(progressCallback, -1, "Configuration error", "Test schema not configured but do.all-schemas is false");
-                    throw new IllegalStateException("Test schema not configured but do.all-schemas is false");
-                }
-                sql = """
-                   SELECT DISTINCT o.owner, o.object_name
-                   FROM all_objects o
-                   JOIN all_tab_cols c
-                     ON c.data_type = o.object_name
-                     AND c.data_type_owner = o.owner
-                   WHERE o.object_type = 'TYPE'
-                     AND o.owner = ?
-                   ORDER BY o.owner, o.object_name
-                   """;
-            }
+            String sql = """
+                SELECT DISTINCT o.owner, o.object_name
+                FROM all_objects o
+                JOIN all_tab_cols c
+                  ON c.data_type = o.object_name
+                  AND c.data_type_owner = o.owner
+                WHERE o.object_type = 'TYPE'
+                  AND LOWER(o.owner) IN (%s)
+                ORDER BY o.owner, o.object_name
+                """.formatted(schemaPlaceholders);
 
             updateProgress(progressCallback, 20, "Executing query", "Fetching object data types from Oracle");
 
             Map<String, List<ObjectDataTypeMetaData>> objectDataTypesBySchema = new HashMap<>();
 
             try (PreparedStatement stmt = connection.prepareStatement(sql)) {
-                if (!doAllSchemas && testSchema != null) {
-                    stmt.setString(1, testSchema.toUpperCase());
+                // Set schema parameters (using lowercase as already normalized)
+                for (int i = 0; i < schemasToProcess.size(); i++) {
+                    stmt.setString(i + 1, schemasToProcess.get(i));
                 }
 
                 try (ResultSet rs = stmt.executeQuery()) {
@@ -111,11 +105,11 @@ public class OracleObjectDataTypeExtractionJob extends AbstractDatabaseExtractio
                     updateProgress(progressCallback, 30, "Processing results", "Extracting object data type metadata");
 
                     while (rs.next()) {
-                        String owner = rs.getString("owner");
-                        String objectName = rs.getString("object_name");
+                        String owner = rs.getString("owner").toLowerCase();
+                        String objectName = rs.getString("object_name").toLowerCase();
 
-                        // Apply UserExcluder logic for consistency
-                        if (UserExcluder.is2BeExclueded(owner, "TYPE")) {
+                        // Apply UserExcluder logic for consistency (check with original case)
+                        if (UserExcluder.is2BeExclueded(rs.getString("owner"), "TYPE")) {
                             log.debug("Excluding Oracle schema for object data types: {}", owner);
                             continue;
                         }
@@ -175,12 +169,12 @@ public class OracleObjectDataTypeExtractionJob extends AbstractDatabaseExtractio
             """;
 
         try (PreparedStatement stmt = connection.prepareStatement(attributeQuery)) {
-            stmt.setString(1, owner);
-            stmt.setString(2, typeName);
+            stmt.setString(1, owner.toUpperCase());
+            stmt.setString(2, typeName.toUpperCase());
 
             try (ResultSet rs = stmt.executeQuery()) {
                 while (rs.next()) {
-                    String attrName = rs.getString("attr_name");
+                    String attrName = rs.getString("attr_name").toLowerCase();
                     String attrTypeName = rs.getString("attr_type_name");
                     Integer length = rs.getObject("length", Integer.class);
                     Integer precision = rs.getObject("precision", Integer.class);
