@@ -92,8 +92,10 @@ public class OracleTableExtractor {
           String columnName = rs.getString("column_name").toLowerCase();
           String dataType = rs.getString("data_type");
           String dataTypeOwner = rs.getString("data_type_owner");
-          // Normalize data type owner to lowercase (null for built-in types)
-          if (dataTypeOwner != null && !dataTypeOwner.isEmpty()) {
+          // Treat SYS-owned types as built-in types (ANYDATA, XMLTYPE, etc.), not custom types
+          // Only user-defined types (non-SYS schemas) should be treated as custom
+          if (dataTypeOwner != null && !dataTypeOwner.isEmpty()
+              && !"SYS".equalsIgnoreCase(dataTypeOwner)) {
             dataTypeOwner = dataTypeOwner.toLowerCase();
           } else {
             dataTypeOwner = null;
