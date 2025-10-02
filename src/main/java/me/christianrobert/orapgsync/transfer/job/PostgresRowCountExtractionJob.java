@@ -1,11 +1,11 @@
-package me.christianrobert.orapgsync.rowcount.job;
+package me.christianrobert.orapgsync.transfer.job;
 
 import jakarta.enterprise.context.Dependent;
 import jakarta.inject.Inject;
 import me.christianrobert.orapgsync.core.job.AbstractDatabaseExtractionJob;
 import me.christianrobert.orapgsync.core.job.model.JobProgress;
-import me.christianrobert.orapgsync.database.service.OracleConnectionService;
-import me.christianrobert.orapgsync.rowcount.model.RowCountMetadata;
+import me.christianrobert.orapgsync.database.service.PostgresConnectionService;
+import me.christianrobert.orapgsync.transfer.model.RowCountMetadata;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -19,16 +19,16 @@ import java.util.Map;
 import java.util.function.Consumer;
 
 @Dependent
-public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<RowCountMetadata> {
+public class PostgresRowCountExtractionJob extends AbstractDatabaseExtractionJob<RowCountMetadata> {
 
-    private static final Logger log = LoggerFactory.getLogger(OracleRowCountExtractionJob.class);
+    private static final Logger log = LoggerFactory.getLogger(PostgresRowCountExtractionJob.class);
 
     @Inject
-    private OracleConnectionService oracleConnectionService;
+    private PostgresConnectionService postgresConnectionService;
 
     @Override
     public String getSourceDatabase() {
-        return "ORACLE";
+        return "POSTGRES";
     }
 
     @Override
@@ -43,7 +43,7 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
 
     @Override
     protected void saveResultsToState(List<RowCountMetadata> results) {
-        stateService.updateOracleRowCounts(results);
+        stateService.setPostgresRowCountMetadata(results);
     }
 
     @Override
@@ -63,15 +63,15 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
         log.info("Starting row count extraction for {} schemas (filtered from {} total)",
                 validSchemas.size(), schemasToProcess.size());
 
-        updateProgress(progressCallback, 5, "Connecting to Oracle", "Establishing database connection");
+        updateProgress(progressCallback, 5, "Connecting to PostgreSQL", "Establishing database connection");
 
         List<RowCountMetadata> allRowCounts = new ArrayList<>();
 
-        try (Connection oracleConnection = oracleConnectionService.getConnection()) {
-            updateProgress(progressCallback, 10, "Connected", "Successfully connected to Oracle database");
+        try (Connection postgresConnection = postgresConnectionService.getConnection()) {
+            updateProgress(progressCallback, 10, "Connected", "Successfully connected to PostgreSQL database");
 
             // First, get all tables for the schemas
-            List<TableInfo> tablesInfo = getTablesForSchemas(oracleConnection, validSchemas, progressCallback);
+            List<TableInfo> tablesInfo = getTablesForSchemas(postgresConnection, validSchemas, progressCallback);
 
             if (tablesInfo.isEmpty()) {
                 updateProgress(progressCallback, 100, "No tables found", "No tables found in the specified schemas");
@@ -91,7 +91,7 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
                     String.format("Table %d of %d", processedTables + 1, totalTables));
 
                 try {
-                    long rowCount = getRowCountForTable(oracleConnection, tableInfo.schema, tableInfo.tableName);
+                    long rowCount = getRowCountForTable(postgresConnection, tableInfo.schema, tableInfo.tableName);
 
                     RowCountMetadata rowCountMetadata = new RowCountMetadata(
                         tableInfo.schema,
@@ -133,20 +133,19 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
                                               Consumer<JobProgress> progressCallback) throws Exception {
         List<TableInfo> tables = new ArrayList<>();
 
-        String sql = "SELECT OWNER, TABLE_NAME FROM ALL_TABLES WHERE OWNER IN (" +
-                     String.join(",", schemas.stream().map(s -> "?").toArray(String[]::new)) + ") " +
-                     "ORDER BY OWNER, TABLE_NAME";
+        // PostgreSQL query to get tables from specific schemas
+        String sql = "SELECT schemaname, tablename FROM pg_tables WHERE schemaname = ANY(?) ORDER BY schemaname, tablename";
 
         try (PreparedStatement stmt = connection.prepareStatement(sql)) {
-            for (int i = 0; i < schemas.size(); i++) {
-                stmt.setString(i + 1, schemas.get(i));
-            }
+            // Convert list to PostgreSQL array format
+            java.sql.Array schemaArray = connection.createArrayOf("text", schemas.toArray(new String[0]));
+            stmt.setArray(1, schemaArray);
 
             try (ResultSet rs = stmt.executeQuery()) {
                 while (rs.next()) {
-                    String owner = rs.getString("OWNER");
-                    String tableName = rs.getString("TABLE_NAME");
-                    tables.add(new TableInfo(owner, tableName));
+                    String schemaName = rs.getString("schemaname");
+                    String tableName = rs.getString("tablename");
+                    tables.add(new TableInfo(schemaName, tableName));
                 }
             }
         }
@@ -157,13 +156,15 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
 
     private long getRowCountForTable(Connection connection, String schema, String tableName) throws Exception {
         // Use COUNT(*) for precise row count
-        String sql = "SELECT COUNT(*) as ROW_COUNT FROM " + schema + "." + tableName;
+        // Quote identifiers to handle special characters and case sensitivity
+        String sql = "SELECT COUNT(*) as row_count FROM " +
+                     "\"" + schema + "\".\"" + tableName + "\"";
 
         try (PreparedStatement stmt = connection.prepareStatement(sql);
              ResultSet rs = stmt.executeQuery()) {
 
             if (rs.next()) {
-                return rs.getLong("ROW_COUNT");
+                return rs.getLong("row_count");
             } else {
                 throw new RuntimeException("No result returned from count query");
             }

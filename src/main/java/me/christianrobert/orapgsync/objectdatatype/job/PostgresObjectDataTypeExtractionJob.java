@@ -44,7 +44,7 @@ public class PostgresObjectDataTypeExtractionJob extends AbstractDatabaseExtract
 
     @Override
     protected void saveResultsToState(List<ObjectDataTypeMetaData> results) {
-        stateService.updatePostgresObjectDataTypeMetaData(results);
+        stateService.setPostgresObjectDataTypeMetaData(results);
     }
 
     @Override
@@ -61,26 +61,24 @@ public class PostgresObjectDataTypeExtractionJob extends AbstractDatabaseExtract
         try (Connection connection = postgresConnectionService.getConnection()) {
             updateProgress(progressCallback, 10, "Connected", "Successfully connected to PostgreSQL database");
 
-            // Extract composite types that are actually used as column data types
-            // This matches Oracle's approach: only extract types that are referenced in table columns
-            // This filters out implicit table row types (which PostgreSQL creates automatically)
+            // Extract all composite types, including those not yet used in tables
+            // This differs from Oracle's approach to show newly created types before table creation
             updateProgress(progressCallback, 20, "Executing query", "Fetching user-defined composite types from PostgreSQL");
 
             List<ObjectDataTypeMetaData> allObjectDataTypes = new ArrayList<>();
 
-            // Query for composite types that are used in table columns
-            // Similar to Oracle's strategy: JOIN with columns to find only types that are actually used
+            // Query for all composite types, not just those used in table columns
+            // This allows visibility of newly created types before tables are created
             String sql = """
-                SELECT DISTINCT
-                    udt_n.nspname as schema_name,
-                    udt_t.typname as type_name
-                FROM information_schema.columns c
-                JOIN pg_namespace udt_n ON c.udt_schema = udt_n.nspname
-                JOIN pg_type udt_t ON c.udt_name = udt_t.typname AND udt_t.typnamespace = udt_n.oid
-                WHERE c.data_type = 'USER-DEFINED'
-                  AND udt_n.nspname NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
-                  AND udt_t.typtype = 'c'  -- composite types only
-                ORDER BY udt_n.nspname, udt_t.typname
+                SELECT
+                    n.nspname as schema_name,
+                    t.typname as type_name
+                FROM pg_type t
+                JOIN pg_namespace n ON t.typnamespace = n.oid
+                WHERE t.typtype = 'c'  -- composite types only
+                  AND n.nspname NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
+                  AND t.typrelid != 0  -- has attributes
+                ORDER BY n.nspname, t.typname
                 """;
 
             try (PreparedStatement stmt = connection.prepareStatement(sql);
@@ -109,7 +107,7 @@ public class PostgresObjectDataTypeExtractionJob extends AbstractDatabaseExtract
                 }
 
                 updateProgress(progressCallback, 80, "Processing completed",
-                    String.format("Found %d user-defined composite types (used in table columns)", processedCount));
+                    String.format("Found %d user-defined composite types", processedCount));
             }
 
             return allObjectDataTypes;

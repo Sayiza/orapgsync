@@ -1849,10 +1849,97 @@ function handleObjectTypeCreationJobComplete(result, database) {
         updateMessage(`Object type creation completed with errors: ${createdCount} created, ${skippedCount} skipped, ${errorCount} errors`);
     }
 
+    // Display object type creation results
+    displayObjectTypeCreationResults(result, database);
+
     // Refresh PostgreSQL object types to show newly created ones
     setTimeout(() => {
         loadPostgresObjectTypes();
     }, 1000);
+}
+
+function displayObjectTypeCreationResults(result, database) {
+    const resultsDiv = document.getElementById(`${database}-object-type-creation-results`);
+    const detailsDiv = document.getElementById(`${database}-object-type-creation-details`);
+
+    if (!resultsDiv || !detailsDiv) {
+        console.error('Object type creation results container not found');
+        return;
+    }
+
+    let html = '';
+
+    const createdCount = result.createdCount || 0;
+    const skippedCount = result.skippedCount || 0;
+    const errorCount = result.errorCount || 0;
+
+    html += '<div class="object-type-creation-summary">';
+    html += `<div class="summary-stats">`;
+    html += `<span class="stat-item created">Created: ${createdCount}</span>`;
+    html += `<span class="stat-item skipped">Skipped: ${skippedCount}</span>`;
+    html += `<span class="stat-item errors">Errors: ${errorCount}</span>`;
+    html += `</div>`;
+    html += '</div>';
+
+    // Show created object types
+    if (createdCount > 0 && result.createdTypes) {
+        html += '<div class="created-types-section">';
+        html += '<h4>Created Object Types:</h4>';
+        html += '<div class="object-type-items">';
+        result.createdTypes.forEach(typeName => {
+            html += `<div class="object-type-item created">${typeName} ✓</div>`;
+        });
+        html += '</div>';
+        html += '</div>';
+    }
+
+    // Show skipped object types
+    if (skippedCount > 0 && result.skippedTypes) {
+        html += '<div class="skipped-types-section">';
+        html += '<h4>Skipped Object Types (already exist):</h4>';
+        html += '<div class="object-type-items">';
+        result.skippedTypes.forEach(typeName => {
+            html += `<div class="object-type-item skipped">${typeName} (already exists)</div>`;
+        });
+        html += '</div>';
+        html += '</div>';
+    }
+
+    // Show errors
+    if (errorCount > 0 && result.errors) {
+        html += '<div class="error-types-section">';
+        html += '<h4>Failed Object Types:</h4>';
+        html += '<div class="object-type-items">';
+        result.errors.forEach(error => {
+            html += `<div class="object-type-item error">`;
+            html += `<strong>${error.typeName}:</strong> ${error.errorMessage}`;
+            if (error.sqlStatement) {
+                html += `<br><code>${error.sqlStatement}</code>`;
+            }
+            html += `</div>`;
+        });
+        html += '</div>';
+        html += '</div>';
+    }
+
+    detailsDiv.innerHTML = html;
+
+    // Show the results section
+    resultsDiv.style.display = 'block';
+}
+
+function toggleObjectTypeCreationResults(database) {
+    const resultsDiv = document.getElementById(`${database}-object-type-creation-results`);
+    const detailsDiv = document.getElementById(`${database}-object-type-creation-details`);
+    const toggleIndicator = resultsDiv.querySelector('.toggle-indicator');
+
+    if (detailsDiv.style.display === 'none' || !detailsDiv.style.display) {
+        detailsDiv.style.display = 'block';
+        toggleIndicator.textContent = '▲';
+    } else {
+        detailsDiv.style.display = 'none';
+        toggleIndicator.textContent = '▼';
+    }
 }
 
 

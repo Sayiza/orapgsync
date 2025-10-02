@@ -1,15 +1,14 @@
 # Oracle to PostgreSQL Synchronization and Migration Tool
 
-An enterprise-grade Oracle-to-PostgreSQL migration tool built with Quarkus, featuring event-driven architecture, plugin-based job system, and real-time progress tracking.
+An enterprise-grade Oracle-to-PostgreSQL migration tool built with Quarkus, featuring centralized state management, plugin-based job system, and real-time progress tracking.
 
 ## A) Development Plan and Current Status
 
 ### 🟢 Completed Features
 
 **Core Infrastructure**
-- ✅ **Event-Driven Architecture**: CDI-based events for loose coupling between components
+- ✅ **Centralized State Management**: Simple StateService for storing all application metadata
 - ✅ **Plugin-Based Job System**: Automatic job discovery and execution via CDI
-- ✅ **Thread-Safe State Management**: ReadWriteLock-based state managers for concurrent access
 - ✅ **Real-Time Progress Tracking**: WebSocket-style polling with detailed progress updates
 - ✅ **Configuration Management**: Runtime configurable database connections with UI
 
@@ -169,56 +168,47 @@ public class OracleTableMetadataExtractionJob extends AbstractDatabaseExtraction
 4. **Progress**: Real-time updates via `JobProgress` callbacks
 5. **Completion**: Results saved to state and returned to frontend
 
-### Event-Driven State Management
+### Centralized State Management
 
-**Why Events?**
-Traditional direct method calls create tight coupling and make testing difficult:
+**Why Centralized State?**
+A single StateService provides simple, straightforward state management:
 
-```java
-// Old approach (tightly coupled):
-service.updateTableMetadata(tables);  // Direct dependency
-
-// Event approach (loosely coupled):
-@Inject Event<TableMetadataUpdatedEvent> event;
-event.fire(TableMetadataUpdatedEvent.forOracle(tables));  // Decoupled
-```
-
-**Event Architecture Benefits**
-- **Loose Coupling**: Components communicate without direct dependencies
-- **Extensibility**: New listeners can be added without modifying existing code
-- **Testing**: Events can be mocked and verified independently
-- **Audit Trail**: All state changes are explicitly tracked through events
-
-**State Management Pattern**
 ```java
 @ApplicationScoped
-public class TableMetadataStateManager {
+public class StateService {
+    // Oracle metadata
+    List<String> oracleSchemaNames = new ArrayList<>();
+    List<TableMetadata> oracleTableMetadata = new ArrayList<>();
+    List<ObjectDataTypeMetaData> oracleObjectDataTypeMetaData = new ArrayList<>();
+    List<RowCountMetadata> oracleRowCountMetadata = new ArrayList<>();
 
-    // Thread-safe storage
-    private final ReadWriteLock lock = new ReentrantReadWriteLock();
-    private List<TableMetadata> oracleTableMetadata = new ArrayList<>();
+    // PostgreSQL metadata
+    List<String> postgresSchemaNames = new ArrayList<>();
+    List<TableMetadata> postgresTableMetadata = new ArrayList<>();
+    List<ObjectDataTypeMetaData> postgresObjectDataTypeMetaData = new ArrayList<>();
+    List<RowCountMetadata> postgresRowCountMetadata = new ArrayList<>();
 
-    // Event-driven updates
-    public void onTableMetadataUpdated(@Observes TableMetadataUpdatedEvent event) {
-        lock.writeLock().lock();
-        try {
-            // Update state based on event
-        } finally {
-            lock.writeLock().unlock();
-        }
+    // Creation results
+    SchemaCreationResult schemaCreationResult;
+    TableCreationResult tableCreationResult;
+    ObjectTypeCreationResult objectTypeCreationResult;
+
+    // Simple getters and setters
+    public void setOracleTableMetadata(List<TableMetadata> metadata) {
+        this.oracleTableMetadata = metadata;
     }
 
-    // Defensive copying for thread safety
     public List<TableMetadata> getOracleTableMetadata() {
-        lock.readLock().lock();
-        try {
-            return new ArrayList<>(oracleTableMetadata);  // Defensive copy
-        } finally {
-            lock.readLock().unlock();
-        }
+        return oracleTableMetadata;
     }
 }
 ```
+
+**State Management Benefits**
+- **Simplicity**: Direct access via getters and setters
+- **Clarity**: All state in one service, easy to understand
+- **Testing**: Easy to mock and verify state changes
+- **Performance**: No event overhead, direct updates
 
 ### Technology Stack
 
@@ -235,9 +225,8 @@ public class TableMetadataStateManager {
 
 **Concurrency and Safety**
 - **CompletableFuture**: Asynchronous job execution
-- **ReadWriteLocks**: Thread-safe state management
-- **Defensive Copying**: Immutable state exposure
-- **CDI Events**: Thread-safe event broadcasting
+- **CDI Scoping**: `@ApplicationScoped` services ensure single instance
+- **Simple State**: In-memory lists and objects for metadata storage
 
 ### Adding New Database Elements
 
@@ -253,16 +242,7 @@ The architecture makes adding new extraction types trivial:
    }
    ```
 
-2. **Create Event**
-   ```java
-   public class ViewUpdatedEvent extends DatabaseMetadataUpdatedEvent<ViewMetadata> {
-       public static ViewUpdatedEvent forOracle(List<ViewMetadata> views) {
-           return new ViewUpdatedEvent("ORACLE", views);
-       }
-   }
-   ```
-
-3. **Create Jobs**
+2. **Create Jobs**
    ```java
    @Dependent
    public class OracleViewExtractionJob extends AbstractDatabaseExtractionJob<ViewMetadata> {
@@ -284,10 +264,11 @@ The architecture makes adding new extraction types trivial:
    }
    ```
 
-4. **Done!**
+3. **Done!**
    - REST endpoint works automatically: `POST /api/jobs/oracle/view/extract`
    - JobRegistry discovers the job via CDI
    - Progress tracking and error handling included
    - Frontend polling works without changes
+   - State updates happen directly in StateService
 
 This architecture provides a solid foundation for Oracle-to-PostgreSQL migration with excellent extensibility for future enhancements.

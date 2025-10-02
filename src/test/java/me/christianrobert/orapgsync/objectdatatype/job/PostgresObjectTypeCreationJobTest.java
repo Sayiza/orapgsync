@@ -117,7 +117,7 @@ class PostgresObjectTypeCreationJobTest {
         assertEquals(100, lastProgress.getPercentage());
 
         // Verify state was updated
-        verify(stateService).updateObjectTypeCreationResult(result);
+        verify(stateService).setObjectTypeCreationResult(result);
     }
 
     @Test
@@ -142,7 +142,7 @@ class PostgresObjectTypeCreationJobTest {
 
         // Verify no database connection was attempted since no valid object types
         verify(postgresConnectionService, never()).getConnection();
-        verify(stateService).updateObjectTypeCreationResult(result);
+        verify(stateService).setObjectTypeCreationResult(result);
     }
 
     @Test
@@ -179,9 +179,9 @@ class PostgresObjectTypeCreationJobTest {
         // Verify skipped object types
         List<String> skippedTypes = result.getSkippedTypes();
         assertEquals(3, skippedTypes.size());
-        assertTrue(skippedTypes.containsAll(Arrays.asList("HR.EMPLOYEE_TYPE", "SALES.CUSTOMER_TYPE", "INVENTORY.PRODUCT_TYPE")));
+        assertTrue(skippedTypes.containsAll(Arrays.asList("hr.employee_type", "sales.customer_type", "inventory.product_type")));
 
-        verify(stateService).updateObjectTypeCreationResult(result);
+        verify(stateService).setObjectTypeCreationResult(result);
     }
 
     @Test
@@ -223,15 +223,15 @@ class PostgresObjectTypeCreationJobTest {
         // Verify created and skipped object types
         List<String> createdTypes = result.getCreatedTypes();
         assertEquals(2, createdTypes.size());
-        assertTrue(createdTypes.containsAll(Arrays.asList("SALES.CUSTOMER_TYPE", "INVENTORY.PRODUCT_TYPE")));
+        assertTrue(createdTypes.containsAll(Arrays.asList("sales.customer_type", "inventory.product_type")));
 
         List<String> skippedTypes = result.getSkippedTypes();
         assertEquals(1, skippedTypes.size());
-        assertTrue(skippedTypes.contains("HR.EMPLOYEE_TYPE"));
+        assertTrue(skippedTypes.contains("hr.employee_type"));
 
         // Verify CREATE TYPE statements were executed
         verify(createTypeStmt, times(2)).executeUpdate();
-        verify(stateService).updateObjectTypeCreationResult(result);
+        verify(stateService).setObjectTypeCreationResult(result);
     }
 
     @Test
@@ -274,11 +274,11 @@ class PostgresObjectTypeCreationJobTest {
         List<ObjectTypeCreationResult.ObjectTypeCreationError> errors = result.getErrors();
         assertEquals(1, errors.size());
         ObjectTypeCreationResult.ObjectTypeCreationError error = errors.get(0);
-        assertEquals("HR.EMPLOYEE_TYPE", error.getTypeName());
+        assertEquals("hr.employee_type", error.getTypeName());
         assertTrue(error.getErrorMessage().contains("Type already exists"));
         assertTrue(error.getSqlStatement().contains("CREATE TYPE"));
 
-        verify(stateService).updateObjectTypeCreationResult(result);
+        verify(stateService).setObjectTypeCreationResult(result);
     }
 
     @Test
@@ -305,7 +305,7 @@ class PostgresObjectTypeCreationJobTest {
         assertFalse(progressUpdates.isEmpty());
 
         // Verify state was not updated due to exception
-        verify(stateService, never()).updateObjectTypeCreationResult(any());
+        verify(stateService, never()).setObjectTypeCreationResult(any());
     }
 
     @Test
@@ -344,9 +344,9 @@ class PostgresObjectTypeCreationJobTest {
         assertTrue(progressUpdates.stream().anyMatch(p -> p.getPercentage() == 100));
 
         // Should have progress updates for each object type creation
-        assertTrue(progressUpdates.stream().anyMatch(p -> p.getCurrentTask().contains("EMPLOYEE_TYPE")));
-        assertTrue(progressUpdates.stream().anyMatch(p -> p.getCurrentTask().contains("CUSTOMER_TYPE")));
-        assertTrue(progressUpdates.stream().anyMatch(p -> p.getCurrentTask().contains("PRODUCT_TYPE")));
+        assertTrue(progressUpdates.stream().anyMatch(p -> p.getCurrentTask().contains("employee_type")));
+        assertTrue(progressUpdates.stream().anyMatch(p -> p.getCurrentTask().contains("customer_type")));
+        assertTrue(progressUpdates.stream().anyMatch(p -> p.getCurrentTask().contains("product_type")));
     }
 
     @Test
@@ -359,7 +359,7 @@ class PostgresObjectTypeCreationJobTest {
         objectTypeCreationJob.saveResultsToState(result);
 
         // Assert
-        verify(stateService).updateObjectTypeCreationResult(result);
+        verify(stateService).setObjectTypeCreationResult(result);
     }
 
     @Test

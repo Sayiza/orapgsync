@@ -45,7 +45,7 @@ public class OracleObjectDataTypeExtractionJob extends AbstractDatabaseExtractio
 
     @Override
     protected void saveResultsToState(List<ObjectDataTypeMetaData> results) {
-        stateService.updateOracleObjectDataTypeMetaData(results);
+        stateService.setOracleObjectDataTypeMetaData(results);
     }
 
     @Override

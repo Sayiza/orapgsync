@@ -41,7 +41,7 @@ public class PostgresSchemaService {
             List<String> schemas = fetchSchemas();
 
             // Save to global state
-            stateService.updatePostgresSchemaNames(schemas);
+            stateService.setPostgresSchemaNames(schemas);
             log.debug("Saved {} PostgreSQL schemas to global state", schemas.size());
 
             result.put("status", "success");

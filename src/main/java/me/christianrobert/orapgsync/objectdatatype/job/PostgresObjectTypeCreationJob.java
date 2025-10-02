@@ -45,7 +45,7 @@ public class PostgresObjectTypeCreationJob extends AbstractDatabaseWriteJob<Obje
 
     @Override
     protected void saveResultsToState(ObjectTypeCreationResult result) {
-        stateService.updateObjectTypeCreationResult(result);
+        stateService.setObjectTypeCreationResult(result);
     }
 
     @Override

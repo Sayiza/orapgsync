@@ -118,7 +118,7 @@ class PostgresTableCreationJobTest {
         assertEquals(100, lastProgress.getPercentage());
 
         // Verify state was updated
-        verify(stateService).updateTableCreationResult(result);
+        verify(stateService).setTableCreationResult(result);
     }
 
     @Test
@@ -143,7 +143,7 @@ class PostgresTableCreationJobTest {
 
         // Verify no database connection was attempted since no valid tables
         verify(postgresConnectionService, never()).getConnection();
-        verify(stateService).updateTableCreationResult(result);
+        verify(stateService).setTableCreationResult(result);
     }
 
     @Test
@@ -182,7 +182,7 @@ class PostgresTableCreationJobTest {
         assertEquals(3, skippedTables.size());
         assertTrue(skippedTables.containsAll(Arrays.asList("HR.EMPLOYEES", "SALES.CUSTOMERS", "INVENTORY.PRODUCTS")));
 
-        verify(stateService).updateTableCreationResult(result);
+        verify(stateService).setTableCreationResult(result);
     }
 
     @Test
@@ -237,7 +237,7 @@ class PostgresTableCreationJobTest {
 
         // Verify CREATE TABLE statements were executed
         verify(createTableStmt, times(2)).executeUpdate();
-        verify(stateService).updateTableCreationResult(result);
+        verify(stateService).setTableCreationResult(result);
     }
 
     @Test
@@ -288,7 +288,7 @@ class PostgresTableCreationJobTest {
         assertTrue(error.getErrorMessage().contains("Permission denied"));
         assertTrue(error.getSqlStatement().contains("CREATE TABLE"));
 
-        verify(stateService).updateTableCreationResult(result);
+        verify(stateService).setTableCreationResult(result);
     }
 
     @Test
@@ -315,7 +315,7 @@ class PostgresTableCreationJobTest {
         assertFalse(progressUpdates.isEmpty());
 
         // Verify state was not updated due to exception
-        verify(stateService, never()).updateTableCreationResult(any());
+        verify(stateService, never()).setTableCreationResult(any());
     }
 
     @Test
@@ -374,7 +374,7 @@ class PostgresTableCreationJobTest {
         tableCreationJob.saveResultsToState(result);
 
         // Assert
-        verify(stateService).updateTableCreationResult(result);
+        verify(stateService).setTableCreationResult(result);
     }
 
     @Test

@@ -46,7 +46,7 @@ public class PostgresTableCreationJob extends AbstractDatabaseWriteJob<TableCrea
 
     @Override
     protected void saveResultsToState(TableCreationResult result) {
-        stateService.updateTableCreationResult(result);
+        stateService.setTableCreationResult(result);
     }
 
     @Override

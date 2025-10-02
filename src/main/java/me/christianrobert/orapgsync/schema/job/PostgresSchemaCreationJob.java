@@ -43,7 +43,7 @@ public class PostgresSchemaCreationJob extends AbstractDatabaseWriteJob<SchemaCr
 
     @Override
     protected void saveResultsToState(SchemaCreationResult result) {
-        stateService.updateSchemaCreationResult(result);
+        stateService.setSchemaCreationResult(result);
     }
 
     @Override

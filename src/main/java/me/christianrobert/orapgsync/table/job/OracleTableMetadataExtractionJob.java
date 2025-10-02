@@ -42,7 +42,7 @@ public class OracleTableMetadataExtractionJob extends AbstractDatabaseExtraction
 
     @Override
     protected void saveResultsToState(List<TableMetadata> results) {
-        stateService.updateOracleTableMetadata(results);
+        stateService.setOracleTableMetadata(results);
     }
 
     @Override

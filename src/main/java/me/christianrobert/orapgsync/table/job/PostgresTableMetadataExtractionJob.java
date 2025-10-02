@@ -75,7 +75,7 @@ public class PostgresTableMetadataExtractionJob extends AbstractDatabaseExtracti
 
     @Override
     protected void saveResultsToState(List<TableMetadata> results) {
-        stateService.updatePostgresTableMetadata(results);
+        stateService.setPostgresTableMetadata(results);
     }
 
     @Override

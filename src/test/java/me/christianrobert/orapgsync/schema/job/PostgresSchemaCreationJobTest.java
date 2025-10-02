@@ -115,7 +115,7 @@ class PostgresSchemaCreationJobTest {
         assertEquals(100, lastProgress.getPercentage());
 
         // Verify state was updated
-        verify(stateService).updateSchemaCreationResult(result);
+        verify(stateService).setSchemaCreationResult(result);
     }
 
     @Test
@@ -136,7 +136,7 @@ class PostgresSchemaCreationJobTest {
 
         // Verify no database connection was attempted since no valid schemas
         verify(postgresConnectionService, never()).getConnection();
-        verify(stateService).updateSchemaCreationResult(result);
+        verify(stateService).setSchemaCreationResult(result);
     }
 
     @Test
@@ -170,7 +170,7 @@ class PostgresSchemaCreationJobTest {
         assertEquals(3, skippedSchemas.size());
         assertTrue(skippedSchemas.containsAll(Arrays.asList("HR", "SALES", "INVENTORY")));
 
-        verify(stateService).updateSchemaCreationResult(result);
+        verify(stateService).setSchemaCreationResult(result);
     }
 
     @Test
@@ -215,7 +215,7 @@ class PostgresSchemaCreationJobTest {
 
         // Verify CREATE SCHEMA statements were executed
         verify(createSchemaStmt, times(2)).executeUpdate();
-        verify(stateService).updateSchemaCreationResult(result);
+        verify(stateService).setSchemaCreationResult(result);
     }
 
     @Test
@@ -258,7 +258,7 @@ class PostgresSchemaCreationJobTest {
         assertTrue(error.getErrorMessage().contains("Permission denied"));
         assertTrue(error.getSqlStatement().contains("CREATE SCHEMA IF NOT EXISTS \"SALES\""));
 
-        verify(stateService).updateSchemaCreationResult(result);
+        verify(stateService).setSchemaCreationResult(result);
     }
 
     @Test
@@ -282,7 +282,7 @@ class PostgresSchemaCreationJobTest {
         assertFalse(progressUpdates.isEmpty());
 
         // Verify state was not updated due to exception
-        verify(stateService, never()).updateSchemaCreationResult(any());
+        verify(stateService, never()).setSchemaCreationResult(any());
     }
 
     @Test
@@ -332,7 +332,7 @@ class PostgresSchemaCreationJobTest {
         schemaCreationJob.saveResultsToState(result);
 
         // Assert
-        verify(stateService).updateSchemaCreationResult(result);
+        verify(stateService).setSchemaCreationResult(result);
     }
 
     @Test

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is an Oracle-to-PostgreSQL synchronization and migration tool built with Quarkus (Java 18). The system operates in multiple phases: schema discovery, table metadata extraction, object type processing, and data synchronization. The architecture follows enterprise Java patterns with CDI, event-driven state management, and plugin-based extensibility.
+This is an Oracle-to-PostgreSQL synchronization and migration tool built with Quarkus (Java 18). The system operates in multiple phases: schema discovery, table metadata extraction, object type processing, and data synchronization. The architecture follows enterprise Java patterns with CDI, centralized state management, and plugin-based extensibility.
 
 ## Build and Development Commands
 
@@ -22,26 +22,21 @@ This is an Oracle-to-PostgreSQL synchronization and migration tool built with Qu
 
 ## Architecture Overview
 
-### Event-Driven State Management Architecture
+### State Management Architecture
 
-The application uses a modern event-driven architecture with CDI events for loose coupling and extensibility:
+The application uses a centralized state management approach for storing metadata:
 
 #### 1. **State Management** (`core/state/`)
-- **Event-driven**: Uses CDI events for state updates
-- **Thread-safe**: State managers use ReadWriteLocks for concurrent access
-- **Separation of concerns**: Each data type has its own state manager
+- **Centralized service**: `StateService` manages all application state
+- **Simple setters/getters**: Direct state updates via service methods
+- **Separation of concerns**: Different state types are clearly organized
 
-**State Managers:**
-- `TableMetadataStateManager`: Manages table metadata for Oracle/PostgreSQL
-- `ObjectDataTypeStateManager`: Manages object type metadata
-- `SchemaStateManager`: Manages schema lists
-- `StateService`: Event dispatcher and backward-compatibility layer
-
-**Events:**
-- `TableMetadataUpdatedEvent`: Fired when table metadata is updated
-- `ObjectDataTypeUpdatedEvent`: Fired when object types are updated
-- `SchemaListUpdatedEvent`: Fired when schema lists are updated
-- `DatabaseMetadataUpdatedEvent<T>`: Base event class
+**State Service Properties:**
+- Oracle/PostgreSQL schema lists
+- Oracle/PostgreSQL table metadata
+- Oracle/PostgreSQL object type metadata
+- Oracle/PostgreSQL row count data
+- Creation results (schemas, tables, object types)
 
 #### 2. **Plugin-Based Job System** (`core/job/`)
 - **Auto-discovery**: Jobs are automatically discovered via CDI
@@ -105,10 +100,10 @@ Each database element type is completely independent:
 - Core modules only depend on cross-cutting concerns
 - No circular dependencies between domain modules
 
-### 2. **Event-Driven Communication**
-- State updates use CDI events (`@Observes`)
-- Loose coupling between components
-- Easy to add new listeners for state changes
+### 2. **Direct State Access**
+- Jobs update state directly via `StateService`
+- Simple and straightforward data flow
+- Clear ownership of state updates
 
 ### 3. **Plugin Architecture**
 - New extraction types are automatically discovered
@@ -122,8 +117,8 @@ Each database element type is completely independent:
 
 ### 5. **CDI Best Practices**
 - Proper scoping: `@ApplicationScoped` for singletons, `@Dependent` for jobs
-- Event-driven: `@Inject Event<T>` for firing events
-- Observer pattern: `@Observes` for event handling
+- Dependency injection: `@Inject` for service dependencies
+- Service-based state management
 
 ## Adding New Database Elements
 
@@ -140,17 +135,7 @@ public class RowCountMetadata {
 }
 ```
 
-### 2. Create Event (Optional)
-```java
-// In core/event/
-public class RowCountUpdatedEvent extends DatabaseMetadataUpdatedEvent<RowCountMetadata> {
-    public static RowCountUpdatedEvent forOracle(List<RowCountMetadata> rowCounts) {
-        return new RowCountUpdatedEvent("ORACLE", rowCounts);
-    }
-}
-```
-
-### 3. Create Extraction Jobs
+### 2. Create Extraction Jobs
 ```java
 // Oracle job
 @Dependent
@@ -166,7 +151,7 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
 
     @Override
     protected void saveResultsToState(List<RowCountMetadata> results) {
-        // Fire event or update state
+        stateService.setOracleRowCountMetadata(results);
     }
 
     @Override
@@ -176,16 +161,16 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
 }
 ```
 
-### 4. Done!
+### 3. Done!
 - Jobs are automatically discovered by `JobRegistry`
 - REST endpoints work immediately: `POST /api/jobs/oracle/row-count/extract`
-- State management works through events
+- State is updated directly in `StateService`
 - Progress tracking and error handling included
 
 ## Current Implementation Status
 
 ### ✅ Completed Features
-- Event-driven state management with CDI
+- Centralized state management via StateService
 - Plugin-based job discovery and execution
 - Table metadata extraction (Oracle ↔ PostgreSQL)
 - Object type metadata extraction (Oracle ↔ PostgreSQL)
@@ -203,9 +188,9 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
 
 ### 🎯 Extension Points
 - New job types: Implement `DatabaseExtractionJob<T>`
-- State listeners: Use `@Observes` on event types
+- State management: Add new properties to `StateService`
 - REST endpoints: Leverage existing generic job endpoints
-- Custom processing: Add event listeners for specialized logic
+- Custom processing: Extend job classes for specialized logic
 
 ## Database Configuration
 
@@ -232,18 +217,18 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
 - **Domain modules**: Independent, only depend on `core/`, `database/`, `config/`
 - **Pure data models**: No service dependencies in model classes
 - **CDI annotations**: Use `@ApplicationScoped` for services, `@Dependent` for jobs
-- **Event handling**: Prefer events over direct method calls for loose coupling
+- **State management**: Jobs update StateService directly via injected dependency
 
 ### Testing Strategy
 - **Framework**: JUnit 5 with Mockito
-- **Focus**: Test job logic, state management, event handling
+- **Focus**: Test job logic, state management, data extraction
 - **Integration**: Test complete job execution flows
-- **Mocking**: Mock database connections for unit tests
+- **Mocking**: Mock database connections and state service for unit tests
 
 ### Performance Considerations
-- **State management**: Thread-safe with ReadWriteLocks
+- **State management**: Simple in-memory storage via StateService
 - **Job execution**: Asynchronous with CompletableFuture
-- **Memory**: Defensive copying in state managers prevents memory leaks
+- **Memory**: Efficient data structures for metadata storage
 - **Connection pooling**: Managed by Quarkus datasource configuration
 
 This architecture provides a solid foundation for Oracle-to-PostgreSQL migration with excellent extensibility for future enhancements.

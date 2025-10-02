@@ -1,31 +1,16 @@
 package me.christianrobert.orapgsync.core.service;
 
 import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.enterprise.event.Event;
-import jakarta.inject.Inject;
-import me.christianrobert.orapgsync.core.event.ObjectDataTypeUpdatedEvent;
-import me.christianrobert.orapgsync.core.event.ObjectTypeCreationCompletedEvent;
-import me.christianrobert.orapgsync.core.event.RowCountUpdatedEvent;
-import me.christianrobert.orapgsync.core.event.SchemaCreationCompletedEvent;
-import me.christianrobert.orapgsync.core.event.SchemaListUpdatedEvent;
-import me.christianrobert.orapgsync.core.event.TableCreationCompletedEvent;
-import me.christianrobert.orapgsync.core.event.TableMetadataUpdatedEvent;
-import me.christianrobert.orapgsync.core.state.ObjectDataTypeStateManager;
-import me.christianrobert.orapgsync.core.state.ObjectTypeCreationStateManager;
-import me.christianrobert.orapgsync.core.state.RowCountStateManager;
-import me.christianrobert.orapgsync.core.state.SchemaCreationStateManager;
-import me.christianrobert.orapgsync.core.state.SchemaStateManager;
-import me.christianrobert.orapgsync.core.state.TableCreationStateManager;
-import me.christianrobert.orapgsync.core.state.TableMetadataStateManager;
 import me.christianrobert.orapgsync.objectdatatype.model.ObjectDataTypeMetaData;
 import me.christianrobert.orapgsync.objectdatatype.model.ObjectTypeCreationResult;
-import me.christianrobert.orapgsync.rowcount.model.RowCountMetadata;
+import me.christianrobert.orapgsync.transfer.model.RowCountMetadata;
 import me.christianrobert.orapgsync.schema.model.SchemaCreationResult;
 import me.christianrobert.orapgsync.table.model.TableCreationResult;
 import me.christianrobert.orapgsync.table.model.TableMetadata;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -40,148 +25,106 @@ public class StateService {
 
     private static final Logger log = LoggerFactory.getLogger(StateService.class);
 
-    @Inject
-    private Event<TableMetadataUpdatedEvent> tableMetadataEvent;
+    List<String> oracleSchemaNames = new ArrayList<>();
+    List<String> postgresSchemaNames = new ArrayList<>();
+    SchemaCreationResult schemaCreationResult;
 
-    @Inject
-    private Event<ObjectDataTypeUpdatedEvent> objectDataTypeEvent;
+    List<ObjectDataTypeMetaData> oracleObjectDataTypeMetaData = new ArrayList<>();
+    List<ObjectDataTypeMetaData> postgresObjectDataTypeMetaData = new ArrayList<>();
+    ObjectTypeCreationResult objectTypeCreationResult;
 
-    @Inject
-    private Event<SchemaListUpdatedEvent> schemaListEvent;
+    List<RowCountMetadata> oracleRowCountMetadata = new ArrayList<>();
+    List<RowCountMetadata> postgresRowCountMetadata = new ArrayList<>();
 
-    @Inject
-    private Event<RowCountUpdatedEvent> rowCountEvent;
-
-    @Inject
-    private Event<SchemaCreationCompletedEvent> schemaCreationEvent;
-
-    @Inject
-    private Event<ObjectTypeCreationCompletedEvent> objectTypeCreationEvent;
-
-    @Inject
-    private Event<TableCreationCompletedEvent> tableCreationEvent;
-
-    @Inject
-    private TableMetadataStateManager tableMetadataStateManager;
-
-    @Inject
-    private ObjectDataTypeStateManager objectDataTypeStateManager;
-
-    @Inject
-    private SchemaStateManager schemaStateManager;
-
-    @Inject
-    private RowCountStateManager rowCountStateManager;
-
-    @Inject
-    private SchemaCreationStateManager schemaCreationStateManager;
-
-    @Inject
-    private ObjectTypeCreationStateManager objectTypeCreationStateManager;
-
-    @Inject
-    private TableCreationStateManager tableCreationStateManager;
-
-    // ==================== Query Methods (delegate to state managers) ====================
+    List<TableMetadata> oracleTableMetadata = new ArrayList<>();
+    List<TableMetadata> postgresTableMetadata = new ArrayList<>();
+    TableCreationResult tableCreationResult;
 
     public List<String> getOracleSchemaNames() {
-        return schemaStateManager.getOracleSchemaNames();
+        return oracleSchemaNames;
+    }
+
+    public void setOracleSchemaNames(List<String> oracleSchemaNames) {
+        this.oracleSchemaNames = oracleSchemaNames;
     }
 
     public List<String> getPostgresSchemaNames() {
-        return schemaStateManager.getPostgresSchemaNames();
+        return postgresSchemaNames;
     }
 
-    public List<ObjectDataTypeMetaData> getPostgresObjectDataTypeMetaData() {
-        return objectDataTypeStateManager.getPostgresObjectDataTypeMetaData();
+    public void setPostgresSchemaNames(List<String> postgresSchemaNames) {
+        this.postgresSchemaNames = postgresSchemaNames;
+    }
+
+    public SchemaCreationResult getSchemaCreationResult() {
+        return schemaCreationResult;
+    }
+
+    public void setSchemaCreationResult(SchemaCreationResult schemaCreationResult) {
+        this.schemaCreationResult = schemaCreationResult;
     }
 
     public List<ObjectDataTypeMetaData> getOracleObjectDataTypeMetaData() {
-        return objectDataTypeStateManager.getOracleObjectDataTypeMetaData();
+        return oracleObjectDataTypeMetaData;
+    }
+
+    public void setOracleObjectDataTypeMetaData(List<ObjectDataTypeMetaData> oracleObjectDataTypeMetaData) {
+        this.oracleObjectDataTypeMetaData = oracleObjectDataTypeMetaData;
+    }
+
+    public List<ObjectDataTypeMetaData> getPostgresObjectDataTypeMetaData() {
+        return postgresObjectDataTypeMetaData;
+    }
+
+    public void setPostgresObjectDataTypeMetaData(List<ObjectDataTypeMetaData> postgresObjectDataTypeMetaData) {
+        this.postgresObjectDataTypeMetaData = postgresObjectDataTypeMetaData;
+    }
+
+    public ObjectTypeCreationResult getObjectTypeCreationResult() {
+        return objectTypeCreationResult;
+    }
+
+    public void setObjectTypeCreationResult(ObjectTypeCreationResult objectTypeCreationResult) {
+        this.objectTypeCreationResult = objectTypeCreationResult;
+    }
+
+    public List<RowCountMetadata> getOracleRowCountMetadata() {
+        return oracleRowCountMetadata;
+    }
+
+    public void setOracleRowCountMetadata(List<RowCountMetadata> oracleRowCountMetadata) {
+        this.oracleRowCountMetadata = oracleRowCountMetadata;
+    }
+
+    public List<RowCountMetadata> getPostgresRowCountMetadata() {
+        return postgresRowCountMetadata;
+    }
+
+    public void setPostgresRowCountMetadata(List<RowCountMetadata> postgresRowCountMetadata) {
+        this.postgresRowCountMetadata = postgresRowCountMetadata;
     }
 
     public List<TableMetadata> getOracleTableMetadata() {
-        return tableMetadataStateManager.getOracleTableMetadata();
+        return oracleTableMetadata;
+    }
+
+    public void setOracleTableMetadata(List<TableMetadata> oracleTableMetadata) {
+        this.oracleTableMetadata = oracleTableMetadata;
     }
 
     public List<TableMetadata> getPostgresTableMetadata() {
-        return tableMetadataStateManager.getPostgresTableMetadata();
+        return postgresTableMetadata;
     }
 
-    public List<RowCountMetadata> getOracleRowCounts() {
-        return rowCountStateManager.getOracleRowCounts();
+    public void setPostgresTableMetadata(List<TableMetadata> postgresTableMetadata) {
+        this.postgresTableMetadata = postgresTableMetadata;
     }
 
-    public List<RowCountMetadata> getPostgresRowCounts() {
-        return rowCountStateManager.getPostgresRowCounts();
+    public TableCreationResult getTableCreationResult() {
+        return tableCreationResult;
     }
 
-    public SchemaCreationResult getLastPostgresSchemaCreationResult() {
-        return schemaCreationStateManager.getLastPostgresCreationResult();
+    public void setTableCreationResult(TableCreationResult tableCreationResult) {
+        this.tableCreationResult = tableCreationResult;
     }
-
-    public boolean hasPostgresSchemaCreationHistory() {
-        return schemaCreationStateManager.hasPostgresCreationHistory();
-    }
-
-    // ==================== Update Methods (fire events) ====================
-
-    public void updateOracleSchemaNames(List<String> schemas) {
-        log.info("Firing Oracle schema list update event with {} schemas", schemas.size());
-        schemaListEvent.fire(SchemaListUpdatedEvent.forOracle(schemas));
-    }
-
-    public void updatePostgresSchemaNames(List<String> schemas) {
-        log.info("Firing PostgreSQL schema list update event with {} schemas", schemas.size());
-        schemaListEvent.fire(SchemaListUpdatedEvent.forPostgres(schemas));
-    }
-
-    public void updateOracleObjectDataTypeMetaData(List<ObjectDataTypeMetaData> objectDataTypes) {
-        log.info("Firing Oracle object data type update event with {} types", objectDataTypes.size());
-        objectDataTypeEvent.fire(ObjectDataTypeUpdatedEvent.forOracle(objectDataTypes));
-    }
-
-    public void updatePostgresObjectDataTypeMetaData(List<ObjectDataTypeMetaData> objectDataTypes) {
-        log.info("Firing PostgreSQL object data type update event with {} types", objectDataTypes.size());
-        objectDataTypeEvent.fire(ObjectDataTypeUpdatedEvent.forPostgres(objectDataTypes));
-    }
-
-    public void updateOracleTableMetadata(List<TableMetadata> tableMetadata) {
-        log.info("Firing Oracle table metadata update event with {} tables", tableMetadata.size());
-        tableMetadataEvent.fire(TableMetadataUpdatedEvent.forOracle(tableMetadata));
-    }
-
-    public void updatePostgresTableMetadata(List<TableMetadata> tableMetadata) {
-        log.info("Firing PostgreSQL table metadata update event with {} tables", tableMetadata.size());
-        tableMetadataEvent.fire(TableMetadataUpdatedEvent.forPostgres(tableMetadata));
-    }
-
-    public void updateOracleRowCounts(List<RowCountMetadata> rowCountMetadata) {
-        log.info("Firing Oracle row count update event with {} tables", rowCountMetadata.size());
-        rowCountEvent.fire(RowCountUpdatedEvent.forOracle(rowCountMetadata));
-    }
-
-    public void updatePostgresRowCounts(List<RowCountMetadata> rowCountMetadata) {
-        log.info("Firing PostgreSQL row count update event with {} tables", rowCountMetadata.size());
-        rowCountEvent.fire(RowCountUpdatedEvent.forPostgres(rowCountMetadata));
-    }
-
-    public void updateSchemaCreationResult(SchemaCreationResult result) {
-        log.info("Firing schema creation completed event: created={}, skipped={}, errors={}",
-                result.getCreatedCount(), result.getSkippedCount(), result.getErrorCount());
-        schemaCreationEvent.fire(SchemaCreationCompletedEvent.forPostgres(result));
-    }
-
-    public void updateObjectTypeCreationResult(ObjectTypeCreationResult result) {
-        log.info("Firing object type creation completed event: created={}, skipped={}, errors={}",
-                result.getCreatedCount(), result.getSkippedCount(), result.getErrorCount());
-        objectTypeCreationEvent.fire(ObjectTypeCreationCompletedEvent.forPostgres(result));
-    }
-
-    public void updateTableCreationResult(TableCreationResult result) {
-        log.info("Firing table creation completed event: created={}, skipped={}, errors={}",
-                result.getCreatedCount(), result.getSkippedCount(), result.getErrorCount());
-        tableCreationEvent.fire(TableCreationCompletedEvent.forPostgres(result));
-    }
-
 }

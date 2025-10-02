@@ -41,7 +41,7 @@ public class OracleSchemaService {
             List<String> schemas = fetchSchemas();
 
             // Save to global state
-            stateService.updateOracleSchemaNames(schemas);
+            stateService.setOracleSchemaNames(schemas);
             log.debug("Saved {} Oracle schemas to global state", schemas.size());
 
             result.put("status", "success");
