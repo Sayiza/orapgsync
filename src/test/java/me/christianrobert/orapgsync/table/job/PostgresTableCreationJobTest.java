@@ -257,17 +257,12 @@ class PostgresTableCreationJobTest {
         when(existingTablesStmt.executeQuery()).thenReturn(existingTablesRs);
         when(existingTablesRs.next()).thenReturn(false);
 
-        // Mock table creation - first succeeds, second fails
+        // Mock table creation - first fails, second succeeds (natural order: HR.EMPLOYEES then SALES.CUSTOMERS)
         PreparedStatement createTableStmt = mock(PreparedStatement.class);
         when(mockConnection.prepareStatement(contains("CREATE TABLE"))).thenReturn(createTableStmt);
         when(createTableStmt.executeUpdate())
-                .thenReturn(1) // CUSTOMERS succeeds (alphabetical order)
-                .thenThrow(new SQLException("Permission denied")); // EMPLOYEES fails
-
-        // Mock foreign key constraint statements (optional)
-        PreparedStatement fkStmt = mock(PreparedStatement.class);
-        when(mockConnection.prepareStatement(contains("ALTER TABLE"))).thenReturn(fkStmt);
-        when(fkStmt.executeUpdate()).thenReturn(1);
+                .thenThrow(new SQLException("Permission denied")) // EMPLOYEES fails (processed first)
+                .thenReturn(1); // CUSTOMERS succeeds (processed second)
 
         // Act
         CompletableFuture<TableCreationResult> future = tableCreationJob.execute(progressCallback);
@@ -340,10 +335,6 @@ class PostgresTableCreationJobTest {
         when(mockConnection.prepareStatement(contains("CREATE TABLE"))).thenReturn(createTableStmt);
         when(createTableStmt.executeUpdate()).thenReturn(1);
 
-        PreparedStatement fkStmt = mock(PreparedStatement.class);
-        when(mockConnection.prepareStatement(contains("ALTER TABLE"))).thenReturn(fkStmt);
-        when(fkStmt.executeUpdate()).thenReturn(1);
-
         // Act
         CompletableFuture<TableCreationResult> future = tableCreationJob.execute(progressCallback);
         future.get();
@@ -355,8 +346,7 @@ class PostgresTableCreationJobTest {
         assertTrue(progressUpdates.stream().anyMatch(p -> p.getCurrentTask().contains("Initializing")));
         assertTrue(progressUpdates.stream().anyMatch(p -> p.getCurrentTask().contains("Connecting")));
         assertTrue(progressUpdates.stream().anyMatch(p -> p.getCurrentTask().contains("Creating table")));
-        assertTrue(progressUpdates.stream().anyMatch(p -> p.getCurrentTask().contains("foreign key constraints")));
-        assertTrue(progressUpdates.stream().anyMatch(p -> p.getPercentage() == 100));
+        assertTrue(progressUpdates.stream().anyMatch(p -> p.getPercentage() == 90)); // Changed from 100 since we stop at "Creation complete"
 
         // Should have progress updates for each table creation
         assertTrue(progressUpdates.stream().anyMatch(p -> p.getCurrentTask().contains("CUSTOMERS")));
@@ -466,15 +456,10 @@ class PostgresTableCreationJobTest {
         when(existingTablesStmt.executeQuery()).thenReturn(existingTablesRs);
         when(existingTablesRs.next()).thenReturn(false);
 
-        // Mock table creation
+        // Mock table creation (FK constraints are no longer created during table creation)
         PreparedStatement createTableStmt = mock(PreparedStatement.class);
         when(mockConnection.prepareStatement(contains("CREATE TABLE"))).thenReturn(createTableStmt);
         when(createTableStmt.executeUpdate()).thenReturn(1);
-
-        // Mock foreign key constraint creation
-        PreparedStatement fkStmt = mock(PreparedStatement.class);
-        when(mockConnection.prepareStatement(contains("ALTER TABLE"))).thenReturn(fkStmt);
-        when(fkStmt.executeUpdate()).thenReturn(1);
 
         // Act
         CompletableFuture<TableCreationResult> future = tableCreationJob.execute(progressCallback);
@@ -487,9 +472,8 @@ class PostgresTableCreationJobTest {
         assertEquals(0, result.getErrorCount());
         assertTrue(result.isSuccessful());
 
-        // Verify both CREATE TABLE and ALTER TABLE (FK) statements were executed
+        // Verify only CREATE TABLE statements were executed (no FK constraints yet)
         verify(createTableStmt, times(2)).executeUpdate();
-        verify(fkStmt, atLeastOnce()).executeUpdate(); // At least one FK constraint added
     }
 
     private TableMetadata createTable(String schema, String tableName) {

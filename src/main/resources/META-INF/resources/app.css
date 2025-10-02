@@ -11,6 +11,14 @@ body {
     line-height: 1.6;
 }
 
+table {
+    table-layout: fixed ;
+    width: 100% ;
+}
+td {
+    width: 50% ;
+}
+
 .header {
     background: #334;
     color: white;
