@@ -5,7 +5,7 @@ import jakarta.inject.Inject;
 import me.christianrobert.orapgsync.core.job.AbstractDatabaseWriteJob;
 import me.christianrobert.orapgsync.core.job.model.JobProgress;
 import me.christianrobert.orapgsync.database.service.PostgresConnectionService;
-import me.christianrobert.orapgsync.schema.model.SchemaCreationResult;
+import me.christianrobert.orapgsync.core.job.model.schema.SchemaCreationResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

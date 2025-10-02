@@ -3,7 +3,7 @@ package me.christianrobert.orapgsync.schema.job;
 import me.christianrobert.orapgsync.core.job.model.JobProgress;
 import me.christianrobert.orapgsync.core.service.StateService;
 import me.christianrobert.orapgsync.database.service.PostgresConnectionService;
-import me.christianrobert.orapgsync.schema.model.SchemaCreationResult;
+import me.christianrobert.orapgsync.core.job.model.schema.SchemaCreationResult;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 

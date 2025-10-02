@@ -3,9 +3,9 @@ package me.christianrobert.orapgsync.objectdatatype.job;
 import me.christianrobert.orapgsync.core.job.model.JobProgress;
 import me.christianrobert.orapgsync.core.service.StateService;
 import me.christianrobert.orapgsync.database.service.PostgresConnectionService;
-import me.christianrobert.orapgsync.objectdatatype.model.ObjectDataTypeMetaData;
-import me.christianrobert.orapgsync.objectdatatype.model.ObjectDataTypeVariable;
-import me.christianrobert.orapgsync.objectdatatype.model.ObjectTypeCreationResult;
+import me.christianrobert.orapgsync.core.job.model.objectdatatype.ObjectDataTypeMetaData;
+import me.christianrobert.orapgsync.core.job.model.objectdatatype.ObjectDataTypeVariable;
+import me.christianrobert.orapgsync.core.job.model.objectdatatype.ObjectTypeCreationResult;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 

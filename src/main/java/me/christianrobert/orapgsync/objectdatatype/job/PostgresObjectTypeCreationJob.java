@@ -6,9 +6,9 @@ import me.christianrobert.orapgsync.core.job.AbstractDatabaseWriteJob;
 import me.christianrobert.orapgsync.core.job.model.JobProgress;
 import me.christianrobert.orapgsync.core.tools.TypeConverter;
 import me.christianrobert.orapgsync.database.service.PostgresConnectionService;
-import me.christianrobert.orapgsync.objectdatatype.model.ObjectDataTypeMetaData;
-import me.christianrobert.orapgsync.objectdatatype.model.ObjectDataTypeVariable;
-import me.christianrobert.orapgsync.objectdatatype.model.ObjectTypeCreationResult;
+import me.christianrobert.orapgsync.core.job.model.objectdatatype.ObjectDataTypeMetaData;
+import me.christianrobert.orapgsync.core.job.model.objectdatatype.ObjectDataTypeVariable;
+import me.christianrobert.orapgsync.core.job.model.objectdatatype.ObjectTypeCreationResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

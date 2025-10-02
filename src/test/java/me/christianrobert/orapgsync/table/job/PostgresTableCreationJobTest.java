@@ -3,10 +3,10 @@ package me.christianrobert.orapgsync.table.job;
 import me.christianrobert.orapgsync.core.job.model.JobProgress;
 import me.christianrobert.orapgsync.core.service.StateService;
 import me.christianrobert.orapgsync.database.service.PostgresConnectionService;
-import me.christianrobert.orapgsync.table.model.ColumnMetadata;
-import me.christianrobert.orapgsync.table.model.ConstraintMetadata;
-import me.christianrobert.orapgsync.table.model.TableCreationResult;
-import me.christianrobert.orapgsync.table.model.TableMetadata;
+import me.christianrobert.orapgsync.core.job.model.table.ColumnMetadata;
+import me.christianrobert.orapgsync.core.job.model.table.ConstraintMetadata;
+import me.christianrobert.orapgsync.core.job.model.table.TableCreationResult;
+import me.christianrobert.orapgsync.core.job.model.table.TableMetadata;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 

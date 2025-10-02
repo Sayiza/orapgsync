@@ -1,4 +1,4 @@
-package me.christianrobert.orapgsync.transfer.model;
+package me.christianrobert.orapgsync.core.job.model.transfer;
 
 /**
  * Represents row count metadata for a specific table.

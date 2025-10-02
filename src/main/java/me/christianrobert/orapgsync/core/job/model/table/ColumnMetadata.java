@@ -1,4 +1,4 @@
-package me.christianrobert.orapgsync.table.model;
+package me.christianrobert.orapgsync.core.job.model.table;
 
 /**
  * Represents a column's metadata including data type, constraints, and default values.

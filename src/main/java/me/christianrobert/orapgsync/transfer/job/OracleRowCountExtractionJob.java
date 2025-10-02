@@ -5,7 +5,7 @@ import jakarta.inject.Inject;
 import me.christianrobert.orapgsync.core.job.AbstractDatabaseExtractionJob;
 import me.christianrobert.orapgsync.core.job.model.JobProgress;
 import me.christianrobert.orapgsync.database.service.OracleConnectionService;
-import me.christianrobert.orapgsync.transfer.model.RowCountMetadata;
+import me.christianrobert.orapgsync.core.job.model.transfer.RowCountMetadata;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

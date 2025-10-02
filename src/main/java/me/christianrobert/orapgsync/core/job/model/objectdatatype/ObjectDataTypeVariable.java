@@ -1,4 +1,4 @@
-package me.christianrobert.orapgsync.objectdatatype.model;
+package me.christianrobert.orapgsync.core.job.model.objectdatatype;
 
 public class ObjectDataTypeVariable {
   private String name;

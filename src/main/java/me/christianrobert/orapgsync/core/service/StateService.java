@@ -1,12 +1,12 @@
 package me.christianrobert.orapgsync.core.service;
 
 import jakarta.enterprise.context.ApplicationScoped;
-import me.christianrobert.orapgsync.objectdatatype.model.ObjectDataTypeMetaData;
-import me.christianrobert.orapgsync.objectdatatype.model.ObjectTypeCreationResult;
-import me.christianrobert.orapgsync.transfer.model.RowCountMetadata;
-import me.christianrobert.orapgsync.schema.model.SchemaCreationResult;
-import me.christianrobert.orapgsync.table.model.TableCreationResult;
-import me.christianrobert.orapgsync.table.model.TableMetadata;
+import me.christianrobert.orapgsync.core.job.model.objectdatatype.ObjectDataTypeMetaData;
+import me.christianrobert.orapgsync.core.job.model.objectdatatype.ObjectTypeCreationResult;
+import me.christianrobert.orapgsync.core.job.model.transfer.RowCountMetadata;
+import me.christianrobert.orapgsync.core.job.model.schema.SchemaCreationResult;
+import me.christianrobert.orapgsync.core.job.model.table.TableCreationResult;
+import me.christianrobert.orapgsync.core.job.model.table.TableMetadata;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

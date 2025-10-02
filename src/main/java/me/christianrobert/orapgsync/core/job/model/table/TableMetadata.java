@@ -1,4 +1,4 @@
-package me.christianrobert.orapgsync.table.model;
+package me.christianrobert.orapgsync.core.job.model.table;
 
 import java.util.ArrayList;
 import java.util.List;

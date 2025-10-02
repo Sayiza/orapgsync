@@ -6,10 +6,10 @@ import me.christianrobert.orapgsync.core.job.AbstractDatabaseWriteJob;
 import me.christianrobert.orapgsync.core.job.model.JobProgress;
 import me.christianrobert.orapgsync.core.tools.TypeConverter;
 import me.christianrobert.orapgsync.database.service.PostgresConnectionService;
-import me.christianrobert.orapgsync.table.model.ColumnMetadata;
-import me.christianrobert.orapgsync.table.model.ConstraintMetadata;
-import me.christianrobert.orapgsync.table.model.TableCreationResult;
-import me.christianrobert.orapgsync.table.model.TableMetadata;
+import me.christianrobert.orapgsync.core.job.model.table.ColumnMetadata;
+import me.christianrobert.orapgsync.core.job.model.table.ConstraintMetadata;
+import me.christianrobert.orapgsync.core.job.model.table.TableCreationResult;
+import me.christianrobert.orapgsync.core.job.model.table.TableMetadata;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

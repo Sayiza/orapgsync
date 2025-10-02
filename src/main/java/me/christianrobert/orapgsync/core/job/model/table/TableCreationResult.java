@@ -1,4 +1,4 @@
-package me.christianrobert.orapgsync.table.model;
+package me.christianrobert.orapgsync.core.job.model.table;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;

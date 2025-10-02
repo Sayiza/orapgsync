@@ -1,8 +1,8 @@
 package me.christianrobert.orapgsync.table.service;
 
-import me.christianrobert.orapgsync.table.model.ColumnMetadata;
-import me.christianrobert.orapgsync.table.model.ConstraintMetadata;
-import me.christianrobert.orapgsync.table.model.TableMetadata;
+import me.christianrobert.orapgsync.core.job.model.table.ColumnMetadata;
+import me.christianrobert.orapgsync.core.job.model.table.ConstraintMetadata;
+import me.christianrobert.orapgsync.core.job.model.table.TableMetadata;
 import me.christianrobert.orapgsync.core.tools.UserExcluder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
