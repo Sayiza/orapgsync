@@ -25,8 +25,18 @@
   <table class="database-comparison-table">
     <thead>
       <tr>
-        <th class="source-column">Oracle (Source)</th>
-        <th class="target-column">PostgreSQL (Target)</th>
+        <th >
+          <div class="component-info">
+            <span>Oracle (Source)</span>
+            <button class="action-btn btn-warning " onclick="resetAll()">State Reset</button>
+          </div>
+        </th>
+        <th>
+          <div class="component-info">
+            <span>PostgreSQL (Target)</span>
+            <button class="action-btn btn-primary" onclick="startAll()">Full Sync</button>
+          </div>
+        </th>
       </tr>
     </thead>
     <tbody>
@@ -35,14 +45,14 @@
           <div class="connection-status" id="oracle-connection">
             <span class="status-indicator disconnected"></span>
             <span class="status-text">Connection: Not connected</span>
-            <button class="test-connection-btn" onclick="testOracleConnection()">Test</button>
+            <button class="action-btn test-connection-btn" onclick="testOracleConnection()">Test</button>
           </div>
         </td>
         <td class="target-cell">
           <div class="connection-status" id="postgres-connection">
             <span class="status-indicator disconnected"></span>
             <span class="status-text">Connection: Not connected</span>
-            <button class="test-connection-btn" onclick="testPostgresConnection()">Test</button>
+            <button class="action-btn test-connection-btn" onclick="testPostgresConnection()">Test</button>
           </div>
         </td>
       </tr>
@@ -305,7 +315,7 @@
         <button type="button" id="save-config-btn" class="btn btn-primary" onclick="saveConfiguration()">
           Save Configuration
         </button>
-        <button type="button" id="reset-config-btn" class="btn btn-secondary" onclick="resetConfiguration()">
+        <button type="button" id="reset-config-btn" class="btn btn-warning" onclick="resetConfiguration()">
           Reset to Defaults
         </button>
       </div>

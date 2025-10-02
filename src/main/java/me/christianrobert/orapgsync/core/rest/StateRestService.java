@@ -48,4 +48,12 @@ public class StateRestService {
 
         return Response.ok(state).build();
     }
+
+    @GET
+    @Path("/reset")
+    public Response resetState() {
+        log.info("Resetting application state");
+        stateService.resetState();
+        return Response.ok(Map.of("message", "State reset successfully")).build();
+    }
 }

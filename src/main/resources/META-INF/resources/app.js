@@ -2144,6 +2144,45 @@ function toggleTableCreationResults(database) {
     }
 }
 
+// Reset all application state
+async function resetAll() {
+    console.log('Resetting all application state...');
+
+    if (!confirm('Are you sure you want to reset all application state? This will clear all extracted metadata but will not affect database configurations.')) {
+        return;
+    }
+
+    updateMessage('Resetting application state...');
+    updateProgress(0, 'Resetting...');
+
+    try {
+        const response = await fetch('/api/state/reset');
+        const result = await response.json();
+
+        if (response.ok) {
+            console.log('State reset successfully:', result);
+            updateMessage('Application state reset successfully');
+            updateProgress(0, 'Ready to start');
+
+            // Reset all UI elements to default state
+            initializeInterface();
+
+        } else {
+            throw new Error(result.message || 'Failed to reset state');
+        }
+
+    } catch (error) {
+        console.error('Error resetting state:', error);
+        updateMessage('Failed to reset state: ' + error.message);
+    }
+}
+
+// Start full sync (placeholder for future implementation)
+async function startAll() {
+    console.log('Starting full sync...');
+    updateMessage('Full sync feature coming soon...');
+}
+
 // Load configuration when page loads
 document.addEventListener('DOMContentLoaded', function() {
     // Load configuration after a short delay to ensure all other initialization is complete

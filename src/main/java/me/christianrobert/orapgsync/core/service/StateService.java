@@ -127,4 +127,19 @@ public class StateService {
     public void setTableCreationResult(TableCreationResult tableCreationResult) {
         this.tableCreationResult = tableCreationResult;
     }
+
+    public void resetState() {
+        log.info("Resetting all state to default values");
+        this.oracleSchemaNames = new ArrayList<>();
+        this.postgresSchemaNames = new ArrayList<>();
+        this.schemaCreationResult = null;
+        this.oracleObjectDataTypeMetaData = new ArrayList<>();
+        this.postgresObjectDataTypeMetaData = new ArrayList<>();
+        this.objectTypeCreationResult = null;
+        this.oracleRowCountMetadata = new ArrayList<>();
+        this.postgresRowCountMetadata = new ArrayList<>();
+        this.oracleTableMetadata = new ArrayList<>();
+        this.postgresTableMetadata = new ArrayList<>();
+        this.tableCreationResult = null;
+    }
 }
