@@ -71,14 +71,16 @@ public class PostgresObjectDataTypeExtractionJob extends AbstractDatabaseExtract
             // This allows visibility of newly created types before tables are created
             String sql = """
                 SELECT
-                    n.nspname as schema_name,
-                    t.typname as type_name
+                  n.nspname AS schema_name,
+                  t.typname AS type_name
                 FROM pg_type t
                 JOIN pg_namespace n ON t.typnamespace = n.oid
+                LEFT JOIN pg_class c ON t.typrelid = c.oid
                 WHERE t.typtype = 'c'  -- composite types only
                   AND n.nspname NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
                   AND t.typrelid != 0  -- has attributes
-                ORDER BY n.nspname, t.typname
+                  AND (c.oid IS NULL OR c.relkind != 'r')  -- exclude types tied to tables
+                ORDER BY n.nspname, t.typname;
                 """;
 
             try (PreparedStatement stmt = connection.prepareStatement(sql);

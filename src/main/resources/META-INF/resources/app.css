@@ -1074,7 +1074,8 @@ td {
     background: #f6f7f8;
 }
 
-/* Schema Creation Styles */
+/* Unified Creation Results Styles */
+/* Action button used across all creation operations */
 .action-btn {
     background: #445;
     border: 1px solid #334;
@@ -1097,14 +1098,22 @@ td {
     cursor: not-allowed;
 }
 
-.schema-creation-results {
+/* Unified results container - used for schema, object type, and table creation */
+.schema-creation-results,
+.object-type-creation-results,
+.table-creation-results,
+.creation-results {
     background: #fcfcfd;
     border: 1px solid #e9ecef;
     border-radius: 3px;
     margin-top: 0.5rem;
 }
 
-.schema-creation-header {
+/* Unified header for all creation results */
+.schema-creation-header,
+.object-type-creation-header,
+.table-creation-header,
+.creation-header {
     background: #f8f9fa;
     border-bottom: 1px solid #e9ecef;
     cursor: pointer;
@@ -1114,18 +1123,30 @@ td {
     user-select: none;
 }
 
-.schema-creation-header:hover {
+.schema-creation-header:hover,
+.object-type-creation-header:hover,
+.table-creation-header:hover,
+.creation-header:hover {
     background: #e9ecef;
 }
 
-.schema-creation-details {
+/* Unified details container */
+.schema-creation-details,
+.object-type-creation-details,
+.table-creation-details,
+.creation-details {
     padding: 0.5rem;
 }
 
-.schema-creation-summary {
+/* Unified summary section */
+.schema-creation-summary,
+.object-type-creation-summary,
+.table-creation-summary,
+.creation-summary {
     margin-bottom: 1rem;
 }
 
+/* Unified stats display */
 .summary-stats {
     display: flex;
     gap: 1rem;
@@ -1154,21 +1175,41 @@ td {
     color: #721c24;
 }
 
+/* Unified sections for created/skipped/error items */
 .created-schemas-section,
 .skipped-schemas-section,
-.error-schemas-section {
+.error-schemas-section,
+.created-types-section,
+.skipped-types-section,
+.error-types-section,
+.created-tables-section,
+.skipped-tables-section,
+.error-tables-section,
+.created-items-section,
+.skipped-items-section,
+.error-items-section {
     margin-bottom: 1rem;
 }
 
 .created-schemas-section h4,
 .skipped-schemas-section h4,
-.error-schemas-section h4 {
+.error-schemas-section h4,
+.created-types-section h4,
+.skipped-types-section h4,
+.error-types-section h4,
+.created-tables-section h4,
+.skipped-tables-section h4,
+.error-tables-section h4,
+.created-items-section h4,
+.skipped-items-section h4,
+.error-items-section h4 {
     color: #495057;
     font-size: 0.75rem;
     margin-bottom: 0.5rem;
 }
 
-.schema-item {
+/* Unified item display - base styles */
+.creation-item {
     background: #f8f9fa;
     border-radius: 3px;
     font-family: monospace;
@@ -1177,17 +1218,71 @@ td {
     padding: 0.25rem 0.5rem;
 }
 
-.schema-item.created {
+.creation-item.created {
     background: #d4edda;
     color: #155724;
 }
 
-.schema-item.skipped {
+.creation-item.skipped {
     background: #fff3cd;
     color: #856404;
 }
 
-.schema-item.error {
+.creation-item.error {
     background: #f8d7da;
     color: #721c24;
+}
+
+/* Specific item classes that inherit from creation-item */
+.schema-item,
+.object-type-item.created,
+.object-type-item.skipped,
+.object-type-item.error,
+.table-item.created,
+.table-item.skipped,
+.table-item.error {
+    background: #f8f9fa;
+    border-radius: 3px;
+    font-family: monospace;
+    font-size: 0.7rem;
+    margin-bottom: 0.25rem;
+    padding: 0.25rem 0.5rem;
+}
+
+.schema-item.created,
+.object-type-item.created,
+.table-item.created {
+    background: #d4edda;
+    color: #155724;
+}
+
+.schema-item.skipped,
+.object-type-item.skipped,
+.table-item.skipped {
+    background: #fff3cd;
+    color: #856404;
+}
+
+.schema-item.error,
+.object-type-item.error,
+.table-item.error {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+/* SQL statement display in error items */
+.sql-statement {
+    background: #2d2d2d;
+    border-radius: 3px;
+    margin-top: 0.3rem;
+    padding: 0.3rem;
+}
+
+.sql-statement pre {
+    color: #f0f0f0;
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 0.65rem;
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-all;
 }
