@@ -314,21 +314,23 @@ public class JobResource {
         Map<String, Object> tableDetails = new HashMap<>();
 
         int totalColumns = 0;
-        int totalConstraints = 0;
+        int totalConstraints = 0; // Note: Constraints are extracted but NOT created (Step A: tables only)
 
         for (TableMetadata table : tableMetadata) {
             String schema = table.getSchema();
             schemaTableCounts.put(schema, schemaTableCounts.getOrDefault(schema, 0) + 1);
 
             totalColumns += table.getColumns().size();
-            totalConstraints += table.getConstraints().size();
+            totalConstraints += table.getConstraints().size(); // Tracked for future Step C
 
             // Store individual table info
+            // Note: constraintCount is the number of constraints EXTRACTED, not CREATED
             Map<String, Object> tableInfo = Map.of(
                     "schema", table.getSchema(),
                     "name", table.getTableName(),
-                    "columnCount", table.getColumns().size(),
-                    "constraintCount", table.getConstraints().size()
+                    "columnCount", table.getColumns().size()
+                    // Intentionally NOT including constraintCount to avoid confusion
+                    // Constraints will be created in Step C (after data transfer)
             );
 
             String tableKey = schema + "." + table.getTableName();
@@ -338,7 +340,9 @@ public class JobResource {
         return Map.of(
                 "totalTables", tableMetadata.size(),
                 "totalColumns", totalColumns,
-                "totalConstraints", totalConstraints,
+                // Note: totalConstraints represents extracted constraints, not created ones
+                // They will be created in a future step (Step C) after data transfer
+                "totalConstraintsExtracted", totalConstraints,
                 "schemaTableCounts", schemaTableCounts,
                 "tables", tableDetails
         );

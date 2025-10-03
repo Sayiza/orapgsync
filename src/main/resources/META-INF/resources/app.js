@@ -1235,7 +1235,8 @@ function populateTableList(summary, database = 'oracle') {
                 schemaTables.forEach(([tableKey, table]) => {
                     const tableItem = document.createElement('div');
                     tableItem.className = 'table-item';
-                    tableItem.innerHTML = `${table.name} (${table.columnCount} cols, ${table.constraintCount} constraints)`;
+                    // Note: Constraints are extracted but NOT created yet (will be created after data transfer - Step C)
+                    tableItem.innerHTML = `${table.name} (${table.columnCount} cols)`;
                     tableItems.appendChild(tableItem);
                 });
             }

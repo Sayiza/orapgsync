@@ -141,8 +141,8 @@ class PostgresSchemaCreationJobTest {
 
     @Test
     void testExecute_AllSchemasAlreadyExist() throws Exception {
-        // Arrange
-        List<String> oracleSchemas = Arrays.asList("HR", "SALES", "INVENTORY");
+        // Arrange - using lowercase schema names as returned by OracleSchemaExtractionJob
+        List<String> oracleSchemas = Arrays.asList("hr", "sales", "inventory");
         when(stateService.getOracleSchemaNames()).thenReturn(oracleSchemas);
         when(postgresConnectionService.getConnection()).thenReturn(mockConnection);
 
@@ -165,22 +165,22 @@ class PostgresSchemaCreationJobTest {
         assertEquals(0, result.getErrorCount());
         assertTrue(result.isSuccessful());
 
-        // Verify skipped schemas
+        // Verify skipped schemas - expecting lowercase names
         List<String> skippedSchemas = result.getSkippedSchemas();
         assertEquals(3, skippedSchemas.size());
-        assertTrue(skippedSchemas.containsAll(Arrays.asList("HR", "SALES", "INVENTORY")));
+        assertTrue(skippedSchemas.containsAll(Arrays.asList("hr", "sales", "inventory")));
 
         verify(stateService).setSchemaCreationResult(result);
     }
 
     @Test
     void testExecute_CreateNewSchemas() throws Exception {
-        // Arrange
-        List<String> oracleSchemas = Arrays.asList("HR", "SALES", "INVENTORY");
+        // Arrange - using lowercase schema names as returned by OracleSchemaExtractionJob
+        List<String> oracleSchemas = Arrays.asList("hr", "sales", "inventory");
         when(stateService.getOracleSchemaNames()).thenReturn(oracleSchemas);
         when(postgresConnectionService.getConnection()).thenReturn(mockConnection);
 
-        // Mock existing PostgreSQL schemas query - only HR exists
+        // Mock existing PostgreSQL schemas query - only hr exists
         PreparedStatement existingSchemaStmt = mock(PreparedStatement.class);
         ResultSet existingSchemaRs = mock(ResultSet.class);
         when(mockConnection.prepareStatement(contains("information_schema.schemata"))).thenReturn(existingSchemaStmt);
@@ -199,19 +199,19 @@ class PostgresSchemaCreationJobTest {
 
         // Assert
         assertNotNull(result);
-        assertEquals(2, result.getCreatedCount()); // SALES and INVENTORY created
-        assertEquals(1, result.getSkippedCount());  // HR skipped
+        assertEquals(2, result.getCreatedCount()); // sales and inventory created
+        assertEquals(1, result.getSkippedCount());  // hr skipped
         assertEquals(0, result.getErrorCount());
         assertTrue(result.isSuccessful());
 
-        // Verify created and skipped schemas
+        // Verify created and skipped schemas - expecting lowercase names
         List<String> createdSchemas = result.getCreatedSchemas();
         assertEquals(2, createdSchemas.size());
-        assertTrue(createdSchemas.containsAll(Arrays.asList("SALES", "INVENTORY")));
+        assertTrue(createdSchemas.containsAll(Arrays.asList("sales", "inventory")));
 
         List<String> skippedSchemas = result.getSkippedSchemas();
         assertEquals(1, skippedSchemas.size());
-        assertTrue(skippedSchemas.contains("HR"));
+        assertTrue(skippedSchemas.contains("hr"));
 
         // Verify CREATE SCHEMA statements were executed
         verify(createSchemaStmt, times(2)).executeUpdate();
@@ -220,8 +220,8 @@ class PostgresSchemaCreationJobTest {
 
     @Test
     void testExecute_WithSchemaCreationErrors() throws Exception {
-        // Arrange
-        List<String> oracleSchemas = Arrays.asList("HR", "SALES");
+        // Arrange - using lowercase schema names as returned by OracleSchemaExtractionJob
+        List<String> oracleSchemas = Arrays.asList("hr", "sales");
         when(stateService.getOracleSchemaNames()).thenReturn(oracleSchemas);
         when(postgresConnectionService.getConnection()).thenReturn(mockConnection);
 
@@ -236,8 +236,8 @@ class PostgresSchemaCreationJobTest {
         PreparedStatement createSchemaStmt = mock(PreparedStatement.class);
         when(mockConnection.prepareStatement(contains("CREATE SCHEMA IF NOT EXISTS"))).thenReturn(createSchemaStmt);
         when(createSchemaStmt.executeUpdate())
-            .thenReturn(1) // HR succeeds
-            .thenThrow(new SQLException("Permission denied")); // SALES fails
+            .thenReturn(1) // hr succeeds
+            .thenThrow(new SQLException("Permission denied")); // sales fails
 
         // Act
         CompletableFuture<SchemaCreationResult> future = schemaCreationJob.execute(progressCallback);
@@ -245,26 +245,26 @@ class PostgresSchemaCreationJobTest {
 
         // Assert
         assertNotNull(result);
-        assertEquals(1, result.getCreatedCount()); // HR created
+        assertEquals(1, result.getCreatedCount()); // hr created
         assertEquals(0, result.getSkippedCount());
-        assertEquals(1, result.getErrorCount());   // SALES failed
+        assertEquals(1, result.getErrorCount());   // sales failed
         assertFalse(result.isSuccessful());
 
-        // Verify error details
+        // Verify error details - expecting lowercase schema name
         List<SchemaCreationResult.SchemaCreationError> errors = result.getErrors();
         assertEquals(1, errors.size());
         SchemaCreationResult.SchemaCreationError error = errors.get(0);
-        assertEquals("SALES", error.getSchemaName());
+        assertEquals("sales", error.getSchemaName());
         assertTrue(error.getErrorMessage().contains("Permission denied"));
-        assertTrue(error.getSqlStatement().contains("CREATE SCHEMA IF NOT EXISTS \"SALES\""));
+        assertTrue(error.getSqlStatement().contains("CREATE SCHEMA IF NOT EXISTS sales"));
 
         verify(stateService).setSchemaCreationResult(result);
     }
 
     @Test
     void testExecute_ConnectionFailure() throws Exception {
-        // Arrange
-        List<String> oracleSchemas = Arrays.asList("HR", "SALES");
+        // Arrange - using lowercase schema names as returned by OracleSchemaExtractionJob
+        List<String> oracleSchemas = Arrays.asList("hr", "sales");
         when(stateService.getOracleSchemaNames()).thenReturn(oracleSchemas);
         when(postgresConnectionService.getConnection()).thenThrow(new SQLException("Connection failed"));
 
@@ -287,8 +287,8 @@ class PostgresSchemaCreationJobTest {
 
     @Test
     void testExecute_ProgressTracking() throws Exception {
-        // Arrange
-        List<String> oracleSchemas = Arrays.asList("HR", "SALES", "INVENTORY");
+        // Arrange - using lowercase schema names as returned by OracleSchemaExtractionJob
+        List<String> oracleSchemas = Arrays.asList("hr", "sales", "inventory");
         when(stateService.getOracleSchemaNames()).thenReturn(oracleSchemas);
         when(postgresConnectionService.getConnection()).thenReturn(mockConnection);
 
@@ -316,10 +316,10 @@ class PostgresSchemaCreationJobTest {
         assertTrue(progressUpdates.stream().anyMatch(p -> p.getCurrentTask().contains("Creating schema")));
         assertTrue(progressUpdates.stream().anyMatch(p -> p.getPercentage() == 100));
 
-        // Should have progress updates for each schema creation
-        assertTrue(progressUpdates.stream().anyMatch(p -> p.getCurrentTask().contains("HR")));
-        assertTrue(progressUpdates.stream().anyMatch(p -> p.getCurrentTask().contains("SALES")));
-        assertTrue(progressUpdates.stream().anyMatch(p -> p.getCurrentTask().contains("INVENTORY")));
+        // Should have progress updates for each schema creation - expecting lowercase
+        assertTrue(progressUpdates.stream().anyMatch(p -> p.getCurrentTask().contains("hr")));
+        assertTrue(progressUpdates.stream().anyMatch(p -> p.getCurrentTask().contains("sales")));
+        assertTrue(progressUpdates.stream().anyMatch(p -> p.getCurrentTask().contains("inventory")));
     }
 
     @Test
@@ -337,20 +337,20 @@ class PostgresSchemaCreationJobTest {
 
     @Test
     void testGenerateSummaryMessage() throws Exception {
-        // Arrange
+        // Arrange - using lowercase schema names as returned by OracleSchemaExtractionJob
         SchemaCreationResult result = new SchemaCreationResult();
-        result.addCreatedSchema("HR");
-        result.addCreatedSchema("SALES");
-        result.addSkippedSchema("INVENTORY");
-        result.addError("FINANCE", "Permission denied", "CREATE SCHEMA \"FINANCE\"");
+        result.addCreatedSchema("hr");
+        result.addCreatedSchema("sales");
+        result.addSkippedSchema("inventory");
+        result.addError("finance", "Permission denied", "CREATE SCHEMA \"finance\"");
 
         // Access the protected method using reflection or create a test subclass
         // For this test, we'll verify the behavior indirectly through execution
-        List<String> oracleSchemas = Arrays.asList("HR", "SALES", "INVENTORY", "FINANCE");
+        List<String> oracleSchemas = Arrays.asList("hr", "sales", "inventory", "finance");
         when(stateService.getOracleSchemaNames()).thenReturn(oracleSchemas);
         when(postgresConnectionService.getConnection()).thenReturn(mockConnection);
 
-        // Mock existing schema (INVENTORY)
+        // Mock existing schema (inventory)
         PreparedStatement existingSchemaStmt = mock(PreparedStatement.class);
         ResultSet existingSchemaRs = mock(ResultSet.class);
         when(mockConnection.prepareStatement(contains("information_schema.schemata"))).thenReturn(existingSchemaStmt);
@@ -358,13 +358,13 @@ class PostgresSchemaCreationJobTest {
         when(existingSchemaRs.next()).thenReturn(true, false);
         when(existingSchemaRs.getString("schema_name")).thenReturn("inventory");
 
-        // Mock schema creation - HR and SALES succeed, FINANCE fails
+        // Mock schema creation - hr and sales succeed, finance fails
         PreparedStatement createSchemaStmt = mock(PreparedStatement.class);
         when(mockConnection.prepareStatement(contains("CREATE SCHEMA IF NOT EXISTS"))).thenReturn(createSchemaStmt);
         when(createSchemaStmt.executeUpdate())
-            .thenReturn(1) // HR succeeds
-            .thenReturn(1) // SALES succeeds
-            .thenThrow(new SQLException("Permission denied")); // FINANCE fails
+            .thenReturn(1) // hr succeeds
+            .thenReturn(1) // sales succeeds
+            .thenThrow(new SQLException("Permission denied")); // finance fails
 
         // Act
         CompletableFuture<SchemaCreationResult> future = schemaCreationJob.execute(progressCallback);

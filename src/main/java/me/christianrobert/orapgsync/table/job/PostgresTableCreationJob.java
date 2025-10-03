@@ -7,7 +7,6 @@ import me.christianrobert.orapgsync.core.job.model.JobProgress;
 import me.christianrobert.orapgsync.core.tools.TypeConverter;
 import me.christianrobert.orapgsync.database.service.PostgresConnectionService;
 import me.christianrobert.orapgsync.core.job.model.table.ColumnMetadata;
-import me.christianrobert.orapgsync.core.job.model.table.ConstraintMetadata;
 import me.christianrobert.orapgsync.core.job.model.table.TableCreationResult;
 import me.christianrobert.orapgsync.core.job.model.table.TableMetadata;
 import org.slf4j.Logger;
