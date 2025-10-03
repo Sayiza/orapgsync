@@ -356,6 +356,19 @@ td {
     text-align: center;
 }
 
+.orchestration-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #1976d2, #42a5f5);
+    border-radius: 3px;
+    transition: width 0.3s ease;
+}
+
+.orchestration-progress-status {
+    font-size: 0.9rem;
+    color: #666;
+    text-align: center;
+}
+
 
 /* Database Comparison Table Styling */
 .database-comparison-container {

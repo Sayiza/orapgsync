@@ -79,6 +79,36 @@ function updateProgress(percentage, status) {
     }
 }
 
+// Update orchestration progress bar (for full job only)
+function updateOrchestrationProgress(percentage, status) {
+    const progressFill = document.querySelector('.orchestration-progress-fill');
+    const progressStatus = document.querySelector('.orchestration-progress-status');
+
+    if (progressFill) {
+        progressFill.style.width = `${percentage}%`;
+    }
+
+    if (progressStatus) {
+        progressStatus.textContent = status;
+    }
+}
+
+// Show orchestration progress bar
+function showOrchestrationProgress() {
+    const orchestrationBar = document.getElementById('orchestration-progress-bar');
+    if (orchestrationBar) {
+        orchestrationBar.style.display = 'block';
+    }
+}
+
+// Hide orchestration progress bar
+function hideOrchestrationProgress() {
+    const orchestrationBar = document.getElementById('orchestration-progress-bar');
+    if (orchestrationBar) {
+        orchestrationBar.style.display = 'none';
+    }
+}
+
 // Update status message in progress bar
 function updateMessage(message) {
     const progressStatus = document.querySelector('.progress-status');
@@ -2300,85 +2330,82 @@ async function resetAll() {
 // Start full sync - orchestrates the complete migration workflow
 async function startAll() {
     console.log('Starting full migration orchestration...');
-    updateMessage('Starting full migration workflow...');
-    updateProgress(0, 'Initializing migration');
+
+    // Show and initialize orchestration progress bar
+    showOrchestrationProgress();
+    updateOrchestrationProgress(0, 'Initializing migration...');
 
     try {
         // Step 1: Test Oracle connection
-        updateMessage('Step 1/11: Testing Oracle connection...');
-        updateProgress(5, 'Testing Oracle connection');
+        updateOrchestrationProgress(5, 'Step 1/11: Testing Oracle connection...');
         await testOracleConnection();
         await delay(1000);
 
         // Step 2: Test PostgreSQL connection
-        updateMessage('Step 2/11: Testing PostgreSQL connection...');
-        updateProgress(10, 'Testing PostgreSQL connection');
+        updateOrchestrationProgress(10, 'Step 2/11: Testing PostgreSQL connection...');
         await testPostgresConnection();
         await delay(1000);
 
         // Step 3: Load Oracle schemas
-        updateMessage('Step 3/11: Loading Oracle schemas...');
-        updateProgress(20, 'Loading Oracle schemas');
+        updateOrchestrationProgress(20, 'Step 3/11: Loading Oracle schemas...');
         await loadOracleSchemas();
         await delay(1000);
 
         // Step 4: Create PostgreSQL schemas
-        updateMessage('Step 4/11: Creating PostgreSQL schemas...');
-        updateProgress(30, 'Creating PostgreSQL schemas');
+        updateOrchestrationProgress(30, 'Step 4/11: Creating PostgreSQL schemas...');
         await createPostgresSchemas();
         await delay(1000);
 
         // Step 5: Verify PostgreSQL schemas
-        updateMessage('Step 5/11: Verifying PostgreSQL schemas...');
-        updateProgress(40, 'Verifying PostgreSQL schemas');
+        updateOrchestrationProgress(40, 'Step 5/11: Verifying PostgreSQL schemas...');
         await loadPostgresSchemas();
         await delay(1000);
 
         // Step 6: Extract Oracle object types
-        updateMessage('Step 6/11: Extracting Oracle object types...');
-        updateProgress(50, 'Extracting Oracle object types');
+        updateOrchestrationProgress(50, 'Step 6/11: Extracting Oracle object types...');
         await loadOracleObjectTypes();
         await delay(1000);
 
         // Step 7: Create PostgreSQL object types
-        updateMessage('Step 7/11: Creating PostgreSQL object types...');
-        updateProgress(60, 'Creating PostgreSQL object types');
+        updateOrchestrationProgress(60, 'Step 7/11: Creating PostgreSQL object types...');
         await createPostgresObjectTypes();
         await delay(1000); // Small delay before verification
 
         // Step 8: Verify PostgreSQL object types
-        updateMessage('Step 8/11: Verifying PostgreSQL object types...');
-        updateProgress(70, 'Verifying PostgreSQL object types');
+        updateOrchestrationProgress(70, 'Step 8/11: Verifying PostgreSQL object types...');
         await loadPostgresObjectTypes();
         await delay(1000);
 
         // Step 9: Extract Oracle table metadata
-        updateMessage('Step 9/11: Extracting Oracle table metadata...');
-        updateProgress(80, 'Extracting Oracle table metadata');
+        updateOrchestrationProgress(80, 'Step 9/11: Extracting Oracle table metadata...');
         await extractTableMetadata();
         await delay(1000);
 
         // Step 10: Create PostgreSQL tables
-        updateMessage('Step 10/11: Creating PostgreSQL tables...');
-        updateProgress(90, 'Creating PostgreSQL tables');
+        updateOrchestrationProgress(90, 'Step 10/11: Creating PostgreSQL tables...');
         await createPostgresTables();
         await delay(1000); // Small delay before verification
 
         // Step 11: Verify PostgreSQL tables
-        updateMessage('Step 11/11: Verifying PostgreSQL tables...');
-        updateProgress(95, 'Verifying PostgreSQL tables');
+        updateOrchestrationProgress(95, 'Step 11/11: Verifying PostgreSQL tables...');
         await extractPostgresTableMetadata();
         await delay(1000);
 
         // Complete
-        updateProgress(100, 'Migration completed successfully');
-        updateMessage('Full migration workflow completed successfully!');
+        updateOrchestrationProgress(100, 'Migration completed successfully!');
         console.log('Full migration orchestration completed successfully');
+
+        // Hide orchestration progress bar after a short delay
+        await delay(2000);
+        hideOrchestrationProgress();
 
     } catch (error) {
         console.error('Migration orchestration failed:', error);
-        updateMessage('Migration failed: ' + error.message);
-        updateProgress(0, 'Migration failed');
+        updateOrchestrationProgress(0, 'Migration failed: ' + error.message);
+
+        // Hide orchestration progress bar after showing error
+        await delay(3000);
+        hideOrchestrationProgress();
     }
 }
 
