@@ -506,4 +506,157 @@ class PostgresTableCreationJobTest {
 
         return table;
     }
+
+    @Test
+    void testExecute_AnydataColumnConvertsToJsonb() throws Exception {
+        // Arrange - Create a table with ANYDATA column (SYS.ANYDATA is a complex Oracle system type)
+        // This test simulates the metadata as extracted by OracleTableExtractor (with SYS owner preserved)
+        TableMetadata table = new TableMetadata("HR", "MESSAGES");
+
+        // Add regular columns (no owner = built-in types)
+        table.addColumn(new ColumnMetadata("ID", "NUMBER", null, 10, 0, false, null));
+        table.addColumn(new ColumnMetadata("MESSAGE_TEXT", "VARCHAR2", 4000, null, null, true, null));
+
+        // Add ANYDATA column (SYS owner preserved - as extracted from Oracle)
+        // After fix: OracleTableExtractor keeps dataTypeOwner="sys" instead of setting it to null
+        table.addColumn(new ColumnMetadata("PAYLOAD", "ANYDATA", "SYS", null, null, null, true, null));
+
+        // Add another complex Oracle system type - AQ$ type
+        table.addColumn(new ColumnMetadata("QUEUE_MSG", "AQ$_JMS_TEXT_MESSAGE", "SYS", null, null, null, true, null));
+
+        // Add a user-defined type (should use composite type, not jsonb)
+        table.addColumn(new ColumnMetadata("ADDRESS", "ADDRESS_TYPE", "HR", null, null, null, true, null));
+
+        List<TableMetadata> oracleTables = Arrays.asList(table);
+        when(stateService.getOracleTableMetadata()).thenReturn(oracleTables);
+        when(postgresConnectionService.getConnection()).thenReturn(mockConnection);
+
+        // Mock no existing tables
+        PreparedStatement existingTablesStmt = mock(PreparedStatement.class);
+        ResultSet existingTablesRs = mock(ResultSet.class);
+        when(mockConnection.prepareStatement(contains("pg_tables"))).thenReturn(existingTablesStmt);
+        when(existingTablesStmt.executeQuery()).thenReturn(existingTablesRs);
+        when(existingTablesRs.next()).thenReturn(false);
+
+        // Capture the CREATE TABLE SQL statement
+        PreparedStatement createTableStmt = mock(PreparedStatement.class);
+        when(mockConnection.prepareStatement(contains("CREATE TABLE"))).thenReturn(createTableStmt);
+        when(createTableStmt.executeUpdate()).thenReturn(1);
+
+        // Act
+        CompletableFuture<TableCreationResult> future = tableCreationJob.execute(progressCallback);
+        TableCreationResult result = future.get();
+
+        // Assert - table was created successfully
+        assertNotNull(result);
+        assertEquals(1, result.getCreatedCount());
+        assertEquals(0, result.getSkippedCount());
+        assertEquals(0, result.getErrorCount());
+        assertTrue(result.isSuccessful());
+
+        // Verify the CREATE TABLE statement was called
+        verify(createTableStmt, times(1)).executeUpdate();
+
+        // Capture and verify the SQL statement contains jsonb for ANYDATA and AQ$ types
+        verify(mockConnection, times(1)).prepareStatement(argThat(sql -> {
+            String sqlLower = sql.toLowerCase();
+            System.out.println("Generated SQL: " + sql);
+
+            // Verify table structure
+            boolean hasCorrectTable = sqlLower.contains("create table hr.messages");
+
+            // Verify ANYDATA is converted to jsonb
+            boolean hasAnydataAsJsonb = sqlLower.contains("payload jsonb");
+
+            // Verify AQ$ type is converted to jsonb
+            boolean hasAqAsJsonb = sqlLower.contains("queue_msg jsonb");
+
+            // Verify user-defined type uses composite type (schema.typename)
+            boolean hasUserTypeAsComposite = sqlLower.contains("address hr.address_type");
+
+            // Verify regular columns are converted correctly
+            boolean hasIdAsNumeric = sqlLower.contains("id numeric");
+            boolean hasMessageAsText = sqlLower.contains("message_text text");
+
+            System.out.println("Table check: " + hasCorrectTable);
+            System.out.println("ANYDATA -> jsonb: " + hasAnydataAsJsonb);
+            System.out.println("AQ$ -> jsonb: " + hasAqAsJsonb);
+            System.out.println("User type -> composite: " + hasUserTypeAsComposite);
+            System.out.println("ID -> numeric: " + hasIdAsNumeric);
+            System.out.println("Message -> text: " + hasMessageAsText);
+
+            return hasCorrectTable && hasAnydataAsJsonb && hasAqAsJsonb &&
+                   hasUserTypeAsComposite && hasIdAsNumeric && hasMessageAsText;
+        }));
+    }
+
+    @Test
+    void testExecute_AnydataWithPublicOwnerConvertsToJsonb() throws Exception {
+        // Arrange - Test PUBLIC owner scenario (Oracle PUBLIC synonyms for SYS types)
+        // In many Oracle databases, there are PUBLIC synonyms/grants for SYS types like ANYDATA
+        // This causes the extraction to return owner="public" instead of owner="sys"
+        TableMetadata table = new TableMetadata("USER_ROBERT", "ANYTEST");
+
+        // Add regular column
+        table.addColumn(new ColumnMetadata("NR", "NUMBER", null, 10, 0, false, null));
+
+        // Add ANYDATA column with PUBLIC owner (due to Oracle PUBLIC synonym)
+        // This is the real-world scenario from the user's database
+        table.addColumn(new ColumnMetadata("ANYBOY", "ANYDATA", "PUBLIC", null, null, null, true, null));
+
+        List<TableMetadata> oracleTables = Arrays.asList(table);
+        when(stateService.getOracleTableMetadata()).thenReturn(oracleTables);
+        when(postgresConnectionService.getConnection()).thenReturn(mockConnection);
+
+        // Mock no existing tables
+        PreparedStatement existingTablesStmt = mock(PreparedStatement.class);
+        ResultSet existingTablesRs = mock(ResultSet.class);
+        when(mockConnection.prepareStatement(contains("pg_tables"))).thenReturn(existingTablesStmt);
+        when(existingTablesStmt.executeQuery()).thenReturn(existingTablesRs);
+        when(existingTablesRs.next()).thenReturn(false);
+
+        // Capture the CREATE TABLE SQL statement
+        PreparedStatement createTableStmt = mock(PreparedStatement.class);
+        when(mockConnection.prepareStatement(contains("CREATE TABLE"))).thenReturn(createTableStmt);
+        when(createTableStmt.executeUpdate()).thenReturn(1);
+
+        // Act
+        CompletableFuture<TableCreationResult> future = tableCreationJob.execute(progressCallback);
+        TableCreationResult result = future.get();
+
+        // Assert - table was created successfully
+        assertNotNull(result);
+        assertEquals(1, result.getCreatedCount());
+        assertEquals(0, result.getSkippedCount());
+        assertEquals(0, result.getErrorCount());
+        assertTrue(result.isSuccessful());
+
+        // Verify the CREATE TABLE statement was called
+        verify(createTableStmt, times(1)).executeUpdate();
+
+        // Capture and verify the SQL statement contains jsonb for PUBLIC.ANYDATA
+        verify(mockConnection, times(1)).prepareStatement(argThat(sql -> {
+            String sqlLower = sql.toLowerCase();
+            System.out.println("Generated SQL (PUBLIC owner): " + sql);
+
+            // Verify table structure
+            boolean hasCorrectTable = sqlLower.contains("create table user_robert.anytest");
+
+            // Verify ANYDATA with PUBLIC owner is converted to jsonb (not public.anydata!)
+            boolean hasAnydataAsJsonb = sqlLower.contains("anyboy jsonb");
+
+            // Verify it does NOT contain public.anydata (the bug scenario)
+            boolean doesNotHavePublicAnydata = !sqlLower.contains("public.anydata");
+
+            // Verify regular column
+            boolean hasNrAsNumeric = sqlLower.contains("nr numeric");
+
+            System.out.println("Table check: " + hasCorrectTable);
+            System.out.println("PUBLIC.ANYDATA -> jsonb: " + hasAnydataAsJsonb);
+            System.out.println("Does NOT contain 'public.anydata': " + doesNotHavePublicAnydata);
+            System.out.println("NR -> numeric: " + hasNrAsNumeric);
+
+            return hasCorrectTable && hasAnydataAsJsonb && doesNotHavePublicAnydata && hasNrAsNumeric;
+        }));
+    }
 }

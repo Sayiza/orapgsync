@@ -258,6 +258,7 @@ The migration handles three categories of Oracle data types with different strat
 - `SYS.AQ$_*` - Advanced Queuing types (e.g., `AQ$_JMS_TEXT_MESSAGE`)
 - `SYS.XMLTYPE` - XML data type
 - `SYS.SDO_GEOMETRY` - Spatial/geometry types
+- **Note:** These types may appear with owner `"SYS"` or `"PUBLIC"` (due to Oracle PUBLIC synonyms/grants)
 
 **Strategy:**
 - **Step A (Table Creation)**: Create as `jsonb` column in PostgreSQL
@@ -276,7 +277,10 @@ The migration handles three categories of Oracle data types with different strat
 - ✅ Debuggable and inspectable data
 
 **Implementation:**
-- Table Creation: `PostgresTableCreationJob.isComplexOracleSystemType()` lines 284-307
+- Table Creation: `PostgresTableCreationJob.isComplexOracleSystemType()` lines 284-309
+  - Detects both `owner="sys"` and `owner="public"` (PUBLIC synonyms for SYS types)
+- Extraction: `OracleTableExtractor.fetchTableMetadata()` lines 95-102
+  - Preserves all type owner information (including SYS/PUBLIC)
 - Data Transfer: **TODO - To be implemented in Step B**
 
 #### 3. Built-in Oracle Types

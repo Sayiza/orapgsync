@@ -277,13 +277,15 @@ public class PostgresTableCreationJob extends AbstractDatabaseWriteJob<TableCrea
      * Identifies complex Oracle system types that cannot be directly mapped to PostgreSQL composite types.
      * These types will be stored as jsonb with metadata preservation during data transfer.
      *
-     * @param owner The schema/owner of the type (e.g., "sys")
+     * @param owner The schema/owner of the type (e.g., "sys", "public")
      * @param type The type name (e.g., "anydata", "aq$_jms_text_message")
      * @return true if this is a complex Oracle system type requiring jsonb serialization
      */
     private boolean isComplexOracleSystemType(String owner, String type) {
         // System-owned complex types that need jsonb serialization
-        if ("sys".equals(owner)) {
+        // Note: Oracle databases often have PUBLIC synonyms for SYS types (grants to PUBLIC)
+        // so we check both "sys" and "public" as indicators of Oracle system types
+        if ("sys".equals(owner) || "public".equals(owner)) {
             // Oracle Advanced Queuing types
             if (type.startsWith("aq$_")) {
                 return true;
