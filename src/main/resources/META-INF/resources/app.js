@@ -450,63 +450,87 @@ async function resetConfiguration() {
 
 // Schema Management Functions
 
-// Load Oracle schemas
+// Load Oracle schemas using job-based approach
 async function loadOracleSchemas() {
-    console.log('Loading Oracle schemas...');
-    updateMessage('Loading Oracle schemas...');
+    console.log('Starting Oracle schema extraction job...');
+    updateMessage('Starting Oracle schema extraction...');
 
     try {
-        const response = await fetch('/api/schemas/oracle');
-        const result = await response.json();
-
-        if (result.status === 'success') {
-            updateComponentCount('oracle-schemas', result.count);
-            populateSchemaList('oracle', result.schemas);
-            updateMessage(`Loaded ${result.count} Oracle schemas`);
-
-            // Show the schema list if we have schemas
-            if (result.count > 0) {
-                document.getElementById('oracle-schema-list').style.display = 'block';
+        // Start the job
+        const startResponse = await fetch('/api/jobs/schemas/oracle/extract', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
             }
+        });
+
+        const startResult = await startResponse.json();
+
+        if (startResult.status === 'success') {
+            console.log('Oracle schema extraction job started:', startResult.jobId);
+            updateMessage('Oracle schema extraction started...');
+
+            // Disable refresh button during extraction
+            const button = document.querySelector('#oracle-schemas .refresh-btn');
+            if (button) {
+                button.disabled = true;
+                button.innerHTML = '⏳';
+            }
+
+            // Start polling for job status
+            await pollJobUntilComplete(startResult.jobId, 'oracle', 'schemas');
+
         } else {
             updateComponentCount('oracle-schemas', '!', 'error');
-            updateMessage('Failed to load Oracle schemas: ' + result.message);
+            updateMessage('Failed to start Oracle schema extraction: ' + startResult.message);
         }
 
     } catch (error) {
-        console.error('Error loading Oracle schemas:', error);
+        console.error('Error starting Oracle schema extraction:', error);
         updateComponentCount('oracle-schemas', '!', 'error');
-        updateMessage('Error loading Oracle schemas: ' + error.message);
+        updateMessage('Error starting Oracle schema extraction: ' + error.message);
     }
 }
 
-// Load PostgreSQL schemas
+// Load PostgreSQL schemas using job-based approach
 async function loadPostgresSchemas() {
-    console.log('Loading PostgreSQL schemas...');
-    updateMessage('Loading PostgreSQL schemas...');
+    console.log('Starting PostgreSQL schema extraction job...');
+    updateMessage('Starting PostgreSQL schema extraction...');
 
     try {
-        const response = await fetch('/api/schemas/postgres');
-        const result = await response.json();
-
-        if (result.status === 'success') {
-            updateComponentCount('postgres-schemas', result.count);
-            populateSchemaList('postgres', result.schemas);
-            updateMessage(`Loaded ${result.count} PostgreSQL schemas`);
-
-            // Show the schema list if we have schemas
-            if (result.count > 0) {
-                document.getElementById('postgres-schema-list').style.display = 'block';
+        // Start the job
+        const startResponse = await fetch('/api/jobs/schemas/postgres/extract', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
             }
+        });
+
+        const startResult = await startResponse.json();
+
+        if (startResult.status === 'success') {
+            console.log('PostgreSQL schema extraction job started:', startResult.jobId);
+            updateMessage('PostgreSQL schema extraction started...');
+
+            // Disable refresh button during extraction
+            const button = document.querySelector('#postgres-schemas .refresh-btn');
+            if (button) {
+                button.disabled = true;
+                button.innerHTML = '⏳';
+            }
+
+            // Start polling for job status
+            await pollJobUntilComplete(startResult.jobId, 'postgres', 'schemas');
+
         } else {
             updateComponentCount('postgres-schemas', '!', 'error');
-            updateMessage('Failed to load PostgreSQL schemas: ' + result.message);
+            updateMessage('Failed to start PostgreSQL schema extraction: ' + startResult.message);
         }
 
     } catch (error) {
-        console.error('Error loading PostgreSQL schemas:', error);
+        console.error('Error starting PostgreSQL schema extraction:', error);
         updateComponentCount('postgres-schemas', '!', 'error');
-        updateMessage('Error loading PostgreSQL schemas: ' + error.message);
+        updateMessage('Error starting PostgreSQL schema extraction: ' + error.message);
     }
 }
 
@@ -980,7 +1004,7 @@ async function pollJobStatus(jobId, database = 'oracle') {
     }
 }
 
-// Poll job status until completion (for object data type extraction)
+// Poll job status until completion (generic for all job types)
 async function pollJobUntilComplete(jobId, database, jobType) {
     console.log('Polling job status for:', jobId, 'database:', database, 'type:', jobType);
 
@@ -1006,22 +1030,29 @@ async function pollJobUntilComplete(jobId, database, jobType) {
         // Check if job is complete
         if (result.isComplete) {
             if (result.status === 'COMPLETED') {
-                console.log('Object data type extraction job completed successfully');
-                updateMessage(`${database.charAt(0).toUpperCase() + database.slice(1)} object data type extraction completed`);
+                console.log(`${jobType} extraction job completed successfully`);
+                updateMessage(`${database.charAt(0).toUpperCase() + database.slice(1)} ${jobType} extraction completed`);
 
-                // Get job results for object data types
-                await getObjectDataTypeJobResults(jobId, database);
+                // Get job results based on job type
+                if (jobType === 'schemas') {
+                    await getSchemaJobResults(jobId, database);
+                } else if (jobType === 'objects') {
+                    await getObjectDataTypeJobResults(jobId, database);
+                }
             } else if (result.status === 'FAILED') {
-                console.error('Object data type extraction job failed:', result.error);
-                updateComponentCount(`${database}-objects`, '!', 'error');
-                updateMessage(`Object data type extraction failed: ${result.error || 'Unknown error'}`);
+                console.error(`${jobType} extraction job failed:`, result.error);
+                updateComponentCount(`${database}-${jobType}`, '!', 'error');
+                updateMessage(`${jobType} extraction failed: ${result.error || 'Unknown error'}`);
             }
 
-            // Re-enable refresh button
-            const button = document.querySelector(`#${database}-objects .refresh-btn`);
+            // Re-enable refresh button based on job type
+            const buttonSelector = jobType === 'schemas'
+                ? `#${database}-schemas .refresh-btn`
+                : `#${database}-${jobType} .refresh-btn`;
+            const button = document.querySelector(buttonSelector);
             if (button) {
                 button.disabled = false;
-                button.innerHTML = '↻';
+                button.innerHTML = jobType === 'schemas' ? '↻' : '↻';
             }
         } else {
             // Continue polling
@@ -1029,16 +1060,55 @@ async function pollJobUntilComplete(jobId, database, jobType) {
         }
 
     } catch (error) {
-        console.error('Error polling object data type job status:', error);
-        updateComponentCount(`${database}-objects`, '!', 'error');
-        updateMessage(`Error checking object data type job status: ${error.message}`);
+        console.error(`Error polling ${jobType} job status:`, error);
+        updateComponentCount(`${database}-${jobType}`, '!', 'error');
+        updateMessage(`Error checking ${jobType} job status: ${error.message}`);
 
         // Re-enable button
-        const button = document.querySelector(`#${database}-objects .refresh-btn`);
+        const buttonSelector = jobType === 'schemas'
+            ? `#${database}-schemas .refresh-btn`
+            : `#${database}-${jobType} .refresh-btn`;
+        const button = document.querySelector(buttonSelector);
         if (button) {
             button.disabled = false;
             button.innerHTML = '↻';
         }
+    }
+}
+
+// Get schema job results and display them
+async function getSchemaJobResults(jobId, database) {
+    console.log('Getting schema job results for:', jobId);
+
+    try {
+        const response = await fetch(`/api/jobs/${jobId}/result`);
+        const result = await response.json();
+
+        if (result.status === 'success') {
+            console.log('Schema job results:', result);
+
+            const schemas = result.schemas || [];
+
+            // Update component count
+            updateComponentCount(`${database}-schemas`, schemas.length);
+
+            // Populate the schema list
+            populateSchemaList(database, schemas);
+
+            // Show the schema list if we have schemas
+            if (schemas.length > 0) {
+                document.getElementById(`${database}-schema-list`).style.display = 'block';
+            }
+
+            updateMessage(`Loaded ${schemas.length} ${database} schemas`);
+        } else {
+            throw new Error(result.message || 'Failed to get schema job results');
+        }
+
+    } catch (error) {
+        console.error('Error getting schema job results:', error);
+        updateComponentCount(`${database}-schemas`, '!', 'error');
+        updateMessage(`Error getting schema results: ${error.message}`);
     }
 }
 
@@ -2177,10 +2247,145 @@ async function resetAll() {
     }
 }
 
-// Start full sync (placeholder for future implementation)
+// Start full sync - orchestrates the complete migration workflow
 async function startAll() {
-    console.log('Starting full sync...');
-    updateMessage('Full sync feature coming soon...');
+    console.log('Starting full migration orchestration...');
+    updateMessage('Starting full migration workflow...');
+    updateProgress(0, 'Initializing migration');
+
+    try {
+        // Step 1: Test Oracle connection
+        updateMessage('Step 1/11: Testing Oracle connection...');
+        updateProgress(5, 'Testing Oracle connection');
+        await testOracleConnection();
+        await delay(1000);
+
+        // Step 2: Test PostgreSQL connection
+        updateMessage('Step 2/11: Testing PostgreSQL connection...');
+        updateProgress(10, 'Testing PostgreSQL connection');
+        await testPostgresConnection();
+        await delay(1000);
+
+        // Step 3: Load Oracle schemas
+        updateMessage('Step 3/11: Loading Oracle schemas...');
+        updateProgress(20, 'Loading Oracle schemas');
+        await loadOracleSchemas();
+        await delay(1000);
+
+        // Step 4: Create PostgreSQL schemas
+        updateMessage('Step 4/11: Creating PostgreSQL schemas...');
+        updateProgress(30, 'Creating PostgreSQL schemas');
+        await createPostgresSchemas();
+        await waitForJobCompletion('schema creation');
+
+        // Step 5: Verify PostgreSQL schemas
+        updateMessage('Step 5/11: Verifying PostgreSQL schemas...');
+        updateProgress(40, 'Verifying PostgreSQL schemas');
+        await loadPostgresSchemas();
+        await delay(1000);
+
+        // Step 6: Extract Oracle object types
+        updateMessage('Step 6/11: Extracting Oracle object types...');
+        updateProgress(50, 'Extracting Oracle object types');
+        await loadOracleObjectTypes();
+        await waitForJobCompletion('object type extraction');
+
+        // Step 7: Create PostgreSQL object types
+        updateMessage('Step 7/11: Creating PostgreSQL object types...');
+        updateProgress(60, 'Creating PostgreSQL object types');
+        await createPostgresObjectTypes();
+        await waitForJobCompletion('object type creation');
+
+        // Step 8: Verify PostgreSQL object types
+        updateMessage('Step 8/11: Verifying PostgreSQL object types...');
+        updateProgress(70, 'Verifying PostgreSQL object types');
+        await loadPostgresObjectTypes();
+        await waitForJobCompletion('object type verification');
+
+        // Step 9: Extract Oracle table metadata
+        updateMessage('Step 9/11: Extracting Oracle table metadata...');
+        updateProgress(80, 'Extracting Oracle table metadata');
+        await extractTableMetadata();
+        await waitForJobCompletion('table extraction');
+
+        // Step 10: Create PostgreSQL tables
+        updateMessage('Step 10/11: Creating PostgreSQL tables...');
+        updateProgress(90, 'Creating PostgreSQL tables');
+        await createPostgresTables();
+        await waitForJobCompletion('table creation');
+
+        // Step 11: Verify PostgreSQL tables
+        updateMessage('Step 11/11: Verifying PostgreSQL tables...');
+        updateProgress(95, 'Verifying PostgreSQL tables');
+        await extractPostgresTableMetadata();
+        await waitForJobCompletion('table verification');
+
+        // Complete
+        updateProgress(100, 'Migration completed successfully');
+        updateMessage('Full migration workflow completed successfully!');
+        console.log('Full migration orchestration completed successfully');
+
+    } catch (error) {
+        console.error('Migration orchestration failed:', error);
+        updateMessage('Migration failed: ' + error.message);
+        updateProgress(0, 'Migration failed');
+    }
+}
+
+// Helper function to add delay between steps
+function delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Helper function to wait for async job completion
+// This monitors the UI state to determine when a job has finished
+async function waitForJobCompletion(jobDescription) {
+    console.log(`Waiting for ${jobDescription} to complete...`);
+
+    // Simple polling approach - wait for buttons to be re-enabled
+    // which indicates job completion
+    return new Promise((resolve) => {
+        const maxWaitTime = 300000; // 5 minutes max wait
+        const checkInterval = 1000; // Check every second
+        let elapsedTime = 0;
+
+        const intervalId = setInterval(() => {
+            elapsedTime += checkInterval;
+
+            // Check if we've exceeded max wait time
+            if (elapsedTime >= maxWaitTime) {
+                console.warn(`${jobDescription} exceeded max wait time`);
+                clearInterval(intervalId);
+                resolve();
+            }
+
+            // Check progress bar for completion indicators
+            const progressStatus = document.querySelector('.progress-status');
+            if (progressStatus) {
+                const statusText = progressStatus.textContent.toLowerCase();
+
+                // Look for completion keywords
+                if (statusText.includes('completed') ||
+                    statusText.includes('success') ||
+                    statusText.includes('loaded') ||
+                    statusText.includes('extracted')) {
+
+                    console.log(`${jobDescription} completed`);
+                    clearInterval(intervalId);
+                    resolve();
+                }
+
+                // Also check for failure keywords
+                if (statusText.includes('failed') ||
+                    statusText.includes('error')) {
+
+                    console.warn(`${jobDescription} failed or errored`);
+                    clearInterval(intervalId);
+                    resolve(); // Resolve anyway to continue workflow
+                }
+            }
+        }, checkInterval);
+    });
 }
 
 // Load configuration when page loads

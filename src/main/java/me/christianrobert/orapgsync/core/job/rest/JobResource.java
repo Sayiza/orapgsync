@@ -38,6 +38,18 @@ public class JobResource {
     JobRegistry jobRegistry;
 
     @POST
+    @Path("/schemas/oracle/extract")
+    public Response startOracleSchemaExtraction() {
+        return startExtractionJob("ORACLE", "SCHEMA", "Oracle schema extraction");
+    }
+
+    @POST
+    @Path("/schemas/postgres/extract")
+    public Response startPostgresSchemaExtraction() {
+        return startExtractionJob("POSTGRES", "SCHEMA", "PostgreSQL schema extraction");
+    }
+
+    @POST
     @Path("/tables/oracle/extract")
     public Response startOracleTableMetadataExtraction() {
         return startExtractionJob("ORACLE", "TABLE_METADATA", "Oracle table metadata extraction");
@@ -205,7 +217,16 @@ public class JobResource {
             // Handle different job result types
             String jobType = execution.getJob().getJobType();
             if (result instanceof List<?>) {
-                if (jobType.contains("TABLE_METADATA")) {
+                if (jobType.contains("SCHEMA")) {
+                    // Handle schema extraction results
+                    @SuppressWarnings("unchecked")
+                    List<String> schemas = (List<String>) result;
+
+                    Map<String, Object> summary = generateSchemaExtractionSummary(schemas);
+                    response.put("summary", summary);
+                    response.put("count", schemas.size());
+                    response.put("schemas", schemas);
+                } else if (jobType.contains("TABLE_METADATA")) {
                     // Handle table metadata extraction results
                     @SuppressWarnings("unchecked")
                     List<TableMetadata> tableMetadata = (List<TableMetadata>) result;
@@ -579,5 +600,12 @@ public class JobResource {
     @Path("/postgres/table/create")
     public Response startPostgresTableCreation() {
         return startJob("POSTGRES", "TABLE_CREATION", "PostgreSQL table creation");
+    }
+
+    private Map<String, Object> generateSchemaExtractionSummary(List<String> schemas) {
+        return Map.of(
+                "totalSchemas", schemas.size(),
+                "message", String.format("Extraction completed: %d schemas found", schemas.size())
+        );
     }
 }
