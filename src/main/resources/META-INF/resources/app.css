@@ -1107,6 +1107,7 @@ td {
     border: 1px solid #e9ecef;
     border-radius: 3px;
     margin-top: 0.5rem;
+    width: 100%;
 }
 
 /* Unified header for all creation results */

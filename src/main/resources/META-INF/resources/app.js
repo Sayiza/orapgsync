@@ -1008,72 +1008,85 @@ async function pollJobStatus(jobId, database = 'oracle') {
 async function pollJobUntilComplete(jobId, database, jobType) {
     console.log('Polling job status for:', jobId, 'database:', database, 'type:', jobType);
 
-    try {
-        const response = await fetch(`/api/jobs/${jobId}/status`);
-        const result = await response.json();
+    return new Promise((resolve, reject) => {
+        const pollOnce = async () => {
+            try {
+                const response = await fetch(`/api/jobs/${jobId}/status`);
+                const result = await response.json();
 
-        if (result.status === 'error') {
-            throw new Error(result.message);
-        }
-
-        console.log('Job status:', result);
-
-        // Update progress if available
-        if (result.progress) {
-            const percentage = result.progress.percentage;
-            const currentTask = result.progress.currentTask || 'Processing...';
-            const details = result.progress.details || '';
-
-            updateMessage(`${currentTask}: ${details}`);
-        }
-
-        // Check if job is complete
-        if (result.isComplete) {
-            if (result.status === 'COMPLETED') {
-                console.log(`${jobType} extraction job completed successfully`);
-                updateMessage(`${database.charAt(0).toUpperCase() + database.slice(1)} ${jobType} extraction completed`);
-
-                // Get job results based on job type
-                if (jobType === 'schemas') {
-                    await getSchemaJobResults(jobId, database);
-                } else if (jobType === 'objects') {
-                    await getObjectDataTypeJobResults(jobId, database);
+                if (result.status === 'error') {
+                    throw new Error(result.message);
                 }
-            } else if (result.status === 'FAILED') {
-                console.error(`${jobType} extraction job failed:`, result.error);
+
+                console.log('Job status:', result);
+
+                // Update progress if available
+                if (result.progress) {
+                    const percentage = result.progress.percentage;
+                    const currentTask = result.progress.currentTask || 'Processing...';
+                    const details = result.progress.details || '';
+
+                    updateMessage(`${currentTask}: ${details}`);
+                }
+
+                // Check if job is complete
+                if (result.isComplete) {
+                    if (result.status === 'COMPLETED') {
+                        console.log(`${jobType} extraction job completed successfully`);
+                        updateMessage(`${database.charAt(0).toUpperCase() + database.slice(1)} ${jobType} extraction completed`);
+
+                        // Get job results based on job type
+                        if (jobType === 'schemas') {
+                            await getSchemaJobResults(jobId, database);
+                        } else if (jobType === 'objects') {
+                            await getObjectDataTypeJobResults(jobId, database);
+                        }
+                    } else if (result.status === 'FAILED') {
+                        console.error(`${jobType} extraction job failed:`, result.error);
+                        updateComponentCount(`${database}-${jobType}`, '!', 'error');
+                        updateMessage(`${jobType} extraction failed: ${result.error || 'Unknown error'}`);
+                    }
+
+                    // Re-enable refresh button based on job type
+                    const buttonSelector = jobType === 'schemas'
+                        ? `#${database}-schemas .refresh-btn`
+                        : `#${database}-${jobType} .refresh-btn`;
+                    const button = document.querySelector(buttonSelector);
+                    if (button) {
+                        button.disabled = false;
+                        button.innerHTML = jobType === 'schemas' ? '↻' : '↻';
+                    }
+
+                    // Resolve the promise to signal completion
+                    resolve();
+                } else {
+                    // Continue polling
+                    setTimeout(pollOnce, 1000);
+                }
+
+            } catch (error) {
+                console.error(`Error polling ${jobType} job status:`, error);
                 updateComponentCount(`${database}-${jobType}`, '!', 'error');
-                updateMessage(`${jobType} extraction failed: ${result.error || 'Unknown error'}`);
+                updateMessage(`Error checking ${jobType} job status: ${error.message}`);
+
+                // Re-enable button
+                const buttonSelector = jobType === 'schemas'
+                    ? `#${database}-schemas .refresh-btn`
+                    : `#${database}-${jobType} .refresh-btn`;
+                const button = document.querySelector(buttonSelector);
+                if (button) {
+                    button.disabled = false;
+                    button.innerHTML = '↻';
+                }
+
+                // Reject the promise to signal error
+                reject(error);
             }
+        };
 
-            // Re-enable refresh button based on job type
-            const buttonSelector = jobType === 'schemas'
-                ? `#${database}-schemas .refresh-btn`
-                : `#${database}-${jobType} .refresh-btn`;
-            const button = document.querySelector(buttonSelector);
-            if (button) {
-                button.disabled = false;
-                button.innerHTML = jobType === 'schemas' ? '↻' : '↻';
-            }
-        } else {
-            // Continue polling
-            setTimeout(() => pollJobUntilComplete(jobId, database, jobType), 1000);
-        }
-
-    } catch (error) {
-        console.error(`Error polling ${jobType} job status:`, error);
-        updateComponentCount(`${database}-${jobType}`, '!', 'error');
-        updateMessage(`Error checking ${jobType} job status: ${error.message}`);
-
-        // Re-enable button
-        const buttonSelector = jobType === 'schemas'
-            ? `#${database}-schemas .refresh-btn`
-            : `#${database}-${jobType} .refresh-btn`;
-        const button = document.querySelector(buttonSelector);
-        if (button) {
-            button.disabled = false;
-            button.innerHTML = '↻';
-        }
-    }
+        // Start polling
+        pollOnce();
+    });
 }
 
 // Get schema job results and display them
@@ -1633,8 +1646,8 @@ async function createPostgresSchemas() {
             console.log('PostgreSQL schema creation job started:', result.jobId);
             updateMessage('PostgreSQL schema creation job started successfully');
 
-            // Start polling for progress
-            pollSchemaCreationJobStatus(result.jobId, 'postgres');
+            // Start polling for progress and AWAIT completion
+            await pollSchemaCreationJobStatus(result.jobId, 'postgres');
         } else {
             throw new Error(result.message || 'Failed to start PostgreSQL schema creation job');
         }
@@ -1655,58 +1668,70 @@ async function createPostgresSchemas() {
 async function pollSchemaCreationJobStatus(jobId, database) {
     console.log(`Polling schema creation job status for ${database}:`, jobId);
 
-    try {
-        const response = await fetch(`/api/jobs/${jobId}/status`);
-        const status = await response.json();
+    return new Promise((resolve, reject) => {
+        const pollOnce = async () => {
+            try {
+                const response = await fetch(`/api/jobs/${jobId}/status`);
+                const status = await response.json();
 
-        if (status.status === 'error') {
-            throw new Error(status.message || 'Job status check failed');
-        }
+                if (status.status === 'error') {
+                    throw new Error(status.message || 'Job status check failed');
+                }
 
-        console.log(`Schema creation job status for ${database}:`, status);
+                console.log(`Schema creation job status for ${database}:`, status);
 
-        if (status.progress) {
-            updateProgress(status.progress.percentage, status.progress.currentTask);
-            updateMessage(`${status.progress.currentTask}: ${status.progress.details}`);
-        }
+                if (status.progress) {
+                    updateProgress(status.progress.percentage, status.progress.currentTask);
+                    updateMessage(`${status.progress.currentTask}: ${status.progress.details}`);
+                }
 
-        if (status.isComplete) {
-            console.log(`Schema creation job completed for ${database}`);
+                if (status.isComplete) {
+                    console.log(`Schema creation job completed for ${database}`);
 
-            // Get final results
-            const resultResponse = await fetch(`/api/jobs/${jobId}/result`);
-            const result = await resultResponse.json();
+                    // Get final results
+                    const resultResponse = await fetch(`/api/jobs/${jobId}/result`);
+                    const result = await resultResponse.json();
 
-            if (result.status === 'success') {
-                handleSchemaCreationJobComplete(result, database);
-            } else {
-                throw new Error(result.message || 'Job completed with errors');
+                    if (result.status === 'success') {
+                        handleSchemaCreationJobComplete(result, database);
+                    } else {
+                        throw new Error(result.message || 'Job completed with errors');
+                    }
+
+                    // Re-enable button
+                    const button = document.querySelector(`#${database}-schemas .action-btn`);
+                    if (button) {
+                        button.disabled = false;
+                        button.innerHTML = 'Create Schemas';
+                    }
+
+                    // Resolve the promise to signal completion
+                    resolve();
+                } else {
+                    // Continue polling
+                    setTimeout(pollOnce, 1000);
+                }
+
+            } catch (error) {
+                console.error('Error polling schema creation job status:', error);
+                updateMessage('Error checking schema creation progress: ' + error.message);
+                updateProgress(0, 'Error checking progress');
+
+                // Re-enable button
+                const button = document.querySelector(`#${database}-schemas .action-btn`);
+                if (button) {
+                    button.disabled = false;
+                    button.innerHTML = 'Create Schemas';
+                }
+
+                // Reject the promise to signal error
+                reject(error);
             }
+        };
 
-            // Re-enable button
-            const button = document.querySelector(`#${database}-schemas .action-btn`);
-            if (button) {
-                button.disabled = false;
-                button.innerHTML = 'Create Schemas';
-            }
-
-        } else {
-            // Continue polling
-            setTimeout(() => pollSchemaCreationJobStatus(jobId, database), 1000);
-        }
-
-    } catch (error) {
-        console.error('Error polling schema creation job status:', error);
-        updateMessage('Error checking schema creation progress: ' + error.message);
-        updateProgress(0, 'Error checking progress');
-
-        // Re-enable button
-        const button = document.querySelector(`#${database}-schemas .action-btn`);
-        if (button) {
-            button.disabled = false;
-            button.innerHTML = 'Create Schemas';
-        }
-    }
+        // Start polling
+        pollOnce();
+    });
 }
 
 function handleSchemaCreationJobComplete(result, database) {
@@ -1835,8 +1860,8 @@ async function createPostgresObjectTypes() {
         if (result.status === 'success') {
             console.log('PostgreSQL object type creation job started:', result.jobId);
             updateMessage('PostgreSQL object type creation job started successfully');
-            // Start polling for progress
-            pollObjectTypeCreationJobStatus(result.jobId, 'postgres');
+            // Start polling for progress and AWAIT completion
+            await pollObjectTypeCreationJobStatus(result.jobId, 'postgres');
         } else {
             throw new Error(result.message || 'Failed to start PostgreSQL object type creation job');
         }
@@ -1855,54 +1880,66 @@ async function createPostgresObjectTypes() {
 async function pollObjectTypeCreationJobStatus(jobId, database) {
     console.log(`Polling object type creation job status for ${database}:`, jobId);
 
-    try {
-        const response = await fetch(`/api/jobs/${jobId}/status`);
-        const status = await response.json();
+    return new Promise((resolve, reject) => {
+        const pollOnce = async () => {
+            try {
+                const response = await fetch(`/api/jobs/${jobId}/status`);
+                const status = await response.json();
 
-        if (status.status === 'error') {
-            throw new Error(status.message || 'Job status check failed');
-        }
+                if (status.status === 'error') {
+                    throw new Error(status.message || 'Job status check failed');
+                }
 
-        console.log(`Object type creation job status for ${database}:`, status);
+                console.log(`Object type creation job status for ${database}:`, status);
 
-        if (status.progress) {
-            updateProgress(status.progress.percentage, status.progress.currentTask);
-            updateMessage(`${status.progress.currentTask}: ${status.progress.details}`);
-        }
+                if (status.progress) {
+                    updateProgress(status.progress.percentage, status.progress.currentTask);
+                    updateMessage(`${status.progress.currentTask}: ${status.progress.details}`);
+                }
 
-        if (status.isComplete) {
-            console.log(`Object type creation job completed for ${database}`);
-            // Get final results
-            const resultResponse = await fetch(`/api/jobs/${jobId}/result`);
-            const result = await resultResponse.json();
+                if (status.isComplete) {
+                    console.log(`Object type creation job completed for ${database}`);
+                    // Get final results
+                    const resultResponse = await fetch(`/api/jobs/${jobId}/result`);
+                    const result = await resultResponse.json();
 
-            if (result.status === 'success') {
-                handleObjectTypeCreationJobComplete(result, database);
-            } else {
-                throw new Error(result.message || 'Job completed with errors');
+                    if (result.status === 'success') {
+                        handleObjectTypeCreationJobComplete(result, database);
+                    } else {
+                        throw new Error(result.message || 'Job completed with errors');
+                    }
+
+                    // Re-enable button
+                    const button = document.querySelector(`#${database}-objects .action-btn`);
+                    if (button) {
+                        button.disabled = false;
+                        button.innerHTML = 'Create Types';
+                    }
+
+                    // Resolve the promise to signal completion
+                    resolve();
+                } else {
+                    // Continue polling
+                    setTimeout(pollOnce, 1000);
+                }
+            } catch (error) {
+                console.error('Error polling object type creation job status:', error);
+                updateMessage('Error checking object type creation progress: ' + error.message);
+                updateProgress(0, 'Error checking progress');
+                // Re-enable button
+                const button = document.querySelector(`#${database}-objects .action-btn`);
+                if (button) {
+                    button.disabled = false;
+                    button.innerHTML = 'Create Types';
+                }
+                // Reject the promise to signal error
+                reject(error);
             }
+        };
 
-            // Re-enable button
-            const button = document.querySelector(`#${database}-objects .action-btn`);
-            if (button) {
-                button.disabled = false;
-                button.innerHTML = 'Create Types';
-            }
-        } else {
-            // Continue polling
-            setTimeout(() => pollObjectTypeCreationJobStatus(jobId, database), 1000);
-        }
-    } catch (error) {
-        console.error('Error polling object type creation job status:', error);
-        updateMessage('Error checking object type creation progress: ' + error.message);
-        updateProgress(0, 'Error checking progress');
-        // Re-enable button
-        const button = document.querySelector(`#${database}-objects .action-btn`);
-        if (button) {
-            button.disabled = false;
-            button.innerHTML = 'Create Types';
-        }
-    }
+        // Start polling
+        pollOnce();
+    });
 }
 
 function handleObjectTypeCreationJobComplete(result, database) {
@@ -2037,8 +2074,8 @@ async function createPostgresTables() {
         if (result.status === 'success') {
             console.log('PostgreSQL table creation job started:', result.jobId);
             updateMessage('PostgreSQL table creation job started successfully');
-            // Start polling for progress
-            pollTableCreationJobStatus(result.jobId, 'postgres');
+            // Start polling for progress and AWAIT completion
+            await pollTableCreationJobStatus(result.jobId, 'postgres');
         } else {
             throw new Error(result.message || 'Failed to start PostgreSQL table creation job');
         }
@@ -2057,54 +2094,66 @@ async function createPostgresTables() {
 async function pollTableCreationJobStatus(jobId, database) {
     console.log(`Polling table creation job status for ${database}:`, jobId);
 
-    try {
-        const response = await fetch(`/api/jobs/${jobId}/status`);
-        const status = await response.json();
+    return new Promise((resolve, reject) => {
+        const pollOnce = async () => {
+            try {
+                const response = await fetch(`/api/jobs/${jobId}/status`);
+                const status = await response.json();
 
-        if (status.status === 'error') {
-            throw new Error(status.message || 'Job status check failed');
-        }
+                if (status.status === 'error') {
+                    throw new Error(status.message || 'Job status check failed');
+                }
 
-        console.log(`Table creation job status for ${database}:`, status);
+                console.log(`Table creation job status for ${database}:`, status);
 
-        if (status.progress) {
-            updateProgress(status.progress.percentage, status.progress.currentTask);
-            updateMessage(`${status.progress.currentTask}: ${status.progress.details}`);
-        }
+                if (status.progress) {
+                    updateProgress(status.progress.percentage, status.progress.currentTask);
+                    updateMessage(`${status.progress.currentTask}: ${status.progress.details}`);
+                }
 
-        if (status.isComplete) {
-            console.log(`Table creation job completed for ${database}`);
-            // Get final results
-            const resultResponse = await fetch(`/api/jobs/${jobId}/result`);
-            const result = await resultResponse.json();
+                if (status.isComplete) {
+                    console.log(`Table creation job completed for ${database}`);
+                    // Get final results
+                    const resultResponse = await fetch(`/api/jobs/${jobId}/result`);
+                    const result = await resultResponse.json();
 
-            if (result.status === 'success') {
-                handleTableCreationJobComplete(result, database);
-            } else {
-                throw new Error(result.message || 'Job completed with errors');
+                    if (result.status === 'success') {
+                        handleTableCreationJobComplete(result, database);
+                    } else {
+                        throw new Error(result.message || 'Job completed with errors');
+                    }
+
+                    // Re-enable button
+                    const button = document.querySelector(`#${database}-tables .action-btn`);
+                    if (button) {
+                        button.disabled = false;
+                        button.innerHTML = 'Create Tables';
+                    }
+
+                    // Resolve the promise to signal completion
+                    resolve();
+                } else {
+                    // Continue polling
+                    setTimeout(pollOnce, 1000);
+                }
+            } catch (error) {
+                console.error('Error polling table creation job status:', error);
+                updateMessage('Error checking table creation progress: ' + error.message);
+                updateProgress(0, 'Error checking progress');
+                // Re-enable button
+                const button = document.querySelector(`#${database}-tables .action-btn`);
+                if (button) {
+                    button.disabled = false;
+                    button.innerHTML = 'Create Tables';
+                }
+                // Reject the promise to signal error
+                reject(error);
             }
+        };
 
-            // Re-enable button
-            const button = document.querySelector(`#${database}-tables .action-btn`);
-            if (button) {
-                button.disabled = false;
-                button.innerHTML = 'Create Tables';
-            }
-        } else {
-            // Continue polling
-            setTimeout(() => pollTableCreationJobStatus(jobId, database), 1000);
-        }
-    } catch (error) {
-        console.error('Error polling table creation job status:', error);
-        updateMessage('Error checking table creation progress: ' + error.message);
-        updateProgress(0, 'Error checking progress');
-        // Re-enable button
-        const button = document.querySelector(`#${database}-tables .action-btn`);
-        if (button) {
-            button.disabled = false;
-            button.innerHTML = 'Create Tables';
-        }
-    }
+        // Start polling
+        pollOnce();
+    });
 }
 
 function handleTableCreationJobComplete(result, database) {
@@ -2277,7 +2326,7 @@ async function startAll() {
         updateMessage('Step 4/11: Creating PostgreSQL schemas...');
         updateProgress(30, 'Creating PostgreSQL schemas');
         await createPostgresSchemas();
-        await waitForJobCompletion('schema creation');
+        await delay(1000);
 
         // Step 5: Verify PostgreSQL schemas
         updateMessage('Step 5/11: Verifying PostgreSQL schemas...');
@@ -2289,37 +2338,37 @@ async function startAll() {
         updateMessage('Step 6/11: Extracting Oracle object types...');
         updateProgress(50, 'Extracting Oracle object types');
         await loadOracleObjectTypes();
-        await waitForJobCompletion('object type extraction');
+        await delay(1000);
 
         // Step 7: Create PostgreSQL object types
         updateMessage('Step 7/11: Creating PostgreSQL object types...');
         updateProgress(60, 'Creating PostgreSQL object types');
         await createPostgresObjectTypes();
-        await waitForJobCompletion('object type creation');
+        await delay(1000); // Small delay before verification
 
         // Step 8: Verify PostgreSQL object types
         updateMessage('Step 8/11: Verifying PostgreSQL object types...');
         updateProgress(70, 'Verifying PostgreSQL object types');
         await loadPostgresObjectTypes();
-        await waitForJobCompletion('object type verification');
+        await delay(1000);
 
         // Step 9: Extract Oracle table metadata
         updateMessage('Step 9/11: Extracting Oracle table metadata...');
         updateProgress(80, 'Extracting Oracle table metadata');
         await extractTableMetadata();
-        await waitForJobCompletion('table extraction');
+        await delay(1000);
 
         // Step 10: Create PostgreSQL tables
         updateMessage('Step 10/11: Creating PostgreSQL tables...');
         updateProgress(90, 'Creating PostgreSQL tables');
         await createPostgresTables();
-        await waitForJobCompletion('table creation');
+        await delay(1000); // Small delay before verification
 
         // Step 11: Verify PostgreSQL tables
         updateMessage('Step 11/11: Verifying PostgreSQL tables...');
         updateProgress(95, 'Verifying PostgreSQL tables');
         await extractPostgresTableMetadata();
-        await waitForJobCompletion('table verification');
+        await delay(1000);
 
         // Complete
         updateProgress(100, 'Migration completed successfully');
