@@ -231,4 +231,101 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
 - **Memory**: Efficient data structures for metadata storage
 - **Connection pooling**: Managed by Quarkus datasource configuration
 
+## Complex Oracle Type Handling Strategy
+
+### Overview
+The migration handles three categories of Oracle data types with different strategies:
+
+1. **Built-in Oracle types** → Direct PostgreSQL type mapping via `TypeConverter`
+2. **User-defined object types** → PostgreSQL composite types (created via `PostgresObjectTypeCreationJob`)
+3. **Complex Oracle system types** → jsonb serialization with type metadata preservation
+
+### Type Categories and Handling
+
+#### 1. User-Defined Object Types (Composite Types)
+**Oracle Examples:** Custom types created by users (e.g., `ADDRESS_TYPE`, `CUSTOMER_TYPE`)
+
+**Strategy:**
+- **Step A (Table Creation)**: Use PostgreSQL composite type `schema.typename`
+- **Step B (Data Transfer)**: Direct structural mapping (Oracle object → PostgreSQL composite)
+- **Foundation**: Object types already extracted and created in PostgreSQL with correct dependency order
+
+**Implementation:** `PostgresTableCreationJob.generateColumnDefinition()` lines 237-250
+
+#### 2. Complex Oracle System Types (jsonb Serialization)
+**Oracle Examples:**
+- `SYS.ANYDATA`, `SYS.ANYTYPE` - Dynamic types
+- `SYS.AQ$_*` - Advanced Queuing types (e.g., `AQ$_JMS_TEXT_MESSAGE`)
+- `SYS.XMLTYPE` - XML data type
+- `SYS.SDO_GEOMETRY` - Spatial/geometry types
+
+**Strategy:**
+- **Step A (Table Creation)**: Create as `jsonb` column in PostgreSQL
+- **Step B (Data Transfer)**: Serialize to JSON with type metadata wrapper:
+  ```json
+  {
+    "oracleType": "SYS.ANYDATA",
+    "value": { /* actual serialized data */ }
+  }
+  ```
+
+**Benefits:**
+- ✅ Preserves original Oracle type name for future PL/SQL code conversion
+- ✅ Enables CSV batch transfer (jsonb serialization maintains performance)
+- ✅ PostgreSQL jsonb operators allow type-aware queries
+- ✅ Debuggable and inspectable data
+
+**Implementation:**
+- Table Creation: `PostgresTableCreationJob.isComplexOracleSystemType()` lines 284-307
+- Data Transfer: **TODO - To be implemented in Step B**
+
+#### 3. Built-in Oracle Types
+**Oracle Examples:** `NUMBER`, `VARCHAR2`, `DATE`, `TIMESTAMP`, etc.
+
+**Strategy:**
+- **Step A (Table Creation)**: Use `TypeConverter.toPostgre()` for direct mapping
+- **Step B (Data Transfer)**: Direct conversion using standard JDBC type mapping
+
+**Implementation:** `TypeConverter.toPostgre()` in `core/tools/TypeConverter.java`
+
+### Migration Process (Three-Step Strategy)
+
+**Step A: Table Creation (✅ Implemented)**
+- Create tables WITHOUT constraints
+- Apply type mapping strategy:
+  - User-defined types → `schema.typename` (composite types)
+  - Complex Oracle system types → `jsonb`
+  - Built-in types → Direct mapping via `TypeConverter`
+
+**Step B: Data Transfer (🔄 To Be Implemented)**
+- User-defined types: Direct structural transfer
+- Complex Oracle system types: Serialize with metadata wrapper to jsonb
+- Built-in types: Direct JDBC conversion
+- Use PostgreSQL COPY for batch performance (CSV format with jsonb serialization)
+
+**Step C: Constraint Creation (🔄 To Be Implemented)**
+- Add primary keys, foreign keys, unique constraints
+- Add check constraints
+- Executed after data transfer to avoid constraint violation issues
+
+### Code References
+
+**Table Creation Type Handling:**
+- `PostgresTableCreationJob.generateColumnDefinition()` - Main type mapping logic
+- `PostgresTableCreationJob.isComplexOracleSystemType()` - Identifies system types requiring jsonb
+
+**Type Conversion:**
+- `TypeConverter.toPostgre()` - Built-in type mapping
+
+**Future Data Transfer (Step B):**
+- Will serialize complex Oracle system types with format:
+  ```json
+  {
+    "oracleType": "<owner>.<type_name>",
+    "value": <serialized_data>
+  }
+  ```
+- Enables performant CSV batch transfer via PostgreSQL COPY
+- Preserves type metadata for future PL/SQL code transformation
+
 This architecture provides a solid foundation for Oracle-to-PostgreSQL migration with excellent extensibility for future enhancements.

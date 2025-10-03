@@ -235,9 +235,19 @@ public class PostgresTableCreationJob extends AbstractDatabaseWriteJob<TableCrea
         // Check if this is a custom (user-defined) data type
         String postgresType;
         if (column.isCustomDataType()) {
-            // Use the fully qualified type name (schema.typename) for custom types
-            postgresType = column.getDataTypeOwner().toLowerCase() + "." + column.getDataType().toLowerCase();
-            log.debug("Using custom data type '{}' for column '{}'", postgresType, column.getColumnName());
+            String oracleType = column.getDataType().toLowerCase();
+            String owner = column.getDataTypeOwner().toLowerCase();
+
+            // Check if it's a complex Oracle system type that needs jsonb serialization
+            if (isComplexOracleSystemType(owner, oracleType)) {
+                postgresType = "jsonb";
+                log.debug("Complex Oracle system type '{}.{}' for column '{}' will use jsonb (data transfer will preserve type metadata)",
+                         owner, oracleType, column.getColumnName());
+            } else {
+                // User-defined type - use the created PostgreSQL composite type
+                postgresType = owner + "." + oracleType;
+                log.debug("Using user-defined composite type '{}' for column '{}'", postgresType, column.getColumnName());
+            }
         } else {
             // Convert Oracle built-in data type to PostgreSQL
             postgresType = TypeConverter.toPostgre(column.getDataType());
@@ -261,6 +271,39 @@ public class PostgresTableCreationJob extends AbstractDatabaseWriteJob<TableCrea
         }
 
         return def.toString();
+    }
+
+    /**
+     * Identifies complex Oracle system types that cannot be directly mapped to PostgreSQL composite types.
+     * These types will be stored as jsonb with metadata preservation during data transfer.
+     *
+     * @param owner The schema/owner of the type (e.g., "sys")
+     * @param type The type name (e.g., "anydata", "aq$_jms_text_message")
+     * @return true if this is a complex Oracle system type requiring jsonb serialization
+     */
+    private boolean isComplexOracleSystemType(String owner, String type) {
+        // System-owned complex types that need jsonb serialization
+        if ("sys".equals(owner)) {
+            // Oracle Advanced Queuing types
+            if (type.startsWith("aq$_")) {
+                return true;
+            }
+            // Oracle dynamic types
+            if (type.equals("anydata") || type.equals("anytype")) {
+                return true;
+            }
+            // XML type (will be serialized to preserve structure)
+            if (type.equals("xmltype")) {
+                return true;
+            }
+            // Spatial/geometry types
+            if (type.equals("sdo_geometry")) {
+                return true;
+            }
+        }
+        // All other custom types are assumed to be user-defined composite types
+        // that have been created in PostgreSQL via ObjectTypeCreationJob
+        return false;
     }
 
     @Override
