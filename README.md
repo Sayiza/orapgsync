@@ -93,6 +93,11 @@ An enterprise-grade Oracle-to-PostgreSQL migration tool built with Quarkus, feat
 docker rm -f pgtest
 docker run --name pgtest -e POSTGRES_PASSWORD=secret -p 5432:5432 -d postgres
 ```
+Optional docker export can be done in this way:
+Commit the container to an image
+docker commit temp-postgres myapp-db:sprint-23-2025-10-04
+Share with team
+docker push myapp-db:sprint-23-2025-10-04
 
 **Connection Settings**
 - Oracle: `jdbc:oracle:thin:@localhost:1521:sid`
