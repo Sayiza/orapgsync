@@ -48,20 +48,20 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
 
     @Override
     protected List<RowCountMetadata> performExtraction(Consumer<JobProgress> progressCallback) throws Exception {
-        // Determine which schemas to process based on configuration
-        List<String> schemasToProcess = determineSchemasToProcess(progressCallback);
+        // Get table metadata from StateService instead of querying database
+        List<me.christianrobert.orapgsync.core.job.model.table.TableMetadata> oracleTableMetadata =
+            stateService.getOracleTableMetadata();
 
-        if (schemasToProcess.isEmpty()) {
-            updateProgress(progressCallback, 100, "No schemas to process", "No schemas available for row count extraction based on current configuration");
+        if (oracleTableMetadata == null || oracleTableMetadata.isEmpty()) {
+            updateProgress(progressCallback, 100, "No tables to process",
+                "No Oracle table metadata found in StateService. Please run Oracle table metadata extraction first.");
             return new ArrayList<>();
         }
 
-        updateProgress(progressCallback, 0, "Initializing", "Starting row count extraction for " + schemasToProcess.size() + " schemas");
+        updateProgress(progressCallback, 0, "Initializing",
+            "Starting row count extraction for " + oracleTableMetadata.size() + " tables from StateService");
 
-        List<String> validSchemas = filterValidSchemas(schemasToProcess);
-
-        log.info("Starting row count extraction for {} schemas (filtered from {} total)",
-                validSchemas.size(), schemasToProcess.size());
+        log.info("Starting row count extraction for {} tables from StateService", oracleTableMetadata.size());
 
         updateProgress(progressCallback, 5, "Connecting to Oracle", "Establishing database connection");
 
@@ -70,46 +70,36 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
         try (Connection oracleConnection = oracleConnectionService.getConnection()) {
             updateProgress(progressCallback, 10, "Connected", "Successfully connected to Oracle database");
 
-            // First, get all tables for the schemas
-            List<TableInfo> tablesInfo = getTablesForSchemas(oracleConnection, validSchemas, progressCallback);
-
-            if (tablesInfo.isEmpty()) {
-                updateProgress(progressCallback, 100, "No tables found", "No tables found in the specified schemas");
-                return new ArrayList<>();
-            }
-
-            updateProgress(progressCallback, 20, "Found tables", "Found " + tablesInfo.size() + " tables, starting row count extraction");
-
-            int totalTables = tablesInfo.size();
+            int totalTables = oracleTableMetadata.size();
             int processedTables = 0;
             long extractionTimestamp = System.currentTimeMillis();
 
-            for (TableInfo tableInfo : tablesInfo) {
+            for (me.christianrobert.orapgsync.core.job.model.table.TableMetadata table : oracleTableMetadata) {
                 updateProgress(progressCallback,
-                    20 + (processedTables * 75 / totalTables),
-                    "Counting rows in: " + tableInfo.schema + "." + tableInfo.tableName,
+                    10 + (processedTables * 85 / totalTables),
+                    "Counting rows in: " + table.getSchema() + "." + table.getTableName(),
                     String.format("Table %d of %d", processedTables + 1, totalTables));
 
                 try {
-                    long rowCount = getRowCountForTable(oracleConnection, tableInfo.schema, tableInfo.tableName);
+                    long rowCount = getRowCountForTable(oracleConnection, table.getSchema(), table.getTableName());
 
                     RowCountMetadata rowCountMetadata = new RowCountMetadata(
-                        tableInfo.schema,
-                        tableInfo.tableName,
+                        table.getSchema(),
+                        table.getTableName(),
                         rowCount,
                         extractionTimestamp
                     );
 
                     allRowCounts.add(rowCountMetadata);
 
-                    log.debug("Table {}.{} has {} rows", tableInfo.schema, tableInfo.tableName, rowCount);
+                    log.debug("Table {}.{} has {} rows", table.getSchema(), table.getTableName(), rowCount);
 
                 } catch (Exception e) {
-                    log.error("Failed to get row count for table: {}.{}", tableInfo.schema, tableInfo.tableName, e);
+                    log.error("Failed to get row count for table: {}.{}", table.getSchema(), table.getTableName(), e);
                     // Add a row count of -1 to indicate error
                     RowCountMetadata errorMetadata = new RowCountMetadata(
-                        tableInfo.schema,
-                        tableInfo.tableName,
+                        table.getSchema(),
+                        table.getTableName(),
                         -1,
                         extractionTimestamp
                     );
@@ -127,32 +117,6 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
             updateProgress(progressCallback, -1, "Failed", "Row count extraction failed: " + e.getMessage());
             throw e;
         }
-    }
-
-    private List<TableInfo> getTablesForSchemas(Connection connection, List<String> schemas,
-                                              Consumer<JobProgress> progressCallback) throws Exception {
-        List<TableInfo> tables = new ArrayList<>();
-
-        String sql = "SELECT OWNER, TABLE_NAME FROM ALL_TABLES WHERE OWNER IN (" +
-                     String.join(",", schemas.stream().map(s -> "?").toArray(String[]::new)) + ") " +
-                     "ORDER BY OWNER, TABLE_NAME";
-
-        try (PreparedStatement stmt = connection.prepareStatement(sql)) {
-            for (int i = 0; i < schemas.size(); i++) {
-                stmt.setString(i + 1, schemas.get(i));
-            }
-
-            try (ResultSet rs = stmt.executeQuery()) {
-                while (rs.next()) {
-                    String owner = rs.getString("OWNER");
-                    String tableName = rs.getString("TABLE_NAME");
-                    tables.add(new TableInfo(owner, tableName));
-                }
-            }
-        }
-
-        log.info("Found {} tables across {} schemas", tables.size(), schemas.size());
-        return tables;
     }
 
     private long getRowCountForTable(Connection connection, String schema, String tableName) throws Exception {
@@ -195,18 +159,5 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
         }
 
         return baseMessage;
-    }
-
-    /**
-     * Simple holder class for table information.
-     */
-    private static class TableInfo {
-        final String schema;
-        final String tableName;
-
-        TableInfo(String schema, String tableName) {
-            this.schema = schema;
-            this.tableName = tableName;
-        }
     }
 }
