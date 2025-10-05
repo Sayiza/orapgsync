@@ -8,6 +8,7 @@ import me.christianrobert.orapgsync.core.job.model.table.TableMetadata;
 import me.christianrobert.orapgsync.core.job.model.transfer.DataTransferResult;
 import me.christianrobert.orapgsync.database.service.OracleConnectionService;
 import me.christianrobert.orapgsync.database.service.PostgresConnectionService;
+import me.christianrobert.orapgsync.transfer.service.CsvDataTransferService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -30,6 +31,9 @@ public class DataTransferJob extends AbstractDatabaseWriteJob<DataTransferResult
 
     @Inject
     private PostgresConnectionService postgresConnectionService;
+
+    @Inject
+    private CsvDataTransferService csvDataTransferService;
 
     @Override
     public String getTargetDatabase() {
@@ -83,13 +87,13 @@ public class DataTransferJob extends AbstractDatabaseWriteJob<DataTransferResult
         try (Connection oracleConnection = oracleConnectionService.getConnection();
              Connection postgresConnection = postgresConnectionService.getConnection()) {
 
+            // Disable auto-commit for batch operations
+            postgresConnection.setAutoCommit(false);
+
             updateProgress(progressCallback, 30, "Connected", "Successfully connected to both databases");
 
             log.info("Data transfer job initialized successfully");
             log.info("Ready to transfer data for {} tables", validOracleTables.size());
-
-            // TODO: Implement actual data transfer logic in future iterations
-            // For now, this is a placeholder that does nothing but completes successfully
 
             int totalTables = validOracleTables.size();
             int processedTables = 0;
@@ -99,13 +103,27 @@ public class DataTransferJob extends AbstractDatabaseWriteJob<DataTransferResult
 
                 updateProgress(progressCallback,
                         30 + (processedTables * 65 / totalTables),
-                        "Processing: " + qualifiedTableName,
+                        "Transferring: " + qualifiedTableName,
                         String.format("Table %d of %d", processedTables + 1, totalTables));
 
-                log.debug("Would transfer data for table: {}", qualifiedTableName);
+                try {
+                    // Attempt to transfer the table
+                    long rowsTransferred = csvDataTransferService.transferTable(
+                            oracleConnection, postgresConnection, table);
 
-                // Placeholder: Mark as skipped for now since we're not doing actual transfer yet
-                result.addSkippedTable(qualifiedTableName);
+                    if (rowsTransferred == 0) {
+                        result.addSkippedTable(qualifiedTableName);
+                        log.info("Table {} skipped (no data or already transferred)", qualifiedTableName);
+                    } else {
+                        result.addTransferredTable(qualifiedTableName, rowsTransferred);
+                        log.info("Table {} transferred: {} rows", qualifiedTableName, rowsTransferred);
+                    }
+
+                } catch (Exception e) {
+                    // Log error and continue with next table (skip tables with errors)
+                    log.error("Failed to transfer table: {}", qualifiedTableName, e);
+                    result.addError(qualifiedTableName, e.getMessage());
+                }
 
                 processedTables++;
             }

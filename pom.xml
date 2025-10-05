@@ -66,6 +66,13 @@
       <version>23.5.0.24.07</version>
     </dependency>
 
+    <!-- Apache Commons CSV for data transfer -->
+    <dependency>
+      <groupId>org.apache.commons</groupId>
+      <artifactId>commons-csv</artifactId>
+      <version>1.10.0</version>
+    </dependency>
+
     <!-- JUnit 5 for testing -->
     <dependency>
       <groupId>io.quarkus</groupId>

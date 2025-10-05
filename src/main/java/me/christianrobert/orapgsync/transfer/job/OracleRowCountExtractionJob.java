@@ -6,12 +6,11 @@ import me.christianrobert.orapgsync.core.job.AbstractDatabaseExtractionJob;
 import me.christianrobert.orapgsync.core.job.model.JobProgress;
 import me.christianrobert.orapgsync.database.service.OracleConnectionService;
 import me.christianrobert.orapgsync.core.job.model.transfer.RowCountMetadata;
+import me.christianrobert.orapgsync.transfer.service.RowCountService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -25,6 +24,9 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
 
     @Inject
     private OracleConnectionService oracleConnectionService;
+
+    @Inject
+    private RowCountService rowCountService;
 
     @Override
     public String getSourceDatabase() {
@@ -80,30 +82,21 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
                     "Counting rows in: " + table.getSchema() + "." + table.getTableName(),
                     String.format("Table %d of %d", processedTables + 1, totalTables));
 
-                try {
-                    long rowCount = getRowCountForTable(oracleConnection, table.getSchema(), table.getTableName());
+                long rowCount = rowCountService.getRowCount(oracleConnection, table.getSchema(), table.getTableName());
 
-                    RowCountMetadata rowCountMetadata = new RowCountMetadata(
-                        table.getSchema(),
-                        table.getTableName(),
-                        rowCount,
-                        extractionTimestamp
-                    );
+                RowCountMetadata rowCountMetadata = new RowCountMetadata(
+                    table.getSchema(),
+                    table.getTableName(),
+                    rowCount,
+                    extractionTimestamp
+                );
 
-                    allRowCounts.add(rowCountMetadata);
+                allRowCounts.add(rowCountMetadata);
 
+                if (rowCount >= 0) {
                     log.debug("Table {}.{} has {} rows", table.getSchema(), table.getTableName(), rowCount);
-
-                } catch (Exception e) {
-                    log.error("Failed to get row count for table: {}.{}", table.getSchema(), table.getTableName(), e);
-                    // Add a row count of -1 to indicate error
-                    RowCountMetadata errorMetadata = new RowCountMetadata(
-                        table.getSchema(),
-                        table.getTableName(),
-                        -1,
-                        extractionTimestamp
-                    );
-                    allRowCounts.add(errorMetadata);
+                } else {
+                    log.warn("Table {}.{} had error during row count", table.getSchema(), table.getTableName());
                 }
 
                 processedTables++;
@@ -116,21 +109,6 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
         } catch (Exception e) {
             updateProgress(progressCallback, -1, "Failed", "Row count extraction failed: " + e.getMessage());
             throw e;
-        }
-    }
-
-    private long getRowCountForTable(Connection connection, String schema, String tableName) throws Exception {
-        // Use COUNT(*) for precise row count
-        String sql = "SELECT COUNT(*) as ROW_COUNT FROM " + schema + "." + tableName;
-
-        try (PreparedStatement stmt = connection.prepareStatement(sql);
-             ResultSet rs = stmt.executeQuery()) {
-
-            if (rs.next()) {
-                return rs.getLong("ROW_COUNT");
-            } else {
-                throw new RuntimeException("No result returned from count query");
-            }
         }
     }
 

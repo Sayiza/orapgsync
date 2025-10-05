@@ -2645,37 +2645,32 @@ function displayDataTransferResults(result) {
 
         // Show transferred tables
         if (summary.transferredTables && Object.keys(summary.transferredTables).length > 0) {
-            html += '<div class="transferred-tables">';
+            html += '<div class="created-items-section">';
             html += '<h4>Transferred Tables:</h4>';
-            html += '<ul>';
             Object.values(summary.transferredTables).forEach(table => {
-                html += `<li class="success">${table.tableName}</li>`;
+                const rowInfo = table.rowsTransferred ? ` (${table.rowsTransferred.toLocaleString()} rows)` : '';
+                html += `<div class="creation-item created">${table.tableName}${rowInfo} ✓</div>`;
             });
-            html += '</ul>';
             html += '</div>';
         }
 
         // Show skipped tables
         if (summary.skippedTables && Object.keys(summary.skippedTables).length > 0) {
-            html += '<div class="skipped-tables">';
+            html += '<div class="skipped-items-section">';
             html += '<h4>Skipped Tables:</h4>';
-            html += '<ul>';
             Object.values(summary.skippedTables).forEach(table => {
-                html += `<li class="skipped">${table.tableName}</li>`;
+                html += `<div class="creation-item skipped">${table.tableName} (already synced or empty)</div>`;
             });
-            html += '</ul>';
             html += '</div>';
         }
 
         // Show errors
         if (summary.errors && Object.keys(summary.errors).length > 0) {
-            html += '<div class="error-tables">';
+            html += '<div class="error-items-section">';
             html += '<h4>Transfer Errors:</h4>';
-            html += '<ul>';
             Object.values(summary.errors).forEach(error => {
-                html += `<li class="error"><strong>${error.tableName}</strong>: ${error.error}</li>`;
+                html += `<div class="creation-item error"><strong>${error.tableName}</strong>: ${error.error}</div>`;
             });
-            html += '</ul>';
             html += '</div>';
         }
     } else {

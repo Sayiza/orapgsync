@@ -1300,3 +1300,7 @@ td {
     white-space: pre-wrap;
     word-break: break-all;
 }
+
+.execution-time {
+    font-size: 0.8rem;
+}
