@@ -13,6 +13,7 @@ import me.christianrobert.orapgsync.core.job.service.JobRegistry;
 import me.christianrobert.orapgsync.core.job.service.JobService;
 import me.christianrobert.orapgsync.core.job.model.objectdatatype.ObjectDataTypeMetaData;
 import me.christianrobert.orapgsync.core.job.model.objectdatatype.ObjectTypeCreationResult;
+import me.christianrobert.orapgsync.core.job.model.transfer.DataTransferResult;
 import me.christianrobert.orapgsync.core.job.model.transfer.RowCountMetadata;
 import me.christianrobert.orapgsync.core.job.model.table.TableCreationResult;
 import me.christianrobert.orapgsync.core.job.model.table.TableMetadata;
@@ -288,6 +289,18 @@ public class JobResource {
                 response.put("skippedCount", tableResult.getSkippedCount());
                 response.put("errorCount", tableResult.getErrorCount());
                 response.put("isSuccessful", tableResult.isSuccessful());
+                response.put("result", result); // Include raw result for frontend compatibility
+            } else if (result instanceof DataTransferResult) {
+                // Handle data transfer results
+                DataTransferResult transferResult = (DataTransferResult) result;
+
+                Map<String, Object> summary = generateDataTransferSummary(transferResult);
+                response.put("summary", summary);
+                response.put("transferredCount", transferResult.getTransferredCount());
+                response.put("skippedCount", transferResult.getSkippedCount());
+                response.put("errorCount", transferResult.getErrorCount());
+                response.put("totalRowsTransferred", transferResult.getTotalRowsTransferred());
+                response.put("isSuccessful", transferResult.isSuccessful());
                 response.put("result", result); // Include raw result for frontend compatibility
             } else {
                 response.put("result", result);
@@ -604,6 +617,58 @@ public class JobResource {
     @Path("/postgres/table/create")
     public Response startPostgresTableCreation() {
         return startJob("POSTGRES", "TABLE_CREATION", "PostgreSQL table creation");
+    }
+
+    @POST
+    @Path("/postgres/data-transfer/create")
+    public Response startDataTransfer() {
+        return startJob("POSTGRES", "DATA_TRANSFER", "Data transfer from Oracle to PostgreSQL");
+    }
+
+    private Map<String, Object> generateDataTransferSummary(DataTransferResult transferResult) {
+        Map<String, Object> transferredDetails = new HashMap<>();
+        Map<String, Object> skippedDetails = new HashMap<>();
+        Map<String, Object> errorDetails = new HashMap<>();
+
+        // Transferred tables details
+        for (String tableName : transferResult.getTransferredTables()) {
+            transferredDetails.put(tableName, Map.of(
+                    "tableName", tableName,
+                    "status", "transferred",
+                    "timestamp", transferResult.getExecutionDateTime().toString()
+            ));
+        }
+
+        // Skipped tables details
+        for (String tableName : transferResult.getSkippedTables()) {
+            skippedDetails.put(tableName, Map.of(
+                    "tableName", tableName,
+                    "status", "skipped",
+                    "reason", "no data or already transferred"
+            ));
+        }
+
+        // Error details
+        for (DataTransferResult.DataTransferError error : transferResult.getErrors()) {
+            errorDetails.put(error.getTableName(), Map.of(
+                    "tableName", error.getTableName(),
+                    "status", "error",
+                    "error", error.getErrorMessage()
+            ));
+        }
+
+        return Map.of(
+                "totalProcessed", transferResult.getTotalProcessed(),
+                "transferredCount", transferResult.getTransferredCount(),
+                "skippedCount", transferResult.getSkippedCount(),
+                "errorCount", transferResult.getErrorCount(),
+                "totalRowsTransferred", transferResult.getTotalRowsTransferred(),
+                "isSuccessful", transferResult.isSuccessful(),
+                "executionTimestamp", transferResult.getExecutionTimestamp(),
+                "transferredTables", transferredDetails,
+                "skippedTables", skippedDetails,
+                "errors", errorDetails
+        );
     }
 
     private Map<String, Object> generateSchemaExtractionSummary(List<String> schemas) {

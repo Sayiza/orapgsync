@@ -3,6 +3,7 @@ package me.christianrobert.orapgsync.core.service;
 import jakarta.enterprise.context.ApplicationScoped;
 import me.christianrobert.orapgsync.core.job.model.objectdatatype.ObjectDataTypeMetaData;
 import me.christianrobert.orapgsync.core.job.model.objectdatatype.ObjectTypeCreationResult;
+import me.christianrobert.orapgsync.core.job.model.transfer.DataTransferResult;
 import me.christianrobert.orapgsync.core.job.model.transfer.RowCountMetadata;
 import me.christianrobert.orapgsync.core.job.model.schema.SchemaCreationResult;
 import me.christianrobert.orapgsync.core.job.model.table.TableCreationResult;
@@ -39,6 +40,8 @@ public class StateService {
     List<TableMetadata> oracleTableMetadata = new ArrayList<>();
     List<TableMetadata> postgresTableMetadata = new ArrayList<>();
     TableCreationResult tableCreationResult;
+
+    DataTransferResult dataTransferResult;
 
     public List<String> getOracleSchemaNames() {
         return oracleSchemaNames;
@@ -128,6 +131,14 @@ public class StateService {
         this.tableCreationResult = tableCreationResult;
     }
 
+    public DataTransferResult getDataTransferResult() {
+        return dataTransferResult;
+    }
+
+    public void setDataTransferResult(DataTransferResult dataTransferResult) {
+        this.dataTransferResult = dataTransferResult;
+    }
+
     public void resetState() {
         log.info("Resetting all state to default values");
         this.oracleSchemaNames = new ArrayList<>();
@@ -141,5 +152,6 @@ public class StateService {
         this.oracleTableMetadata = new ArrayList<>();
         this.postgresTableMetadata = new ArrayList<>();
         this.tableCreationResult = null;
+        this.dataTransferResult = null;
     }
 }

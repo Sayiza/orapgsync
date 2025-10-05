@@ -2337,58 +2337,73 @@ async function startAll() {
 
     try {
         // Step 1: Test Oracle connection
-        updateOrchestrationProgress(5, 'Step 1/11: Testing Oracle connection...');
+        updateOrchestrationProgress(4, 'Step 1/14: Testing Oracle connection...');
         await testOracleConnection();
         await delay(1000);
 
         // Step 2: Test PostgreSQL connection
-        updateOrchestrationProgress(10, 'Step 2/11: Testing PostgreSQL connection...');
+        updateOrchestrationProgress(7, 'Step 2/14: Testing PostgreSQL connection...');
         await testPostgresConnection();
         await delay(1000);
 
         // Step 3: Load Oracle schemas
-        updateOrchestrationProgress(20, 'Step 3/11: Loading Oracle schemas...');
+        updateOrchestrationProgress(14, 'Step 3/14: Loading Oracle schemas...');
         await loadOracleSchemas();
         await delay(1000);
 
         // Step 4: Create PostgreSQL schemas
-        updateOrchestrationProgress(30, 'Step 4/11: Creating PostgreSQL schemas...');
+        updateOrchestrationProgress(21, 'Step 4/14: Creating PostgreSQL schemas...');
         await createPostgresSchemas();
         await delay(1000);
 
         // Step 5: Verify PostgreSQL schemas
-        updateOrchestrationProgress(40, 'Step 5/11: Verifying PostgreSQL schemas...');
+        updateOrchestrationProgress(29, 'Step 5/14: Verifying PostgreSQL schemas...');
         await loadPostgresSchemas();
         await delay(1000);
 
         // Step 6: Extract Oracle object types
-        updateOrchestrationProgress(50, 'Step 6/11: Extracting Oracle object types...');
+        updateOrchestrationProgress(36, 'Step 6/14: Extracting Oracle object types...');
         await loadOracleObjectTypes();
         await delay(1000);
 
         // Step 7: Create PostgreSQL object types
-        updateOrchestrationProgress(60, 'Step 7/11: Creating PostgreSQL object types...');
+        updateOrchestrationProgress(43, 'Step 7/14: Creating PostgreSQL object types...');
         await createPostgresObjectTypes();
         await delay(1000); // Small delay before verification
 
         // Step 8: Verify PostgreSQL object types
-        updateOrchestrationProgress(70, 'Step 8/11: Verifying PostgreSQL object types...');
+        updateOrchestrationProgress(50, 'Step 8/14: Verifying PostgreSQL object types...');
         await loadPostgresObjectTypes();
         await delay(1000);
 
         // Step 9: Extract Oracle table metadata
-        updateOrchestrationProgress(80, 'Step 9/11: Extracting Oracle table metadata...');
+        updateOrchestrationProgress(57, 'Step 9/14: Extracting Oracle table metadata...');
         await extractTableMetadata();
         await delay(1000);
 
         // Step 10: Create PostgreSQL tables
-        updateOrchestrationProgress(90, 'Step 10/11: Creating PostgreSQL tables...');
+        updateOrchestrationProgress(64, 'Step 10/14: Creating PostgreSQL tables...');
         await createPostgresTables();
         await delay(1000); // Small delay before verification
 
         // Step 11: Verify PostgreSQL tables
-        updateOrchestrationProgress(95, 'Step 11/11: Verifying PostgreSQL tables...');
+        updateOrchestrationProgress(71, 'Step 11/14: Verifying PostgreSQL tables...');
         await extractPostgresTableMetadata();
+        await delay(1000);
+
+        // Step 12: Extract Oracle row counts
+        updateOrchestrationProgress(79, 'Step 12/14: Extracting Oracle row counts...');
+        await extractOracleRowCounts();
+        await delay(1000);
+
+        // Step 13: Transfer data from Oracle to PostgreSQL
+        updateOrchestrationProgress(86, 'Step 13/14: Transferring data...');
+        await transferData();
+        await delay(1000);
+
+        // Step 14: Verify data transfer
+        updateOrchestrationProgress(93, 'Step 14/14: Verifying data transfer...');
+        await extractPostgresRowCounts();
         await delay(1000);
 
         // Complete
@@ -2463,6 +2478,225 @@ async function waitForJobCompletion(jobDescription) {
             }
         }, checkInterval);
     });
+}
+
+// ============================================================================
+// Data Transfer Functions
+// ============================================================================
+
+async function transferData() {
+    console.log('Starting data transfer job...');
+    const button = document.querySelector('#postgres-data .action-btn');
+    if (button) {
+        button.disabled = true;
+        button.innerHTML = '⏳';
+    }
+    updateMessage('Starting data transfer from Oracle to PostgreSQL...');
+    updateProgress(0, 'Starting data transfer');
+
+    try {
+        const response = await fetch('/api/jobs/postgres/data-transfer/create', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+
+        const result = await response.json();
+        if (result.status === 'success') {
+            console.log('Data transfer job started:', result.jobId);
+            updateMessage('Data transfer job started successfully');
+            // Start polling for progress and AWAIT completion
+            await pollDataTransferJobStatus(result.jobId);
+        } else {
+            throw new Error(result.message || 'Failed to start data transfer job');
+        }
+    } catch (error) {
+        console.error('Error starting data transfer job:', error);
+        updateMessage('Failed to start data transfer: ' + error.message);
+        updateProgress(0, 'Failed to start data transfer');
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = 'Transfer Data';
+        }
+    }
+}
+
+async function pollDataTransferJobStatus(jobId) {
+    console.log('Polling data transfer job status:', jobId);
+
+    return new Promise((resolve, reject) => {
+        const pollOnce = async () => {
+            try {
+                const response = await fetch(`/api/jobs/${jobId}/status`);
+                const status = await response.json();
+
+                if (status.status === 'error') {
+                    throw new Error(status.message || 'Job status check failed');
+                }
+
+                console.log('Data transfer job status:', status);
+
+                if (status.progress) {
+                    updateProgress(status.progress.percentage, status.progress.currentTask);
+                    updateMessage(`${status.progress.currentTask}: ${status.progress.details}`);
+                }
+
+                if (status.isComplete) {
+                    console.log('Data transfer job completed');
+                    // Get final results
+                    const resultResponse = await fetch(`/api/jobs/${jobId}/result`);
+                    const result = await resultResponse.json();
+
+                    if (result.status === 'success') {
+                        handleDataTransferJobComplete(result);
+                    } else {
+                        throw new Error(result.message || 'Job completed with errors');
+                    }
+
+                    // Re-enable button
+                    const button = document.querySelector('#postgres-data .action-btn');
+                    if (button) {
+                        button.disabled = false;
+                        button.innerHTML = 'Transfer Data';
+                    }
+
+                    // Resolve the promise to signal completion
+                    resolve();
+                } else {
+                    // Continue polling
+                    setTimeout(pollOnce, 1000);
+                }
+            } catch (error) {
+                console.error('Error polling data transfer job status:', error);
+                updateMessage('Error checking data transfer progress: ' + error.message);
+                updateProgress(0, 'Error checking progress');
+                // Re-enable button
+                const button = document.querySelector('#postgres-data .action-btn');
+                if (button) {
+                    button.disabled = false;
+                    button.innerHTML = 'Transfer Data';
+                }
+                reject(error);
+            }
+        };
+
+        // Start polling
+        pollOnce();
+    });
+}
+
+function handleDataTransferJobComplete(result) {
+    console.log('Data transfer job results:', result);
+
+    const transferredCount = result.transferredCount || 0;
+    const skippedCount = result.skippedCount || 0;
+    const errorCount = result.errorCount || 0;
+    const totalRows = result.totalRowsTransferred || 0;
+
+    updateProgress(100, `Data transfer completed: ${transferredCount} tables, ${totalRows.toLocaleString()} rows transferred`);
+
+    if (result.isSuccessful) {
+        updateMessage(`Data transfer completed successfully: ${transferredCount} tables, ${totalRows.toLocaleString()} rows transferred`);
+    } else {
+        updateMessage(`Data transfer completed with errors: ${transferredCount} transferred, ${skippedCount} skipped, ${errorCount} errors`);
+    }
+
+    // Update data transfer results section
+    displayDataTransferResults(result);
+
+    // Refresh PostgreSQL row counts to show newly transferred data
+    setTimeout(() => {
+        extractPostgresRowCounts();
+    }, 1000);
+}
+
+function displayDataTransferResults(result) {
+    const resultsDiv = document.getElementById('postgres-data-transfer-results');
+    const detailsDiv = document.getElementById('postgres-data-transfer-details');
+
+    if (!resultsDiv || !detailsDiv) {
+        console.error('Data transfer results container not found');
+        return;
+    }
+
+    let html = '';
+
+    if (result.summary) {
+        const summary = result.summary;
+
+        html += '<div class="table-creation-summary">';
+        html += `<div class="summary-stats">`;
+        html += `<span class="stat-item transferred">Transferred: ${summary.transferredCount}</span>`;
+        html += `<span class="stat-item skipped">Skipped: ${summary.skippedCount}</span>`;
+        if (summary.errorCount > 0) {
+            html += `<span class="stat-item errors">Errors: ${summary.errorCount}</span>`;
+        }
+        html += `<span class="stat-item total-rows">Total Rows: ${(summary.totalRowsTransferred || 0).toLocaleString()}</span>`;
+        html += '</div>';
+
+        if (summary.executionTimestamp) {
+            const date = new Date(summary.executionTimestamp);
+            html += `<div class="execution-time">Executed: ${date.toLocaleString()}</div>`;
+        }
+
+        html += '</div>';
+
+        // Show transferred tables
+        if (summary.transferredTables && Object.keys(summary.transferredTables).length > 0) {
+            html += '<div class="transferred-tables">';
+            html += '<h4>Transferred Tables:</h4>';
+            html += '<ul>';
+            Object.values(summary.transferredTables).forEach(table => {
+                html += `<li class="success">${table.tableName}</li>`;
+            });
+            html += '</ul>';
+            html += '</div>';
+        }
+
+        // Show skipped tables
+        if (summary.skippedTables && Object.keys(summary.skippedTables).length > 0) {
+            html += '<div class="skipped-tables">';
+            html += '<h4>Skipped Tables:</h4>';
+            html += '<ul>';
+            Object.values(summary.skippedTables).forEach(table => {
+                html += `<li class="skipped">${table.tableName}</li>`;
+            });
+            html += '</ul>';
+            html += '</div>';
+        }
+
+        // Show errors
+        if (summary.errors && Object.keys(summary.errors).length > 0) {
+            html += '<div class="error-tables">';
+            html += '<h4>Transfer Errors:</h4>';
+            html += '<ul>';
+            Object.values(summary.errors).forEach(error => {
+                html += `<li class="error"><strong>${error.tableName}</strong>: ${error.error}</li>`;
+            });
+            html += '</ul>';
+            html += '</div>';
+        }
+    } else {
+        html += '<div class="no-results">No detailed results available</div>';
+    }
+
+    detailsDiv.innerHTML = html;
+    resultsDiv.style.display = 'block';
+}
+
+function toggleDataTransferResults() {
+    const detailsDiv = document.getElementById('postgres-data-transfer-details');
+    const header = document.querySelector('#postgres-data-transfer-results .table-creation-header .toggle-indicator');
+
+    if (detailsDiv.style.display === 'none' || !detailsDiv.style.display) {
+        detailsDiv.style.display = 'block';
+        if (header) header.textContent = '▼';
+    } else {
+        detailsDiv.style.display = 'none';
+        if (header) header.textContent = '▶';
+    }
 }
 
 // Load configuration when page loads
