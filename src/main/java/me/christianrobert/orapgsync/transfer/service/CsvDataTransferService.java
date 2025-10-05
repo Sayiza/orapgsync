@@ -42,6 +42,9 @@ public class CsvDataTransferService {
     @Inject
     private RowCountService rowCountService;
 
+    @Inject
+    private OracleComplexTypeSerializer complexTypeSerializer;
+
     /**
      * Transfers data for a single table from Oracle to PostgreSQL.
      *
@@ -259,11 +262,10 @@ public class CsvDataTransferService {
                                 column.getColumnName(), table.getSchema(), table.getTableName());
                         csvPrinter.print(null);
                     } else if (isComplexOracleSystemType(column)) {
-                        // TODO: Handle complex Oracle system types (ANYDATA, XMLTYPE, etc.)
-                        // For now, skip complex type columns (this is a placeholder)
-                        log.warn("Complex type column {} ({}) in table {}.{} - complex type handling not yet implemented",
-                                column.getColumnName(), dataType, table.getSchema(), table.getTableName());
-                        csvPrinter.print(null);
+                        // Handle complex Oracle system types (ANYDATA, XMLTYPE, etc.)
+                        // Serialize to JSON format for storage in PostgreSQL jsonb
+                        String jsonValue = complexTypeSerializer.serializeToJson(rs, i + 1, column);
+                        csvPrinter.print(jsonValue);
                     } else {
                         // Simple type: use standard JDBC getString
                         String value = rs.getString(i + 1);
