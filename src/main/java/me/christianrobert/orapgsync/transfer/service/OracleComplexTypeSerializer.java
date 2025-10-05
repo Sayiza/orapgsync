@@ -13,8 +13,10 @@ import org.slf4j.LoggerFactory;
 
 import java.sql.CallableStatement;
 import java.sql.Connection;
+import java.sql.Date;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Timestamp;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -34,6 +36,174 @@ public class OracleComplexTypeSerializer {
     private static final Logger log = LoggerFactory.getLogger(OracleComplexTypeSerializer.class);
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    /**
+     * Serializes a user-defined Oracle STRUCT/OBJECT type to PostgreSQL composite type format for CSV COPY.
+     * This is used for custom object types that have been mapped to PostgreSQL composite types.
+     *
+     * Format for CSV COPY: (value1,value2,value3) or ("text with spaces",123,NULL)
+     * For nested objects: (value1,"(nested1,nested2)",value3)
+     *
+     * Note: This is NOT the ROW() constructor format - PostgreSQL COPY expects raw composite literal syntax.
+     *
+     * @param connection Oracle database connection
+     * @param rs ResultSet positioned at current row
+     * @param columnIndex Column index (1-based)
+     * @param column Column metadata
+     * @return PostgreSQL composite literal string, or null if the value is NULL
+     * @throws SQLException if database access fails
+     */
+    public String serializeToPostgresRow(Connection connection, ResultSet rs, int columnIndex, ColumnMetadata column) throws SQLException {
+        Object obj = rs.getObject(columnIndex);
+
+        if (obj == null) {
+            return null; // NULL object → NULL in PostgreSQL
+        }
+
+        if (!(obj instanceof STRUCT)) {
+            log.warn("Expected STRUCT for user-defined type {} in column {}, got: {}",
+                    column.getDataType(), column.getColumnName(), obj.getClass().getName());
+            return null;
+        }
+
+        STRUCT struct = (STRUCT) obj;
+        return serializeStructToCompositeLiteral(struct);
+    }
+
+    /**
+     * Recursively serializes an Oracle STRUCT to PostgreSQL composite literal format for CSV COPY.
+     * Format: (value1,value2,value3) - parentheses with comma-separated values
+     * Nested composites are quoted: (value1,"(nested1,nested2)",value3)
+     */
+    private String serializeStructToCompositeLiteral(STRUCT struct) throws SQLException {
+        if (struct == null) {
+            return null;
+        }
+
+        Object[] attributes = struct.getAttributes();
+
+        if (attributes == null || attributes.length == 0) {
+            return "()"; // Empty composite
+        }
+
+        StringBuilder literalBuilder = new StringBuilder("(");
+
+        for (int i = 0; i < attributes.length; i++) {
+            if (i > 0) {
+                literalBuilder.append(",");
+            }
+
+            Object attrValue = attributes[i];
+            literalBuilder.append(serializeAttributeValueForComposite(attrValue, false));
+        }
+
+        literalBuilder.append(")");
+        return literalBuilder.toString();
+    }
+
+    /**
+     * Serializes a single attribute value for use in PostgreSQL composite literal.
+     *
+     * PostgreSQL composite literal rules for CSV COPY:
+     * - NULL values: unquoted NULL or empty position
+     * - Numbers: unquoted (123, 45.67)
+     * - Strings without special chars: can be unquoted (abc) or quoted ("abc")
+     * - Strings with special chars (spaces, commas, quotes, backslashes, parens): MUST be quoted
+     * - Nested composites: quoted composite literals: "(val1,val2)"
+     * - Quotes inside strings: double the quote ("O""Brien")
+     * - Backslashes: double the backslash ("path\\to\\file")
+     *
+     * @param value The attribute value
+     * @param isNested True if this is a nested composite (needs extra quoting)
+     */
+    private String serializeAttributeValueForComposite(Object value, boolean isNested) throws SQLException {
+        if (value == null) {
+            return ""; // In composite literals, NULL is represented as empty string or omitted
+        }
+
+        // Handle nested STRUCT (recursive case)
+        if (value instanceof STRUCT) {
+            String nestedLiteral = serializeStructToCompositeLiteral((STRUCT) value);
+            // Nested composites must be quoted and the quotes inside must be escaped
+            return quoteCompositeValue(nestedLiteral);
+        }
+
+        // Handle Oracle Datum types
+        if (value instanceof Datum) {
+            Datum datum = (Datum) value;
+            try {
+                Object javaValue = datum.toJdbc();
+                return serializeAttributeValueForComposite(javaValue, isNested);
+            } catch (Exception e) {
+                log.warn("Failed to convert Datum to JDBC type: {}", e.getMessage());
+                String strValue = datum.stringValue();
+                return quoteCompositeValue(strValue);
+            }
+        }
+
+        // Handle standard Java types
+        if (value instanceof String) {
+            String strValue = (String) value;
+            // Check if quoting is needed
+            if (needsQuoting(strValue)) {
+                return quoteCompositeValue(strValue);
+            } else {
+                return strValue; // Simple strings can be unquoted
+            }
+        }
+
+        if (value instanceof Number) {
+            return value.toString(); // Numbers are always unquoted
+        }
+
+        if (value instanceof Boolean) {
+            return value.toString(); // Boolean: true/false unquoted
+        }
+
+        if (value instanceof Date || value instanceof Timestamp) {
+            // Dates need quoting
+            return quoteCompositeValue(value.toString());
+        }
+
+        // Fallback: convert to string and quote if needed
+        log.debug("Unhandled attribute type {}: using toString()", value.getClass().getName());
+        String strValue = value.toString();
+        return needsQuoting(strValue) ? quoteCompositeValue(strValue) : strValue;
+    }
+
+    /**
+     * Checks if a string value needs quoting in a composite literal.
+     * Strings need quoting if they contain: spaces, commas, quotes, backslashes, parens, or are empty.
+     */
+    private boolean needsQuoting(String value) {
+        if (value == null || value.isEmpty()) {
+            return true;
+        }
+        // Check for special characters that require quoting
+        return value.contains(" ") || value.contains(",") || value.contains("\"") ||
+               value.contains("\\") || value.contains("(") || value.contains(")") ||
+               value.contains("\n") || value.contains("\r") || value.contains("\t");
+    }
+
+    /**
+     * Quotes and escapes a value for use in PostgreSQL composite literal.
+     * Rules:
+     * - Wrap in double quotes
+     * - Double any internal quotes: " → ""
+     * - Double any backslashes: \ → \\
+     */
+    private String quoteCompositeValue(String value) {
+        if (value == null) {
+            return "";
+        }
+
+        // Escape backslashes first (must be done before quotes)
+        String escaped = value.replace("\\", "\\\\");
+        // Escape double quotes
+        escaped = escaped.replace("\"", "\"\"");
+
+        return "\"" + escaped + "\"";
+    }
 
     /**
      * Serializes a complex Oracle type to JSON string for storage in PostgreSQL jsonb.

@@ -33,11 +33,16 @@ public class CsvDataTransferService {
 
     // Batch sizes based on data complexity
     private static final int BATCH_SIZE_DEFAULT = 10_000;
-    private static final int BATCH_SIZE_LOB = 1_000;
+    private static final int BATCH_SIZE_LOB = 50;  // Small batch for LOB tables to manage memory
     private static final int BATCH_SIZE_SIMPLE = 50_000;
 
     // Pipe buffer size for streaming CSV data
     private static final int PIPE_BUFFER_SIZE = 1024 * 1024; // 1MB
+
+    // LOB handling configuration
+    private static final long MAX_INLINE_LOB_SIZE = 20 * 1024 * 1024; // 20MB - LOBs larger than this will be skipped
+    private static final int LOB_CHUNK_SIZE = 8192; // 8KB chunks for streaming LOB data
+    private static final int LOB_FLUSH_FREQUENCY = 10; // Flush CSV to pipe every 10 rows for LOB tables
 
     @Inject
     private RowCountService rowCountService;
@@ -277,11 +282,29 @@ public class CsvDataTransferService {
                         // Build JSON wrapper
                         String jsonValue = buildAnydataJson(typeName, value);
                         csvPrinter.print(jsonValue);
+                    } else if (isUserDefinedObjectType(column)) {
+                        // User-defined object type - serialize to PostgreSQL ROW format
+                        try {
+                            String rowValue = complexTypeSerializer.serializeToPostgresRow(
+                                    oracleConn, rs, rsColumnIndex, column);
+                            csvPrinter.print(rowValue);
+                        } catch (Exception e) {
+                            log.error("Failed to serialize user-defined type {} for column {}: {}",
+                                    dataType, column.getColumnName(), e.getMessage());
+                            csvPrinter.print(null);
+                        }
+                        rsColumnIndex++;
                     } else if (isComplexOracleSystemType(column)) {
-                        // Other complex types - for now, just log and use null
-                        log.warn("Complex type {} for column {} not yet fully implemented",
-                                dataType, column.getColumnName());
-                        csvPrinter.print(null);
+                        // Other complex Oracle system types - serialize to JSON (for jsonb columns)
+                        try {
+                            String jsonValue = complexTypeSerializer.serializeToJson(
+                                    oracleConn, rs, rsColumnIndex, column);
+                            csvPrinter.print(jsonValue);
+                        } catch (Exception e) {
+                            log.error("Failed to serialize complex type {} for column {}: {}",
+                                    dataType, column.getColumnName(), e.getMessage());
+                            csvPrinter.print(null);
+                        }
                         rsColumnIndex++;
                     } else {
                         // Simple type: use standard JDBC getString
@@ -328,6 +351,38 @@ public class CsvDataTransferService {
         }
 
         return false;
+    }
+
+    /**
+     * Checks if a column is a user-defined object type (not a system type, not a simple type).
+     * User-defined types have been mapped to PostgreSQL composite types.
+     */
+    private boolean isUserDefinedObjectType(ColumnMetadata column) {
+        String owner = column.getDataTypeOwner();
+        String dataType = column.getDataType();
+
+        // Must have an owner (schema) and data type
+        if (owner == null || dataType == null) {
+            return false;
+        }
+
+        // Exclude system-owned types
+        if (owner.equalsIgnoreCase("SYS") || owner.equalsIgnoreCase("PUBLIC")) {
+            return false;
+        }
+
+        // Exclude simple built-in types
+        if (isSimpleType(dataType)) {
+            return false;
+        }
+
+        // Exclude LOB types
+        if (isLobType(dataType)) {
+            return false;
+        }
+
+        // If it has a custom owner and is not a simple type or LOB, it's a user-defined type
+        return true;
     }
 
     /**
@@ -393,28 +448,23 @@ public class CsvDataTransferService {
 
             String columnName = column.getColumnName();
 
-            if (isComplexOracleSystemType(column)) {
-                // For ANYDATA and other complex types, add extraction columns
-                if ("ANYDATA".equals(column.getDataType())) {
-                    // Original column (for debugging, but we won't use it in CSV)
-                    sb.append(columnName);
+            if ("ANYDATA".equals(column.getDataType()) && isComplexOracleSystemType(column)) {
+                // For ANYDATA: add extraction columns
+                // Original column (for debugging, but we won't use it in CSV)
+                sb.append(columnName);
 
-                    // Add extracted value column
-                    sb.append(", CASE ANYDATA.GetTypeName(").append(columnName).append(") ");
-                    sb.append("WHEN 'SYS.NUMBER' THEN TO_CHAR(ANYDATA.AccessNumber(").append(columnName).append(")) ");
-                    sb.append("WHEN 'SYS.VARCHAR2' THEN ANYDATA.AccessVarchar2(").append(columnName).append(") ");
-                    sb.append("WHEN 'SYS.DATE' THEN TO_CHAR(ANYDATA.AccessDate(").append(columnName).append("), 'YYYY-MM-DD HH24:MI:SS') ");
-                    sb.append("WHEN 'SYS.TIMESTAMP' THEN TO_CHAR(ANYDATA.AccessTimestamp(").append(columnName).append("), 'YYYY-MM-DD HH24:MI:SS.FF6') ");
-                    sb.append("ELSE 'Unsupported Type' END AS ").append(columnName).append("_VALUE");
+                // Add extracted value column
+                sb.append(", CASE ANYDATA.GetTypeName(").append(columnName).append(") ");
+                sb.append("WHEN 'SYS.NUMBER' THEN TO_CHAR(ANYDATA.AccessNumber(").append(columnName).append(")) ");
+                sb.append("WHEN 'SYS.VARCHAR2' THEN ANYDATA.AccessVarchar2(").append(columnName).append(") ");
+                sb.append("WHEN 'SYS.DATE' THEN TO_CHAR(ANYDATA.AccessDate(").append(columnName).append("), 'YYYY-MM-DD HH24:MI:SS') ");
+                sb.append("WHEN 'SYS.TIMESTAMP' THEN TO_CHAR(ANYDATA.AccessTimestamp(").append(columnName).append("), 'YYYY-MM-DD HH24:MI:SS.FF6') ");
+                sb.append("ELSE 'Unsupported Type' END AS ").append(columnName).append("_VALUE");
 
-                    // Add type name column
-                    sb.append(", ANYDATA.GetTypeName(").append(columnName).append(") AS ").append(columnName).append("_TYPE");
-                } else {
-                    // Other complex types - just select the column for now
-                    sb.append(columnName);
-                }
+                // Add type name column
+                sb.append(", ANYDATA.GetTypeName(").append(columnName).append(") AS ").append(columnName).append("_TYPE");
             } else {
-                // Simple column - just select it
+                // User-defined types, other complex types, and simple columns - just select the column
                 sb.append(columnName);
             }
         }
