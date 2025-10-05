@@ -163,10 +163,11 @@ public class CsvDataTransferService {
         String qualifiedPostgresName = "\"" + table.getSchema() + "\".\"" + table.getTableName() + "\"";
 
         // Build column list for SELECT and COPY
-        String columnList = buildColumnList(table);
+        // The SELECT includes extra columns for ANYDATA extraction
+        String columnList = buildOracleSelectColumnList(table);
         String quotedColumnList = buildQuotedColumnList(table);
 
-        // Oracle SELECT query
+        // Oracle SELECT query with ANYDATA extraction
         String selectSql = "SELECT " + columnList + " FROM " + qualifiedOracleName;
 
         // PostgreSQL COPY command
@@ -191,7 +192,7 @@ public class CsvDataTransferService {
             // Producer: Read from Oracle and write CSV to pipe
             CompletableFuture<Long> producerFuture = CompletableFuture.supplyAsync(() -> {
                 try {
-                    return produceOracleCsv(selectStmt, table, pipedOutput);
+                    return produceOracleCsv(oracleConn, selectStmt, table, pipedOutput);
                 } catch (Exception e) {
                     log.error("Producer failed", e);
                     throw new RuntimeException("CSV production failed", e);
@@ -233,8 +234,9 @@ public class CsvDataTransferService {
 
     /**
      * Produces CSV data from Oracle ResultSet and writes to output stream.
+     * The ResultSet may have extra columns for ANYDATA extraction (_VALUE and _TYPE).
      */
-    private long produceOracleCsv(PreparedStatement selectStmt, TableMetadata table,
+    private long produceOracleCsv(Connection oracleConn, PreparedStatement selectStmt, TableMetadata table,
                                  PipedOutputStream outputStream) throws SQLException, IOException {
         long rowCount = 0;
 
@@ -247,12 +249,15 @@ public class CsvDataTransferService {
              StringWriter stringWriter = new StringWriter();
              CSVPrinter csvPrinter = new CSVPrinter(stringWriter, csvFormat)) {
 
-            int columnCount = table.getColumns().size();
+            // Build column index mapping
+            // ResultSet has extra columns for ANYDATA: original, _VALUE, _TYPE
+            int rsColumnIndex = 1; // ResultSet columns are 1-based
 
             while (rs.next()) {
-                // Check for complex types and LOBs
-                for (int i = 0; i < columnCount; i++) {
-                    ColumnMetadata column = table.getColumns().get(i);
+                rsColumnIndex = 1; // Reset for each row
+
+                // Process each table column
+                for (ColumnMetadata column : table.getColumns()) {
                     String dataType = column.getDataType();
 
                     if (isLobType(dataType)) {
@@ -261,14 +266,26 @@ public class CsvDataTransferService {
                         log.warn("LOB column {} in table {}.{} - LOB handling not yet implemented",
                                 column.getColumnName(), table.getSchema(), table.getTableName());
                         csvPrinter.print(null);
-                    } else if (isComplexOracleSystemType(column)) {
-                        // Handle complex Oracle system types (ANYDATA, XMLTYPE, etc.)
-                        // Serialize to JSON format for storage in PostgreSQL jsonb
-                        String jsonValue = complexTypeSerializer.serializeToJson(rs, i + 1, column);
+                        rsColumnIndex++; // Move past this column
+                    } else if (isComplexOracleSystemType(column) && "ANYDATA".equals(dataType)) {
+                        // For ANYDATA: skip original column, read _VALUE and _TYPE columns
+                        rsColumnIndex++; // Skip original ANYDATA column
+
+                        String value = rs.getString(rsColumnIndex++); // Read _VALUE
+                        String typeName = rs.getString(rsColumnIndex++); // Read _TYPE
+
+                        // Build JSON wrapper
+                        String jsonValue = buildAnydataJson(typeName, value);
                         csvPrinter.print(jsonValue);
+                    } else if (isComplexOracleSystemType(column)) {
+                        // Other complex types - for now, just log and use null
+                        log.warn("Complex type {} for column {} not yet fully implemented",
+                                dataType, column.getColumnName());
+                        csvPrinter.print(null);
+                        rsColumnIndex++;
                     } else {
                         // Simple type: use standard JDBC getString
-                        String value = rs.getString(i + 1);
+                        String value = rs.getString(rsColumnIndex++);
                         csvPrinter.print(value);
                     }
                 }
@@ -302,8 +319,6 @@ public class CsvDataTransferService {
      * Checks if a column is a complex Oracle system type requiring JSON serialization.
      */
     private boolean isComplexOracleSystemType(ColumnMetadata column) {
-        // TODO: Detect complex Oracle system types (ANYDATA, XMLTYPE, AQ$_*, SDO_GEOMETRY, etc.)
-        // For now, return false (only handle simple types in this iteration)
         String owner = column.getDataTypeOwner();
         String dataType = column.getDataType();
 
@@ -316,17 +331,100 @@ public class CsvDataTransferService {
     }
 
     /**
-     * Builds a comma-separated list of column names (unquoted, for Oracle).
+     * Builds JSON wrapper for ANYDATA extracted value.
+     * Format: {"oracleType": "SYS.NUMBER", "value": "123"}
      */
-    private String buildColumnList(TableMetadata table) {
-        return table.getColumns().stream()
-                .map(ColumnMetadata::getColumnName)
-                .reduce((a, b) -> a + ", " + b)
-                .orElse("*");
+    private String buildAnydataJson(String typeName, String value) {
+        if (typeName == null) {
+            return null;
+        }
+
+        try {
+            // Simple JSON construction (could use Jackson for more complex cases)
+            StringBuilder json = new StringBuilder();
+            json.append("{\"oracleType\":\"");
+            json.append(escapeJson(typeName));
+            json.append("\",\"value\":");
+
+            if (value == null) {
+                json.append("null");
+            } else {
+                json.append("\"");
+                json.append(escapeJson(value));
+                json.append("\"");
+            }
+
+            json.append("}");
+            return json.toString();
+        } catch (Exception e) {
+            log.error("Failed to build JSON for ANYDATA: {}", e.getMessage());
+            return "{\"error\":\"JSON construction failed\"}";
+        }
     }
 
     /**
-     * Builds a comma-separated list of quoted column names (for PostgreSQL).
+     * Escapes special characters for JSON strings.
+     */
+    private String escapeJson(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t");
+    }
+
+    /**
+     * Builds Oracle SELECT column list with ANYDATA extraction.
+     * For ANYDATA columns, adds extra columns: {column}_VALUE and {column}_TYPE
+     */
+    private String buildOracleSelectColumnList(TableMetadata table) {
+        StringBuilder sb = new StringBuilder();
+        boolean first = true;
+
+        for (ColumnMetadata column : table.getColumns()) {
+            if (!first) {
+                sb.append(", ");
+            }
+            first = false;
+
+            String columnName = column.getColumnName();
+
+            if (isComplexOracleSystemType(column)) {
+                // For ANYDATA and other complex types, add extraction columns
+                if ("ANYDATA".equals(column.getDataType())) {
+                    // Original column (for debugging, but we won't use it in CSV)
+                    sb.append(columnName);
+
+                    // Add extracted value column
+                    sb.append(", CASE ANYDATA.GetTypeName(").append(columnName).append(") ");
+                    sb.append("WHEN 'SYS.NUMBER' THEN TO_CHAR(ANYDATA.AccessNumber(").append(columnName).append(")) ");
+                    sb.append("WHEN 'SYS.VARCHAR2' THEN ANYDATA.AccessVarchar2(").append(columnName).append(") ");
+                    sb.append("WHEN 'SYS.DATE' THEN TO_CHAR(ANYDATA.AccessDate(").append(columnName).append("), 'YYYY-MM-DD HH24:MI:SS') ");
+                    sb.append("WHEN 'SYS.TIMESTAMP' THEN TO_CHAR(ANYDATA.AccessTimestamp(").append(columnName).append("), 'YYYY-MM-DD HH24:MI:SS.FF6') ");
+                    sb.append("ELSE 'Unsupported Type' END AS ").append(columnName).append("_VALUE");
+
+                    // Add type name column
+                    sb.append(", ANYDATA.GetTypeName(").append(columnName).append(") AS ").append(columnName).append("_TYPE");
+                } else {
+                    // Other complex types - just select the column for now
+                    sb.append(columnName);
+                }
+            } else {
+                // Simple column - just select it
+                sb.append(columnName);
+            }
+        }
+
+        return sb.toString();
+    }
+
+    /**
+     * Builds a comma-separated list of quoted column names (for PostgreSQL COPY).
+     * This only includes the actual table columns, not the extraction helper columns.
      */
     private String buildQuotedColumnList(TableMetadata table) {
         return table.getColumns().stream()
