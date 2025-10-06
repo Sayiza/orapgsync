@@ -226,12 +226,24 @@ public class PostgresObjectTypeCreationJob extends AbstractDatabaseWriteJob<Obje
         List<String> fields = new ArrayList<>();
         for (ObjectDataTypeVariable variable : objectType.getVariables()) {
             String fieldName = variable.getName().toLowerCase();
-            String fieldType = TypeConverter.toPostgre(variable.getDataType());
-            if (fieldType == null) {
-                fieldType = "text"; // Fallback for unknown types
-                log.warn("Unknown data type '{}' for variable '{}', using 'text' as fallback",
-                        variable.getDataType(), variable.getName());
+            String fieldType;
+
+            // Check if this is a custom (user-defined) type
+            if (variable.isCustomDataType()) {
+                // Use the fully qualified type name (schema.typename) for custom types
+                fieldType = variable.getQualifiedTypeName();
+                log.debug("Using custom type '{}' for variable '{}' in type {}.{}",
+                        fieldType, variable.getName(), objectType.getSchema(), objectType.getName());
+            } else {
+                // Convert built-in Oracle types to PostgreSQL types
+                fieldType = TypeConverter.toPostgre(variable.getDataType());
+                if (fieldType == null) {
+                    fieldType = "text"; // Fallback for unknown types
+                    log.warn("Unknown data type '{}' for variable '{}', using 'text' as fallback",
+                            variable.getDataType(), variable.getName());
+                }
             }
+
             fields.add(String.format("%s %s", fieldName, fieldType));
         }
 

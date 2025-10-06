@@ -81,13 +81,14 @@ public abstract class AbstractDatabaseExtractionJob<T> implements DatabaseExtrac
     /**
      * Determines which schemas to process based on configuration.
      * This method provides common logic for schema determination.
+     * Supports multiple schemas via comma-separated list in "do.only-test-schema" config.
      */
     protected List<String> determineSchemasToProcess(Consumer<JobProgress> progressCallback) {
         updateProgress(progressCallback, 0, "Checking configuration",
                       "Determining schemas to process based on configuration settings");
 
         boolean doAllSchemas = Boolean.TRUE.equals(configService.getConfigValueAsBoolean("do.all-schemas"));
-        String testSchema = configService.getConfigValueAsString("do.only-test-schema");
+        List<String> testSchemas = configService.getConfigValueAsStringList("do.only-test-schema");
 
         if (doAllSchemas) {
             updateProgress(progressCallback, 0, "Using all schemas",
@@ -95,29 +96,50 @@ public abstract class AbstractDatabaseExtractionJob<T> implements DatabaseExtrac
             log.info("Processing all schemas based on configuration (do.all-schemas=true)");
             return getAvailableSchemas();
         } else {
-            if (testSchema == null || testSchema.trim().isEmpty()) {
+            if (testSchemas.isEmpty()) {
                 updateProgress(progressCallback, 100, "Configuration error",
-                              "Test schema not configured but do.all-schemas is false");
-                log.error("Test schema not configured but do.all-schemas is false");
-                throw new IllegalStateException("Test schema not configured but do.all-schemas is false");
+                              "Test schema(s) not configured but do.all-schemas is false");
+                log.error("Test schema(s) not configured but do.all-schemas is false");
+                throw new IllegalStateException("Test schema(s) not configured but do.all-schemas is false");
             }
 
-            String normalizedTestSchema = testSchema.trim().toLowerCase();
-            List<String> availableSchemas = getAvailableSchemas();
+            // Normalize all test schemas to lowercase
+            List<String> normalizedTestSchemas = testSchemas.stream()
+                    .map(String::toLowerCase)
+                    .collect(java.util.stream.Collectors.toList());
 
-            if (!availableSchemas.contains(normalizedTestSchema)) {
-                updateProgress(progressCallback, 100, "Schema not found",
-                              "Configured test schema '" + normalizedTestSchema + "' not found in available schemas");
-                log.warn("Configured test schema '{}' not found in available schemas: {}",
-                        normalizedTestSchema, availableSchemas);
+            List<String> availableSchemas = getAvailableSchemas();
+            List<String> validTestSchemas = new ArrayList<>();
+            List<String> missingSchemas = new ArrayList<>();
+
+            // Check which configured schemas are actually available
+            for (String testSchema : normalizedTestSchemas) {
+                if (availableSchemas.contains(testSchema)) {
+                    validTestSchemas.add(testSchema);
+                } else {
+                    missingSchemas.add(testSchema);
+                }
+            }
+
+            if (!missingSchemas.isEmpty()) {
+                log.warn("Configured test schema(s) not found in available schemas: {}. Available: {}",
+                        missingSchemas, availableSchemas);
+            }
+
+            if (validTestSchemas.isEmpty()) {
+                updateProgress(progressCallback, 100, "No valid schemas",
+                              "None of the configured test schemas were found in available schemas");
+                log.warn("None of the configured test schemas {} found in available schemas: {}",
+                        normalizedTestSchemas, availableSchemas);
                 return new ArrayList<>();
             }
 
-            updateProgress(progressCallback, 0, "Using test schema",
-                          "Configuration set to process only schema: " + normalizedTestSchema);
-            log.info("Processing only test schema '{}' based on configuration (do.all-schemas=false)",
-                    normalizedTestSchema);
-            return List.of(normalizedTestSchema);
+            String schemaList = String.join(", ", validTestSchemas);
+            updateProgress(progressCallback, 0, "Using test schema(s)",
+                          "Configuration set to process schema(s): " + schemaList);
+            log.info("Processing test schema(s) '{}' based on configuration (do.all-schemas=false)",
+                    schemaList);
+            return validTestSchemas;
         }
     }
 

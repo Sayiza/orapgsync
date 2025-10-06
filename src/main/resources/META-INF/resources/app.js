@@ -2007,57 +2007,57 @@ function displayObjectTypeCreationResults(result, database) {
 
     let html = '';
 
-    const createdCount = result.createdCount || 0;
-    const skippedCount = result.skippedCount || 0;
-    const errorCount = result.errorCount || 0;
+    if (result.summary) {
+        const summary = result.summary;
 
-    html += '<div class="object-type-creation-summary">';
-    html += `<div class="summary-stats">`;
-    html += `<span class="stat-item created">Created: ${createdCount}</span>`;
-    html += `<span class="stat-item skipped">Skipped: ${skippedCount}</span>`;
-    html += `<span class="stat-item errors">Errors: ${errorCount}</span>`;
-    html += `</div>`;
-    html += '</div>';
+        html += '<div class="object-type-creation-summary">';
+        html += `<div class="summary-stats">`;
+        html += `<span class="stat-item created">Created: ${summary.createdCount}</span>`;
+        html += `<span class="stat-item skipped">Skipped: ${summary.skippedCount}</span>`;
+        html += `<span class="stat-item errors">Errors: ${summary.errorCount}</span>`;
+        html += `</div>`;
+        html += '</div>';
 
-    // Show created object types
-    if (createdCount > 0 && result.createdTypes) {
-        html += '<div class="created-types-section">';
-        html += '<h4>Created Object Types:</h4>';
-        html += '<div class="object-type-items">';
-        result.createdTypes.forEach(typeName => {
-            html += `<div class="object-type-item created">${typeName} ✓</div>`;
-        });
-        html += '</div>';
-        html += '</div>';
-    }
+        // Show created object types
+        if (summary.createdCount > 0) {
+            html += '<div class="created-types-section">';
+            html += '<h4>Created Object Types:</h4>';
+            html += '<div class="object-type-items">';
+            Object.values(summary.createdTypes).forEach(type => {
+                html += `<div class="object-type-item created">${type.typeName} ✓</div>`;
+            });
+            html += '</div>';
+            html += '</div>';
+        }
 
-    // Show skipped object types
-    if (skippedCount > 0 && result.skippedTypes) {
-        html += '<div class="skipped-types-section">';
-        html += '<h4>Skipped Object Types (already exist):</h4>';
-        html += '<div class="object-type-items">';
-        result.skippedTypes.forEach(typeName => {
-            html += `<div class="object-type-item skipped">${typeName} (already exists)</div>`;
-        });
-        html += '</div>';
-        html += '</div>';
-    }
+        // Show skipped object types
+        if (summary.skippedCount > 0) {
+            html += '<div class="skipped-types-section">';
+            html += '<h4>Skipped Object Types (already exist):</h4>';
+            html += '<div class="object-type-items">';
+            Object.values(summary.skippedTypes).forEach(type => {
+                html += `<div class="object-type-item skipped">${type.typeName} (${type.reason})</div>`;
+            });
+            html += '</div>';
+            html += '</div>';
+        }
 
-    // Show errors
-    if (errorCount > 0 && result.errors) {
-        html += '<div class="error-types-section">';
-        html += '<h4>Failed Object Types:</h4>';
-        html += '<div class="object-type-items">';
-        result.errors.forEach(error => {
-            html += `<div class="object-type-item error">`;
-            html += `<strong>${error.typeName}:</strong> ${error.errorMessage}`;
-            if (error.sqlStatement) {
-                html += `<br><code>${error.sqlStatement}</code>`;
-            }
-            html += `</div>`;
-        });
-        html += '</div>';
-        html += '</div>';
+        // Show errors
+        if (summary.errorCount > 0) {
+            html += '<div class="error-types-section">';
+            html += '<h4>Failed Object Types:</h4>';
+            html += '<div class="object-type-items">';
+            Object.values(summary.errors).forEach(error => {
+                html += `<div class="object-type-item error">`;
+                html += `<strong>${error.typeName}</strong>: ${error.error}`;
+                if (error.sql) {
+                    html += `<div class="sql-statement"><pre>${error.sql}</pre></div>`;
+                }
+                html += `</div>`;
+            });
+            html += '</div>';
+            html += '</div>';
+        }
     }
 
     detailsDiv.innerHTML = html;

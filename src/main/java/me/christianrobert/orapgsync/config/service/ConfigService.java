@@ -4,9 +4,13 @@ import jakarta.enterprise.context.ApplicationScoped;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 @ApplicationScoped
 public class ConfigService {
@@ -58,6 +62,26 @@ public class ConfigService {
             return Boolean.parseBoolean((String) value);
         }
         return null;
+    }
+
+    /**
+     * Gets a configuration value as a list of strings.
+     * Supports comma-separated values: "SCHEMA1,SCHEMA2,SCHEMA3"
+     * Trims whitespace and filters out empty strings.
+     *
+     * @param key Configuration key
+     * @return List of strings, or empty list if value is null/empty
+     */
+    public List<String> getConfigValueAsStringList(String key) {
+        String value = getConfigValueAsString(key);
+        if (value == null || value.trim().isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        return Arrays.stream(value.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .collect(Collectors.toList());
     }
 
     public void updateConfiguration(Map<String, Object> newConfig) {

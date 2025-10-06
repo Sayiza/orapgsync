@@ -82,9 +82,6 @@ public class OracleObjectDataTypeExtractionJob extends AbstractDatabaseExtractio
             String sql = """
                 SELECT DISTINCT o.owner, o.object_name
                 FROM all_objects o
-                JOIN all_tab_cols c
-                  ON c.data_type = o.object_name
-                  AND c.data_type_owner = o.owner
                 WHERE o.object_type = 'TYPE'
                   AND LOWER(o.owner) IN (%s)
                 ORDER BY o.owner, o.object_name
@@ -158,6 +155,7 @@ public class OracleObjectDataTypeExtractionJob extends AbstractDatabaseExtractio
             SELECT
                 attr_name,
                 attr_type_name,
+                attr_type_owner,
                 length,
                 precision,
                 scale,
@@ -176,6 +174,7 @@ public class OracleObjectDataTypeExtractionJob extends AbstractDatabaseExtractio
                 while (rs.next()) {
                     String attrName = rs.getString("attr_name").toLowerCase();
                     String attrTypeName = rs.getString("attr_type_name");
+                    String attrTypeOwner = rs.getString("attr_type_owner");
                     Integer length = rs.getObject("length", Integer.class);
                     Integer precision = rs.getObject("precision", Integer.class);
                     Integer scale = rs.getObject("scale", Integer.class);
@@ -184,11 +183,14 @@ public class OracleObjectDataTypeExtractionJob extends AbstractDatabaseExtractio
                     // Format the data type with size information if available
                     String formattedDataType = formatDataType(attrTypeName, length, precision, scale);
 
-                    ObjectDataTypeVariable variable = new ObjectDataTypeVariable(attrName, formattedDataType);
+                    // Normalize the owner to lowercase (null for built-in types)
+                    String normalizedOwner = (attrTypeOwner != null) ? attrTypeOwner.toLowerCase() : null;
+
+                    ObjectDataTypeVariable variable = new ObjectDataTypeVariable(attrName, formattedDataType, normalizedOwner);
                     attributes.add(variable);
 
-                    log.debug("Found attribute {} for {}.{}: {} (formatted as: {})",
-                        attrName, owner, typeName, attrTypeName, formattedDataType);
+                    log.debug("Found attribute {} for {}.{}: {}.{} (formatted as: {})",
+                        attrName, owner, typeName, attrTypeOwner, attrTypeName, formattedDataType);
                 }
             }
         }
