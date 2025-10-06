@@ -66,6 +66,20 @@
       <version>23.5.0.24.07</version>
     </dependency>
 
+    <!-- Oracle XDB (XML Database) - Required for XMLTYPE support -->
+    <dependency>
+      <groupId>com.oracle.database.xml</groupId>
+      <artifactId>xdb</artifactId>
+      <version>23.5.0.24.07</version>
+    </dependency>
+
+    <!-- Oracle XMLPARSERV2 - Required by XDB for XML parsing -->
+    <dependency>
+      <groupId>com.oracle.database.xml</groupId>
+      <artifactId>xmlparserv2</artifactId>
+      <version>23.5.0.24.07</version>
+    </dependency>
+
     <!-- Apache Commons CSV for data transfer -->
     <dependency>
       <groupId>org.apache.commons</groupId>

@@ -144,7 +144,7 @@ public class TypeConverter {
       case "nclob":
         return "text";
 
-      // XML type
+      // XML type, warning: handled differently in tablecreationjob, outside of this class
       case "xmltype":
         return "xml";
 

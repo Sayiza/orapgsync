@@ -244,9 +244,14 @@ public class PostgresTableCreationJob extends AbstractDatabaseWriteJob<TableCrea
                 log.debug("Complex Oracle system type '{}.{}' for column '{}' will use jsonb (data transfer will preserve type metadata)",
                          owner, oracleType, column.getColumnName());
             } else {
-                // User-defined type - use the created PostgreSQL composite type
-                postgresType = owner + "." + oracleType;
-                log.debug("Using user-defined composite type '{}' for column '{}'", postgresType, column.getColumnName());
+                if (oracleType.equals("xmltype")) {
+                    postgresType = "xml";
+                    log.debug("Using xmltype");
+                } else {
+                    // User-defined type - use the created PostgreSQL composite type
+                    postgresType = owner + "." + oracleType;
+                    log.debug("Using user-defined composite type '{}' for column '{}'", postgresType, column.getColumnName());
+                }
             }
         } else {
             // Convert Oracle built-in data type to PostgreSQL
@@ -292,10 +297,6 @@ public class PostgresTableCreationJob extends AbstractDatabaseWriteJob<TableCrea
             }
             // Oracle dynamic types
             if (type.equals("anydata") || type.equals("anytype")) {
-                return true;
-            }
-            // XML type (will be serialized to preserve structure)
-            if (type.equals("xmltype")) {
                 return true;
             }
             // Spatial/geometry types

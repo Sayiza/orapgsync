@@ -80,9 +80,10 @@ public class OracleTableExtractor {
     TableMetadata tableMetadata = new TableMetadata(owner.toLowerCase(), table.toLowerCase());
 
     // Fetch column metadata (exclude hidden, virtual, and system-generated columns)
+    // AND hidden_column = 'NO' AND virtual_column = 'NO'
     String columnSql = "SELECT column_name, data_type, data_type_owner, char_length, data_precision, data_scale, nullable, data_default " +
             "FROM all_tab_cols WHERE owner = ? AND table_name = ? " +
-            "AND hidden_column = 'NO' AND virtual_column = 'NO' AND user_generated = 'YES' " +
+            "AND user_generated = 'YES' " +
             "ORDER BY column_id";
     try (PreparedStatement ps = oracleConn.prepareStatement(columnSql)) {
       ps.setString(1, owner.toUpperCase());

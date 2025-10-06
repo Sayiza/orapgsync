@@ -640,13 +640,38 @@ public class OracleComplexTypeSerializer {
     }
 
     /**
-     * Serializes Oracle XMLTYPE to JSON.
-     * TODO: Implement when needed
+     * Serializes Oracle XMLTYPE to string.
+     * XMLTYPE is mapped to PostgreSQL's native xml type, so we extract the XML string directly.
+     *
+     * Note: This method is not used in the standard data transfer flow since XMLTYPE is no longer
+     * treated as a complex type. It's kept for backward compatibility and potential future use.
      */
     private String serializeXmlType(ResultSet rs, int columnIndex, ColumnMetadata column) throws SQLException {
-        log.warn("XMLTYPE serialization not yet implemented for column {}", column.getColumnName());
-        // Future implementation: extract XML string and embed in JSON
-        return buildJsonWrapper("SYS.XMLTYPE", "<<XMLTYPE not yet implemented>>");
+        Object xmlObj = rs.getObject(columnIndex);
+
+        if (xmlObj == null) {
+            return null; // NULL XMLTYPE → NULL in PostgreSQL
+        }
+
+        try {
+            // Try to use standard JDBC getString which works for XMLTYPE
+            String xmlString = rs.getString(columnIndex);
+
+            if (xmlString == null) {
+                log.warn("XMLTYPE column {} returned null string", column.getColumnName());
+                return null;
+            }
+
+            log.debug("Extracted XML from column {}, length: {} characters",
+                    column.getColumnName(), xmlString.length());
+
+            return xmlString;
+
+        } catch (Exception e) {
+            log.error("Failed to extract XMLTYPE from column {}: {}",
+                    column.getColumnName(), e.getMessage(), e);
+            throw new SQLException("Failed to extract XMLTYPE: " + e.getMessage(), e);
+        }
     }
 
     /**

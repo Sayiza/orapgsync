@@ -375,7 +375,7 @@ public class CsvDataTransferService {
 
         // Check for known complex types with SYS or PUBLIC owner
         if (owner != null && (owner.equalsIgnoreCase("SYS") || owner.equalsIgnoreCase("PUBLIC"))) {
-            return dataType != null && dataType.matches("ANYDATA|ANYTYPE|XMLTYPE|AQ\\$_.*|SDO_GEOMETRY|SDO_.*");
+            return dataType != null && dataType.matches("ANYDATA|ANYTYPE|AQ\\$_.*|SDO_GEOMETRY|SDO_.*");
         }
 
         return false;
