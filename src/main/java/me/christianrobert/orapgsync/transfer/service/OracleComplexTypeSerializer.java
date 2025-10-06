@@ -5,12 +5,16 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.enterprise.context.ApplicationScoped;
 import me.christianrobert.orapgsync.core.job.model.table.ColumnMetadata;
 import oracle.sql.ANYDATA;
+import oracle.sql.BLOB;
+import oracle.sql.CLOB;
 import oracle.sql.Datum;
 import oracle.sql.STRUCT;
 import oracle.sql.TypeDescriptor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.InputStream;
+import java.io.Reader;
 import java.sql.CallableStatement;
 import java.sql.Connection;
 import java.sql.Date;
@@ -36,6 +40,13 @@ public class OracleComplexTypeSerializer {
     private static final Logger log = LoggerFactory.getLogger(OracleComplexTypeSerializer.class);
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    // LOB handling configuration
+    private static final long MAX_INLINE_LOB_SIZE = 20 * 1024 * 1024; // 20MB
+    private static final int LOB_CHUNK_SIZE = 8192; // 8KB chunks
+
+    // Hex encoding lookup table for performance
+    private static final char[] HEX_ARRAY = "0123456789abcdef".toCharArray();
 
     /**
      * Serializes a user-defined Oracle STRUCT/OBJECT type to PostgreSQL composite type format for CSV COPY.
@@ -203,6 +214,159 @@ public class OracleComplexTypeSerializer {
         escaped = escaped.replace("\"", "\"\"");
 
         return "\"" + escaped + "\"";
+    }
+
+    /**
+     * Serializes an Oracle BLOB to PostgreSQL bytea hex format for CSV COPY.
+     * Format: \\x48656c6c6f (hex encoding with \\x prefix, escaped for CSV)
+     *
+     * @param rs ResultSet positioned at current row
+     * @param columnIndex Column index (1-based)
+     * @param column Column metadata
+     * @return Hex-encoded string for PostgreSQL bytea, or null if NULL/too large
+     * @throws SQLException if database access fails
+     */
+    public String serializeBlobToHex(ResultSet rs, int columnIndex, ColumnMetadata column) throws SQLException {
+        java.sql.Blob sqlBlob = rs.getBlob(columnIndex);
+
+        if (sqlBlob == null) {
+            return null; // NULL BLOB → NULL in PostgreSQL
+        }
+
+        // Convert to Oracle BLOB for better API support
+        BLOB blob = (BLOB) sqlBlob;
+
+        try {
+            long size = blob.length();
+
+            // Check size limit
+            if (size > MAX_INLINE_LOB_SIZE) {
+                log.warn("BLOB size {} bytes exceeds limit {} in column {}, skipping (will insert NULL)",
+                        size, MAX_INLINE_LOB_SIZE, column.getColumnName());
+                return null;
+            }
+
+            if (size == 0) {
+                return "\\\\x"; // Empty BLOB → \x (escaped for CSV)
+            }
+
+            log.debug("Serializing BLOB of {} bytes in column {}", size, column.getColumnName());
+
+            // Stream BLOB data in chunks and encode to hex
+            return streamBlobToHex(blob, size);
+
+        } catch (Exception e) {
+            log.error("Failed to serialize BLOB in column {}: {}", column.getColumnName(), e.getMessage(), e);
+            return null; // Insert NULL on error
+        }
+    }
+
+    /**
+     * Streams BLOB data in chunks and encodes to hex format.
+     * This avoids loading the entire BLOB into memory at once.
+     */
+    private String streamBlobToHex(BLOB blob, long size) throws SQLException {
+        // Pre-allocate StringBuilder with known size: \\x + 2 chars per byte
+        // Add some buffer for safety
+        int capacity = (int) (4 + (size * 2));
+        StringBuilder hex = new StringBuilder(capacity);
+        hex.append("\\\\x"); // Escaped \x prefix for CSV
+
+        try (InputStream stream = blob.getBinaryStream()) {
+            byte[] buffer = new byte[LOB_CHUNK_SIZE];
+            int bytesRead;
+
+            while ((bytesRead = stream.read(buffer)) != -1) {
+                // Convert chunk to hex
+                appendBytesAsHex(hex, buffer, 0, bytesRead);
+            }
+
+            return hex.toString();
+
+        } catch (Exception e) {
+            log.error("Failed to stream BLOB data: {}", e.getMessage(), e);
+            throw new SQLException("BLOB streaming failed", e);
+        }
+    }
+
+    /**
+     * Converts bytes to hex characters and appends to StringBuilder.
+     * High-performance implementation using lookup table.
+     */
+    private void appendBytesAsHex(StringBuilder sb, byte[] bytes, int offset, int length) {
+        for (int i = 0; i < length; i++) {
+            int v = bytes[offset + i] & 0xFF;
+            sb.append(HEX_ARRAY[v >>> 4]);   // High nibble
+            sb.append(HEX_ARRAY[v & 0x0F]);  // Low nibble
+        }
+    }
+
+    /**
+     * Serializes an Oracle CLOB to text format for CSV COPY.
+     * For PostgreSQL text columns, the text is escaped according to CSV rules.
+     *
+     * @param rs ResultSet positioned at current row
+     * @param columnIndex Column index (1-based)
+     * @param column Column metadata
+     * @return CLOB text content, or null if NULL/too large
+     * @throws SQLException if database access fails
+     */
+    public String serializeClobToText(ResultSet rs, int columnIndex, ColumnMetadata column) throws SQLException {
+        java.sql.Clob sqlClob = rs.getClob(columnIndex);
+
+        if (sqlClob == null) {
+            return null; // NULL CLOB → NULL in PostgreSQL
+        }
+
+        // Convert to Oracle CLOB for better API support
+        CLOB clob = (CLOB) sqlClob;
+
+        try {
+            long size = clob.length();
+
+            // Check size limit
+            if (size > MAX_INLINE_LOB_SIZE) {
+                log.warn("CLOB size {} characters exceeds limit {} in column {}, skipping (will insert NULL)",
+                        size, MAX_INLINE_LOB_SIZE, column.getColumnName());
+                return null;
+            }
+
+            if (size == 0) {
+                return ""; // Empty CLOB → empty string
+            }
+
+            log.debug("Serializing CLOB of {} characters in column {}", size, column.getColumnName());
+
+            // Stream CLOB data in chunks
+            return streamClobToString(clob, size);
+
+        } catch (Exception e) {
+            log.error("Failed to serialize CLOB in column {}: {}", column.getColumnName(), e.getMessage(), e);
+            return null; // Insert NULL on error
+        }
+    }
+
+    /**
+     * Streams CLOB data in chunks to avoid loading entire CLOB into memory.
+     */
+    private String streamClobToString(CLOB clob, long size) throws SQLException {
+        // Pre-allocate StringBuilder with known size
+        StringBuilder text = new StringBuilder((int) size);
+
+        try (Reader reader = clob.getCharacterStream()) {
+            char[] buffer = new char[LOB_CHUNK_SIZE];
+            int charsRead;
+
+            while ((charsRead = reader.read(buffer)) != -1) {
+                text.append(buffer, 0, charsRead);
+            }
+
+            return text.toString();
+
+        } catch (Exception e) {
+            log.error("Failed to stream CLOB data: {}", e.getMessage(), e);
+            throw new SQLException("CLOB streaming failed", e);
+        }
     }
 
     /**

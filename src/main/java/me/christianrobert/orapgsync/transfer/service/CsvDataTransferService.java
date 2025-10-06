@@ -250,6 +250,14 @@ public class CsvDataTransferService {
                 .setNullString("\\N")  // PostgreSQL NULL representation
                 .build();
 
+        // Detect if table has LOB columns for enhanced flushing
+        boolean hasLobColumns = table.getColumns().stream()
+                .anyMatch(col -> isLobType(col.getDataType()));
+        int flushFrequency = hasLobColumns ? LOB_FLUSH_FREQUENCY : 1000;
+
+        log.debug("Table {} has LOB columns: {}, flush frequency: {}",
+                table.getTableName(), hasLobColumns, flushFrequency);
+
         try (ResultSet rs = selectStmt.executeQuery();
              StringWriter stringWriter = new StringWriter();
              CSVPrinter csvPrinter = new CSVPrinter(stringWriter, csvFormat)) {
@@ -266,12 +274,28 @@ public class CsvDataTransferService {
                     String dataType = column.getDataType();
 
                     if (isLobType(dataType)) {
-                        // TODO: Handle BLOB/CLOB with hex encoding
-                        // For now, skip LOB columns (this is a placeholder)
-                        log.warn("LOB column {} in table {}.{} - LOB handling not yet implemented",
-                                column.getColumnName(), table.getSchema(), table.getTableName());
-                        csvPrinter.print(null);
-                        rsColumnIndex++; // Move past this column
+                        // Handle BLOB/CLOB with streaming and hex encoding
+                        try {
+                            String lobValue = null;
+
+                            if (dataType.matches("BLOB|BFILE|LONG RAW")) {
+                                // Binary LOB - serialize to hex format
+                                lobValue = complexTypeSerializer.serializeBlobToHex(rs, rsColumnIndex, column);
+                            } else if (dataType.matches("CLOB|NCLOB|LONG")) {
+                                // Character LOB - serialize to text
+                                lobValue = complexTypeSerializer.serializeClobToText(rs, rsColumnIndex, column);
+                            } else {
+                                log.warn("Unknown LOB type {} for column {}", dataType, column.getColumnName());
+                            }
+
+                            csvPrinter.print(lobValue);
+
+                        } catch (Exception e) {
+                            log.error("Failed to serialize LOB type {} for column {}: {}",
+                                    dataType, column.getColumnName(), e.getMessage());
+                            csvPrinter.print(null); // Insert NULL on error
+                        }
+                        rsColumnIndex++;
                     } else if (isComplexOracleSystemType(column) && "ANYDATA".equals(dataType)) {
                         // For ANYDATA: skip original column, read _VALUE and _TYPE columns
                         rsColumnIndex++; // Skip original ANYDATA column
@@ -316,11 +340,15 @@ public class CsvDataTransferService {
                 csvPrinter.println();
                 rowCount++;
 
-                // Flush to pipe periodically
-                if (rowCount % 1000 == 0) {
+                // Flush to pipe periodically (more frequently for LOB tables)
+                if (rowCount % flushFrequency == 0) {
                     stringWriter.flush();
                     outputStream.write(stringWriter.toString().getBytes("UTF-8"));
                     stringWriter.getBuffer().setLength(0); // Clear buffer
+
+                    if (hasLobColumns && rowCount % 50 == 0) {
+                        log.debug("Flushed {} rows with LOB data for table {}", rowCount, table.getTableName());
+                    }
                 }
             }
 
