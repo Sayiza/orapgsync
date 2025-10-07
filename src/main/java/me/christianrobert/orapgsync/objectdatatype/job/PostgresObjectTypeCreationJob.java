@@ -9,6 +9,7 @@ import me.christianrobert.orapgsync.database.service.PostgresConnectionService;
 import me.christianrobert.orapgsync.core.job.model.objectdatatype.ObjectDataTypeMetaData;
 import me.christianrobert.orapgsync.core.job.model.objectdatatype.ObjectDataTypeVariable;
 import me.christianrobert.orapgsync.core.job.model.objectdatatype.ObjectTypeCreationResult;
+import me.christianrobert.orapgsync.objectdatatype.service.TypeDependencyAnalyzer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -197,11 +198,27 @@ public class PostgresObjectTypeCreationJob extends AbstractDatabaseWriteJob<Obje
     }
 
     private List<ObjectDataTypeMetaData> sortByDependencies(List<ObjectDataTypeMetaData> objectTypes) {
-        // For now, use simple alphabetical sorting
-        // TODO: Implement proper dependency analysis based on variable types
-        return objectTypes.stream()
-                .sorted(Comparator.comparing(ObjectDataTypeMetaData::getName))
-                .collect(Collectors.toList());
+        log.info("Analyzing dependencies for {} object types", objectTypes.size());
+
+        // Use TypeDependencyAnalyzer to perform topological sort
+        TypeDependencyAnalyzer.DependencyAnalysisResult analysisResult =
+                TypeDependencyAnalyzer.analyzeDependencies(objectTypes);
+
+        // Log any circular dependencies found
+        if (analysisResult.hasCircularDependencies()) {
+            log.warn("Found {} circular dependencies in object types:",
+                    analysisResult.getCircularDependencies().size());
+            for (TypeDependencyAnalyzer.CircularDependency cycle : analysisResult.getCircularDependencies()) {
+                log.warn("  Circular dependency cycle: {}", cycle);
+            }
+            log.warn("Types in circular dependencies will be created last and may fail. " +
+                    "Manual intervention may be required.");
+        }
+
+        List<ObjectDataTypeMetaData> sortedTypes = analysisResult.getSortedTypes();
+        log.info("Dependency analysis complete. Types sorted in creation order.");
+
+        return sortedTypes;
     }
 
     private String getQualifiedTypeName(ObjectDataTypeMetaData objectType) {
