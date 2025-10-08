@@ -162,6 +162,7 @@ public class TypeConverter {
         return "text";
         
       case "anydata":
+      case "anytype":
         return "jsonb";
 
       case "aq$_jms_text_message":

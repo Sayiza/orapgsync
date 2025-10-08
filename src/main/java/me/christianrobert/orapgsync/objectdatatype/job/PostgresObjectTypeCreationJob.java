@@ -4,6 +4,7 @@ import jakarta.enterprise.context.Dependent;
 import jakarta.inject.Inject;
 import me.christianrobert.orapgsync.core.job.AbstractDatabaseWriteJob;
 import me.christianrobert.orapgsync.core.job.model.JobProgress;
+import me.christianrobert.orapgsync.core.tools.OracleTypeClassifier;
 import me.christianrobert.orapgsync.core.tools.TypeConverter;
 import me.christianrobert.orapgsync.database.service.PostgresConnectionService;
 import me.christianrobert.orapgsync.core.job.model.objectdatatype.ObjectDataTypeMetaData;
@@ -247,10 +248,20 @@ public class PostgresObjectTypeCreationJob extends AbstractDatabaseWriteJob<Obje
 
             // Check if this is a custom (user-defined) type
             if (variable.isCustomDataType()) {
-                // Use the fully qualified type name (schema.typename) for custom types
-                fieldType = variable.getQualifiedTypeName();
-                log.debug("Using custom type '{}' for variable '{}' in type {}.{}",
-                        fieldType, variable.getName(), objectType.getSchema(), objectType.getName());
+                String oracleType = variable.getDataType().toLowerCase();
+                String owner = variable.getDataTypeOwner().toLowerCase();
+
+                // Check if it's a complex Oracle system type that needs jsonb serialization
+                if (OracleTypeClassifier.isComplexOracleSystemType(owner, oracleType)) {
+                    fieldType = "jsonb";
+                    log.debug("Complex Oracle system type '{}.{}' for variable '{}' in type {}.{} will use jsonb",
+                            owner, oracleType, variable.getName(), objectType.getSchema(), objectType.getName());
+                } else {
+                    // User-defined type - use the fully qualified type name (schema.typename)
+                    fieldType = variable.getQualifiedTypeName();
+                    log.debug("Using custom type '{}' for variable '{}' in type {}.{}",
+                            fieldType, variable.getName(), objectType.getSchema(), objectType.getName());
+                }
             } else {
                 // Convert built-in Oracle types to PostgreSQL types
                 fieldType = TypeConverter.toPostgre(variable.getDataType());

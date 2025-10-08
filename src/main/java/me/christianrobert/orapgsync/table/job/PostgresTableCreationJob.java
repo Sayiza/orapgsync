@@ -4,6 +4,7 @@ import jakarta.enterprise.context.Dependent;
 import jakarta.inject.Inject;
 import me.christianrobert.orapgsync.core.job.AbstractDatabaseWriteJob;
 import me.christianrobert.orapgsync.core.job.model.JobProgress;
+import me.christianrobert.orapgsync.core.tools.OracleTypeClassifier;
 import me.christianrobert.orapgsync.core.tools.TypeConverter;
 import me.christianrobert.orapgsync.database.service.PostgresConnectionService;
 import me.christianrobert.orapgsync.core.job.model.table.ColumnMetadata;
@@ -239,7 +240,7 @@ public class PostgresTableCreationJob extends AbstractDatabaseWriteJob<TableCrea
             String owner = column.getDataTypeOwner().toLowerCase();
 
             // Check if it's a complex Oracle system type that needs jsonb serialization
-            if (isComplexOracleSystemType(owner, oracleType)) {
+            if (OracleTypeClassifier.isComplexOracleSystemType(owner, oracleType)) {
                 postgresType = "jsonb";
                 log.debug("Complex Oracle system type '{}.{}' for column '{}' will use jsonb (data transfer will preserve type metadata)",
                          owner, oracleType, column.getColumnName());
@@ -278,36 +279,6 @@ public class PostgresTableCreationJob extends AbstractDatabaseWriteJob<TableCrea
         return def.toString();
     }
 
-    /**
-     * Identifies complex Oracle system types that cannot be directly mapped to PostgreSQL composite types.
-     * These types will be stored as jsonb with metadata preservation during data transfer.
-     *
-     * @param owner The schema/owner of the type (e.g., "sys", "public")
-     * @param type The type name (e.g., "anydata", "aq$_jms_text_message")
-     * @return true if this is a complex Oracle system type requiring jsonb serialization
-     */
-    private boolean isComplexOracleSystemType(String owner, String type) {
-        // System-owned complex types that need jsonb serialization
-        // Note: Oracle databases often have PUBLIC synonyms for SYS types (grants to PUBLIC)
-        // so we check both "sys" and "public" as indicators of Oracle system types
-        if ("sys".equals(owner) || "public".equals(owner)) {
-            // Oracle Advanced Queuing types
-            if (type.startsWith("aq$_")) {
-                return true;
-            }
-            // Oracle dynamic types
-            if (type.equals("anydata") || type.equals("anytype")) {
-                return true;
-            }
-            // Spatial/geometry types
-            if (type.equals("sdo_geometry")) {
-                return true;
-            }
-        }
-        // All other custom types are assumed to be user-defined composite types
-        // that have been created in PostgreSQL via ObjectTypeCreationJob
-        return false;
-    }
 
     @Override
     protected String generateSummaryMessage(TableCreationResult result) {
