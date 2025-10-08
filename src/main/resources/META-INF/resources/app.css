@@ -4,6 +4,13 @@
     box-sizing: border-box;
 }
 
+:root {
+    --mainblue:  #555077; /*555077 658 #373150;*/
+    --mainblue2: #446; /*446 557 #000022; #232f3e*/
+    --mainblue3: #3A3451; /*224 373451 #373150; 131921*/
+    --mainblue4: #334; /*223 334 #000022; #232f3e*/
+}
+
 body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     background-color: #fff;
@@ -20,7 +27,7 @@ td {
 }
 
 .header {
-    background: #334;
+    background: linear-gradient(var(--mainblue4), var(--mainblue3));
     color: white;
     padding: 1rem 2rem;
     /*box-shadow: 0 4px 10px rgba(0,0,0,0.3);
@@ -71,7 +78,7 @@ td {
 
 .btn {
     padding: 0.25rem 0.5rem;
-    border: 1px solid #334;
+    border: 1px solid #445;
     border-radius: 3px;
     font-size: 0.9rem;
     font-weight: normal;
@@ -93,12 +100,14 @@ td {
 }
 
 .btn-primary {
-    background: #445;
+    background: #557;
+    background: linear-gradient(var(--mainblue2), var(--mainblue));
     color: white;
 }
 
 .btn-success {
-    background: #445;
+    background: #557;
+    background: linear-gradient(var(--mainblue2), var(--mainblue));
     color: white;
 }
 
@@ -134,7 +143,8 @@ td {
 
 .progress-fill {
     height: 100%;
-    background: linear-gradient(90deg, #1976d2, #42a5f5);
+    background: #779;/*linear-gradient(90deg, #779, #88A);*/
+    background: linear-gradient(90deg, var(--mainblue2), var(--mainblue));
     border-radius: 3px;
     transition: width 0.3s ease;
     position: relative;
@@ -319,7 +329,7 @@ td {
 /* Progress Bar Styling */
 .progress-container {
     /*max-width: 1400px;*/
-    margin: 2rem auto 0;
+    margin: 1.7rem auto 1.5rem;
     padding: 0 2rem;
 }
 
@@ -343,13 +353,6 @@ td {
     margin-bottom: 0.5rem;
 }
 
-.progress-fill {
-    height: 100%;
-    background: linear-gradient(90deg, #1976d2, #42a5f5);
-    border-radius: 3px;
-    transition: width 0.3s ease;
-}
-
 .progress-status {
     font-size: 0.9rem;
     color: #666;
@@ -358,7 +361,8 @@ td {
 
 .orchestration-progress-fill {
     height: 100%;
-    background: linear-gradient(90deg, #1976d2, #42a5f5);
+    background: #779;
+    background: linear-gradient(90deg, var(--mainblue2), var(--mainblue));
     border-radius: 3px;
     transition: width 0.3s ease;
 }
@@ -376,7 +380,13 @@ td {
 
     */
     margin: 0 auto;
-    padding: 0 2rem 2rem;
+    padding: 0 2rem;
+}
+
+.database-comparison-container-inner {
+    padding: 1rem 1.5rem;
+    border-radius: 3px;
+    border: 1px solid #e0e0e0;
 }
 
 .database-comparison-table {
@@ -392,6 +402,7 @@ td {
     text-align: left;
     font-size: 1rem;
     font-weight: bold;
+    border-bottom: 1px solid #f0f0f0;
 }
 
 .database-comparison-table td {
@@ -552,7 +563,7 @@ td {
   /*  max-width: 1400px;
 
    */
-    margin: 2rem auto;
+    margin: 1.5rem auto;
     padding: 0 2rem;
 }
 
@@ -1090,8 +1101,9 @@ td {
 /* Unified Creation Results Styles */
 /* Action button used across all creation operations */
 .action-btn {
-    background: #445;
-    border: 1px solid #334;
+    background: #557;
+    background: linear-gradient(var(--mainblue2), var(--mainblue));
+    border: 1px solid #445;
     border-radius: 3px;
     color: white;
     cursor: pointer;
