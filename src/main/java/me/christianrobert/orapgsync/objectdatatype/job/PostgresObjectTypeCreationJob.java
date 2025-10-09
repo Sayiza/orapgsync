@@ -66,9 +66,16 @@ public class PostgresObjectTypeCreationJob extends AbstractDatabaseWriteJob<Obje
         // Filter valid object types (exclude system schemas)
         List<ObjectDataTypeMetaData> validOracleObjectTypes = filterValidObjectTypes(oracleObjectTypes);
 
-        updateProgress(progressCallback, 10, "Analyzing object types",
+        updateProgress(progressCallback, 10, "Normalizing object types",
                       String.format("Found %d Oracle object types, %d are valid for creation",
                                    oracleObjectTypes.size(), validOracleObjectTypes.size()));
+
+        // Normalize object types by resolving all synonym references
+        // This ensures dependency analysis and type creation work with actual type references
+        List<ObjectDataTypeMetaData> normalizedObjectTypes = normalizeObjectTypes(validOracleObjectTypes);
+
+        updateProgress(progressCallback, 15, "Analyzing object types",
+                      String.format("Normalized %d object types for dependency analysis", normalizedObjectTypes.size()));
 
         ObjectTypeCreationResult result = new ObjectTypeCreationResult();
 
@@ -89,7 +96,8 @@ public class PostgresObjectTypeCreationJob extends AbstractDatabaseWriteJob<Obje
                           String.format("Found %d existing PostgreSQL object types", existingPostgresTypes.size()));
 
             // Sort types by dependencies to avoid creation order issues
-            List<ObjectDataTypeMetaData> sortedTypes = sortByDependencies(validOracleObjectTypes);
+            // Use normalized types so dependency analysis sees the true dependencies (not synonyms)
+            List<ObjectDataTypeMetaData> sortedTypes = sortByDependencies(normalizedObjectTypes);
 
             // Determine which types need to be created
             List<ObjectDataTypeMetaData> typesToCreate = new ArrayList<>();
@@ -170,6 +178,133 @@ public class PostgresObjectTypeCreationJob extends AbstractDatabaseWriteJob<Obje
             }
         }
         return validTypes;
+    }
+
+    /**
+     * Normalizes object types by resolving all synonym references in type variables.
+     * This preprocessing step ensures that:
+     * 1. Dependency analysis sees the true type dependencies (not synonyms)
+     * 2. Type creation SQL uses the correct target types
+     * 3. Synonym resolution happens only once per type reference
+     *
+     * @param objectTypes The original object types with potential synonym references
+     * @return Normalized copies with all synonyms resolved to their targets
+     */
+    private List<ObjectDataTypeMetaData> normalizeObjectTypes(List<ObjectDataTypeMetaData> objectTypes) {
+        log.info("Normalizing {} object types by resolving synonym references", objectTypes.size());
+
+        List<ObjectDataTypeMetaData> normalizedTypes = new ArrayList<>();
+        int synonymsResolved = 0;
+
+        for (ObjectDataTypeMetaData originalType : objectTypes) {
+            try {
+                // Create a deep copy with normalized variable references
+                List<ObjectDataTypeVariable> normalizedVariables = new ArrayList<>();
+
+                for (ObjectDataTypeVariable originalVariable : originalType.getVariables()) {
+                    ObjectDataTypeVariable normalizedVariable;
+
+                    // Only resolve synonyms for custom (user-defined) types
+                    if (originalVariable.isCustomDataType()) {
+                        String owner = originalVariable.getDataTypeOwner();
+                        String typeName = originalVariable.getDataType();
+
+                        // Extract the base type name without size/precision info
+                        String baseTypeName = extractBaseTypeName(typeName);
+
+                        // Try to resolve as a synonym
+                        String resolvedTarget = stateService.resolveSynonym(owner, baseTypeName);
+
+                        if (resolvedTarget != null) {
+                            // Parse the resolved target (format: "schema.typename")
+                            String[] parts = resolvedTarget.split("\\.");
+                            if (parts.length == 2) {
+                                String resolvedOwner = parts[0];
+                                String resolvedTypeName = parts[1];
+
+                                // Preserve any size/precision info from the original type
+                                String typeWithSize = typeName.substring(baseTypeName.length());
+                                String fullResolvedType = resolvedTypeName + typeWithSize;
+
+                                normalizedVariable = new ObjectDataTypeVariable(
+                                    originalVariable.getName(),
+                                    fullResolvedType,
+                                    resolvedOwner
+                                );
+
+                                synonymsResolved++;
+                                log.debug("Resolved synonym {}.{} -> {}.{} for variable '{}' in type {}.{}",
+                                    owner, baseTypeName, resolvedOwner, resolvedTypeName,
+                                    originalVariable.getName(), originalType.getSchema(), originalType.getName());
+                            } else {
+                                // Malformed resolution result, use original
+                                normalizedVariable = new ObjectDataTypeVariable(
+                                    originalVariable.getName(),
+                                    typeName,
+                                    owner
+                                );
+                                log.warn("Malformed synonym resolution result: {}", resolvedTarget);
+                            }
+                        } else {
+                            // Not a synonym, use original variable
+                            normalizedVariable = new ObjectDataTypeVariable(
+                                originalVariable.getName(),
+                                typeName,
+                                owner
+                            );
+                        }
+                    } else {
+                        // Built-in type, use original variable
+                        normalizedVariable = new ObjectDataTypeVariable(
+                            originalVariable.getName(),
+                            originalVariable.getDataType(),
+                            originalVariable.getDataTypeOwner()
+                        );
+                    }
+
+                    normalizedVariables.add(normalizedVariable);
+                }
+
+                // Create a copy of the ObjectDataTypeMetaData with normalized variables
+                ObjectDataTypeMetaData normalizedType = createObjectDataTypeMetaDataCopy(
+                    originalType.getSchema(),
+                    originalType.getName(),
+                    normalizedVariables
+                );
+
+                normalizedTypes.add(normalizedType);
+
+            } catch (Exception e) {
+                log.error("Failed to normalize object type {}.{}, using original",
+                    originalType.getSchema(), originalType.getName(), e);
+                normalizedTypes.add(originalType); // Fall back to original on error
+            }
+        }
+
+        log.info("Normalization complete: {} object types processed, {} synonym references resolved",
+            normalizedTypes.size(), synonymsResolved);
+
+        return normalizedTypes;
+    }
+
+    /**
+     * Extracts the base type name without size/precision information.
+     * For example: "VARCHAR2(100)" -> "VARCHAR2", "NUMBER(10,2)" -> "NUMBER"
+     */
+    private String extractBaseTypeName(String dataType) {
+        int parenIndex = dataType.indexOf('(');
+        if (parenIndex > 0) {
+            return dataType.substring(0, parenIndex);
+        }
+        return dataType;
+    }
+
+    /**
+     * Creates a copy of ObjectDataTypeMetaData with the given schema, name, and variables.
+     */
+    private ObjectDataTypeMetaData createObjectDataTypeMetaDataCopy(String schema, String name,
+                                                                     List<ObjectDataTypeVariable> variables) {
+        return new ObjectDataTypeMetaData(schema, name, new ArrayList<>(variables));
     }
 
     private Set<String> getExistingPostgresObjectTypes(Connection connection) throws SQLException {
@@ -257,7 +392,7 @@ public class PostgresObjectTypeCreationJob extends AbstractDatabaseWriteJob<Obje
                     log.debug("Complex Oracle system type '{}.{}' for variable '{}' in type {}.{} will use jsonb",
                             owner, oracleType, variable.getName(), objectType.getSchema(), objectType.getName());
                 } else {
-                    // User-defined type - use the fully qualified type name (schema.typename)
+                    // User-defined type - use the fully qualified type name (already normalized, synonyms resolved)
                     fieldType = variable.getQualifiedTypeName();
                     log.debug("Using custom type '{}' for variable '{}' in type {}.{}",
                             fieldType, variable.getName(), objectType.getSchema(), objectType.getName());

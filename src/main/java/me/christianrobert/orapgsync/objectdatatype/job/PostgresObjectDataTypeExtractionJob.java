@@ -160,26 +160,7 @@ public class PostgresObjectDataTypeExtractionJob extends AbstractDatabaseExtract
     }
 
     private ObjectDataTypeMetaData createObjectDataTypeMetaData(String schema, String typeName, List<ObjectDataTypeVariable> variables) {
-        // Using reflection to create ObjectDataTypeMetaData since it lacks setters
-        try {
-            ObjectDataTypeMetaData objectDataType = new ObjectDataTypeMetaData();
-            java.lang.reflect.Field nameField = ObjectDataTypeMetaData.class.getDeclaredField("name");
-            java.lang.reflect.Field schemaField = ObjectDataTypeMetaData.class.getDeclaredField("schema");
-            java.lang.reflect.Field variablesField = ObjectDataTypeMetaData.class.getDeclaredField("variables");
-
-            nameField.setAccessible(true);
-            schemaField.setAccessible(true);
-            variablesField.setAccessible(true);
-
-            nameField.set(objectDataType, typeName);
-            schemaField.set(objectDataType, schema);
-            variablesField.set(objectDataType, new ArrayList<>(variables));
-
-            return objectDataType;
-        } catch (Exception e) {
-            log.error("Failed to create ObjectDataTypeMetaData for {}.{}", schema, typeName, e);
-            throw new RuntimeException("Failed to create ObjectDataTypeMetaData", e);
-        }
+        return new ObjectDataTypeMetaData(schema, typeName, new ArrayList<>(variables));
     }
 
     @Override
