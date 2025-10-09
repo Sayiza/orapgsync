@@ -253,6 +253,15 @@ public class JobResource {
                     response.put("summary", summary);
                     response.put("rowCountDataCount", rowCounts.size());
                     response.put("result", result); // Include raw result for frontend compatibility
+                } else if (jobType.contains("SYNONYM")) {
+                    // Handle synonym extraction results
+                    @SuppressWarnings("unchecked")
+                    List<?> synonyms = (List<?>) result;
+
+                    Map<String, Object> summary = generateSynonymSummary(synonyms);
+                    response.put("summary", summary);
+                    response.put("synonymCount", synonyms.size());
+                    response.put("result", result); // Include raw result for frontend compatibility
                 } else {
                     // Generic list result
                     response.put("result", result);
@@ -590,6 +599,12 @@ public class JobResource {
     }
 
     @POST
+    @Path("/oracle/synonym/extract")
+    public Response startOracleSynonymExtraction() {
+        return startExtractionJob("ORACLE", "SYNONYM", "Oracle synonym extraction");
+    }
+
+    @POST
     @Path("/oracle/row_count/extract")
     public Response startOracleRowCountExtraction() {
         return startExtractionJob("ORACLE", "ROW_COUNT", "Oracle row count extraction");
@@ -675,6 +690,13 @@ public class JobResource {
         return Map.of(
                 "totalSchemas", schemas.size(),
                 "message", String.format("Extraction completed: %d schemas found", schemas.size())
+        );
+    }
+
+    private Map<String, Object> generateSynonymSummary(List<?> synonyms) {
+        return Map.of(
+                "totalSynonyms", synonyms.size(),
+                "message", String.format("Extraction completed: %d synonyms found", synonyms.size())
         );
     }
 }

@@ -103,6 +103,28 @@
             </div>
           </td>
         </tr>
+        <tr class="synonyms-row">
+          <td class="source-cell">
+            <div class="component-info" id="oracle-synonyms">
+              <span class="count-badge">-</span>
+              <span class="component-text">Synonyms discovered</span>
+              <button class="refresh-btn" onclick="loadOracleSynonyms()" title="Refresh Oracle synonyms">↻</button>
+              <div class="synonym-list" id="oracle-synonym-list" style="display: none;">
+                <div class="synonym-list-header" onclick="toggleSynonymList('oracle')">
+                  <span class="toggle-indicator">▼</span> Synonyms by Schema
+                </div>
+                <div class="synonym-items" id="oracle-synonym-items">
+                  <!-- Synonyms will be populated here grouped by schema -->
+                </div>
+              </div>
+            </div>
+          </td>
+          <td class="target-cell">
+            <div class="component-info" id="postgres-synonyms">
+              <span class="component-text">N/A - Resolved during migration</span>
+            </div>
+          </td>
+        </tr>
         <tr class="objects-row">
           <td class="source-cell">
             <div class="component-info" id="oracle-objects">

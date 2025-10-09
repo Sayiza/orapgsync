@@ -1098,6 +1098,99 @@ td {
     background: #f6f7f8;
 }
 
+/* Synonym List Styles */
+.synonym-list {
+    background: #f8f9fa;
+    border: 1px solid #e0e2e5;
+    border-radius: 3px;
+    margin-top: 0.5rem;
+    width: 100%;
+}
+
+.synonym-list-header {
+    background: #f8f9fa;
+    border-bottom: 1px solid #e0e2e5;
+    cursor: pointer;
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.5rem;
+    user-select: none;
+    transition: background-color 0.15s;
+}
+
+.synonym-list-header:hover {
+    background: #e6e8ea;
+}
+
+.synonym-list-header.collapsed .toggle-indicator {
+    transform: rotate(-90deg);
+}
+
+.synonym-items {
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.synonym-schema-group {
+    border-bottom: 1px solid #e8eaed;
+    margin-bottom: 0.5rem;
+}
+
+.synonym-schema-group:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+}
+
+.synonym-schema-header {
+    background: #f4f5f6;
+    border-bottom: 1px solid #dee2e6;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.75rem;
+    padding: 0.35rem 0.5rem;
+    user-select: none;
+    transition: background-color 0.15s;
+    color: #2c3e50;
+}
+
+.synonym-schema-header:hover {
+    background: #ebecee;
+}
+
+.synonym-schema-header.collapsed .toggle-indicator {
+    transform: rotate(-90deg);
+}
+
+.synonym-items-inner {
+    background: #fcfcfd;
+    max-height: 120px;
+    overflow-y: auto;
+}
+
+.synonym-item {
+    border-bottom: 1px solid #f1f3f5;
+    color: #495057;
+    font-family: monospace;
+    font-size: 0.7rem;
+    padding: 0.25rem 1rem;
+    transition: background-color 0.15s;
+}
+
+.synonym-item:last-child {
+    border-bottom: none;
+}
+
+.synonym-item:hover {
+    background: #f6f7f8;
+}
+
+.remote-indicator {
+    color: #ff9800;
+    font-style: italic;
+    font-size: 0.65rem;
+    margin-left: 0.25rem;
+}
+
 /* Unified Creation Results Styles */
 /* Action button used across all creation operations */
 .action-btn {
