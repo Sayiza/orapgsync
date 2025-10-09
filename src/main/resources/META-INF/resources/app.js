@@ -2557,79 +2557,83 @@ async function startAll() {
     updateOrchestrationProgress(0, 'Initializing migration...');
 
     try {
-        // Step 1: Test Oracle connection
-        updateOrchestrationProgress(4, 'Step 1/14: Testing Oracle connection...');
+        // Step 1: Test Oracle connection (synchronous)
+        updateOrchestrationProgress(5, 'Step 1/11: Testing Oracle connection...');
         await testOracleConnection();
-        await delay(1000);
+        // Check if connection succeeded by looking for the "connected" status
+        const oracleConnected = document.querySelector('#oracle-connection .status-indicator').classList.contains('connected');
+        if (!oracleConnected) {
+            throw new Error('Oracle connection test failed. Cannot proceed with migration.');
+        }
+        await delay(500);
 
-        // Step 2: Test PostgreSQL connection
-        updateOrchestrationProgress(7, 'Step 2/14: Testing PostgreSQL connection...');
+        // Step 2: Test PostgreSQL connection (synchronous)
+        updateOrchestrationProgress(10, 'Step 2/11: Testing PostgreSQL connection...');
         await testPostgresConnection();
-        await delay(1000);
+        // Check if connection succeeded
+        const postgresConnected = document.querySelector('#postgres-connection .status-indicator').classList.contains('connected');
+        if (!postgresConnected) {
+            throw new Error('PostgreSQL connection test failed. Cannot proceed with migration.');
+        }
+        await delay(500);
 
-        // Step 3: Load Oracle schemas
-        updateOrchestrationProgress(14, 'Step 3/14: Loading Oracle schemas...');
+        // Step 3: Extract Oracle schemas
+        updateOrchestrationProgress(15, 'Step 3/11: Extracting Oracle schemas...');
         await loadOracleSchemas();
-        await delay(1000);
+        await pollCountBadge('oracle-schemas', { requirePositive: true, allowZero: false });
+        updateOrchestrationProgress(20, 'Oracle schemas extracted');
 
         // Step 4: Create PostgreSQL schemas
-        updateOrchestrationProgress(21, 'Step 4/14: Creating PostgreSQL schemas...');
+        updateOrchestrationProgress(25, 'Step 4/11: Creating PostgreSQL schemas...');
         await createPostgresSchemas();
-        await delay(1000);
+        await pollCountBadge('postgres-schemas', { requirePositive: true, allowZero: false });
+        updateOrchestrationProgress(30, 'PostgreSQL schemas created');
 
-        // Step 5: Verify PostgreSQL schemas
-        updateOrchestrationProgress(29, 'Step 5/14: Verifying PostgreSQL schemas...');
-        await loadPostgresSchemas();
-        await delay(1000);
+        // Step 5: Extract Oracle synonyms
+        updateOrchestrationProgress(35, 'Step 5/11: Extracting Oracle synonyms...');
+        await loadOracleSynonyms();
+        await pollCountBadge('oracle-synonyms', { requirePositive: false, allowZero: true });
+        updateOrchestrationProgress(40, 'Oracle synonyms extracted');
 
         // Step 6: Extract Oracle object types
-        updateOrchestrationProgress(36, 'Step 6/14: Extracting Oracle object types...');
+        updateOrchestrationProgress(45, 'Step 6/11: Extracting Oracle object types...');
         await loadOracleObjectTypes();
-        await delay(1000);
+        await pollCountBadge('oracle-objects', { requirePositive: false, allowZero: true });
+        updateOrchestrationProgress(50, 'Oracle object types extracted');
 
         // Step 7: Create PostgreSQL object types
-        updateOrchestrationProgress(43, 'Step 7/14: Creating PostgreSQL object types...');
+        updateOrchestrationProgress(55, 'Step 7/11: Creating PostgreSQL object types...');
         await createPostgresObjectTypes();
-        await delay(1000); // Small delay before verification
+        await pollCountBadge('postgres-objects', { requirePositive: false, allowZero: true });
+        updateOrchestrationProgress(60, 'PostgreSQL object types created');
 
-        // Step 8: Verify PostgreSQL object types
-        updateOrchestrationProgress(50, 'Step 8/14: Verifying PostgreSQL object types...');
-        await loadPostgresObjectTypes();
-        await delay(1000);
-
-        // Step 9: Extract Oracle table metadata
-        updateOrchestrationProgress(57, 'Step 9/14: Extracting Oracle table metadata...');
+        // Step 8: Extract Oracle table metadata
+        updateOrchestrationProgress(65, 'Step 8/11: Extracting Oracle table metadata...');
         await extractTableMetadata();
-        await delay(1000);
+        await pollCountBadge('oracle-tables', { requirePositive: false, allowZero: true });
+        updateOrchestrationProgress(70, 'Oracle table metadata extracted');
 
-        // Step 10: Create PostgreSQL tables
-        updateOrchestrationProgress(64, 'Step 10/14: Creating PostgreSQL tables...');
+        // Step 9: Create PostgreSQL tables
+        updateOrchestrationProgress(75, 'Step 9/11: Creating PostgreSQL tables...');
         await createPostgresTables();
-        await delay(1000); // Small delay before verification
+        await pollCountBadge('postgres-tables', { requirePositive: false, allowZero: true });
+        updateOrchestrationProgress(80, 'PostgreSQL tables created');
 
-        // Step 11: Verify PostgreSQL tables
-        updateOrchestrationProgress(71, 'Step 11/14: Verifying PostgreSQL tables...');
-        await extractPostgresTableMetadata();
-        await delay(1000);
-
-        // Step 12: Extract Oracle row counts
-        updateOrchestrationProgress(79, 'Step 12/14: Extracting Oracle row counts...');
+        // Step 10: Extract Oracle row counts
+        updateOrchestrationProgress(85, 'Step 10/11: Extracting Oracle row counts...');
         await extractOracleRowCounts();
-        await delay(1000);
+        await pollCountBadge('oracle-data', { requirePositive: false, allowZero: true });
+        updateOrchestrationProgress(90, 'Oracle row counts extracted');
 
-        // Step 13: Transfer data from Oracle to PostgreSQL
-        updateOrchestrationProgress(86, 'Step 13/14: Transferring data...');
+        // Step 11: Transfer data from Oracle to PostgreSQL
+        updateOrchestrationProgress(93, 'Step 11/11: Transferring data...');
         await transferData();
-        await delay(1000);
-
-        // Step 14: Verify data transfer
-        updateOrchestrationProgress(93, 'Step 14/14: Verifying data transfer...');
-        await extractPostgresRowCounts();
-        await delay(1000);
+        await pollCountBadge('postgres-data', { requirePositive: false, allowZero: true });
+        updateOrchestrationProgress(100, 'Data transfer completed');
 
         // Complete
-        updateOrchestrationProgress(100, 'Migration completed successfully!');
         console.log('Full migration orchestration completed successfully');
+        updateOrchestrationProgress(100, 'Migration completed successfully!');
 
         // Hide orchestration progress bar after a short delay
         await delay(2000);
@@ -2637,10 +2641,11 @@ async function startAll() {
 
     } catch (error) {
         console.error('Migration orchestration failed:', error);
-        updateOrchestrationProgress(0, 'Migration failed: ' + error.message);
+        updateOrchestrationProgress(-1, 'Migration failed: ' + error.message);
+        updateMessage('Migration aborted: ' + error.message);
 
         // Hide orchestration progress bar after showing error
-        await delay(3000);
+        await delay(5000);
         hideOrchestrationProgress();
     }
 }
@@ -2648,6 +2653,97 @@ async function startAll() {
 // Helper function to add delay between steps
 function delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Poll a count badge until it contains a valid value
+ * @param {string} elementId - The ID of the component div (e.g., 'oracle-schemas')
+ * @param {object} options - Configuration options
+ * @param {boolean} options.requirePositive - If true, require count > 0 (throw error on 0)
+ * @param {boolean} options.allowZero - If true, accept 0 as valid completion (no error)
+ * @returns {Promise<number>} - The final count value
+ * @throws {Error} - If error indicator found or invalid state detected
+ */
+async function pollCountBadge(elementId, options = {}) {
+    const { requirePositive = false, allowZero = false } = options;
+    const maxWaitTime = 300000; // 5 minutes
+    const checkInterval = 500; // Check every 500ms
+    let elapsedTime = 0;
+
+    console.log(`Polling count badge for ${elementId}...`, options);
+
+    return new Promise((resolve, reject) => {
+        const intervalId = setInterval(() => {
+            elapsedTime += checkInterval;
+
+            // Timeout check
+            if (elapsedTime >= maxWaitTime) {
+                clearInterval(intervalId);
+                reject(new Error(`Timeout waiting for ${elementId} count badge to update (waited ${maxWaitTime/1000}s)`));
+                return;
+            }
+
+            // Find the count badge element
+            const componentElement = document.getElementById(elementId);
+            if (!componentElement) {
+                clearInterval(intervalId);
+                reject(new Error(`Component element not found: ${elementId}`));
+                return;
+            }
+
+            const countBadge = componentElement.querySelector('.count-badge');
+            if (!countBadge) {
+                clearInterval(intervalId);
+                reject(new Error(`Count badge not found in component: ${elementId}`));
+                return;
+            }
+
+            const badgeText = countBadge.textContent.trim();
+            console.log(`${elementId} badge: "${badgeText}"`);
+
+            // Check for error state
+            if (badgeText === '!') {
+                clearInterval(intervalId);
+                reject(new Error(`Error indicator found in ${elementId}. Step failed.`));
+                return;
+            }
+
+            // Check if it's still loading (initial state)
+            if (badgeText === '-') {
+                // Still loading, keep polling
+                return;
+            }
+
+            // Try to parse as number
+            const count = parseInt(badgeText, 10);
+            if (isNaN(count)) {
+                // Not a number and not "-" or "!" - unexpected state
+                console.warn(`Unexpected badge text in ${elementId}: "${badgeText}"`);
+                return; // Keep polling
+            }
+
+            // We have a valid number
+            console.log(`${elementId} completed with count: ${count}`);
+
+            // Check abort conditions based on options
+            if (requirePositive && count === 0) {
+                clearInterval(intervalId);
+                reject(new Error(`${elementId} returned 0 items. Cannot proceed (requirePositive=true).`));
+                return;
+            }
+
+            if (!allowZero && count === 0 && !requirePositive) {
+                // This case shouldn't happen with current logic, but handle it anyway
+                clearInterval(intervalId);
+                reject(new Error(`${elementId} returned 0 items unexpectedly.`));
+                return;
+            }
+
+            // Success! Valid count received
+            clearInterval(intervalId);
+            resolve(count);
+        }, checkInterval);
+    });
 }
 
 // Helper function to wait for async job completion
