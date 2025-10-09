@@ -486,6 +486,8 @@ async function loadOracleSchemas() {
     console.log('Starting Oracle schema extraction job...');
     updateMessage('Starting Oracle schema extraction...');
 
+    updateComponentCount("oracle-schemas", "-");
+
     try {
         // Start the job
         const startResponse = await fetch('/api/jobs/schemas/oracle/extract', {
@@ -619,6 +621,8 @@ function toggleSchemaList(database) {
 async function loadOracleObjectTypes() {
     console.log('Starting Oracle object data type extraction job...');
     updateMessage('Starting Oracle object data type extraction...');
+
+    updateComponentCount('oracle-objects', '-');
 
     try {
         // Start the job
@@ -881,6 +885,8 @@ async function testConnectionsAfterConfigLoad() {
 async function loadOracleSynonyms() {
     console.log('Starting Oracle synonym extraction job...');
     updateMessage('Starting Oracle synonym extraction...');
+
+    updateComponentCount("oracle-synonyms", "-");
 
     try {
         // Start the job
@@ -1540,6 +1546,8 @@ function toggleTableSchemaGroup(database, schemaName) {
 async function extractOracleRowCounts() {
     console.log('Starting Oracle row count extraction job...');
 
+    updateComponentCount("oracle-data", "-");
+
     const button = document.querySelector('#oracle-data .refresh-btn');
     if (button) {
         button.disabled = true;
@@ -1857,6 +1865,9 @@ async function createPostgresSchemas() {
         button.disabled = true;
         button.innerHTML = '⏳';
     }
+
+    updateComponentCount("postgres-schemas", "-");
+
     updateMessage('Starting PostgreSQL schema creation...');
     updateProgress(0, 'Starting PostgreSQL schema creation');
 
@@ -1980,10 +1991,10 @@ function handleSchemaCreationJobComplete(result, database) {
     // Update schema creation results section
     displaySchemaCreationResults(result, database);
 
-    // Refresh PostgreSQL schemas to show newly created ones
-    setTimeout(() => {
-        loadPostgresSchemas();
-    }, 1000);
+    // Refresh PostgreSQL schemas to show newly created ones ... not really needed
+    //setTimeout(() => {
+    //    loadPostgresSchemas();
+    //}, 1000);
 }
 
 function displaySchemaCreationResults(result, database) {
@@ -1999,6 +2010,8 @@ function displaySchemaCreationResults(result, database) {
 
     if (result.summary) {
         const summary = result.summary;
+
+        updateComponentCount("postgres-schemas", summary.createdCount + summary.skippedCount + summary.errorCount);
 
         html += '<div class="schema-creation-summary">';
         html += `<div class="summary-stats">`;
@@ -2068,6 +2081,9 @@ function toggleSchemaCreationResults(database) {
 // Object Type Creation Functions
 async function createPostgresObjectTypes() {
     console.log('Starting PostgreSQL object type creation job...');
+
+    updateComponentCount("postgres-objects", "-");
+
     const button = document.querySelector('#postgres-objects .action-btn');
     if (button) {
         button.disabled = true;
@@ -2188,10 +2204,10 @@ function handleObjectTypeCreationJobComplete(result, database) {
     // Display object type creation results
     displayObjectTypeCreationResults(result, database);
 
-    // Refresh PostgreSQL object types to show newly created ones
-    setTimeout(() => {
-        loadPostgresObjectTypes();
-    }, 1000);
+    // Refresh PostgreSQL object types to show newly created ones ... no need
+    //setTimeout(() => {
+    //    loadPostgresObjectTypes();
+    //}, 1000);
 }
 
 function displayObjectTypeCreationResults(result, database) {
@@ -2207,6 +2223,8 @@ function displayObjectTypeCreationResults(result, database) {
 
     if (result.summary) {
         const summary = result.summary;
+
+        updateComponentCount("postgres-objects", summary.createdCount + summary.skippedCount + summary.errorCount);
 
         html += '<div class="object-type-creation-summary">';
         html += `<div class="summary-stats">`;
@@ -2282,6 +2300,9 @@ function toggleObjectTypeCreationResults(database) {
 // Table Creation Functions
 async function createPostgresTables() {
     console.log('Starting PostgreSQL table creation job...');
+
+    updateComponentCount("postgres-tables", "-");
+
     const button = document.querySelector('#postgres-tables .action-btn');
     if (button) {
         button.disabled = true;
@@ -2402,10 +2423,10 @@ function handleTableCreationJobComplete(result, database) {
     // Update table creation results section
     displayTableCreationResults(result, database);
 
-    // Refresh PostgreSQL tables to show newly created ones
-    setTimeout(() => {
-        extractPostgresTableMetadata();
-    }, 1000);
+    // Refresh PostgreSQL tables to show newly created ones not need any more
+    //setTimeout(() => {
+    //    extractPostgresTableMetadata();
+    //}, 1000);
 }
 
 function displayTableCreationResults(result, database) {
@@ -2421,6 +2442,8 @@ function displayTableCreationResults(result, database) {
 
     if (result.summary) {
         const summary = result.summary;
+
+        updateComponentCount("postgres-tables", summary.createdCount + summary.skippedCount + summary.errorCount);
 
         html += '<div class="table-creation-summary">';
         html += `<div class="summary-stats">`;
@@ -2689,6 +2712,9 @@ async function transferData() {
         button.disabled = true;
         button.innerHTML = '⏳';
     }
+
+    updateComponentCount("postgres-data", "-");
+
     updateMessage('Starting data transfer from Oracle to PostgreSQL...');
     updateProgress(0, 'Starting data transfer');
 
@@ -2804,10 +2830,10 @@ function handleDataTransferJobComplete(result) {
     // Update data transfer results section
     displayDataTransferResults(result);
 
-    // Refresh PostgreSQL row counts to show newly transferred data
-    setTimeout(() => {
-        extractPostgresRowCounts();
-    }, 1000);
+    // Refresh PostgreSQL row counts to show newly transferred data, not needed
+    //setTimeout(() => {
+    //    extractPostgresRowCounts();
+    //}, 1000);
 }
 
 function displayDataTransferResults(result) {
@@ -2823,6 +2849,8 @@ function displayDataTransferResults(result) {
 
     if (result.summary) {
         const summary = result.summary;
+
+        updateComponentCount("postgres-data", (summary.totalRowsTransferred || 0).toLocaleString());
 
         html += '<div class="table-creation-summary">';
         html += `<div class="summary-stats">`;
