@@ -213,11 +213,11 @@
               <span class="count-badge">-</span>
               <span class="component-text">Sequences found</span>
               <button class="refresh-btn" onclick="extractOracleSequences()" title="Extract Oracle sequences">⚙</button>
-              <div class="sequence-list" id="oracle-sequence-list" style="display: none;">
-                <div class="sequence-list-header" onclick="toggleSequenceList('oracle')">
+              <div class="table-list" id="oracle-sequence-list" style="display: none;">
+                <div class="table-list-header" onclick="toggleSequenceList('oracle')">
                   <span class="toggle-indicator">▼</span> Sequences by Schema
                 </div>
-                <div class="sequence-items" id="oracle-sequence-items">
+                <div class="table-items" id="oracle-sequence-items">
                   <!-- Sequence metadata will be populated here -->
                 </div>
               </div>
@@ -229,19 +229,19 @@
               <span class="component-text">Sequences created</span>
               <button class="refresh-btn" onclick="extractPostgresSequences()" title="Extract PostgreSQL sequences">⚙</button>
               <button class="action-btn" onclick="createPostgresSequences()" title="Create Oracle sequences in PostgreSQL">Create Sequences</button>
-              <div class="sequence-list" id="postgres-sequence-list" style="display: none;">
-                <div class="sequence-list-header" onclick="toggleSequenceList('postgres')">
+              <div class="table-list" id="postgres-sequence-list" style="display: none;">
+                <div class="table-list-header" onclick="toggleSequenceList('postgres')">
                   <span class="toggle-indicator">▼</span> Sequences by Schema
                 </div>
-                <div class="sequence-items" id="postgres-sequence-items">
+                <div class="table-items" id="postgres-sequence-items">
                   <!-- Sequence metadata will be populated here -->
                 </div>
               </div>
-              <div class="sequence-creation-results" id="postgres-sequence-creation-results" style="display: none;">
-                <div class="sequence-creation-header" onclick="toggleSequenceCreationResults()">
+              <div class="table-creation-results" id="postgres-sequence-creation-results" style="display: none;">
+                <div class="table-creation-header" onclick="toggleSequenceCreationResults()">
                   <span class="toggle-indicator">▼</span> Sequence Creation Results
                 </div>
-                <div class="sequence-creation-details" id="postgres-sequence-creation-details">
+                <div class="table-creation-details" id="postgres-sequence-creation-details">
                   <!-- Sequence creation results will be populated here -->
                 </div>
               </div>
