@@ -6,6 +6,7 @@ import me.christianrobert.orapgsync.core.job.AbstractDatabaseWriteJob;
 import me.christianrobert.orapgsync.core.job.model.JobProgress;
 import me.christianrobert.orapgsync.core.job.model.table.TableMetadata;
 import me.christianrobert.orapgsync.core.job.model.transfer.DataTransferResult;
+import me.christianrobert.orapgsync.core.tools.TableMetadataNormalizer;
 import me.christianrobert.orapgsync.database.service.OracleConnectionService;
 import me.christianrobert.orapgsync.database.service.PostgresConnectionService;
 import me.christianrobert.orapgsync.transfer.service.CsvDataTransferService;
@@ -34,6 +35,9 @@ public class DataTransferJob extends AbstractDatabaseWriteJob<DataTransferResult
 
     @Inject
     private CsvDataTransferService csvDataTransferService;
+
+    @Inject
+    private TableMetadataNormalizer tableMetadataNormalizer;
 
     @Override
     public String getTargetDatabase() {
@@ -71,13 +75,20 @@ public class DataTransferJob extends AbstractDatabaseWriteJob<DataTransferResult
         // Filter valid tables (exclude system schemas)
         List<TableMetadata> validOracleTables = filterValidTables(oracleTables);
 
-        updateProgress(progressCallback, 10, "Analyzing tables",
+        updateProgress(progressCallback, 10, "Normalizing tables",
                 String.format("Found %d Oracle tables, %d are valid for data transfer",
                         oracleTables.size(), validOracleTables.size()));
 
+        // Normalize tables by resolving all synonym references in column types
+        // This ensures data transfer correctly classifies types for serialization
+        List<TableMetadata> normalizedTables = tableMetadataNormalizer.normalizeTableMetadata(validOracleTables);
+
+        updateProgress(progressCallback, 15, "Analyzing tables",
+                String.format("Normalized %d tables for data transfer", normalizedTables.size()));
+
         DataTransferResult result = new DataTransferResult();
 
-        if (validOracleTables.isEmpty()) {
+        if (normalizedTables.isEmpty()) {
             updateProgress(progressCallback, 100, "No valid tables", "No valid Oracle tables to transfer");
             return result;
         }
@@ -93,12 +104,12 @@ public class DataTransferJob extends AbstractDatabaseWriteJob<DataTransferResult
             updateProgress(progressCallback, 30, "Connected", "Successfully connected to both databases");
 
             log.info("Data transfer job initialized successfully");
-            log.info("Ready to transfer data for {} tables", validOracleTables.size());
+            log.info("Ready to transfer data for {} tables", normalizedTables.size());
 
-            int totalTables = validOracleTables.size();
+            int totalTables = normalizedTables.size();
             int processedTables = 0;
 
-            for (TableMetadata table : validOracleTables) {
+            for (TableMetadata table : normalizedTables) {
                 String qualifiedTableName = table.getSchema() + "." + table.getTableName();
 
                 updateProgress(progressCallback,
