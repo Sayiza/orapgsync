@@ -3132,29 +3132,29 @@ async function startAll() {
         await pollCountBadge('postgres-objects', { requirePositive: false, allowZero: true });
         updateOrchestrationProgress(60, 'PostgreSQL object types created');
 
-        // Step 8: Extract Oracle table metadata
-        updateOrchestrationProgress(65, 'Step 8/13: Extracting Oracle table metadata...');
-        await extractTableMetadata();
-        await pollCountBadge('oracle-tables', { requirePositive: false, allowZero: true });
-        updateOrchestrationProgress(68, 'Oracle table metadata extracted');
-
-        // Step 9: Create PostgreSQL tables
-        updateOrchestrationProgress(70, 'Step 9/13: Creating PostgreSQL tables...');
-        await createPostgresTables();
-        await pollCountBadge('postgres-tables', { requirePositive: false, allowZero: true });
-        updateOrchestrationProgress(73, 'PostgreSQL tables created');
-
-        // Step 10: Extract Oracle sequences
-        updateOrchestrationProgress(75, 'Step 10/13: Extracting Oracle sequences...');
+        // Step 8: Extract Oracle sequences
+        updateOrchestrationProgress(65, 'Step 8/13: Extracting Oracle sequences...');
         await extractOracleSequences();
         await pollCountBadge('oracle-sequences', { requirePositive: false, allowZero: true });
-        updateOrchestrationProgress(77, 'Oracle sequences extracted');
+        updateOrchestrationProgress(68, 'Oracle sequences extracted');
 
-        // Step 11: Create PostgreSQL sequences
-        updateOrchestrationProgress(80, 'Step 11/13: Creating PostgreSQL sequences...');
+        // Step 9: Create PostgreSQL sequences
+        updateOrchestrationProgress(70, 'Step 9/13: Creating PostgreSQL sequences...');
         await createPostgresSequences();
         await pollCountBadge('postgres-sequences', { requirePositive: false, allowZero: true });
-        updateOrchestrationProgress(83, 'PostgreSQL sequences created');
+        updateOrchestrationProgress(73, 'PostgreSQL sequences created');
+
+        // Step 10: Extract Oracle table metadata
+        updateOrchestrationProgress(75, 'Step 10/13: Extracting Oracle table metadata...');
+        await extractTableMetadata();
+        await pollCountBadge('oracle-tables', { requirePositive: false, allowZero: true });
+        updateOrchestrationProgress(77, 'Oracle table metadata extracted');
+
+        // Step 11: Create PostgreSQL tables
+        updateOrchestrationProgress(80, 'Step 11/13: Creating PostgreSQL tables...');
+        await createPostgresTables();
+        await pollCountBadge('postgres-tables', { requirePositive: false, allowZero: true });
+        updateOrchestrationProgress(83, 'PostgreSQL tables created');
 
         // Step 12: Extract Oracle row counts
         updateOrchestrationProgress(85, 'Step 12/13: Extracting Oracle row counts...');

@@ -166,47 +166,6 @@
             </div>
           </td>
         </tr>
-        <tr class="tables-row">
-          <td class="source-cell">
-            <div class="component-info" id="oracle-tables">
-              <span class="count-badge">-</span>
-              <span class="component-text">Tables found</span>
-              <button class="refresh-btn" onclick="extractTableMetadata()" title="Extract Oracle table metadata">⚙</button>
-              <div class="table-list" id="oracle-table-list" style="display: none;">
-                <div class="table-list-header" onclick="toggleTableList('oracle')">
-                  <span class="toggle-indicator">▼</span> Tables by Schema
-                </div>
-                <div class="table-items" id="oracle-table-items">
-                  <!-- Table metadata will be populated here -->
-                </div>
-              </div>
-            </div>
-          </td>
-          <td class="target-cell">
-            <div class="component-info" id="postgres-tables">
-              <span class="count-badge">-</span>
-              <span class="component-text">Tables found</span>
-              <button class="refresh-btn" onclick="extractPostgresTableMetadata()" title="Extract PostgreSQL table metadata">⚙</button>
-              <button class="action-btn" onclick="createPostgresTables()" title="Create missing Oracle tables in PostgreSQL">Create Tables</button>
-              <div class="table-list" id="postgres-table-list" style="display: none;">
-                <div class="table-list-header" onclick="toggleTableList('postgres')">
-                  <span class="toggle-indicator">▼</span> Tables by Schema
-                </div>
-                <div class="table-items" id="postgres-table-items">
-                  <!-- Table metadata will be populated here -->
-                </div>
-              </div>
-              <div class="table-creation-results" id="postgres-table-creation-results" style="display: none;">
-                <div class="table-creation-header" onclick="toggleTableCreationResults('postgres')">
-                  <span class="toggle-indicator">▼</span> Table Creation Results
-                </div>
-                <div class="table-creation-details" id="postgres-table-creation-details">
-                  <!-- Table creation results will be populated here -->
-                </div>
-              </div>
-            </div>
-          </td>
-        </tr>
         <tr class="sequences-row">
           <td class="source-cell">
             <div class="component-info" id="oracle-sequences">
@@ -243,6 +202,47 @@
                 </div>
                 <div class="table-creation-details" id="postgres-sequence-creation-details">
                   <!-- Sequence creation results will be populated here -->
+                </div>
+              </div>
+            </div>
+          </td>
+        </tr>
+        <tr class="tables-row">
+          <td class="source-cell">
+            <div class="component-info" id="oracle-tables">
+              <span class="count-badge">-</span>
+              <span class="component-text">Tables found</span>
+              <button class="refresh-btn" onclick="extractTableMetadata()" title="Extract Oracle table metadata">⚙</button>
+              <div class="table-list" id="oracle-table-list" style="display: none;">
+                <div class="table-list-header" onclick="toggleTableList('oracle')">
+                  <span class="toggle-indicator">▼</span> Tables by Schema
+                </div>
+                <div class="table-items" id="oracle-table-items">
+                  <!-- Table metadata will be populated here -->
+                </div>
+              </div>
+            </div>
+          </td>
+          <td class="target-cell">
+            <div class="component-info" id="postgres-tables">
+              <span class="count-badge">-</span>
+              <span class="component-text">Tables found</span>
+              <button class="refresh-btn" onclick="extractPostgresTableMetadata()" title="Extract PostgreSQL table metadata">⚙</button>
+              <button class="action-btn" onclick="createPostgresTables()" title="Create missing Oracle tables in PostgreSQL">Create Tables</button>
+              <div class="table-list" id="postgres-table-list" style="display: none;">
+                <div class="table-list-header" onclick="toggleTableList('postgres')">
+                  <span class="toggle-indicator">▼</span> Tables by Schema
+                </div>
+                <div class="table-items" id="postgres-table-items">
+                  <!-- Table metadata will be populated here -->
+                </div>
+              </div>
+              <div class="table-creation-results" id="postgres-table-creation-results" style="display: none;">
+                <div class="table-creation-header" onclick="toggleTableCreationResults('postgres')">
+                  <span class="toggle-indicator">▼</span> Table Creation Results
+                </div>
+                <div class="table-creation-details" id="postgres-table-creation-details">
+                  <!-- Table creation results will be populated here -->
                 </div>
               </div>
             </div>
