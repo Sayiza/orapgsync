@@ -16,6 +16,8 @@ function initializeInterface() {
     updateComponentCount('postgres-objects', '-');
     updateComponentCount('oracle-tables', '-');
     updateComponentCount('postgres-tables', '-');
+    updateComponentCount('oracle-sequences', '-');
+    updateComponentCount('postgres-sequences', '-');
     updateComponentCount('oracle-data', '-');
     updateComponentCount('postgres-data', '-');
     updateComponentCount('oracle-views', '-');
@@ -2515,6 +2517,369 @@ function toggleTableCreationResults(database) {
     }
 }
 
+// ===== SEQUENCE FUNCTIONS =====
+
+async function extractOracleSequences() {
+    console.log('Starting Oracle sequence extraction job...');
+
+    const button = document.querySelector('#oracle-sequences .refresh-btn');
+    if (button) {
+        button.disabled = true;
+        button.innerHTML = '⏳';
+    }
+
+    updateMessage('Starting Oracle sequence extraction...');
+    updateProgress(0, 'Starting Oracle sequence extraction');
+
+    try {
+        const response = await fetch('/api/jobs/oracle/sequence/extract', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+
+        const result = await response.json();
+
+        if (result.status === 'success') {
+            console.log('Oracle sequence extraction job started:', result.jobId);
+            updateMessage('Oracle sequence extraction job started successfully');
+
+            // Start polling for progress
+            await pollSequenceJobStatus(result.jobId, 'oracle');
+        } else {
+            throw new Error(result.message || 'Failed to start Oracle sequence extraction job');
+        }
+    } catch (error) {
+        console.error('Error starting Oracle sequence extraction job:', error);
+        updateMessage('Failed to start Oracle sequence extraction: ' + error.message);
+        updateProgress(0, 'Failed to start Oracle sequence extraction');
+        // Re-enable button
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = '⚙';
+        }
+    }
+}
+
+async function extractPostgresSequences() {
+    console.log('Starting PostgreSQL sequence extraction job...');
+
+    const button = document.querySelector('#postgres-sequences .refresh-btn');
+    if (button) {
+        button.disabled = true;
+        button.innerHTML = '⏳';
+    }
+
+    updateMessage('Starting PostgreSQL sequence extraction...');
+    updateProgress(0, 'Starting PostgreSQL sequence extraction');
+
+    try {
+        const response = await fetch('/api/jobs/postgres/sequence/extract', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+
+        const result = await response.json();
+
+        if (result.status === 'success') {
+            console.log('PostgreSQL sequence extraction job started:', result.jobId);
+            updateMessage('PostgreSQL sequence extraction job started successfully');
+
+            // Start polling for progress
+            await pollSequenceJobStatus(result.jobId, 'postgres');
+        } else {
+            throw new Error(result.message || 'Failed to start PostgreSQL sequence extraction job');
+        }
+    } catch (error) {
+        console.error('Error starting PostgreSQL sequence extraction job:', error);
+        updateMessage('Failed to start PostgreSQL sequence extraction: ' + error.message);
+        updateProgress(0, 'Failed to start PostgreSQL sequence extraction');
+        // Re-enable button
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = '⚙';
+        }
+    }
+}
+
+async function createPostgresSequences() {
+    console.log('Starting PostgreSQL sequence creation job...');
+
+    updateComponentCount("postgres-sequences", "-");
+
+    const button = document.querySelector('#postgres-sequences .action-btn');
+    if (button) {
+        button.disabled = true;
+        button.innerHTML = '⏳';
+    }
+
+    updateMessage('Starting PostgreSQL sequence creation...');
+    updateProgress(0, 'Starting PostgreSQL sequence creation');
+
+    try {
+        const response = await fetch('/api/jobs/postgres/sequence-creation/create', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+
+        const result = await response.json();
+        if (result.status === 'success') {
+            console.log('PostgreSQL sequence creation job started:', result.jobId);
+            updateMessage('PostgreSQL sequence creation job started successfully');
+            // Start polling for progress and AWAIT completion
+            await pollSequenceCreationJobStatus(result.jobId, 'postgres');
+        } else {
+            throw new Error(result.message || 'Failed to start PostgreSQL sequence creation job');
+        }
+    } catch (error) {
+        console.error('Error starting PostgreSQL sequence creation job:', error);
+        updateMessage('Failed to start PostgreSQL sequence creation: ' + error.message);
+        updateProgress(0, 'Failed to start PostgreSQL sequence creation');
+        // Re-enable button
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = 'Create Sequences';
+        }
+    }
+}
+
+async function pollSequenceJobStatus(jobId, database) {
+    console.log(`Polling sequence job status for ${database}:`, jobId);
+
+    return new Promise((resolve, reject) => {
+        const pollOnce = async () => {
+            try {
+                const response = await fetch(`/api/jobs/${jobId}/status`);
+                const status = await response.json();
+
+                console.log(`Sequence job status for ${database}:`, status);
+
+                // Update progress bar
+                if (status.progress !== undefined) {
+                    updateProgress(status.progress, status.currentTask || 'Processing...');
+                }
+
+                if (status.status === 'COMPLETED') {
+                    console.log(`Sequence extraction completed for ${database}:`, status);
+                    updateProgress(100, `${database.toUpperCase()} sequence extraction completed`);
+
+                    // Load the sequences to update the UI
+                    await loadSequences(database);
+
+                    // Re-enable button
+                    const button = document.querySelector(`#${database}-sequences .refresh-btn`);
+                    if (button) {
+                        button.disabled = false;
+                        button.innerHTML = '⚙';
+                    }
+
+                    resolve(status);
+                } else if (status.status === 'FAILED') {
+                    updateProgress(-1, `${database.toUpperCase()} sequence extraction failed`);
+                    updateMessage(`${database.toUpperCase()} sequence extraction failed: ` + (status.error || 'Unknown error'));
+
+                    // Re-enable button
+                    const button = document.querySelector(`#${database}-sequences .refresh-btn`);
+                    if (button) {
+                        button.disabled = false;
+                        button.innerHTML = '⚙';
+                    }
+
+                    reject(new Error(status.error || 'Sequence extraction failed'));
+                } else {
+                    // Still processing
+                    setTimeout(pollOnce, 1000);
+                }
+            } catch (error) {
+                console.error('Error polling sequence job status:', error);
+                reject(error);
+            }
+        };
+
+        pollOnce();
+    });
+}
+
+async function pollSequenceCreationJobStatus(jobId, database) {
+    console.log(`Polling sequence creation job status for ${database}:`, jobId);
+
+    return new Promise((resolve, reject) => {
+        const pollOnce = async () => {
+            try {
+                const response = await fetch(`/api/jobs/${jobId}/status`);
+                const status = await response.json();
+
+                console.log(`Sequence creation job status for ${database}:`, status);
+
+                // Update progress bar
+                if (status.progress !== undefined) {
+                    updateProgress(status.progress, status.currentTask || 'Processing...');
+                }
+
+                if (status.status === 'COMPLETED') {
+                    console.log(`Sequence creation completed for ${database}:`, status);
+                    updateProgress(100, `${database.toUpperCase()} sequence creation completed`);
+
+                    // Display results
+                    if (status.result) {
+                        displaySequenceCreationResults(status.result, database);
+                    }
+
+                    // Load the sequences to update the UI
+                    await loadSequences(database);
+
+                    // Re-enable button
+                    const button = document.querySelector(`#${database}-sequences .action-btn`);
+                    if (button) {
+                        button.disabled = false;
+                        button.innerHTML = 'Create Sequences';
+                    }
+
+                    resolve(status);
+                } else if (status.status === 'FAILED') {
+                    updateProgress(-1, `${database.toUpperCase()} sequence creation failed`);
+                    updateMessage(`${database.toUpperCase()} sequence creation failed: ` + (status.error || 'Unknown error'));
+
+                    // Re-enable button
+                    const button = document.querySelector(`#${database}-sequences .action-btn`);
+                    if (button) {
+                        button.disabled = false;
+                        button.innerHTML = 'Create Sequences';
+                    }
+
+                    reject(new Error(status.error || 'Sequence creation failed'));
+                } else {
+                    // Still processing
+                    setTimeout(pollOnce, 1000);
+                }
+            } catch (error) {
+                console.error('Error polling sequence creation job status:', error);
+                reject(error);
+            }
+        };
+
+        pollOnce();
+    });
+}
+
+async function loadSequences(database) {
+    try {
+        const response = await fetch(`/api/state/sequences/${database}`);
+        const sequences = await response.json();
+
+        console.log(`Loaded ${database} sequences:`, sequences);
+
+        // Update badge count
+        updateComponentCount(`${database}-sequences`, sequences.length);
+
+        // TODO: Populate sequence list UI (similar to tables/objects)
+        // This would display sequence details in the collapsible section
+
+    } catch (error) {
+        console.error(`Error loading ${database} sequences:`, error);
+        updateComponentCount(`${database}-sequences`, '?', 'error');
+    }
+}
+
+function displaySequenceCreationResults(result, database) {
+    const resultsDiv = document.getElementById(`${database}-sequence-creation-results`);
+    const detailsDiv = document.getElementById(`${database}-sequence-creation-details`);
+
+    if (!resultsDiv || !detailsDiv) {
+        console.error('Sequence creation results container not found');
+        return;
+    }
+
+    let html = '';
+
+    if (result.summary) {
+        const summary = result.summary;
+
+        updateComponentCount("postgres-sequences", summary.createdCount + summary.skippedCount + summary.errorCount);
+
+        html += '<div class="sequence-creation-summary">';
+        html += `<div class="summary-stats">`;
+        html += `<span class="stat-item created">Created: ${summary.createdCount}</span>`;
+        html += `<span class="stat-item skipped">Skipped: ${summary.skippedCount}</span>`;
+        html += `<span class="stat-item errors">Errors: ${summary.errorCount}</span>`;
+        html += `</div>`;
+        html += '</div>';
+
+        // Show created sequences
+        if (summary.createdCount > 0) {
+            html += '<div class="created-sequences-section">';
+            html += '<h4>Created Sequences:</h4>';
+            html += '<ul class="item-list">';
+            summary.createdSequences.forEach(seq => {
+                html += `<li>${seq}</li>`;
+            });
+            html += '</ul>';
+            html += '</div>';
+        }
+
+        // Show skipped sequences
+        if (summary.skippedCount > 0) {
+            html += '<div class="skipped-sequences-section">';
+            html += '<h4>Skipped Sequences (Already Exist):</h4>';
+            html += '<ul class="item-list">';
+            summary.skippedSequences.forEach(seq => {
+                html += `<li>${seq}</li>`;
+            });
+            html += '</ul>';
+            html += '</div>';
+        }
+
+        // Show errors
+        if (summary.errorCount > 0) {
+            html += '<div class="error-sequences-section">';
+            html += '<h4>Errors:</h4>';
+            html += '<ul class="error-list">';
+            summary.errors.forEach(error => {
+                html += `<li><strong>${error.sequenceName}</strong>: ${error.errorMessage}</li>`;
+            });
+            html += '</ul>';
+            html += '</div>';
+        }
+    }
+
+    detailsDiv.innerHTML = html;
+    resultsDiv.style.display = 'block';
+}
+
+function toggleSequenceList(database) {
+    const listDiv = document.getElementById(`${database}-sequence-list`);
+    const toggleIndicator = listDiv.querySelector('.toggle-indicator');
+
+    if (listDiv.style.display === 'none' || !listDiv.style.display) {
+        listDiv.style.display = 'block';
+        toggleIndicator.textContent = '▲';
+    } else {
+        listDiv.style.display = 'none';
+        toggleIndicator.textContent = '▼';
+    }
+}
+
+function toggleSequenceCreationResults() {
+    const resultsDiv = document.getElementById('postgres-sequence-creation-results');
+    const detailsDiv = document.getElementById('postgres-sequence-creation-details');
+    const toggleIndicator = resultsDiv.querySelector('.toggle-indicator');
+
+    if (detailsDiv.style.display === 'none' || !detailsDiv.style.display) {
+        detailsDiv.style.display = 'block';
+        toggleIndicator.textContent = '▲';
+    } else {
+        detailsDiv.style.display = 'none';
+        toggleIndicator.textContent = '▼';
+    }
+}
+
+// ===== END SEQUENCE FUNCTIONS =====
+
 // Reset all application state
 async function resetAll() {
     console.log('Resetting all application state...');
@@ -2558,7 +2923,7 @@ async function startAll() {
 
     try {
         // Step 1: Test Oracle connection (synchronous)
-        updateOrchestrationProgress(5, 'Step 1/11: Testing Oracle connection...');
+        updateOrchestrationProgress(5, 'Step 1/13: Testing Oracle connection...');
         await testOracleConnection();
         // Check if connection succeeded by looking for the "connected" status
         const oracleConnected = document.querySelector('#oracle-connection .status-indicator').classList.contains('connected');
@@ -2568,7 +2933,7 @@ async function startAll() {
         await delay(500);
 
         // Step 2: Test PostgreSQL connection (synchronous)
-        updateOrchestrationProgress(10, 'Step 2/11: Testing PostgreSQL connection...');
+        updateOrchestrationProgress(10, 'Step 2/13: Testing PostgreSQL connection...');
         await testPostgresConnection();
         // Check if connection succeeded
         const postgresConnected = document.querySelector('#postgres-connection .status-indicator').classList.contains('connected');
@@ -2578,55 +2943,67 @@ async function startAll() {
         await delay(500);
 
         // Step 3: Extract Oracle schemas
-        updateOrchestrationProgress(15, 'Step 3/11: Extracting Oracle schemas...');
+        updateOrchestrationProgress(15, 'Step 3/13: Extracting Oracle schemas...');
         await loadOracleSchemas();
         await pollCountBadge('oracle-schemas', { requirePositive: true, allowZero: false });
         updateOrchestrationProgress(20, 'Oracle schemas extracted');
 
         // Step 4: Create PostgreSQL schemas
-        updateOrchestrationProgress(25, 'Step 4/11: Creating PostgreSQL schemas...');
+        updateOrchestrationProgress(25, 'Step 4/13: Creating PostgreSQL schemas...');
         await createPostgresSchemas();
         await pollCountBadge('postgres-schemas', { requirePositive: true, allowZero: false });
         updateOrchestrationProgress(30, 'PostgreSQL schemas created');
 
         // Step 5: Extract Oracle synonyms
-        updateOrchestrationProgress(35, 'Step 5/11: Extracting Oracle synonyms...');
+        updateOrchestrationProgress(35, 'Step 5/13: Extracting Oracle synonyms...');
         await loadOracleSynonyms();
         await pollCountBadge('oracle-synonyms', { requirePositive: false, allowZero: true });
         updateOrchestrationProgress(40, 'Oracle synonyms extracted');
 
         // Step 6: Extract Oracle object types
-        updateOrchestrationProgress(45, 'Step 6/11: Extracting Oracle object types...');
+        updateOrchestrationProgress(45, 'Step 6/13: Extracting Oracle object types...');
         await loadOracleObjectTypes();
         await pollCountBadge('oracle-objects', { requirePositive: false, allowZero: true });
         updateOrchestrationProgress(50, 'Oracle object types extracted');
 
         // Step 7: Create PostgreSQL object types
-        updateOrchestrationProgress(55, 'Step 7/11: Creating PostgreSQL object types...');
+        updateOrchestrationProgress(55, 'Step 7/13: Creating PostgreSQL object types...');
         await createPostgresObjectTypes();
         await pollCountBadge('postgres-objects', { requirePositive: false, allowZero: true });
         updateOrchestrationProgress(60, 'PostgreSQL object types created');
 
         // Step 8: Extract Oracle table metadata
-        updateOrchestrationProgress(65, 'Step 8/11: Extracting Oracle table metadata...');
+        updateOrchestrationProgress(65, 'Step 8/13: Extracting Oracle table metadata...');
         await extractTableMetadata();
         await pollCountBadge('oracle-tables', { requirePositive: false, allowZero: true });
-        updateOrchestrationProgress(70, 'Oracle table metadata extracted');
+        updateOrchestrationProgress(68, 'Oracle table metadata extracted');
 
         // Step 9: Create PostgreSQL tables
-        updateOrchestrationProgress(75, 'Step 9/11: Creating PostgreSQL tables...');
+        updateOrchestrationProgress(70, 'Step 9/13: Creating PostgreSQL tables...');
         await createPostgresTables();
         await pollCountBadge('postgres-tables', { requirePositive: false, allowZero: true });
-        updateOrchestrationProgress(80, 'PostgreSQL tables created');
+        updateOrchestrationProgress(73, 'PostgreSQL tables created');
 
-        // Step 10: Extract Oracle row counts
-        updateOrchestrationProgress(85, 'Step 10/11: Extracting Oracle row counts...');
+        // Step 10: Extract Oracle sequences
+        updateOrchestrationProgress(75, 'Step 10/13: Extracting Oracle sequences...');
+        await extractOracleSequences();
+        await pollCountBadge('oracle-sequences', { requirePositive: false, allowZero: true });
+        updateOrchestrationProgress(77, 'Oracle sequences extracted');
+
+        // Step 11: Create PostgreSQL sequences
+        updateOrchestrationProgress(80, 'Step 11/13: Creating PostgreSQL sequences...');
+        await createPostgresSequences();
+        await pollCountBadge('postgres-sequences', { requirePositive: false, allowZero: true });
+        updateOrchestrationProgress(83, 'PostgreSQL sequences created');
+
+        // Step 12: Extract Oracle row counts
+        updateOrchestrationProgress(85, 'Step 12/13: Extracting Oracle row counts...');
         await extractOracleRowCounts();
         await pollCountBadge('oracle-data', { requirePositive: false, allowZero: true });
         updateOrchestrationProgress(90, 'Oracle row counts extracted');
 
-        // Step 11: Transfer data from Oracle to PostgreSQL
-        updateOrchestrationProgress(93, 'Step 11/11: Transferring data...');
+        // Step 13: Transfer data from Oracle to PostgreSQL
+        updateOrchestrationProgress(93, 'Step 13/13: Transferring data...');
         await transferData();
         await pollCountBadge('postgres-data', { requirePositive: false, allowZero: true });
         updateOrchestrationProgress(100, 'Data transfer completed');

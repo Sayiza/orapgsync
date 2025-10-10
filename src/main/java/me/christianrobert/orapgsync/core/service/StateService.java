@@ -9,6 +9,8 @@ import me.christianrobert.orapgsync.core.job.model.transfer.RowCountMetadata;
 import me.christianrobert.orapgsync.core.job.model.schema.SchemaCreationResult;
 import me.christianrobert.orapgsync.core.job.model.table.TableCreationResult;
 import me.christianrobert.orapgsync.core.job.model.table.TableMetadata;
+import me.christianrobert.orapgsync.core.job.model.sequence.SequenceMetadata;
+import me.christianrobert.orapgsync.core.job.model.sequence.SequenceCreationResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -48,6 +50,10 @@ public class StateService {
     List<TableMetadata> oracleTableMetadata = new ArrayList<>();
     List<TableMetadata> postgresTableMetadata = new ArrayList<>();
     TableCreationResult tableCreationResult;
+
+    List<SequenceMetadata> oracleSequenceMetadata = new ArrayList<>();
+    List<SequenceMetadata> postgresSequenceMetadata = new ArrayList<>();
+    SequenceCreationResult sequenceCreationResult;
 
     DataTransferResult dataTransferResult;
 
@@ -197,6 +203,30 @@ public class StateService {
         this.dataTransferResult = dataTransferResult;
     }
 
+    public List<SequenceMetadata> getOracleSequenceMetadata() {
+        return oracleSequenceMetadata;
+    }
+
+    public void setOracleSequenceMetadata(List<SequenceMetadata> oracleSequenceMetadata) {
+        this.oracleSequenceMetadata = oracleSequenceMetadata;
+    }
+
+    public List<SequenceMetadata> getPostgresSequenceMetadata() {
+        return postgresSequenceMetadata;
+    }
+
+    public void setPostgresSequenceMetadata(List<SequenceMetadata> postgresSequenceMetadata) {
+        this.postgresSequenceMetadata = postgresSequenceMetadata;
+    }
+
+    public SequenceCreationResult getSequenceCreationResult() {
+        return sequenceCreationResult;
+    }
+
+    public void setSequenceCreationResult(SequenceCreationResult sequenceCreationResult) {
+        this.sequenceCreationResult = sequenceCreationResult;
+    }
+
     public void resetState() {
         log.info("Resetting all state to default values");
         this.oracleSchemaNames = new ArrayList<>();
@@ -211,6 +241,9 @@ public class StateService {
         this.oracleTableMetadata = new ArrayList<>();
         this.postgresTableMetadata = new ArrayList<>();
         this.tableCreationResult = null;
+        this.oracleSequenceMetadata = new ArrayList<>();
+        this.postgresSequenceMetadata = new ArrayList<>();
+        this.sequenceCreationResult = null;
         this.dataTransferResult = null;
     }
 }

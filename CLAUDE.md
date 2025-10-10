@@ -77,6 +77,15 @@ Each database element type is completely independent:
 - `PostgresSchemaCreationJob`: Creates schemas in PostgreSQL
 - REST endpoints for schema information
 
+**Data Transfer** (`transfer/`):
+- `DataTransferJob`: Main data transfer orchestration job
+- `CsvDataTransferService`: High-performance CSV-based data transfer using PostgreSQL COPY
+- `OracleComplexTypeSerializer`: Serialization for complex Oracle types (ANYDATA, BLOB/CLOB, user-defined types)
+- `RowCountService`: Row count comparison for transfer validation
+- Supports all data types: simple types, LOBs, user-defined object types, complex system types
+- Piped streaming architecture (producer-consumer) for memory-efficient transfer
+- Automatic table truncation and row count validation
+
 #### 4. **Cross-Cutting Concerns** (`core/`)
 - `TypeConverter`: Oracle-to-PostgreSQL data type mapping
 - `OracleTypeClassifier`: Identifies complex Oracle system types requiring jsonb
@@ -191,16 +200,23 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
 - Object type creation in PostgreSQL with dependency ordering
 - Synonym extraction and resolution (Oracle)
 - Row count extraction (Oracle ↔ PostgreSQL)
+- **Data transfer (Oracle → PostgreSQL)** - Full implementation with:
+  - CSV-based bulk transfer using PostgreSQL COPY
+  - Support for all data types (simple, LOB, user-defined objects, complex system types)
+  - BLOB/CLOB streaming with hex encoding
+  - User-defined object type serialization to PostgreSQL composite format
+  - Complex Oracle system type serialization to jsonb with metadata preservation
+  - Memory-efficient piped streaming (producer-consumer architecture)
+  - Automatic row count validation and table truncation
 - Generic REST API for job management
 - Database connection management and testing
 - Configuration management with UI
 
 ### 🔄 Ready for Implementation
+- **Sequence extraction and creation (Oracle → PostgreSQL)** ⬅️ Next priority
 - Constraint migration (primary keys, foreign keys, unique, check)
-- Data transfer jobs (bulk data copying)
 - View metadata processing
 - Index metadata extraction
-- Sequence migration
 - Trigger migration
 
 ### 🎯 Extension Points
@@ -318,11 +334,12 @@ The migration handles three categories of Oracle data types with different strat
   - Complex Oracle system types → `jsonb`
   - Built-in types → Direct mapping via `TypeConverter`
 
-**Step B: Data Transfer (🔄 To Be Implemented)**
-- User-defined types: Direct structural transfer
-- Complex Oracle system types: Serialize with metadata wrapper to jsonb
-- Built-in types: Direct JDBC conversion
-- Use PostgreSQL COPY for batch performance (CSV format with jsonb serialization)
+**Step B: Data Transfer (✅ Implemented)**
+- User-defined types: PostgreSQL composite literal format serialization (`CsvDataTransferService.serializeToPostgresRow()`)
+- Complex Oracle system types: JSON serialization with metadata wrapper to jsonb (`OracleComplexTypeSerializer.serializeToJson()`)
+- Built-in types: Direct JDBC conversion via `getString()`
+- LOB types: BLOB→hex encoding, CLOB→text extraction (`OracleComplexTypeSerializer.serializeBlobToHex/serializeClobToText()`)
+- PostgreSQL COPY for batch performance (CSV format with piped streaming)
 
 **Step C: Constraint Creation (🔄 To Be Implemented)**
 - Add primary keys, foreign keys, unique constraints
@@ -338,15 +355,19 @@ The migration handles three categories of Oracle data types with different strat
 **Type Conversion:**
 - `TypeConverter.toPostgre()` - Built-in type mapping
 
-**Future Data Transfer (Step B):**
-- Will serialize complex Oracle system types with format:
+**Data Transfer Implementation:**
+- `CsvDataTransferService.performCsvTransfer()` - Main transfer orchestration
+- `CsvDataTransferService.produceOracleCsv()` - Extracts Oracle data to CSV format
+- `OracleComplexTypeSerializer.serializeToPostgresRow()` - User-defined object serialization
+- `OracleComplexTypeSerializer.serializeToJson()` - Complex system type serialization to jsonb
+- `OracleComplexTypeSerializer.serializeBlobToHex()` / `serializeClobToText()` - LOB handling
+- Serialization format for complex types:
   ```json
   {
     "oracleType": "<owner>.<type_name>",
     "value": <serialized_data>
   }
   ```
-- Enables performant CSV batch transfer via PostgreSQL COPY
 - Preserves type metadata for future PL/SQL code transformation
 
 This architecture provides a solid foundation for Oracle-to-PostgreSQL migration with excellent extensibility for future enhancements.
