@@ -563,6 +563,7 @@ public class JobResource {
         Map<String, Object> createdDetails = new HashMap<>();
         Map<String, Object> skippedDetails = new HashMap<>();
         Map<String, Object> errorDetails = new HashMap<>();
+        Map<String, Object> unmappedDefaultDetails = new HashMap<>();
 
         // Created tables details
         for (String tableName : tableResult.getCreatedTables()) {
@@ -592,17 +593,32 @@ public class JobResource {
             ));
         }
 
-        return Map.of(
-                "totalProcessed", tableResult.getTotalProcessed(),
-                "createdCount", tableResult.getCreatedCount(),
-                "skippedCount", tableResult.getSkippedCount(),
-                "errorCount", tableResult.getErrorCount(),
-                "isSuccessful", tableResult.isSuccessful(),
-                "executionTimestamp", tableResult.getExecutionTimestamp(),
-                "createdTables", createdDetails,
-                "skippedTables", skippedDetails,
-                "errors", errorDetails
-        );
+        // Unmapped default value warnings
+        for (TableCreationResult.UnmappedDefaultWarning warning : tableResult.getUnmappedDefaults()) {
+            String key = warning.getTableName() + "." + warning.getColumnName();
+            unmappedDefaultDetails.put(key, Map.of(
+                    "tableName", warning.getTableName(),
+                    "columnName", warning.getColumnName(),
+                    "oracleDefault", warning.getOracleDefault(),
+                    "note", warning.getNote()
+            ));
+        }
+
+        // Use a Map builder that accepts more than 10 entries
+        Map<String, Object> result = new HashMap<>();
+        result.put("totalProcessed", tableResult.getTotalProcessed());
+        result.put("createdCount", tableResult.getCreatedCount());
+        result.put("skippedCount", tableResult.getSkippedCount());
+        result.put("errorCount", tableResult.getErrorCount());
+        result.put("unmappedDefaultCount", tableResult.getUnmappedDefaultCount());
+        result.put("isSuccessful", tableResult.isSuccessful());
+        result.put("executionTimestamp", tableResult.getExecutionTimestamp());
+        result.put("createdTables", createdDetails);
+        result.put("skippedTables", skippedDetails);
+        result.put("errors", errorDetails);
+        result.put("unmappedDefaults", unmappedDefaultDetails);
+
+        return result;
     }
 
     @POST

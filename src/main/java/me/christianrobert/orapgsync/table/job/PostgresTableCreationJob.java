@@ -4,6 +4,7 @@ import jakarta.enterprise.context.Dependent;
 import jakarta.inject.Inject;
 import me.christianrobert.orapgsync.core.job.AbstractDatabaseWriteJob;
 import me.christianrobert.orapgsync.core.job.model.JobProgress;
+import me.christianrobert.orapgsync.table.service.DefaultValueTransformer;
 import me.christianrobert.orapgsync.core.tools.OracleTypeClassifier;
 import me.christianrobert.orapgsync.core.tools.TypeConverter;
 import me.christianrobert.orapgsync.database.service.PostgresConnectionService;
@@ -187,12 +188,12 @@ public class PostgresTableCreationJob extends AbstractDatabaseWriteJob<TableCrea
                           String.format("Table %d of %d", processedTables + 1, totalTables));
 
             try {
-                createTable(connection, table);
+                createTable(connection, table, result);
                 result.addCreatedTable(qualifiedTableName);
                 log.info("Successfully created PostgreSQL table: {}", qualifiedTableName);
             } catch (SQLException e) {
                 String errorMessage = String.format("Failed to create table '%s': %s", qualifiedTableName, e.getMessage());
-                String sqlStatement = generateCreateTableSQL(table);
+                String sqlStatement = generateCreateTableSQL(table, result);
                 result.addError(qualifiedTableName, errorMessage, sqlStatement);
                 log.error("Failed to create table: {}", qualifiedTableName, e);
             }
@@ -201,8 +202,8 @@ public class PostgresTableCreationJob extends AbstractDatabaseWriteJob<TableCrea
         }
     }
 
-    private void createTable(Connection connection, TableMetadata table) throws SQLException {
-        String sql = generateCreateTableSQL(table);
+    private void createTable(Connection connection, TableMetadata table, TableCreationResult result) throws SQLException {
+        String sql = generateCreateTableSQL(table, result);
 
         try (PreparedStatement stmt = connection.prepareStatement(sql)) {
             stmt.executeUpdate();
@@ -211,7 +212,7 @@ public class PostgresTableCreationJob extends AbstractDatabaseWriteJob<TableCrea
         log.debug("Executed SQL: {}", sql);
     }
 
-    private String generateCreateTableSQL(TableMetadata table) {
+    private String generateCreateTableSQL(TableMetadata table, TableCreationResult result) {
         StringBuilder sql = new StringBuilder();
         sql.append("CREATE TABLE ");
         sql.append(String.format("%s.%s (", table.getSchema().toLowerCase(), table.getTableName().toLowerCase()));
@@ -220,7 +221,7 @@ public class PostgresTableCreationJob extends AbstractDatabaseWriteJob<TableCrea
 
         // Add column definitions only (no constraints - they will be added after data transfer)
         for (ColumnMetadata column : table.getColumns()) {
-            columnDefinitions.add(generateColumnDefinition(column));
+            columnDefinitions.add(generateColumnDefinition(column, table, result));
         }
 
         sql.append(String.join(", ", columnDefinitions));
@@ -229,7 +230,7 @@ public class PostgresTableCreationJob extends AbstractDatabaseWriteJob<TableCrea
         return sql.toString();
     }
 
-    private String generateColumnDefinition(ColumnMetadata column) {
+    private String generateColumnDefinition(ColumnMetadata column, TableMetadata table, TableCreationResult result) {
         StringBuilder def = new StringBuilder();
         def.append(column.getColumnName().toLowerCase());
 
@@ -271,9 +272,28 @@ public class PostgresTableCreationJob extends AbstractDatabaseWriteJob<TableCrea
             def.append(" NOT NULL");
         }
 
-        // Add default value if specified
+        // Add default value if specified - transform Oracle defaults to PostgreSQL
         if (column.getDefaultValue() != null && !column.getDefaultValue().trim().isEmpty()) {
-            def.append(" DEFAULT ").append(column.getDefaultValue());
+            String qualifiedTableName = getQualifiedTableName(table);
+            DefaultValueTransformer.TransformationResult transformResult =
+                DefaultValueTransformer.transform(column.getDefaultValue(), column.getColumnName(), qualifiedTableName);
+
+            if (transformResult.isSkipped()) {
+                // Complex default that couldn't be mapped - log warning and track for manual review
+                result.addUnmappedDefault(qualifiedTableName, column.getColumnName(),
+                    transformResult.getOriginalValue(), transformResult.getTransformationNote());
+                log.info("Skipped default value for {}.{}: {} ({})",
+                    qualifiedTableName, column.getColumnName(),
+                    transformResult.getOriginalValue(), transformResult.getTransformationNote());
+            } else {
+                // Simple default or successfully transformed - apply it
+                def.append(" DEFAULT ").append(transformResult.getTransformedValue());
+                if (transformResult.wasTransformed()) {
+                    log.debug("Applied transformed default for {}.{}: {} -> {}",
+                        qualifiedTableName, column.getColumnName(),
+                        transformResult.getOriginalValue(), transformResult.getTransformedValue());
+                }
+            }
         }
 
         return def.toString();
@@ -286,6 +306,10 @@ public class PostgresTableCreationJob extends AbstractDatabaseWriteJob<TableCrea
         summary.append(String.format("Table creation completed: %d created, %d skipped, %d errors",
                                     result.getCreatedCount(), result.getSkippedCount(), result.getErrorCount()));
 
+        if (result.getUnmappedDefaultCount() > 0) {
+            summary.append(String.format(", %d unmapped defaults", result.getUnmappedDefaultCount()));
+        }
+
         if (result.getCreatedCount() > 0) {
             summary.append(String.format(" | Created: %s", String.join(", ", result.getCreatedTables())));
         }
@@ -296,6 +320,10 @@ public class PostgresTableCreationJob extends AbstractDatabaseWriteJob<TableCrea
 
         if (result.hasErrors()) {
             summary.append(String.format(" | %d errors occurred", result.getErrorCount()));
+        }
+
+        if (result.getUnmappedDefaultCount() > 0) {
+            summary.append(String.format(" | %d column defaults require manual review", result.getUnmappedDefaultCount()));
         }
 
         return summary.toString();

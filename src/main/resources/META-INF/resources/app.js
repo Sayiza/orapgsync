@@ -2452,6 +2452,9 @@ function displayTableCreationResults(result, database) {
         html += `<span class="stat-item created">Created: ${summary.createdCount}</span>`;
         html += `<span class="stat-item skipped">Skipped: ${summary.skippedCount}</span>`;
         html += `<span class="stat-item errors">Errors: ${summary.errorCount}</span>`;
+        if (summary.unmappedDefaultCount > 0) {
+            html += `<span class="stat-item warnings">Unmapped Defaults: ${summary.unmappedDefaultCount}</span>`;
+        }
         html += `</div>`;
         html += '</div>';
 
@@ -2490,6 +2493,25 @@ function displayTableCreationResults(result, database) {
                 if (error.sql) {
                     html += `<div class="sql-statement"><pre>${error.sql}</pre></div>`;
                 }
+                html += `</div>`;
+            });
+            html += '</div>';
+            html += '</div>';
+        }
+
+        // Show unmapped defaults (columns with complex Oracle default values that need manual review)
+        if (summary.unmappedDefaultCount > 0) {
+            html += '<div class="warning-tables-section">';
+            html += '<h4>Columns with Unmapped Default Values (Require Manual Review):</h4>';
+            html += '<div class="table-items">';
+            html += '<p style="font-style: italic; color: #666; margin: 5px 0;">The following columns have complex Oracle default values that could not be automatically transformed. Tables were created without these defaults. You can add them manually later.</p>';
+            Object.values(summary.unmappedDefaults).forEach(warning => {
+                html += `<div class="table-item warning">`;
+                html += `<strong>${warning.tableName}.${warning.columnName}</strong>`;
+                html += `<div style="margin-left: 15px; margin-top: 5px;">`;
+                html += `<div><strong>Oracle Default:</strong> <code>${warning.oracleDefault}</code></div>`;
+                html += `<div><strong>Note:</strong> ${warning.note}</div>`;
+                html += `</div>`;
                 html += `</div>`;
             });
             html += '</div>';
