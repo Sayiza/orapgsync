@@ -285,9 +285,23 @@ public class CsvDataTransferService {
                             // Check if LOB data should be excluded (config flag)
                             Boolean excludeLobData = configService.getConfigValueAsBoolean("exclude.lob-data");
                             if (excludeLobData != null && excludeLobData) {
-                                // Skip LOB serialization - leave column empty (NULL)
-                                lobValue = null;
-                                log.trace("Skipping LOB data for column {} (exclude.lob-data=true)", column.getColumnName());
+                                // Skip LOB serialization - insert minimal dummy value to satisfy NOT NULL constraints
+                                if (dataType.matches("BLOB|BFILE|LONG RAW")) {
+                                    // Binary LOB - use empty bytea in PostgreSQL hex format
+                                    // Format: \x (PostgreSQL's representation of empty bytea in CSV)
+                                    lobValue = "\\x";
+                                    log.trace("Using empty bytea dummy value for BLOB column {} (exclude.lob-data=true)",
+                                             column.getColumnName());
+                                } else if (dataType.matches("CLOB|NCLOB|LONG")) {
+                                    // Character LOB - use empty string
+                                    lobValue = "";
+                                    log.trace("Using empty string dummy value for CLOB column {} (exclude.lob-data=true)",
+                                             column.getColumnName());
+                                } else {
+                                    log.warn("Unknown LOB type {} for column {}, using empty string",
+                                            dataType, column.getColumnName());
+                                    lobValue = "";
+                                }
                             } else {
                                 // Normal LOB serialization
                                 if (dataType.matches("BLOB|BFILE|LONG RAW")) {
