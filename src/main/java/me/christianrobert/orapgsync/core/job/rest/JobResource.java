@@ -17,6 +17,8 @@ import me.christianrobert.orapgsync.core.job.model.transfer.DataTransferResult;
 import me.christianrobert.orapgsync.core.job.model.transfer.RowCountMetadata;
 import me.christianrobert.orapgsync.core.job.model.table.TableCreationResult;
 import me.christianrobert.orapgsync.core.job.model.table.TableMetadata;
+import me.christianrobert.orapgsync.core.job.model.sequence.SequenceMetadata;
+import me.christianrobert.orapgsync.core.job.model.sequence.SequenceCreationResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -217,55 +219,19 @@ public class JobResource {
 
             // Handle different job result types
             String jobType = execution.getJob().getJobType();
-            if (result instanceof List<?>) {
-                if (jobType.contains("SCHEMA")) {
-                    // Handle schema extraction results
-                    @SuppressWarnings("unchecked")
-                    List<String> schemas = (List<String>) result;
 
-                    Map<String, Object> summary = generateSchemaExtractionSummary(schemas);
-                    response.put("summary", summary);
-                    response.put("count", schemas.size());
-                    response.put("schemas", schemas);
-                } else if (jobType.contains("TABLE_METADATA")) {
-                    // Handle table metadata extraction results
-                    @SuppressWarnings("unchecked")
-                    List<TableMetadata> tableMetadata = (List<TableMetadata>) result;
+            // Check result object type first (more specific), then fall back to jobType string matching for Lists
+            if (result instanceof SequenceCreationResult) {
+                // Handle sequence creation results (check BEFORE List check)
+                SequenceCreationResult sequenceResult = (SequenceCreationResult) result;
 
-                    Map<String, Object> summary = generateTableMetadataSummary(tableMetadata);
-                    response.put("summary", summary);
-                    response.put("tableCount", tableMetadata.size());
-                } else if (jobType.contains("OBJECT_DATATYPE")) {
-                    // Handle object data type extraction results
-                    @SuppressWarnings("unchecked")
-                    List<ObjectDataTypeMetaData> objectDataTypes = (List<ObjectDataTypeMetaData>) result;
-
-                    Map<String, Object> summary = generateObjectDataTypeSummary(objectDataTypes);
-                    response.put("summary", summary);
-                    response.put("objectDataTypeCount", objectDataTypes.size());
-                    response.put("result", result); // Include raw result for frontend compatibility
-                } else if (jobType.contains("ROW_COUNT")) {
-                    // Handle row count extraction results
-                    @SuppressWarnings("unchecked")
-                    List<RowCountMetadata> rowCounts = (List<RowCountMetadata>) result;
-
-                    Map<String, Object> summary = generateRowCountSummary(rowCounts);
-                    response.put("summary", summary);
-                    response.put("rowCountDataCount", rowCounts.size());
-                    response.put("result", result); // Include raw result for frontend compatibility
-                } else if (jobType.contains("SYNONYM")) {
-                    // Handle synonym extraction results
-                    @SuppressWarnings("unchecked")
-                    List<?> synonyms = (List<?>) result;
-
-                    Map<String, Object> summary = generateSynonymSummary(synonyms);
-                    response.put("summary", summary);
-                    response.put("synonymCount", synonyms.size());
-                    response.put("result", result); // Include raw result for frontend compatibility
-                } else {
-                    // Generic list result
-                    response.put("result", result);
-                }
+                Map<String, Object> summary = generateSequenceCreationSummary(sequenceResult);
+                response.put("summary", summary);
+                response.put("createdCount", sequenceResult.getCreatedCount());
+                response.put("skippedCount", sequenceResult.getSkippedCount());
+                response.put("errorCount", sequenceResult.getErrorCount());
+                response.put("isSuccessful", sequenceResult.isSuccessful());
+                response.put("result", result); // Include raw result for frontend compatibility
             } else if (result instanceof SchemaCreationResult) {
                 // Handle schema creation results
                 SchemaCreationResult schemaResult = (SchemaCreationResult) result;
@@ -311,6 +277,65 @@ public class JobResource {
                 response.put("totalRowsTransferred", transferResult.getTotalRowsTransferred());
                 response.put("isSuccessful", transferResult.isSuccessful());
                 response.put("result", result); // Include raw result for frontend compatibility
+            } else if (result instanceof List<?>) {
+                // Handle List results based on jobType
+                if (jobType.contains("SCHEMA") && !jobType.contains("SCHEMA_CREATION")) {
+                    // Handle schema extraction results
+                    @SuppressWarnings("unchecked")
+                    List<String> schemas = (List<String>) result;
+
+                    Map<String, Object> summary = generateSchemaExtractionSummary(schemas);
+                    response.put("summary", summary);
+                    response.put("count", schemas.size());
+                    response.put("schemas", schemas);
+                } else if (jobType.contains("TABLE_METADATA")) {
+                    // Handle table metadata extraction results
+                    @SuppressWarnings("unchecked")
+                    List<TableMetadata> tableMetadata = (List<TableMetadata>) result;
+
+                    Map<String, Object> summary = generateTableMetadataSummary(tableMetadata);
+                    response.put("summary", summary);
+                    response.put("tableCount", tableMetadata.size());
+                } else if (jobType.contains("OBJECT_DATATYPE")) {
+                    // Handle object data type extraction results
+                    @SuppressWarnings("unchecked")
+                    List<ObjectDataTypeMetaData> objectDataTypes = (List<ObjectDataTypeMetaData>) result;
+
+                    Map<String, Object> summary = generateObjectDataTypeSummary(objectDataTypes);
+                    response.put("summary", summary);
+                    response.put("objectDataTypeCount", objectDataTypes.size());
+                    response.put("result", result); // Include raw result for frontend compatibility
+                } else if (jobType.contains("ROW_COUNT")) {
+                    // Handle row count extraction results
+                    @SuppressWarnings("unchecked")
+                    List<RowCountMetadata> rowCounts = (List<RowCountMetadata>) result;
+
+                    Map<String, Object> summary = generateRowCountSummary(rowCounts);
+                    response.put("summary", summary);
+                    response.put("rowCountDataCount", rowCounts.size());
+                    response.put("result", result); // Include raw result for frontend compatibility
+                } else if (jobType.contains("SYNONYM")) {
+                    // Handle synonym extraction results
+                    @SuppressWarnings("unchecked")
+                    List<?> synonyms = (List<?>) result;
+
+                    Map<String, Object> summary = generateSynonymSummary(synonyms);
+                    response.put("summary", summary);
+                    response.put("synonymCount", synonyms.size());
+                    response.put("result", result); // Include raw result for frontend compatibility
+                } else if (jobType.contains("SEQUENCE") && !jobType.contains("SEQUENCE_CREATION")) {
+                    // Handle sequence extraction results (NOT creation)
+                    @SuppressWarnings("unchecked")
+                    List<SequenceMetadata> sequences = (List<SequenceMetadata>) result;
+
+                    Map<String, Object> summary = generateSequenceSummary(sequences);
+                    response.put("summary", summary);
+                    response.put("sequenceCount", sequences.size());
+                    response.put("result", result); // Include raw result for frontend compatibility
+                } else {
+                    // Generic list result
+                    response.put("result", result);
+                }
             } else {
                 response.put("result", result);
             }
@@ -617,9 +642,27 @@ public class JobResource {
     }
 
     @POST
+    @Path("/oracle/sequence/extract")
+    public Response startOracleSequenceExtraction() {
+        return startExtractionJob("ORACLE", "SEQUENCE", "Oracle sequence extraction");
+    }
+
+    @POST
+    @Path("/postgres/sequence/extract")
+    public Response startPostgresSequenceExtraction() {
+        return startExtractionJob("POSTGRES", "SEQUENCE", "PostgreSQL sequence extraction");
+    }
+
+    @POST
     @Path("/postgres/schema/create")
     public Response startPostgresSchemaCreation() {
         return startJob("POSTGRES", "SCHEMA_CREATION", "PostgreSQL schema creation");
+    }
+
+    @POST
+    @Path("/postgres/sequence-creation/create")
+    public Response startPostgresSequenceCreation() {
+        return startJob("POSTGRES", "SEQUENCE_CREATION", "PostgreSQL sequence creation");
     }
 
     @POST
@@ -697,6 +740,68 @@ public class JobResource {
         return Map.of(
                 "totalSynonyms", synonyms.size(),
                 "message", String.format("Extraction completed: %d synonyms found", synonyms.size())
+        );
+    }
+
+    private Map<String, Object> generateSequenceSummary(List<SequenceMetadata> sequences) {
+        Map<String, Integer> schemaSequenceCounts = new HashMap<>();
+
+        for (SequenceMetadata sequence : sequences) {
+            String schema = sequence.getSchema();
+            schemaSequenceCounts.put(schema, schemaSequenceCounts.getOrDefault(schema, 0) + 1);
+        }
+
+        return Map.of(
+                "totalSequences", sequences.size(),
+                "schemaSequenceCounts", schemaSequenceCounts,
+                "message", String.format("Extraction completed: %d sequences from %d schemas",
+                        sequences.size(), schemaSequenceCounts.size())
+        );
+    }
+
+    private Map<String, Object> generateSequenceCreationSummary(SequenceCreationResult sequenceResult) {
+        Map<String, Object> createdDetails = new HashMap<>();
+        Map<String, Object> skippedDetails = new HashMap<>();
+        Map<String, Object> errorDetails = new HashMap<>();
+
+        // Created sequences details
+        for (String sequenceName : sequenceResult.getCreatedSequences()) {
+            createdDetails.put(sequenceName, Map.of(
+                    "sequenceName", sequenceName,
+                    "status", "created",
+                    "timestamp", sequenceResult.getExecutionDateTime().toString()
+            ));
+        }
+
+        // Skipped sequences details
+        for (String sequenceName : sequenceResult.getSkippedSequences()) {
+            skippedDetails.put(sequenceName, Map.of(
+                    "sequenceName", sequenceName,
+                    "status", "skipped",
+                    "reason", "already exists"
+            ));
+        }
+
+        // Error details
+        for (SequenceCreationResult.SequenceCreationError error : sequenceResult.getErrors()) {
+            errorDetails.put(error.getSequenceName(), Map.of(
+                    "sequenceName", error.getSequenceName(),
+                    "status", "error",
+                    "error", error.getErrorMessage(),
+                    "sql", error.getSqlStatement()
+            ));
+        }
+
+        return Map.of(
+                "totalProcessed", sequenceResult.getTotalProcessed(),
+                "createdCount", sequenceResult.getCreatedCount(),
+                "skippedCount", sequenceResult.getSkippedCount(),
+                "errorCount", sequenceResult.getErrorCount(),
+                "isSuccessful", sequenceResult.isSuccessful(),
+                "executionTimestamp", sequenceResult.getExecutionTimestamp(),
+                "createdSequences", createdDetails,
+                "skippedSequences", skippedDetails,
+                "errors", errorDetails
         );
     }
 }

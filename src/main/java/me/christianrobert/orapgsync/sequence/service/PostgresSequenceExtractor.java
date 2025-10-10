@@ -5,6 +5,7 @@ import me.christianrobert.orapgsync.core.tools.UserExcluder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.math.BigInteger;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -80,14 +81,15 @@ public class PostgresSequenceExtractor {
                     String sequenceName = rs.getString("sequence_name").toLowerCase();
                     SequenceMetadata metadata = new SequenceMetadata(schema.toLowerCase(), sequenceName);
 
-                    // Extract metadata
+                    // Extract metadata - use BigInteger to handle large values
                     String minValueStr = rs.getString("minimum_value");
                     String maxValueStr = rs.getString("maximum_value");
+                    String lastValueStr = rs.getString("last_value");
 
-                    metadata.setMinValue(minValueStr != null ? Long.parseLong(minValueStr) : null);
-                    metadata.setMaxValue(maxValueStr != null ? Long.parseLong(maxValueStr) : null);
+                    metadata.setMinValue(minValueStr != null ? new BigInteger(minValueStr) : null);
+                    metadata.setMaxValue(maxValueStr != null ? new BigInteger(maxValueStr) : null);
                     metadata.setIncrementBy(rs.getInt("increment"));
-                    metadata.setCurrentValue(rs.getLong("last_value")); // PostgreSQL's current value
+                    metadata.setCurrentValue(lastValueStr != null ? new BigInteger(lastValueStr) : null);
                     metadata.setCacheSize(rs.getInt("cache_size"));
 
                     // Convert PostgreSQL cycle_option to Oracle-style flag

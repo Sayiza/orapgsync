@@ -194,6 +194,17 @@ public abstract class AbstractDatabaseExtractionJob<T> implements DatabaseExtrac
     }
 
     /**
+     * Utility method for updating job progress.
+     */
+    public void updateProgress(Consumer<JobProgress> progressCallback, int percentage,
+                                String currentTask, String details) {
+        if (progressCallback != null) {
+            JobProgress progress = new JobProgress(percentage, currentTask, details);
+            progressCallback.accept(progress);
+        }
+    }
+
+    /**
      * Generates a summary message for the extraction results.
      * Default implementation provides count information.
      */

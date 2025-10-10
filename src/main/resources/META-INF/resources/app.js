@@ -2661,15 +2661,15 @@ async function pollSequenceJobStatus(jobId, database) {
 
                 // Update progress bar
                 if (status.progress !== undefined) {
-                    updateProgress(status.progress, status.currentTask || 'Processing...');
+                    updateProgress(status.progress.percentage, status.progress.currentTask || 'Processing...');
                 }
 
                 if (status.status === 'COMPLETED') {
                     console.log(`Sequence extraction completed for ${database}:`, status);
                     updateProgress(100, `${database.toUpperCase()} sequence extraction completed`);
 
-                    // Load the sequences to update the UI
-                    await loadSequences(database);
+                    // Get job results and update the UI
+                    await getSequenceJobResults(jobId, database);
 
                     // Re-enable button
                     const button = document.querySelector(`#${database}-sequences .refresh-btn`);
@@ -2718,20 +2718,15 @@ async function pollSequenceCreationJobStatus(jobId, database) {
 
                 // Update progress bar
                 if (status.progress !== undefined) {
-                    updateProgress(status.progress, status.currentTask || 'Processing...');
+                    updateProgress(status.progress.percentage, status.progress.currentTask || 'Processing...');
                 }
 
                 if (status.status === 'COMPLETED') {
                     console.log(`Sequence creation completed for ${database}:`, status);
                     updateProgress(100, `${database.toUpperCase()} sequence creation completed`);
 
-                    // Display results
-                    if (status.result) {
-                        displaySequenceCreationResults(status.result, database);
-                    }
-
-                    // Load the sequences to update the UI
-                    await loadSequences(database);
+                    // Get job results and display
+                    await getSequenceCreationResults(jobId, database);
 
                     // Re-enable button
                     const button = document.querySelector(`#${database}-sequences .action-btn`);
@@ -2767,22 +2762,150 @@ async function pollSequenceCreationJobStatus(jobId, database) {
     });
 }
 
-async function loadSequences(database) {
+async function getSequenceJobResults(jobId, database) {
+    console.log('Getting sequence job results for:', jobId);
+
     try {
-        const response = await fetch(`/api/state/sequences/${database}`);
-        const sequences = await response.json();
+        const response = await fetch(`/api/jobs/${jobId}/result`);
+        const result = await response.json();
 
-        console.log(`Loaded ${database} sequences:`, sequences);
+        if (result.status === 'success') {
+            console.log('Sequence job results:', result);
 
-        // Update badge count
-        updateComponentCount(`${database}-sequences`, sequences.length);
+            // Update badge count
+            const sequenceCount = result.sequenceCount || 0;
+            updateComponentCount(`${database}-sequences`, sequenceCount);
 
-        // TODO: Populate sequence list UI (similar to tables/objects)
-        // This would display sequence details in the collapsible section
+            // Show success message
+            const databaseName = database === 'oracle' ? 'Oracle' : 'PostgreSQL';
+            if (result.summary && result.summary.message) {
+                updateMessage(`${databaseName}: ${result.summary.message}`);
+            } else {
+                updateMessage(`Extracted ${sequenceCount} ${databaseName} sequences`);
+            }
+
+            // Populate sequence list UI
+            populateSequenceList(result, database);
+
+            // Show sequence list if there are sequences
+            if (sequenceCount > 0) {
+                document.getElementById(`${database}-sequence-list`).style.display = 'block';
+            }
+
+        } else {
+            throw new Error(result.message || 'Failed to get sequence job results');
+        }
 
     } catch (error) {
-        console.error(`Error loading ${database} sequences:`, error);
+        console.error('Error getting sequence job results:', error);
+        updateMessage('Error getting sequence results: ' + error.message);
         updateComponentCount(`${database}-sequences`, '?', 'error');
+    }
+}
+
+async function getSequenceCreationResults(jobId, database) {
+    console.log('Getting sequence creation job results for:', jobId);
+
+    try {
+        const response = await fetch(`/api/jobs/${jobId}/result`);
+        const result = await response.json();
+
+        if (result.status === 'success') {
+            console.log('Sequence creation job results:', result);
+
+            // Display the creation results
+            displaySequenceCreationResults(result, database);
+
+            // Update badge count
+            const sequenceCount = result.createdCount || 0;
+            updateComponentCount(`${database}-sequences`, sequenceCount);
+
+            // Show success message
+            const databaseName = database === 'oracle' ? 'Oracle' : 'PostgreSQL';
+            updateMessage(`${databaseName}: Created ${result.createdCount} sequences, skipped ${result.skippedCount}, ${result.errorCount} errors`);
+
+        } else {
+            throw new Error(result.message || 'Failed to get sequence creation results');
+        }
+
+    } catch (error) {
+        console.error('Error getting sequence creation results:', error);
+        updateMessage('Error getting sequence creation results: ' + error.message);
+    }
+}
+
+function populateSequenceList(result, database) {
+    const sequenceItemsElement = document.getElementById(`${database}-sequence-items`);
+
+    if (!sequenceItemsElement) {
+        console.warn('Sequence items element not found');
+        return;
+    }
+
+    // Clear existing items
+    sequenceItemsElement.innerHTML = '';
+
+    // Get sequences from result
+    const sequences = result.result || [];
+
+    if (sequences && sequences.length > 0) {
+        // Group sequences by schema
+        const schemaGroups = {};
+        sequences.forEach(seq => {
+            const schema = seq.schema || 'unknown';
+            if (!schemaGroups[schema]) {
+                schemaGroups[schema] = [];
+            }
+            schemaGroups[schema].push(seq);
+        });
+
+        // Create schema groups
+        Object.entries(schemaGroups).forEach(([schemaName, schemaSequences]) => {
+            const schemaGroup = document.createElement('div');
+            schemaGroup.className = 'table-schema-group';
+
+            const schemaHeader = document.createElement('div');
+            schemaHeader.className = 'table-schema-header';
+            schemaHeader.innerHTML = `<span class="toggle-indicator">▼</span> ${schemaName} (${schemaSequences.length} sequences)`;
+            schemaHeader.onclick = () => toggleSequenceSchemaGroup(database, schemaName);
+
+            const sequenceItems = document.createElement('div');
+            sequenceItems.className = 'table-items-list';
+            sequenceItems.id = `${database}-${schemaName}-sequences`;
+
+            // Add individual sequence entries for this schema
+            schemaSequences.forEach(seq => {
+                const sequenceItem = document.createElement('div');
+                sequenceItem.className = 'table-item';
+                sequenceItem.textContent = seq.sequenceName;
+                sequenceItems.appendChild(sequenceItem);
+            });
+
+            schemaGroup.appendChild(schemaHeader);
+            schemaGroup.appendChild(sequenceItems);
+            sequenceItemsElement.appendChild(schemaGroup);
+        });
+    } else {
+        const noSequencesItem = document.createElement('div');
+        noSequencesItem.className = 'table-item';
+        noSequencesItem.textContent = 'No sequences found';
+        noSequencesItem.style.fontStyle = 'italic';
+        noSequencesItem.style.color = '#999';
+        sequenceItemsElement.appendChild(noSequencesItem);
+    }
+}
+
+function toggleSequenceSchemaGroup(database, schemaName) {
+    const sequenceItems = document.getElementById(`${database}-${schemaName}-sequences`);
+    const header = sequenceItems.previousElementSibling;
+    const indicator = header.querySelector('.toggle-indicator');
+
+    if (sequenceItems.style.display === 'none') {
+        sequenceItems.style.display = 'block';
+        indicator.textContent = '▼';
+    } else {
+        sequenceItems.style.display = 'none';
+        indicator.textContent = '▶';
     }
 }
 
@@ -2802,7 +2925,7 @@ function displaySequenceCreationResults(result, database) {
 
         updateComponentCount("postgres-sequences", summary.createdCount + summary.skippedCount + summary.errorCount);
 
-        html += '<div class="sequence-creation-summary">';
+        html += '<div class="table-creation-summary">';
         html += `<div class="summary-stats">`;
         html += `<span class="stat-item created">Created: ${summary.createdCount}</span>`;
         html += `<span class="stat-item skipped">Skipped: ${summary.skippedCount}</span>`;
@@ -2810,39 +2933,44 @@ function displaySequenceCreationResults(result, database) {
         html += `</div>`;
         html += '</div>';
 
-        // Show created sequences
-        if (summary.createdCount > 0) {
-            html += '<div class="created-sequences-section">';
+        // Show created sequences - convert Map to Array using Object.values()
+        if (summary.createdCount > 0 && summary.createdSequences) {
+            html += '<div class="created-tables-section">';
             html += '<h4>Created Sequences:</h4>';
-            html += '<ul class="item-list">';
-            summary.createdSequences.forEach(seq => {
-                html += `<li>${seq}</li>`;
+            html += '<div class="table-items">';
+            Object.values(summary.createdSequences).forEach(seq => {
+                html += `<div class="table-item created">${seq.sequenceName} ✓</div>`;
             });
-            html += '</ul>';
+            html += '</div>';
             html += '</div>';
         }
 
-        // Show skipped sequences
-        if (summary.skippedCount > 0) {
-            html += '<div class="skipped-sequences-section">';
-            html += '<h4>Skipped Sequences (Already Exist):</h4>';
-            html += '<ul class="item-list">';
-            summary.skippedSequences.forEach(seq => {
-                html += `<li>${seq}</li>`;
+        // Show skipped sequences - convert Map to Array using Object.values()
+        if (summary.skippedCount > 0 && summary.skippedSequences) {
+            html += '<div class="skipped-tables-section">';
+            html += '<h4>Skipped Sequences (already exist):</h4>';
+            html += '<div class="table-items">';
+            Object.values(summary.skippedSequences).forEach(seq => {
+                html += `<div class="table-item skipped">${seq.sequenceName} (${seq.reason})</div>`;
             });
-            html += '</ul>';
+            html += '</div>';
             html += '</div>';
         }
 
-        // Show errors
-        if (summary.errorCount > 0) {
-            html += '<div class="error-sequences-section">';
-            html += '<h4>Errors:</h4>';
-            html += '<ul class="error-list">';
-            summary.errors.forEach(error => {
-                html += `<li><strong>${error.sequenceName}</strong>: ${error.errorMessage}</li>`;
+        // Show errors - convert Map to Array using Object.values()
+        if (summary.errorCount > 0 && summary.errors) {
+            html += '<div class="error-tables-section">';
+            html += '<h4>Failed Sequences:</h4>';
+            html += '<div class="table-items">';
+            Object.values(summary.errors).forEach(error => {
+                html += `<div class="table-item error">`;
+                html += `<strong>${error.sequenceName}</strong>: ${error.error}`;
+                if (error.sql) {
+                    html += `<div class="sql-statement"><pre>${error.sql}</pre></div>`;
+                }
+                html += `</div>`;
             });
-            html += '</ul>';
+            html += '</div>';
             html += '</div>';
         }
     }

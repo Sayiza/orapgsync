@@ -1,16 +1,19 @@
 package me.christianrobert.orapgsync.core.job.model.sequence;
 
+import java.math.BigInteger;
+
 /**
  * Represents metadata for a database sequence.
  * This is a pure data model without dependencies on other services.
+ * Uses BigInteger for min/max/current values to support Oracle's large sequence values (up to 10^28).
  */
 public class SequenceMetadata {
     private String schema;
     private String sequenceName;
-    private Long minValue;
-    private Long maxValue;
+    private BigInteger minValue;
+    private BigInteger maxValue;
     private Integer incrementBy;
-    private Long currentValue; // last_number from Oracle, last_value from PostgreSQL
+    private BigInteger currentValue; // last_number from Oracle, last_value from PostgreSQL
     private Integer cacheSize;
     private String cycleFlag; // "Y" or "N"
     private String orderFlag; // "Y" or "N" (Oracle only, PostgreSQL doesn't have ORDER)
@@ -37,19 +40,19 @@ public class SequenceMetadata {
         this.sequenceName = sequenceName;
     }
 
-    public Long getMinValue() {
+    public BigInteger getMinValue() {
         return minValue;
     }
 
-    public void setMinValue(Long minValue) {
+    public void setMinValue(BigInteger minValue) {
         this.minValue = minValue;
     }
 
-    public Long getMaxValue() {
+    public BigInteger getMaxValue() {
         return maxValue;
     }
 
-    public void setMaxValue(Long maxValue) {
+    public void setMaxValue(BigInteger maxValue) {
         this.maxValue = maxValue;
     }
 
@@ -61,11 +64,11 @@ public class SequenceMetadata {
         this.incrementBy = incrementBy;
     }
 
-    public Long getCurrentValue() {
+    public BigInteger getCurrentValue() {
         return currentValue;
     }
 
-    public void setCurrentValue(Long currentValue) {
+    public void setCurrentValue(BigInteger currentValue) {
         this.currentValue = currentValue;
     }
 

@@ -5,6 +5,8 @@ import me.christianrobert.orapgsync.core.tools.UserExcluder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -71,11 +73,15 @@ public class OracleSequenceExtractor {
                     String sequenceName = rs.getString("sequence_name").toLowerCase();
                     SequenceMetadata metadata = new SequenceMetadata(schema.toLowerCase(), sequenceName);
 
-                    // Extract metadata
-                    metadata.setMinValue(rs.getLong("min_value"));
-                    metadata.setMaxValue(rs.getLong("max_value"));
+                    // Extract metadata - use BigDecimal then convert to BigInteger to handle large Oracle values
+                    BigDecimal minValueDecimal = rs.getBigDecimal("min_value");
+                    BigDecimal maxValueDecimal = rs.getBigDecimal("max_value");
+                    BigDecimal currentValueDecimal = rs.getBigDecimal("last_number");
+
+                    metadata.setMinValue(minValueDecimal != null ? minValueDecimal.toBigInteger() : null);
+                    metadata.setMaxValue(maxValueDecimal != null ? maxValueDecimal.toBigInteger() : null);
                     metadata.setIncrementBy(rs.getInt("increment_by"));
-                    metadata.setCurrentValue(rs.getLong("last_number")); // Oracle's current value
+                    metadata.setCurrentValue(currentValueDecimal != null ? currentValueDecimal.toBigInteger() : null);
                     metadata.setCacheSize(rs.getInt("cache_size"));
                     metadata.setCycleFlag(rs.getString("cycle_flag")); // "Y" or "N"
                     metadata.setOrderFlag(rs.getString("order_flag")); // "Y" or "N"

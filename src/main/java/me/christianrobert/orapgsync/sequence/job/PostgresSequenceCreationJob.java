@@ -10,6 +10,7 @@ import me.christianrobert.orapgsync.database.service.PostgresConnectionService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.math.BigInteger;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -21,6 +22,10 @@ import java.util.function.Consumer;
 public class PostgresSequenceCreationJob extends AbstractDatabaseWriteJob<SequenceCreationResult> {
 
     private static final Logger log = LoggerFactory.getLogger(PostgresSequenceCreationJob.class);
+
+    // PostgreSQL sequence limits (bigint range: -2^63 to 2^63-1)
+    private static final BigInteger POSTGRES_MAX_VALUE = BigInteger.valueOf(Long.MAX_VALUE); // 9,223,372,036,854,775,807
+    private static final BigInteger POSTGRES_MIN_VALUE = BigInteger.valueOf(Long.MIN_VALUE); // -9,223,372,036,854,775,808
 
     @Inject
     private PostgresConnectionService postgresConnectionService;
@@ -222,29 +227,67 @@ public class PostgresSequenceCreationJob extends AbstractDatabaseWriteJob<Sequen
         sql.append(".");
         sql.append(sequence.getSequenceName().toLowerCase());
 
-        // INCREMENT BY
+        // INCREMENT BY - must not be 0
         if (sequence.getIncrementBy() != null) {
-            sql.append(" INCREMENT BY ").append(sequence.getIncrementBy());
+            int increment = sequence.getIncrementBy();
+            if (increment == 0) {
+                log.warn("Sequence {}.{} has INCREMENT BY 0, defaulting to 1",
+                        sequence.getSchema(), sequence.getSequenceName());
+                increment = 1;
+            }
+            sql.append(" INCREMENT BY ").append(increment);
+        }
+
+        // Get min/max values, capped to PostgreSQL range
+        BigInteger minValue = sequence.getMinValue() != null ?
+                capToPostgresRange(sequence.getMinValue(), "MIN") : null;
+        BigInteger maxValue = sequence.getMaxValue() != null ?
+                capToPostgresRange(sequence.getMaxValue(), "MAX") : null;
+        BigInteger startValue = sequence.getCurrentValue() != null ?
+                capToPostgresRange(sequence.getCurrentValue(), "CURRENT") : null;
+
+        // Validate and adjust min/max relationship
+        if (minValue != null && maxValue != null && minValue.compareTo(maxValue) > 0) {
+            log.warn("Sequence {}.{} has MINVALUE ({}) > MAXVALUE ({}), swapping values",
+                    sequence.getSchema(), sequence.getSequenceName(), minValue, maxValue);
+            BigInteger temp = minValue;
+            minValue = maxValue;
+            maxValue = temp;
         }
 
         // MINVALUE
-        if (sequence.getMinValue() != null) {
-            sql.append(" MINVALUE ").append(sequence.getMinValue());
+        if (minValue != null) {
+            sql.append(" MINVALUE ").append(minValue);
         }
 
         // MAXVALUE
-        if (sequence.getMaxValue() != null) {
-            sql.append(" MAXVALUE ").append(sequence.getMaxValue());
+        if (maxValue != null) {
+            sql.append(" MAXVALUE ").append(maxValue);
         }
 
-        // START WITH (use Oracle's current value to synchronize)
-        if (sequence.getCurrentValue() != null) {
-            sql.append(" START WITH ").append(sequence.getCurrentValue());
+        // START WITH - ensure it's within min/max range
+        if (startValue != null) {
+            if (minValue != null && startValue.compareTo(minValue) < 0) {
+                log.warn("Sequence {}.{} START WITH ({}) is below MINVALUE ({}), adjusting to MINVALUE",
+                        sequence.getSchema(), sequence.getSequenceName(), startValue, minValue);
+                startValue = minValue;
+            }
+            if (maxValue != null && startValue.compareTo(maxValue) > 0) {
+                log.warn("Sequence {}.{} START WITH ({}) exceeds MAXVALUE ({}), adjusting to MAXVALUE",
+                        sequence.getSchema(), sequence.getSequenceName(), startValue, maxValue);
+                startValue = maxValue;
+            }
+            sql.append(" START WITH ").append(startValue);
         }
 
-        // CACHE
-        if (sequence.getCacheSize() != null) {
+        // CACHE - PostgreSQL requires CACHE >= 1, Oracle allows 0 (NOCACHE)
+        if (sequence.getCacheSize() != null && sequence.getCacheSize() > 0) {
             sql.append(" CACHE ").append(sequence.getCacheSize());
+        } else if (sequence.getCacheSize() != null && sequence.getCacheSize() == 0) {
+            // Oracle NOCACHE (0) -> PostgreSQL minimum cache (1)
+            sql.append(" CACHE 1");
+            log.debug("Converted Oracle NOCACHE (0) to PostgreSQL CACHE 1 for sequence {}.{}",
+                    sequence.getSchema(), sequence.getSequenceName());
         }
 
         // CYCLE / NO CYCLE
@@ -255,6 +298,27 @@ public class PostgresSequenceCreationJob extends AbstractDatabaseWriteJob<Sequen
         }
 
         return sql.toString();
+    }
+
+    /**
+     * Caps a BigInteger value to PostgreSQL's bigint range.
+     * PostgreSQL sequences use bigint, which has range: -2^63 to 2^63-1
+     *
+     * @param value The value to cap
+     * @param valueType The type of value (for logging)
+     * @return The capped value
+     */
+    private BigInteger capToPostgresRange(BigInteger value, String valueType) {
+        if (value.compareTo(POSTGRES_MAX_VALUE) > 0) {
+            log.warn("Sequence {} value {} exceeds PostgreSQL maximum ({}), capping to maximum",
+                    valueType, value, POSTGRES_MAX_VALUE);
+            return POSTGRES_MAX_VALUE;
+        } else if (value.compareTo(POSTGRES_MIN_VALUE) < 0) {
+            log.warn("Sequence {} value {} is below PostgreSQL minimum ({}), capping to minimum",
+                    valueType, value, POSTGRES_MIN_VALUE);
+            return POSTGRES_MIN_VALUE;
+        }
+        return value;
     }
 
     @Override
