@@ -675,13 +675,204 @@ public class OracleComplexTypeSerializer {
     }
 
     /**
-     * Serializes Oracle Advanced Queuing (AQ) types.
-     * TODO: Implement when needed
+     * Serializes Oracle Advanced Queuing (AQ) types to JSON.
+     * AQ types are Oracle STRUCT objects that represent JMS messages and related data structures.
+     *
+     * Supported AQ types:
+     * - AQ$_JMS_TEXT_MESSAGE: JMS text messages
+     * - AQ$_SIG_PROP: Message properties
+     * - AQ$_RECIPIENTS: Message recipient lists
+     *
+     * The serialization extracts all attributes from the STRUCT and builds a structured JSON object.
      */
     private String serializeAqType(ResultSet rs, int columnIndex, ColumnMetadata column) throws SQLException {
         String dataType = column.getDataType();
-        log.warn("AQ type {} serialization not yet implemented for column {}", dataType, column.getColumnName());
-        return buildJsonWrapper("SYS." + dataType, "<<AQ type not yet implemented>>");
+        Object aqObject = rs.getObject(columnIndex);
+
+        if (aqObject == null) {
+            return null; // NULL AQ type → NULL in PostgreSQL
+        }
+
+        // AQ types are Oracle STRUCTs
+        if (!(aqObject instanceof STRUCT)) {
+            log.warn("Expected STRUCT for AQ type {} in column {}, got: {}",
+                    dataType, column.getColumnName(), aqObject.getClass().getName());
+            return buildJsonWrapper("SYS." + dataType, "<<Unexpected object type>>");
+        }
+
+        STRUCT struct = (STRUCT) aqObject;
+
+        try {
+            // Extract struct data based on AQ type
+            Map<String, Object> aqData;
+
+            if ("AQ$_JMS_TEXT_MESSAGE".equals(dataType)) {
+                aqData = extractJmsTextMessage(struct);
+            } else if ("AQ$_SIG_PROP".equals(dataType)) {
+                aqData = extractSigProp(struct);
+            } else if ("AQ$_RECIPIENTS".equals(dataType)) {
+                aqData = extractRecipients(struct);
+            } else {
+                // Generic AQ type extraction
+                log.debug("Using generic extraction for AQ type: {}", dataType);
+                aqData = extractStructData(struct);
+            }
+
+            log.debug("Serialized AQ type {} for column {}: {} attributes",
+                    dataType, column.getColumnName(), aqData.size());
+
+            // Build JSON wrapper with Oracle type metadata
+            return buildJsonWrapper("SYS." + dataType, aqData);
+
+        } catch (Exception e) {
+            log.error("Failed to serialize AQ type {} for column {}: {}",
+                    dataType, column.getColumnName(), e.getMessage(), e);
+            return buildErrorJson("SYS." + dataType, column.getColumnName(), e.getMessage());
+        }
+    }
+
+    /**
+     * Extracts AQ$_JMS_TEXT_MESSAGE structure.
+     *
+     * Oracle AQ$_JMS_TEXT_MESSAGE structure typically contains:
+     * - Text content
+     * - JMS headers (message ID, timestamp, correlation ID, etc.)
+     * - Custom properties
+     * - Message metadata
+     *
+     * The exact attribute structure may vary by Oracle version, so we extract
+     * all attributes generically and add known field names for common attributes.
+     */
+    private Map<String, Object> extractJmsTextMessage(STRUCT struct) throws SQLException {
+        Map<String, Object> messageData = new HashMap<>();
+
+        Object[] attributes = struct.getAttributes();
+        if (attributes == null || attributes.length == 0) {
+            log.warn("JMS text message struct has no attributes");
+            return messageData;
+        }
+
+        // Oracle AQ JMS message structure (typical layout - may vary by version):
+        // The exact attribute positions may differ, so we extract all attributes
+        // and provide meaningful names based on common patterns
+
+        for (int i = 0; i < attributes.length; i++) {
+            Object attr = attributes[i];
+
+            // Convert Oracle types to Java types for JSON serialization
+            Object convertedValue = convertOracleTypeToJava(attr);
+
+            // Use generic attribute names since exact structure may vary
+            String attributeName = "attr_" + i;
+
+            // Try to identify common JMS message attributes by type and position
+            // This is a best-effort approach since Oracle doesn't expose attribute names easily
+            if (i == 0 && convertedValue instanceof String) {
+                // First attribute is often the text content
+                messageData.put("text_content", convertedValue);
+                messageData.put(attributeName, convertedValue);
+            } else if (convertedValue instanceof Map) {
+                // Nested structures (headers, properties)
+                messageData.put("nested_" + attributeName, convertedValue);
+                messageData.put(attributeName, convertedValue);
+            } else {
+                messageData.put(attributeName, convertedValue);
+            }
+        }
+
+        messageData.put("message_type", "JMS_TEXT_MESSAGE");
+        messageData.put("attribute_count", attributes.length);
+
+        return messageData;
+    }
+
+    /**
+     * Extracts AQ$_SIG_PROP structure (message signature properties).
+     */
+    private Map<String, Object> extractSigProp(STRUCT struct) throws SQLException {
+        Map<String, Object> propData = new HashMap<>();
+
+        Object[] attributes = struct.getAttributes();
+        if (attributes == null || attributes.length == 0) {
+            return propData;
+        }
+
+        for (int i = 0; i < attributes.length; i++) {
+            Object attr = attributes[i];
+            Object convertedValue = convertOracleTypeToJava(attr);
+            propData.put("attr_" + i, convertedValue);
+        }
+
+        propData.put("type", "SIG_PROP");
+        propData.put("attribute_count", attributes.length);
+
+        return propData;
+    }
+
+    /**
+     * Extracts AQ$_RECIPIENTS structure (message recipients list).
+     */
+    private Map<String, Object> extractRecipients(STRUCT struct) throws SQLException {
+        Map<String, Object> recipientsData = new HashMap<>();
+
+        Object[] attributes = struct.getAttributes();
+        if (attributes == null || attributes.length == 0) {
+            return recipientsData;
+        }
+
+        for (int i = 0; i < attributes.length; i++) {
+            Object attr = attributes[i];
+            Object convertedValue = convertOracleTypeToJava(attr);
+            recipientsData.put("attr_" + i, convertedValue);
+        }
+
+        recipientsData.put("type", "RECIPIENTS");
+        recipientsData.put("attribute_count", attributes.length);
+
+        return recipientsData;
+    }
+
+    /**
+     * Converts Oracle-specific types to Java types suitable for JSON serialization.
+     */
+    private Object convertOracleTypeToJava(Object oracleValue) throws SQLException {
+        if (oracleValue == null) {
+            return null;
+        }
+
+        // Handle Oracle Datum types
+        if (oracleValue instanceof Datum) {
+            Datum datum = (Datum) oracleValue;
+            try {
+                return datum.toJdbc();
+            } catch (Exception e) {
+                log.debug("Failed to convert Datum to JDBC, using stringValue: {}", e.getMessage());
+                return datum.stringValue();
+            }
+        }
+
+        // Handle nested STRUCTs (recursive)
+        if (oracleValue instanceof STRUCT) {
+            return extractStructData((STRUCT) oracleValue);
+        }
+
+        // Handle arrays (Oracle ARRAY types)
+        if (oracleValue instanceof java.sql.Array) {
+            try {
+                Object[] arrayElements = (Object[]) ((java.sql.Array) oracleValue).getArray();
+                Object[] convertedArray = new Object[arrayElements.length];
+                for (int i = 0; i < arrayElements.length; i++) {
+                    convertedArray[i] = convertOracleTypeToJava(arrayElements[i]);
+                }
+                return convertedArray;
+            } catch (Exception e) {
+                log.warn("Failed to extract array elements: {}", e.getMessage());
+                return "<<Array extraction failed>>";
+            }
+        }
+
+        // Standard Java types (String, Number, Date, etc.) are already JSON-compatible
+        return oracleValue;
     }
 
     /**
