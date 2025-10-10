@@ -9,6 +9,7 @@ import me.christianrobert.orapgsync.core.tools.OracleTypeClassifier;
 import me.christianrobert.orapgsync.core.tools.TypeConverter;
 import me.christianrobert.orapgsync.database.service.PostgresConnectionService;
 import me.christianrobert.orapgsync.core.job.model.table.ColumnMetadata;
+import me.christianrobert.orapgsync.core.job.model.table.ConstraintMetadata;
 import me.christianrobert.orapgsync.core.job.model.table.TableCreationResult;
 import me.christianrobert.orapgsync.core.job.model.table.TableMetadata;
 import org.slf4j.Logger;
@@ -65,13 +66,20 @@ public class PostgresTableCreationJob extends AbstractDatabaseWriteJob<TableCrea
         // Filter valid tables (exclude system schemas)
         List<TableMetadata> validOracleTables = filterValidTables(oracleTables);
 
-        updateProgress(progressCallback, 10, "Analyzing tables",
+        updateProgress(progressCallback, 10, "Normalizing tables",
                       String.format("Found %d Oracle tables, %d are valid for creation",
                                    oracleTables.size(), validOracleTables.size()));
 
+        // Normalize tables by resolving all synonym references in column types
+        // This ensures table creation uses actual type references (not synonyms)
+        List<TableMetadata> normalizedTables = normalizeTableMetadata(validOracleTables);
+
+        updateProgress(progressCallback, 15, "Analyzing tables",
+                      String.format("Normalized %d tables for creation", normalizedTables.size()));
+
         TableCreationResult result = new TableCreationResult();
 
-        if (validOracleTables.isEmpty()) {
+        if (normalizedTables.isEmpty()) {
             updateProgress(progressCallback, 100, "No valid tables", "No valid Oracle tables to create in PostgreSQL");
             return result;
         }
@@ -91,7 +99,7 @@ public class PostgresTableCreationJob extends AbstractDatabaseWriteJob<TableCrea
             List<TableMetadata> tablesToCreate = new ArrayList<>();
             List<TableMetadata> tablesAlreadyExisting = new ArrayList<>();
 
-            for (TableMetadata table : validOracleTables) {
+            for (TableMetadata table : normalizedTables) {
                 String qualifiedTableName = getQualifiedTableName(table);
                 if (existingPostgresTables.contains(qualifiedTableName.toLowerCase())) {
                     tablesAlreadyExisting.add(table);
@@ -144,6 +152,135 @@ public class PostgresTableCreationJob extends AbstractDatabaseWriteJob<TableCrea
             }
         }
         return validTables;
+    }
+
+    /**
+     * Normalizes table metadata by resolving all synonym references in column data types.
+     * This preprocessing step ensures that:
+     * 1. Table creation SQL uses the correct target types (not synonyms)
+     * 2. Synonym resolution happens only once per type reference
+     *
+     * @param tables The original tables with potential synonym references in column types
+     * @return Normalized copies with all synonyms resolved to their targets
+     */
+    private List<TableMetadata> normalizeTableMetadata(List<TableMetadata> tables) {
+        log.info("Normalizing {} tables by resolving synonym references in column types", tables.size());
+
+        List<TableMetadata> normalizedTables = new ArrayList<>();
+        int synonymsResolved = 0;
+
+        for (TableMetadata originalTable : tables) {
+            try {
+                // Create a new table with normalized column references
+                TableMetadata normalizedTable = new TableMetadata(
+                    originalTable.getSchema(),
+                    originalTable.getTableName()
+                );
+
+                // Normalize each column's data type
+                for (ColumnMetadata originalColumn : originalTable.getColumns()) {
+                    ColumnMetadata normalizedColumn;
+
+                    // Only resolve synonyms for custom (user-defined) types
+                    if (originalColumn.isCustomDataType()) {
+                        String owner = originalColumn.getDataTypeOwner();
+                        String typeName = originalColumn.getDataType();
+
+                        // Extract the base type name without size/precision info
+                        String baseTypeName = extractBaseTypeName(typeName);
+
+                        // Try to resolve as a synonym
+                        String resolvedTarget = stateService.resolveSynonym(owner, baseTypeName);
+
+                        if (resolvedTarget != null) {
+                            // Parse the resolved target (format: "schema.typename")
+                            String[] parts = resolvedTarget.split("\\.");
+                            if (parts.length == 2) {
+                                String resolvedOwner = parts[0];
+                                String resolvedTypeName = parts[1];
+
+                                // Preserve any size/precision info from the original type
+                                String typeWithSize = typeName.substring(baseTypeName.length());
+                                String fullResolvedType = resolvedTypeName + typeWithSize;
+
+                                normalizedColumn = new ColumnMetadata(
+                                    originalColumn.getColumnName(),
+                                    fullResolvedType,
+                                    resolvedOwner,
+                                    originalColumn.getCharacterLength(),
+                                    originalColumn.getNumericPrecision(),
+                                    originalColumn.getNumericScale(),
+                                    originalColumn.isNullable(),
+                                    originalColumn.getDefaultValue()
+                                );
+
+                                synonymsResolved++;
+                                log.debug("Resolved synonym {}.{} -> {}.{} for column '{}' in table {}.{}",
+                                    owner, baseTypeName, resolvedOwner, resolvedTypeName,
+                                    originalColumn.getColumnName(), originalTable.getSchema(), originalTable.getTableName());
+                            } else {
+                                // Malformed resolution result, use original
+                                normalizedColumn = createColumnCopy(originalColumn);
+                                log.warn("Malformed synonym resolution result: {}", resolvedTarget);
+                            }
+                        } else {
+                            // Not a synonym, use original column
+                            normalizedColumn = createColumnCopy(originalColumn);
+                        }
+                    } else {
+                        // Built-in type, use original column
+                        normalizedColumn = createColumnCopy(originalColumn);
+                    }
+
+                    normalizedTable.addColumn(normalizedColumn);
+                }
+
+                // Copy constraints as-is (no type references in constraints at this stage)
+                for (ConstraintMetadata constraint : originalTable.getConstraints()) {
+                    normalizedTable.addConstraint(constraint);
+                }
+
+                normalizedTables.add(normalizedTable);
+
+            } catch (Exception e) {
+                log.error("Failed to normalize table {}.{}, using original",
+                    originalTable.getSchema(), originalTable.getTableName(), e);
+                normalizedTables.add(originalTable); // Fall back to original on error
+            }
+        }
+
+        log.info("Normalization complete: {} tables processed, {} synonym references resolved",
+            normalizedTables.size(), synonymsResolved);
+
+        return normalizedTables;
+    }
+
+    /**
+     * Extracts the base type name without size/precision information.
+     * For example: "VARCHAR2(100)" -> "VARCHAR2", "NUMBER(10,2)" -> "NUMBER"
+     */
+    private String extractBaseTypeName(String dataType) {
+        int parenIndex = dataType.indexOf('(');
+        if (parenIndex > 0) {
+            return dataType.substring(0, parenIndex);
+        }
+        return dataType;
+    }
+
+    /**
+     * Creates a copy of a ColumnMetadata object.
+     */
+    private ColumnMetadata createColumnCopy(ColumnMetadata original) {
+        return new ColumnMetadata(
+            original.getColumnName(),
+            original.getDataType(),
+            original.getDataTypeOwner(),
+            original.getCharacterLength(),
+            original.getNumericPrecision(),
+            original.getNumericScale(),
+            original.isNullable(),
+            original.getDefaultValue()
+        );
     }
 
     private Set<String> getExistingPostgresTables(Connection connection) throws SQLException {
