@@ -310,10 +310,15 @@ function clearConfigurationFromLocalStorage() {
 
 // Populate form fields with configuration data
 function populateConfigurationForm(config) {
-    // Checkbox field
+    // Checkbox fields
     const allSchemasCheckbox = document.getElementById('do-all-schemas');
     if (allSchemasCheckbox) {
         allSchemasCheckbox.checked = config['do.all-schemas'] === true;
+    }
+
+    const excludeLobDataCheckbox = document.getElementById('exclude-lob-data');
+    if (excludeLobDataCheckbox) {
+        excludeLobDataCheckbox.checked = config['exclude.lob-data'] === true;
     }
 
     // Text fields mapping
@@ -395,10 +400,15 @@ async function saveConfiguration() {
 function collectConfigurationData() {
     const config = {};
 
-    // Checkbox field
+    // Checkbox fields
     const allSchemasCheckbox = document.getElementById('do-all-schemas');
     if (allSchemasCheckbox) {
         config['do.all-schemas'] = allSchemasCheckbox.checked;
+    }
+
+    const excludeLobDataCheckbox = document.getElementById('exclude-lob-data');
+    if (excludeLobDataCheckbox) {
+        config['exclude.lob-data'] = excludeLobDataCheckbox.checked;
     }
 
     // Text fields mapping

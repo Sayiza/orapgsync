@@ -36,6 +36,7 @@ public class ConfigService {
         configuration.put("postgre.url", "jdbc:postgresql://localhost:5432/postgres");
         configuration.put("postgre.username", "postgres");
         configuration.put("postgre.password", "xxx");
+        configuration.put("exclude.lob-data", false);
 
         log.info("Configuration service initialized with default values");
     }

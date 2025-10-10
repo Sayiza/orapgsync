@@ -50,6 +50,9 @@ public class CsvDataTransferService {
     @Inject
     private OracleComplexTypeSerializer complexTypeSerializer;
 
+    @Inject
+    private me.christianrobert.orapgsync.config.service.ConfigService configService;
+
     /**
      * Transfers data for a single table from Oracle to PostgreSQL.
      *
@@ -278,14 +281,23 @@ public class CsvDataTransferService {
                         try {
                             String lobValue = null;
 
-                            if (dataType.matches("BLOB|BFILE|LONG RAW")) {
-                                // Binary LOB - serialize to hex format
-                                lobValue = complexTypeSerializer.serializeBlobToHex(rs, rsColumnIndex, column);
-                            } else if (dataType.matches("CLOB|NCLOB|LONG")) {
-                                // Character LOB - serialize to text
-                                lobValue = complexTypeSerializer.serializeClobToText(rs, rsColumnIndex, column);
+                            // Check if LOB data should be excluded (config flag)
+                            Boolean excludeLobData = configService.getConfigValueAsBoolean("exclude.lob-data");
+                            if (excludeLobData != null && excludeLobData) {
+                                // Skip LOB serialization - leave column empty (NULL)
+                                lobValue = null;
+                                log.trace("Skipping LOB data for column {} (exclude.lob-data=true)", column.getColumnName());
                             } else {
-                                log.warn("Unknown LOB type {} for column {}", dataType, column.getColumnName());
+                                // Normal LOB serialization
+                                if (dataType.matches("BLOB|BFILE|LONG RAW")) {
+                                    // Binary LOB - serialize to hex format
+                                    lobValue = complexTypeSerializer.serializeBlobToHex(rs, rsColumnIndex, column);
+                                } else if (dataType.matches("CLOB|NCLOB|LONG")) {
+                                    // Character LOB - serialize to text
+                                    lobValue = complexTypeSerializer.serializeClobToText(rs, rsColumnIndex, column);
+                                } else {
+                                    log.warn("Unknown LOB type {} for column {}", dataType, column.getColumnName());
+                                }
                             }
 
                             csvPrinter.print(lobValue);
