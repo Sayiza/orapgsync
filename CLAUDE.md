@@ -36,6 +36,7 @@ The application uses a centralized state management approach for storing metadat
 - Oracle/PostgreSQL table metadata
 - Oracle/PostgreSQL object type metadata
 - Oracle/PostgreSQL row count data
+- Oracle synonyms (dual-map structure for efficient resolution)
 - Creation results (schemas, tables, object types)
 
 #### 2. **Plugin-Based Job System** (`core/job/`)
@@ -59,19 +60,30 @@ Each database element type is completely independent:
 - `TableExtractor`, `PostgresTableExtractor`: Database-specific extraction logic
 
 **Object Types** (`objectdatatype/`):
-- `ObjectDataTypeMetaData`, `ObjectDataTypeVariable`: Data models
-- `OracleObjectDataTypeExtractionJob`, `PostgresObjectDataTypeExtractionJob`: CDI-managed jobs
+- `ObjectDataTypeMetaData`, `ObjectDataTypeVariable`: Data models with proper constructors
+- `OracleObjectDataTypeExtractionJob`, `PostgresObjectDataTypeExtractionJob`: CDI-managed extraction jobs
+- `PostgresObjectTypeCreationJob`: Creates PostgreSQL composite types with dependency ordering
+- `TypeDependencyAnalyzer`: Topological sort with circular dependency detection
 - Service classes for REST endpoint compatibility
+
+**Synonyms** (`core/job/model/synonym/`):
+- `SynonymMetadata`: Oracle synonym data model
+- `OracleSynonymExtractionJob`: Extracts Oracle synonyms (private and PUBLIC)
+- Synonym resolution follows Oracle rules: current schema → PUBLIC fallback
+- Used during object type creation to resolve type references
 
 **Schemas** (`schema/`):
 - Schema discovery and management services
+- `PostgresSchemaCreationJob`: Creates schemas in PostgreSQL
 - REST endpoints for schema information
 
 #### 4. **Cross-Cutting Concerns** (`core/`)
 - `TypeConverter`: Oracle-to-PostgreSQL data type mapping
+- `OracleTypeClassifier`: Identifies complex Oracle system types requiring jsonb
 - `PostgreSqlIdentifierUtils`: PostgreSQL naming conventions
 - `UserExcluder`: Schema filtering logic
 - `NameNormalizer`, `CodeCleaner`: Data processing utilities
+- `StateService.resolveSynonym()`: Oracle synonym resolution logic
 
 #### 5. **Database Connectivity** (`database/`)
 - `OracleConnectionService`: Oracle database connections
@@ -172,19 +184,24 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
 ### ✅ Completed Features
 - Centralized state management via StateService
 - Plugin-based job discovery and execution
+- Schema discovery and creation (Oracle → PostgreSQL)
 - Table metadata extraction (Oracle ↔ PostgreSQL)
+- Table creation in PostgreSQL (without constraints)
 - Object type metadata extraction (Oracle ↔ PostgreSQL)
-- Schema discovery and management
+- Object type creation in PostgreSQL with dependency ordering
+- Synonym extraction and resolution (Oracle)
+- Row count extraction (Oracle ↔ PostgreSQL)
 - Generic REST API for job management
 - Database connection management and testing
 - Configuration management with UI
 
 ### 🔄 Ready for Implementation
-- Row count extraction (architecture supports it)
+- Constraint migration (primary keys, foreign keys, unique, check)
+- Data transfer jobs (bulk data copying)
 - View metadata processing
 - Index metadata extraction
-- Constraint synchronization
-- Data migration jobs
+- Sequence migration
+- Trigger migration
 
 ### 🎯 Extension Points
 - New job types: Implement `DatabaseExtractionJob<T>`
@@ -333,3 +350,62 @@ The migration handles three categories of Oracle data types with different strat
 - Preserves type metadata for future PL/SQL code transformation
 
 This architecture provides a solid foundation for Oracle-to-PostgreSQL migration with excellent extensibility for future enhancements.
+
+## Synonym Resolution and Object Type Dependencies
+
+### Overview
+Oracle synonyms provide alternative names for database objects. While PostgreSQL doesn't have synonyms, Oracle object types can reference other types via synonyms, requiring resolution during migration.
+
+### Synonym Resolution Strategy
+
+**Extraction:**
+- `OracleSynonymExtractionJob` extracts all synonyms from `ALL_SYNONYMS`
+- Captures both private (schema-specific) and PUBLIC synonyms
+- Stores in dual-map structure: `Map<owner, Map<synonym_name, SynonymMetadata>>`
+
+**Resolution Logic (`StateService.resolveSynonym()`):**
+Follows Oracle's name resolution rules:
+1. Check for synonym in the current schema
+2. If not found, check PUBLIC schema
+3. If not found, return null (not a synonym)
+
+**Example:**
+```sql
+-- Oracle setup
+CREATE TYPE schema_a.address_type AS OBJECT (street VARCHAR2(100));
+CREATE SYNONYM schema_b.addr_syn FOR schema_a.address_type;
+
+CREATE TYPE schema_b.person_type AS OBJECT (
+    name VARCHAR2(100),
+    address addr_syn  -- Synonym reference
+);
+```
+
+When extracting `schema_b.person_type`, Oracle stores:
+- `attr_type_owner` = "schema_b"
+- `attr_type_name` = "addr_syn"
+
+Our resolution resolves this to `schema_a.address_type`.
+
+### Object Type Creation with Synonym Resolution
+
+**Preprocessing/Normalization:**
+Before creating PostgreSQL composite types, `PostgresObjectTypeCreationJob` normalizes object type metadata:
+
+1. **Normalize Object Types:** For each type variable that references a custom type, resolve synonyms
+2. **Dependency Analysis:** Use normalized metadata for topological sorting
+3. **Type Creation:** Generate SQL with resolved type references
+
+**Benefits:**
+- Synonym resolution happens once per type reference (not multiple times)
+- Dependency analyzer sees true dependencies (not synonym references)
+- PostgreSQL types reference actual target types
+- Clean separation of concerns
+
+**Implementation:**
+- `PostgresObjectTypeCreationJob.normalizeObjectTypes()` (lines 183-288): Preprocessing step
+- `StateService.resolveSynonym()` (lines 101-126): Resolution logic
+- `TypeDependencyAnalyzer`: Analyzes normalized metadata for correct ordering
+
+**Important Note:**
+Synonyms are only relevant for object type attributes. Table columns in Oracle cannot use synonyms - Oracle always stores the actual type name and owner in table metadata.

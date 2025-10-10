@@ -19,8 +19,12 @@ An enterprise-grade Oracle-to-PostgreSQL migration tool built with Quarkus, feat
 
 **Metadata Extraction**
 - ✅ **Schema Discovery**: Extract and display schema lists from both databases
+- ✅ **Schema Creation**: Create PostgreSQL schemas from Oracle schema lists
 - ✅ **Table Metadata Extraction**: Complete table structure with columns, constraints, data types
+- ✅ **Table Creation**: Create PostgreSQL tables from Oracle metadata (without constraints)
 - ✅ **Object Data Type Extraction**: Oracle/PostgreSQL custom type discovery with variables
+- ✅ **Object Type Creation**: Create PostgreSQL composite types with dependency ordering
+- ✅ **Synonym Extraction**: Extract Oracle synonyms (private and PUBLIC) for type resolution
 - ✅ **Row Count Analysis**: Precise table row counting for migration planning
 
 **Frontend Interface**
@@ -32,9 +36,9 @@ An enterprise-grade Oracle-to-PostgreSQL migration tool built with Quarkus, feat
 ### 🟡 In Progress / Next Phase
 
 **Data Migration (Priority 1)**
+- 🔄 **Constraint Migration**: Primary keys, foreign keys, unique constraints, check constraints
 - 🔄 **Bulk Data Transfer**: High-performance data copying between databases
-- 🔄 **Type Conversion**: Oracle-to-PostgreSQL data type mapping and conversion
-- 🔄 **Constraint Migration**: Primary keys, foreign keys, indexes, and check constraints
+- 🔄 **Complex Type Handling**: Serialization of Oracle system types (ANYDATA, XMLTYPE, etc.)
 - 🔄 **Incremental Sync**: Delta synchronization for ongoing data updates
 
 **PL/SQL Migration (Priority 2)**
@@ -186,6 +190,7 @@ public class StateService {
     List<TableMetadata> oracleTableMetadata = new ArrayList<>();
     List<ObjectDataTypeMetaData> oracleObjectDataTypeMetaData = new ArrayList<>();
     List<RowCountMetadata> oracleRowCountMetadata = new ArrayList<>();
+    Map<String, Map<String, SynonymMetadata>> oracleSynonymsByOwnerAndName = new HashMap<>();
 
     // PostgreSQL metadata
     List<String> postgresSchemaNames = new ArrayList<>();

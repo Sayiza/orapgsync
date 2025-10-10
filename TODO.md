@@ -4,6 +4,6 @@
 [ ] aq types
 [x] synonym frontend
 [x] synonym extraction job and state saving
-[ ] synonym resolving for tables
-[ ] synonym resolving for types
-[ ] clear up usage of reflections
+[x] synonym resolving for types
+[x] clear up usage of reflections
+[ ] sequences after tables
