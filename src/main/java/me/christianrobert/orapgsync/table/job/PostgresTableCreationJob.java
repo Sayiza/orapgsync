@@ -240,20 +240,20 @@ public class PostgresTableCreationJob extends AbstractDatabaseWriteJob<TableCrea
             String oracleType = column.getDataType().toLowerCase();
             String owner = column.getDataTypeOwner().toLowerCase();
 
+            // Check if it's XMLTYPE - has direct PostgreSQL xml type mapping
+            if (OracleTypeClassifier.isXmlType(owner, oracleType)) {
+                postgresType = "xml";
+                log.debug("Oracle XMLTYPE for column '{}' mapped to PostgreSQL xml type", column.getColumnName());
+            }
             // Check if it's a complex Oracle system type that needs jsonb serialization
-            if (OracleTypeClassifier.isComplexOracleSystemType(owner, oracleType)) {
+            else if (OracleTypeClassifier.isComplexOracleSystemType(owner, oracleType)) {
                 postgresType = "jsonb";
                 log.debug("Complex Oracle system type '{}.{}' for column '{}' will use jsonb (data transfer will preserve type metadata)",
                          owner, oracleType, column.getColumnName());
             } else {
-                if (oracleType.equals("xmltype")) {
-                    postgresType = "xml";
-                    log.debug("Using xmltype");
-                } else {
-                    // User-defined type - use the created PostgreSQL composite type
-                    postgresType = owner + "." + oracleType;
-                    log.debug("Using user-defined composite type '{}' for column '{}'", postgresType, column.getColumnName());
-                }
+                // User-defined type - use the created PostgreSQL composite type
+                postgresType = owner + "." + oracleType;
+                log.debug("Using user-defined composite type '{}' for column '{}'", postgresType, column.getColumnName());
             }
         } else {
             // Convert Oracle built-in data type to PostgreSQL

@@ -59,6 +59,35 @@ public class OracleTypeClassifier {
     }
 
     /**
+     * Identifies Oracle XMLTYPE, which has a direct mapping to PostgreSQL's native xml type.
+     * Despite being a SYS-owned type, XMLTYPE is treated as a mappable built-in type
+     * because PostgreSQL has native XML support.
+     *
+     * <p>Note: This is separate from {@link #isComplexOracleSystemType(String, String)}
+     * because XMLTYPE doesn't require jsonb serialization - it has a direct PostgreSQL equivalent.</p>
+     *
+     * @param owner The schema/owner of the type (e.g., "sys", "public", "myschema").
+     *              Should be lowercase for consistency.
+     * @param type The type name (e.g., "xmltype").
+     *             Should be lowercase for consistency.
+     * @return {@code true} if this is Oracle XMLTYPE (SYS.XMLTYPE or PUBLIC.XMLTYPE),
+     *         {@code false} otherwise
+     */
+    public static boolean isXmlType(String owner, String type) {
+        if (owner == null || type == null) {
+            return false;
+        }
+
+        // Normalize to lowercase for case-insensitive comparison
+        String normalizedOwner = owner.toLowerCase();
+        String normalizedType = type.toLowerCase();
+
+        // XMLTYPE can appear as SYS.XMLTYPE or PUBLIC.XMLTYPE (via PUBLIC synonym)
+        return ("sys".equals(normalizedOwner) || "public".equals(normalizedOwner))
+                && "xmltype".equals(normalizedType);
+    }
+
+    /**
      * Identifies complex Oracle system types that cannot be directly mapped to PostgreSQL composite types.
      * These types will be stored as jsonb with metadata preservation during data transfer.
      *
@@ -69,7 +98,10 @@ public class OracleTypeClassifier {
      *   <li>Spatial/geometry types: SDO_GEOMETRY</li>
      * </ul>
      *
-     * <p>Note: Oracle databases often have PUBLIC synonyms for SYS types (grants to PUBLIC),
+     * <p><strong>Note:</strong> XMLTYPE is NOT included here because it has a direct mapping
+     * to PostgreSQL's native {@code xml} type. Use {@link #isXmlType(String, String)} to check for XMLTYPE.</p>
+     *
+     * <p>Oracle databases often have PUBLIC synonyms for SYS types (grants to PUBLIC),
      * so we check both "sys" and "public" as indicators of Oracle system types.</p>
      *
      * @param owner The schema/owner of the type (e.g., "sys", "public", "myschema").

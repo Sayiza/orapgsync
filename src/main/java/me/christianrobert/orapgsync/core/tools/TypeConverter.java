@@ -144,7 +144,8 @@ public class TypeConverter {
       case "nclob":
         return "text";
 
-      // XML type, warning: handled differently in tablecreationjob, outside of this class
+      // XML type - Oracle XMLTYPE maps directly to PostgreSQL xml type
+      // Note: When XMLTYPE appears with owner SYS/PUBLIC, it's detected via OracleTypeClassifier.isXmlType()
       case "xmltype":
         return "xml";
 

@@ -4,6 +4,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import me.christianrobert.orapgsync.core.job.model.table.ColumnMetadata;
 import me.christianrobert.orapgsync.core.job.model.table.TableMetadata;
+import me.christianrobert.orapgsync.core.tools.OracleTypeClassifier;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVPrinter;
 import org.postgresql.copy.CopyManager;
@@ -308,7 +309,8 @@ public class CsvDataTransferService {
                             csvPrinter.print(null); // Insert NULL on error
                         }
                         rsColumnIndex++;
-                    } else if (isComplexOracleSystemType(column) && "ANYDATA".equals(dataType)) {
+                    } else if (OracleTypeClassifier.isComplexOracleSystemType(column.getDataTypeOwner(), dataType)
+                            && "ANYDATA".equals(dataType)) {
                         // For ANYDATA: skip original column, read _VALUE and _TYPE columns
                         rsColumnIndex++; // Skip original ANYDATA column
 
@@ -330,7 +332,7 @@ public class CsvDataTransferService {
                             csvPrinter.print(null);
                         }
                         rsColumnIndex++;
-                    } else if (isComplexOracleSystemType(column)) {
+                    } else if (OracleTypeClassifier.isComplexOracleSystemType(column.getDataTypeOwner(), dataType)) {
                         // Other complex Oracle system types - serialize to JSON (for jsonb columns)
                         try {
                             String jsonValue = complexTypeSerializer.serializeToJson(
@@ -379,23 +381,9 @@ public class CsvDataTransferService {
     }
 
     /**
-     * Checks if a column is a complex Oracle system type requiring JSON serialization.
-     */
-    private boolean isComplexOracleSystemType(ColumnMetadata column) {
-        String owner = column.getDataTypeOwner();
-        String dataType = column.getDataType();
-
-        // Check for known complex types with SYS or PUBLIC owner
-        if (owner != null && (owner.equalsIgnoreCase("SYS") || owner.equalsIgnoreCase("PUBLIC"))) {
-            return dataType != null && dataType.matches("ANYDATA|ANYTYPE|AQ\\$_.*|SDO_GEOMETRY|SDO_.*");
-        }
-
-        return false;
-    }
-
-    /**
      * Checks if a column is a user-defined object type (not a system type, not a simple type).
      * User-defined types have been mapped to PostgreSQL composite types.
+     * Uses OracleTypeClassifier for consistent type classification across the application.
      */
     private boolean isUserDefinedObjectType(ColumnMetadata column) {
         String owner = column.getDataTypeOwner();
@@ -488,7 +476,8 @@ public class CsvDataTransferService {
 
             String columnName = column.getColumnName();
 
-            if ("ANYDATA".equals(column.getDataType()) && isComplexOracleSystemType(column)) {
+            if ("ANYDATA".equals(column.getDataType())
+                    && OracleTypeClassifier.isComplexOracleSystemType(column.getDataTypeOwner(), column.getDataType())) {
                 // For ANYDATA: add extraction columns
                 // Original column (for debugging, but we won't use it in CSV)
                 sb.append(columnName);

@@ -386,8 +386,14 @@ public class PostgresObjectTypeCreationJob extends AbstractDatabaseWriteJob<Obje
                 String oracleType = variable.getDataType().toLowerCase();
                 String owner = variable.getDataTypeOwner().toLowerCase();
 
+                // Check if it's XMLTYPE - has direct PostgreSQL xml type mapping
+                if (OracleTypeClassifier.isXmlType(owner, oracleType)) {
+                    fieldType = "xml";
+                    log.debug("Oracle XMLTYPE for variable '{}' in type {}.{} mapped to PostgreSQL xml type",
+                            variable.getName(), objectType.getSchema(), objectType.getName());
+                }
                 // Check if it's a complex Oracle system type that needs jsonb serialization
-                if (OracleTypeClassifier.isComplexOracleSystemType(owner, oracleType)) {
+                else if (OracleTypeClassifier.isComplexOracleSystemType(owner, oracleType)) {
                     fieldType = "jsonb";
                     log.debug("Complex Oracle system type '{}.{}' for variable '{}' in type {}.{} will use jsonb",
                             owner, oracleType, variable.getName(), objectType.getSchema(), objectType.getName());

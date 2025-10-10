@@ -2512,9 +2512,9 @@ function displayTableCreationResults(result, database) {
         // Show unmapped defaults (columns with complex Oracle default values that need manual review)
         if (summary.unmappedDefaultCount > 0) {
             html += '<div class="warning-tables-section">';
-            html += '<h4>Columns with Unmapped Default Values (Require Manual Review):</h4>';
+            html += '<p style="font-size:0.9rem; font-weight: bold;">Columns with Unmapped Default Values (Require Manual Review):</p>';
             html += '<div class="table-items">';
-            html += '<p style="font-style: italic; color: #666; margin: 5px 0;">The following columns have complex Oracle default values that could not be automatically transformed. Tables were created without these defaults. You can add them manually later.</p>';
+            html += '<p style="font-size: 0.7rem; font-style: italic; color: #666; margin: 5px 0;">The following columns have complex Oracle default values that could not be automatically transformed. Tables were created without these defaults. You can add them manually later.</p>';
             Object.values(summary.unmappedDefaults).forEach(warning => {
                 html += `<div class="table-item warning">`;
                 html += `<strong>${warning.tableName}.${warning.columnName}</strong>`;
