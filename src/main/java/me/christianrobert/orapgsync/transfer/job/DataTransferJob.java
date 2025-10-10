@@ -14,6 +14,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.sql.Connection;
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
@@ -134,6 +135,17 @@ public class DataTransferJob extends AbstractDatabaseWriteJob<DataTransferResult
                     // Log error and continue with next table (skip tables with errors)
                     log.error("Failed to transfer table: {}", qualifiedTableName, e);
                     result.addError(qualifiedTableName, e.getMessage());
+
+                    // CRITICAL: Rollback the transaction to reset PostgreSQL connection state
+                    // PostgreSQL aborts the current transaction after any error, so we must
+                    // rollback and start fresh for the next table
+                    try {
+                        postgresConnection.rollback();
+                        log.debug("Rolled back transaction after error for table {}", qualifiedTableName);
+                    } catch (SQLException rollbackException) {
+                        log.error("Failed to rollback transaction after error: {}", rollbackException.getMessage());
+                        // Even if rollback fails, continue trying other tables
+                    }
                 }
 
                 processedTables++;

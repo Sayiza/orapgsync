@@ -78,6 +78,11 @@ public class CsvDataTransferService {
             throw new RuntimeException("Failed to get Oracle row count for table: " + qualifiedOracleName);
         }
 
+        if (postgresRowCount == -1) {
+            log.warn("PostgreSQL table does not exist or is not accessible: {}", qualifiedPostgresName);
+            throw new RuntimeException("PostgreSQL table does not exist or is not accessible: " + qualifiedPostgresName);
+        }
+
         if (oracleRowCount == 0) {
             log.info("Table {} is empty in Oracle, skipping transfer", qualifiedOracleName);
             return 0;
