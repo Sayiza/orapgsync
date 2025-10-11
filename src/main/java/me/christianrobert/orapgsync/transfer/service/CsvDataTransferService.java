@@ -5,6 +5,7 @@ import jakarta.inject.Inject;
 import me.christianrobert.orapgsync.core.job.model.table.ColumnMetadata;
 import me.christianrobert.orapgsync.core.job.model.table.TableMetadata;
 import me.christianrobert.orapgsync.core.tools.OracleTypeClassifier;
+import me.christianrobert.orapgsync.core.tools.PostgresIdentifierNormalizer;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVPrinter;
 import org.postgresql.copy.CopyManager;
@@ -560,12 +561,13 @@ public class CsvDataTransferService {
     }
 
     /**
-     * Builds a comma-separated list of quoted column names (for PostgreSQL COPY).
+     * Builds a comma-separated list of normalized column names (for PostgreSQL COPY).
      * This only includes the actual table columns, not the extraction helper columns.
+     * Column names are normalized to handle reserved words and special characters.
      */
     private String buildQuotedColumnList(TableMetadata table) {
         return table.getColumns().stream()
-                .map(col -> "\"" + col.getColumnName() + "\"")
+                .map(col -> PostgresIdentifierNormalizer.normalizeIdentifier(col.getColumnName()))
                 .reduce((a, b) -> a + ", " + b)
                 .orElse("*");
     }

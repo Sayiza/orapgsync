@@ -6,6 +6,7 @@ import me.christianrobert.orapgsync.core.job.AbstractDatabaseWriteJob;
 import me.christianrobert.orapgsync.core.job.model.JobProgress;
 import me.christianrobert.orapgsync.table.service.DefaultValueTransformer;
 import me.christianrobert.orapgsync.core.tools.OracleTypeClassifier;
+import me.christianrobert.orapgsync.core.tools.PostgresIdentifierNormalizer;
 import me.christianrobert.orapgsync.core.tools.TableMetadataNormalizer;
 import me.christianrobert.orapgsync.core.tools.TypeConverter;
 import me.christianrobert.orapgsync.database.service.PostgresConnectionService;
@@ -243,7 +244,10 @@ public class PostgresTableCreationJob extends AbstractDatabaseWriteJob<TableCrea
 
     private String generateColumnDefinition(ColumnMetadata column, TableMetadata table, TableCreationResult result) {
         StringBuilder def = new StringBuilder();
-        def.append(column.getColumnName().toLowerCase());
+
+        // Normalize column name (handles reserved words and special characters)
+        String normalizedColumnName = PostgresIdentifierNormalizer.normalizeIdentifier(column.getColumnName());
+        def.append(normalizedColumnName);
 
         // Check if this is a custom (user-defined) data type
         String postgresType;
