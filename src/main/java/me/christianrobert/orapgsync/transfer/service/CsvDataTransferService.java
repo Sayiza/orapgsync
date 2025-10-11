@@ -333,8 +333,8 @@ public class CsvDataTransferService {
                         // For ANYDATA: skip original column, read _VALUE and _TYPE columns
                         rsColumnIndex++; // Skip original ANYDATA column
 
-                        String value = rs.getString(rsColumnIndex++); // Read _VALUE
-                        String typeName = rs.getString(rsColumnIndex++); // Read _TYPE
+                        String value = stripNullBytes(rs.getString(rsColumnIndex++)); // Read _VALUE
+                        String typeName = stripNullBytes(rs.getString(rsColumnIndex++)); // Read _TYPE
 
                         // Build JSON wrapper
                         String jsonValue = buildAnydataJson(typeName, value);
@@ -344,7 +344,8 @@ public class CsvDataTransferService {
                         try {
                             String rowValue = complexTypeSerializer.serializeToPostgresRow(
                                     oracleConn, rs, rsColumnIndex, column);
-                            csvPrinter.print(rowValue);
+                            // Row values are already processed by the serializer, just strip NULL bytes
+                            csvPrinter.print(stripNullBytes(rowValue));
                         } catch (Exception e) {
                             log.error("Failed to serialize user-defined type {} for column {}: {}",
                                     dataType, column.getColumnName(), e.getMessage());
@@ -356,7 +357,8 @@ public class CsvDataTransferService {
                         try {
                             String jsonValue = complexTypeSerializer.serializeToJson(
                                     oracleConn, rs, rsColumnIndex, column);
-                            csvPrinter.print(jsonValue);
+                            // JSON values are already processed by the serializer, just strip NULL bytes
+                            csvPrinter.print(stripNullBytes(jsonValue));
                         } catch (Exception e) {
                             log.error("Failed to serialize complex type {} for column {}: {}",
                                     dataType, column.getColumnName(), e.getMessage());
@@ -366,7 +368,8 @@ public class CsvDataTransferService {
                     } else {
                         // Simple type: use standard JDBC getString
                         String value = rs.getString(rsColumnIndex++);
-                        csvPrinter.print(value);
+                        // Strip NULL bytes from simple string values to ensure PostgreSQL UTF-8 compatibility
+                        csvPrinter.print(stripNullBytes(value));
                     }
                 }
 
@@ -477,6 +480,42 @@ public class CsvDataTransferService {
                 .replace("\n", "\\n")
                 .replace("\r", "\\r")
                 .replace("\t", "\\t");
+    }
+
+    /**
+     * Strips NULL bytes (0x00) from a string to make it PostgreSQL UTF-8 compatible.
+     * PostgreSQL's UTF-8 encoding does not allow NULL bytes, which can cause
+     * "invalid byte sequence for encoding UTF8: 0x00" errors during COPY operations.
+     *
+     * NULL bytes are often found in Oracle data when:
+     * - Data was imported from binary sources
+     * - Application code explicitly inserted NULL bytes
+     * - Binary data was stored in text columns
+     *
+     * @param value The string that may contain NULL bytes
+     * @return The string with NULL bytes removed, or null if input is null
+     */
+    private String stripNullBytes(String value) {
+        if (value == null) {
+            return null;
+        }
+
+        // Check if string contains NULL bytes before doing expensive replace
+        if (value.indexOf('\0') == -1) {
+            return value; // No NULL bytes, return as-is for performance
+        }
+
+        // Remove all NULL bytes
+        String stripped = value.replace("\0", "");
+
+        // Log warning if NULL bytes were found (only for first occurrence to avoid log spam)
+        if (stripped.length() != value.length()) {
+            int nullByteCount = value.length() - stripped.length();
+            log.debug("Stripped {} NULL byte(s) from string value (length: {} -> {})",
+                    nullByteCount, value.length(), stripped.length());
+        }
+
+        return stripped;
     }
 
     /**

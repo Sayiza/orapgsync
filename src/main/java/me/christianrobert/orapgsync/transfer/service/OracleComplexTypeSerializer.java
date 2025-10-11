@@ -154,7 +154,7 @@ public class OracleComplexTypeSerializer {
 
         // Handle standard Java types
         if (value instanceof String) {
-            String strValue = (String) value;
+            String strValue = stripNullBytes((String) value);
             // Check if quoting is needed
             if (needsQuoting(strValue)) {
                 return quoteCompositeValue(strValue);
@@ -581,10 +581,14 @@ public class OracleComplexTypeSerializer {
 
                 // Convert Oracle-specific types to Java types
                 if (attrValue instanceof Datum) {
-                    attrValue = ((Datum) attrValue).stringValue();
+                    String strValue = ((Datum) attrValue).stringValue();
+                    attrValue = stripNullBytes(strValue);
                 } else if (attrValue instanceof STRUCT) {
                     // Nested object - recurse
                     attrValue = extractStructData((STRUCT) attrValue);
+                } else if (attrValue instanceof String) {
+                    // Strip NULL bytes from string values
+                    attrValue = stripNullBytes((String) attrValue);
                 }
 
                 data.put("attr_" + i, attrValue);
@@ -844,10 +848,15 @@ public class OracleComplexTypeSerializer {
         if (oracleValue instanceof Datum) {
             Datum datum = (Datum) oracleValue;
             try {
-                return datum.toJdbc();
+                Object jdbcValue = datum.toJdbc();
+                // If the result is a String, strip NULL bytes
+                if (jdbcValue instanceof String) {
+                    return stripNullBytes((String) jdbcValue);
+                }
+                return jdbcValue;
             } catch (Exception e) {
                 log.debug("Failed to convert Datum to JDBC, using stringValue: {}", e.getMessage());
-                return datum.stringValue();
+                return stripNullBytes(datum.stringValue());
             }
         }
 
@@ -883,5 +892,38 @@ public class OracleComplexTypeSerializer {
         String dataType = column.getDataType();
         log.warn("SDO type {} serialization not yet implemented for column {}", dataType, column.getColumnName());
         return buildJsonWrapper("MDSYS." + dataType, "<<SDO type not yet implemented>>");
+    }
+
+    /**
+     * Strips NULL bytes (0x00) from a string to make it PostgreSQL UTF-8 compatible.
+     * PostgreSQL's UTF-8 encoding does not allow NULL bytes, which can cause
+     * "invalid byte sequence for encoding UTF8: 0x00" errors during COPY operations.
+     *
+     * This is applied to all string values extracted from Oracle to ensure compatibility.
+     *
+     * @param value The string that may contain NULL bytes
+     * @return The string with NULL bytes removed, or null if input is null
+     */
+    private String stripNullBytes(String value) {
+        if (value == null) {
+            return null;
+        }
+
+        // Check if string contains NULL bytes before doing expensive replace
+        if (value.indexOf('\0') == -1) {
+            return value; // No NULL bytes, return as-is for performance
+        }
+
+        // Remove all NULL bytes
+        String stripped = value.replace("\0", "");
+
+        // Log warning if NULL bytes were found (debug level to avoid log spam)
+        if (stripped.length() != value.length()) {
+            int nullByteCount = value.length() - stripped.length();
+            log.debug("Stripped {} NULL byte(s) from serialized value (length: {} -> {})",
+                    nullByteCount, value.length(), stripped.length());
+        }
+
+        return stripped;
     }
 }
