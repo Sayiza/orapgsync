@@ -217,8 +217,13 @@ public class OracleComplexTypeSerializer {
     }
 
     /**
-     * Serializes an Oracle BLOB to PostgreSQL bytea hex format for CSV COPY.
+     * Serializes an Oracle BLOB or LONG RAW to PostgreSQL bytea hex format for CSV COPY.
      * Format: \\x48656c6c6f (hex encoding with \\x prefix, escaped for CSV)
+     *
+     * Note: Oracle LONG RAW datatype is different from BLOB:
+     * - LONG RAW is an obsolete type (replaced by BLOB in Oracle 8i)
+     * - LONG RAW uses getBytes() for access
+     * - BLOB uses getBlob() for access
      *
      * @param rs ResultSet positioned at current row
      * @param columnIndex Column index (1-based)
@@ -227,6 +232,14 @@ public class OracleComplexTypeSerializer {
      * @throws SQLException if database access fails
      */
     public String serializeBlobToHex(ResultSet rs, int columnIndex, ColumnMetadata column) throws SQLException {
+        String dataType = column.getDataType();
+
+        // Handle LONG RAW datatype (obsolete Oracle type, different from BLOB)
+        if ("LONG RAW".equals(dataType)) {
+            return serializeLongRawToHex(rs, columnIndex, column);
+        }
+
+        // Handle BLOB, BFILE
         java.sql.Blob sqlBlob = rs.getBlob(columnIndex);
 
         if (sqlBlob == null) {
@@ -257,6 +270,53 @@ public class OracleComplexTypeSerializer {
 
         } catch (Exception e) {
             log.error("Failed to serialize BLOB in column {}: {}", column.getColumnName(), e.getMessage(), e);
+            return null; // Insert NULL on error
+        }
+    }
+
+    /**
+     * Serializes an Oracle LONG RAW datatype to PostgreSQL bytea hex format.
+     * LONG RAW is an obsolete Oracle datatype (replaced by BLOB in Oracle 8i).
+     * It uses getBytes() for access, unlike BLOB which uses getBlob().
+     *
+     * @param rs ResultSet positioned at current row
+     * @param columnIndex Column index (1-based)
+     * @param column Column metadata
+     * @return Hex-encoded string for PostgreSQL bytea, or null if NULL
+     * @throws SQLException if database access fails
+     */
+    private String serializeLongRawToHex(ResultSet rs, int columnIndex, ColumnMetadata column) throws SQLException {
+        try {
+            // LONG RAW columns must be accessed using getBytes()
+            // Oracle JDBC driver doesn't support getBlob() on LONG RAW
+            byte[] longRawData = rs.getBytes(columnIndex);
+
+            if (longRawData == null) {
+                return null; // NULL LONG RAW → NULL in PostgreSQL
+            }
+
+            // Check size (getBytes() loads entire LONG RAW into memory)
+            if (longRawData.length > MAX_INLINE_LOB_SIZE) {
+                log.warn("LONG RAW size {} bytes exceeds limit {} in column {}, skipping (will insert NULL)",
+                        longRawData.length, MAX_INLINE_LOB_SIZE, column.getColumnName());
+                return null;
+            }
+
+            if (longRawData.length == 0) {
+                return "\\\\x"; // Empty LONG RAW → \x (escaped for CSV)
+            }
+
+            log.debug("Serialized LONG RAW of {} bytes in column {}", longRawData.length, column.getColumnName());
+
+            // Convert bytes to hex
+            StringBuilder hex = new StringBuilder(4 + (longRawData.length * 2));
+            hex.append("\\\\x"); // Escaped \x prefix for CSV
+            appendBytesAsHex(hex, longRawData, 0, longRawData.length);
+
+            return hex.toString();
+
+        } catch (Exception e) {
+            log.error("Failed to serialize LONG RAW in column {}: {}", column.getColumnName(), e.getMessage(), e);
             return null; // Insert NULL on error
         }
     }
@@ -302,16 +362,28 @@ public class OracleComplexTypeSerializer {
     }
 
     /**
-     * Serializes an Oracle CLOB to text format for CSV COPY.
+     * Serializes an Oracle CLOB or LONG to text format for CSV COPY.
      * For PostgreSQL text columns, the text is escaped according to CSV rules.
+     *
+     * Note: Oracle LONG datatype is different from CLOB:
+     * - LONG uses T4CLongAccessor (accessed via getString())
+     * - CLOB uses T4ClobAccessor (accessed via getClob())
      *
      * @param rs ResultSet positioned at current row
      * @param columnIndex Column index (1-based)
      * @param column Column metadata
-     * @return CLOB text content, or null if NULL/too large
+     * @return CLOB/LONG text content, or null if NULL/too large
      * @throws SQLException if database access fails
      */
     public String serializeClobToText(ResultSet rs, int columnIndex, ColumnMetadata column) throws SQLException {
+        String dataType = column.getDataType();
+
+        // Handle LONG datatype (obsolete Oracle type, different from CLOB)
+        if ("LONG".equals(dataType)) {
+            return serializeLongToText(rs, columnIndex, column);
+        }
+
+        // Handle CLOB, NCLOB
         java.sql.Clob sqlClob = rs.getClob(columnIndex);
 
         if (sqlClob == null) {
@@ -342,6 +414,44 @@ public class OracleComplexTypeSerializer {
 
         } catch (Exception e) {
             log.error("Failed to serialize CLOB in column {}: {}", column.getColumnName(), e.getMessage(), e);
+            return null; // Insert NULL on error
+        }
+    }
+
+    /**
+     * Serializes an Oracle LONG datatype to text format.
+     * LONG is an obsolete Oracle datatype (replaced by CLOB in Oracle 8i).
+     * It uses a different accessor (T4CLongAccessor) that doesn't support getClob().
+     *
+     * @param rs ResultSet positioned at current row
+     * @param columnIndex Column index (1-based)
+     * @param column Column metadata
+     * @return LONG text content, or null if NULL
+     * @throws SQLException if database access fails
+     */
+    private String serializeLongToText(ResultSet rs, int columnIndex, ColumnMetadata column) throws SQLException {
+        try {
+            // LONG columns must be accessed using getString() or getCharacterStream()
+            // Oracle JDBC driver throws ORA-17004 if you try to use getClob() on LONG
+            String longText = rs.getString(columnIndex);
+
+            if (longText == null) {
+                return null; // NULL LONG → NULL in PostgreSQL
+            }
+
+            // Check size (getString() loads entire LONG into memory)
+            if (longText.length() > MAX_INLINE_LOB_SIZE) {
+                log.warn("LONG size {} characters exceeds limit {} in column {}, truncating",
+                        longText.length(), MAX_INLINE_LOB_SIZE, column.getColumnName());
+                return longText.substring(0, (int) MAX_INLINE_LOB_SIZE);
+            }
+
+            log.debug("Serialized LONG of {} characters in column {}", longText.length(), column.getColumnName());
+
+            return longText;
+
+        } catch (Exception e) {
+            log.error("Failed to serialize LONG in column {}: {}", column.getColumnName(), e.getMessage(), e);
             return null; // Insert NULL on error
         }
     }
