@@ -410,6 +410,24 @@
   </div>
 </div>
 
+<!-- Core/Infrastructure Scripts (must load first) -->
+<script src="ui-utils.js"></script>
+<script src="job-service.js"></script>
+<script src="connection-service.js"></script>
+<script src="config-service.js"></script>
+
+<!-- Domain-Specific Service Scripts -->
+<script src="schema-service.js"></script>
+<script src="synonym-service.js"></script>
+<script src="object-type-service.js"></script>
+<script src="sequence-service.js"></script>
+<script src="table-service.js"></script>
+<script src="data-transfer-service.js"></script>
+
+<!-- Orchestration Script -->
+<script src="orchestration-service.js"></script>
+
+<!-- Main Application Entry Point (must load last) -->
 <script src="app.js"></script>
 </body>
 </html>
