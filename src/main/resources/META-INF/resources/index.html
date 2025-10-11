@@ -289,6 +289,47 @@
             </div>
           </td>
         </tr>
+        <tr class="constraints-row">
+          <td class="source-cell">
+            <div class="component-info" id="oracle-constraints">
+              <span class="count-badge">-</span>
+              <span class="component-text">Constraints found</span>
+              <button class="refresh-btn" onclick="extractOracleConstraints()" title="Extract Oracle constraints">⚙</button>
+              <div class="table-list" id="oracle-constraint-list" style="display: none;">
+                <div class="table-list-header" onclick="toggleConstraintList('oracle')">
+                  <span class="toggle-indicator">▼</span> Constraints by Type
+                </div>
+                <div class="table-items" id="oracle-constraint-items">
+                  <!-- Constraint metadata will be populated here -->
+                </div>
+              </div>
+            </div>
+          </td>
+          <td class="target-cell">
+            <div class="component-info" id="postgres-constraints">
+              <span class="count-badge">-</span>
+              <span class="component-text">Constraints created</span>
+              <button class="refresh-btn" onclick="verifyPostgresConstraints()" title="Verify PostgreSQL constraints">⚙</button>
+              <button class="action-btn" onclick="createPostgresConstraints()" title="Create Oracle constraints in PostgreSQL">Create Constraints</button>
+              <div class="table-list" id="postgres-constraint-list" style="display: none;">
+                <div class="table-list-header" onclick="toggleConstraintList('postgres')">
+                  <span class="toggle-indicator">▼</span> Constraints by Type
+                </div>
+                <div class="table-items" id="postgres-constraint-items">
+                  <!-- Constraint metadata will be populated here -->
+                </div>
+              </div>
+              <div class="table-creation-results" id="postgres-constraint-creation-results" style="display: none;">
+                <div class="table-creation-header" onclick="toggleConstraintCreationResults()">
+                  <span class="toggle-indicator">▼</span> Constraint Creation Results
+                </div>
+                <div class="table-creation-details" id="postgres-constraint-creation-details">
+                  <!-- Constraint creation results will be populated here -->
+                </div>
+              </div>
+            </div>
+          </td>
+        </tr>
         <tr class="views-row">
           <td class="source-cell">
             <div class="component-info" id="oracle-views">
@@ -423,6 +464,7 @@
 <script src="sequence-service.js"></script>
 <script src="table-service.js"></script>
 <script src="data-transfer-service.js"></script>
+<script src="constraint-service.js"></script>
 
 <!-- Orchestration Script -->
 <script src="orchestration-service.js"></script>

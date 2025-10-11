@@ -19,6 +19,8 @@ import me.christianrobert.orapgsync.core.job.model.table.TableCreationResult;
 import me.christianrobert.orapgsync.core.job.model.table.TableMetadata;
 import me.christianrobert.orapgsync.core.job.model.sequence.SequenceMetadata;
 import me.christianrobert.orapgsync.core.job.model.sequence.SequenceCreationResult;
+import me.christianrobert.orapgsync.core.job.model.table.ConstraintMetadata;
+import me.christianrobert.orapgsync.core.job.model.table.ConstraintCreationResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -221,7 +223,18 @@ public class JobResource {
             String jobType = execution.getJob().getJobType();
 
             // Check result object type first (more specific), then fall back to jobType string matching for Lists
-            if (result instanceof SequenceCreationResult) {
+            if (result instanceof ConstraintCreationResult) {
+                // Handle constraint creation results (check BEFORE List check)
+                ConstraintCreationResult constraintResult = (ConstraintCreationResult) result;
+
+                Map<String, Object> summary = generateConstraintCreationSummary(constraintResult);
+                response.put("summary", summary);
+                response.put("createdCount", constraintResult.getCreatedCount());
+                response.put("skippedCount", constraintResult.getSkippedCount());
+                response.put("errorCount", constraintResult.getErrorCount());
+                response.put("isSuccessful", constraintResult.isSuccessful());
+                response.put("result", result); // Include raw result for frontend compatibility
+            } else if (result instanceof SequenceCreationResult) {
                 // Handle sequence creation results (check BEFORE List check)
                 SequenceCreationResult sequenceResult = (SequenceCreationResult) result;
 
@@ -331,6 +344,15 @@ public class JobResource {
                     Map<String, Object> summary = generateSequenceSummary(sequences);
                     response.put("summary", summary);
                     response.put("sequenceCount", sequences.size());
+                    response.put("result", result); // Include raw result for frontend compatibility
+                } else if (jobType.contains("CONSTRAINT") && !jobType.contains("CONSTRAINT_CREATION")) {
+                    // Handle constraint extraction/verification results (NOT creation)
+                    @SuppressWarnings("unchecked")
+                    List<ConstraintMetadata> constraints = (List<ConstraintMetadata>) result;
+
+                    Map<String, Object> summary = generateConstraintSummary(constraints);
+                    response.put("summary", summary);
+                    response.put("constraintCount", constraints.size());
                     response.put("result", result); // Include raw result for frontend compatibility
                 } else {
                     // Generic list result
@@ -699,6 +721,24 @@ public class JobResource {
         return startJob("POSTGRES", "DATA_TRANSFER", "Data transfer from Oracle to PostgreSQL");
     }
 
+    @POST
+    @Path("/oracle/constraint-source-state/read")
+    public Response startOracleConstraintSourceStateExtraction() {
+        return startExtractionJob("ORACLE", "CONSTRAINT_SOURCE_STATE", "Oracle constraint source state extraction");
+    }
+
+    @POST
+    @Path("/postgres/constraint-verification/read")
+    public Response startPostgresConstraintVerification() {
+        return startExtractionJob("POSTGRES", "CONSTRAINT_VERIFICATION", "PostgreSQL constraint verification");
+    }
+
+    @POST
+    @Path("/postgres/constraint-creation/create")
+    public Response startPostgresConstraintCreation() {
+        return startJob("POSTGRES", "CONSTRAINT_CREATION", "PostgreSQL constraint creation");
+    }
+
     private Map<String, Object> generateDataTransferSummary(DataTransferResult transferResult) {
         Map<String, Object> transferredDetails = new HashMap<>();
         Map<String, Object> skippedDetails = new HashMap<>();
@@ -817,6 +857,82 @@ public class JobResource {
                 "executionTimestamp", sequenceResult.getExecutionTimestamp(),
                 "createdSequences", createdDetails,
                 "skippedSequences", skippedDetails,
+                "errors", errorDetails
+        );
+    }
+
+    private Map<String, Object> generateConstraintSummary(List<ConstraintMetadata> constraints) {
+        Map<String, Integer> schemaConstraintCounts = new HashMap<>();
+        Map<String, Integer> typeConstraintCounts = new HashMap<>();
+
+        for (ConstraintMetadata constraint : constraints) {
+            String schema = constraint.getSchema();
+            schemaConstraintCounts.put(schema, schemaConstraintCounts.getOrDefault(schema, 0) + 1);
+
+            String typeName = constraint.getConstraintTypeName();
+            typeConstraintCounts.put(typeName, typeConstraintCounts.getOrDefault(typeName, 0) + 1);
+        }
+
+        return Map.of(
+                "totalConstraints", constraints.size(),
+                "schemaConstraintCounts", schemaConstraintCounts,
+                "typeConstraintCounts", typeConstraintCounts,
+                "message", String.format("Extraction completed: %d constraints from %d schemas",
+                        constraints.size(), schemaConstraintCounts.size())
+        );
+    }
+
+    private Map<String, Object> generateConstraintCreationSummary(ConstraintCreationResult constraintResult) {
+        Map<String, Object> createdDetails = new HashMap<>();
+        Map<String, Object> skippedDetails = new HashMap<>();
+        Map<String, Object> errorDetails = new HashMap<>();
+
+        // Created constraints details
+        for (ConstraintCreationResult.ConstraintInfo constraint : constraintResult.getCreatedConstraints()) {
+            String key = constraint.getTableName() + "." + constraint.getConstraintName();
+            createdDetails.put(key, Map.of(
+                    "tableName", constraint.getTableName(),
+                    "constraintName", constraint.getConstraintName(),
+                    "constraintType", constraint.getConstraintTypeName(),
+                    "status", "created",
+                    "timestamp", constraintResult.getExecutionDateTime().toString()
+            ));
+        }
+
+        // Skipped constraints details
+        for (ConstraintCreationResult.ConstraintInfo constraint : constraintResult.getSkippedConstraints()) {
+            String key = constraint.getTableName() + "." + constraint.getConstraintName();
+            skippedDetails.put(key, Map.of(
+                    "tableName", constraint.getTableName(),
+                    "constraintName", constraint.getConstraintName(),
+                    "constraintType", constraint.getConstraintTypeName(),
+                    "status", "skipped",
+                    "reason", constraint.getReason() != null ? constraint.getReason() : "already exists"
+            ));
+        }
+
+        // Error details
+        for (ConstraintCreationResult.ConstraintCreationError error : constraintResult.getErrors()) {
+            String key = error.getTableName() + "." + error.getConstraintName();
+            errorDetails.put(key, Map.of(
+                    "tableName", error.getTableName(),
+                    "constraintName", error.getConstraintName(),
+                    "constraintType", error.getConstraintTypeName(),
+                    "status", "error",
+                    "error", error.getErrorMessage(),
+                    "sql", error.getSqlStatement()
+            ));
+        }
+
+        return Map.of(
+                "totalProcessed", constraintResult.getTotalProcessed(),
+                "createdCount", constraintResult.getCreatedCount(),
+                "skippedCount", constraintResult.getSkippedCount(),
+                "errorCount", constraintResult.getErrorCount(),
+                "isSuccessful", constraintResult.isSuccessful(),
+                "executionTimestamp", constraintResult.getExecutionTimestamp(),
+                "createdConstraints", createdDetails,
+                "skippedConstraints", skippedDetails,
                 "errors", errorDetails
         );
     }

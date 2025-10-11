@@ -9,6 +9,10 @@ import java.util.Map;
  * Supports PRIMARY KEY, FOREIGN KEY, UNIQUE, CHECK, and NOT NULL constraints.
  */
 public class ConstraintMetadata {
+  // Table identification (optional - for standalone constraint objects)
+  private String schema;
+  private String tableName;
+
   // Basic constraint information
   private String constraintName;
   private String constraintType;         // P, R, U, C, N (Oracle constraint types)
@@ -88,6 +92,8 @@ public class ConstraintMetadata {
   }
 
   // Basic getters
+  public String getSchema() { return schema; }
+  public String getTableName() { return tableName; }
   public String getConstraintName() { return constraintName; }
   public String getConstraintType() { return constraintType; }
   public List<String> getColumnNames() { return columnNames; }
@@ -110,6 +116,8 @@ public class ConstraintMetadata {
   public String getIndexName() { return indexName; }
   
   // Setters for constraint properties
+  public void setSchema(String schema) { this.schema = schema; }
+  public void setTableName(String tableName) { this.tableName = tableName; }
   public void setReferencedSchema(String referencedSchema) { this.referencedSchema = referencedSchema; }
   public void setReferencedTable(String referencedTable) { this.referencedTable = referencedTable; }
   public void setDeleteRule(String deleteRule) { this.deleteRule = deleteRule; }

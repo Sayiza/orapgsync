@@ -7,6 +7,7 @@ import me.christianrobert.orapgsync.core.job.model.synonym.SynonymMetadata;
 import me.christianrobert.orapgsync.core.job.model.transfer.DataTransferResult;
 import me.christianrobert.orapgsync.core.job.model.transfer.RowCountMetadata;
 import me.christianrobert.orapgsync.core.job.model.schema.SchemaCreationResult;
+import me.christianrobert.orapgsync.core.job.model.table.ConstraintCreationResult;
 import me.christianrobert.orapgsync.core.job.model.table.TableCreationResult;
 import me.christianrobert.orapgsync.core.job.model.table.TableMetadata;
 import me.christianrobert.orapgsync.core.job.model.sequence.SequenceMetadata;
@@ -54,6 +55,8 @@ public class StateService {
     List<SequenceMetadata> oracleSequenceMetadata = new ArrayList<>();
     List<SequenceMetadata> postgresSequenceMetadata = new ArrayList<>();
     SequenceCreationResult sequenceCreationResult;
+
+    ConstraintCreationResult constraintCreationResult;
 
     DataTransferResult dataTransferResult;
 
@@ -227,6 +230,14 @@ public class StateService {
         this.sequenceCreationResult = sequenceCreationResult;
     }
 
+    public ConstraintCreationResult getConstraintCreationResult() {
+        return constraintCreationResult;
+    }
+
+    public void setConstraintCreationResult(ConstraintCreationResult constraintCreationResult) {
+        this.constraintCreationResult = constraintCreationResult;
+    }
+
     public void resetState() {
         log.info("Resetting all state to default values");
         this.oracleSchemaNames = new ArrayList<>();
@@ -244,6 +255,7 @@ public class StateService {
         this.oracleSequenceMetadata = new ArrayList<>();
         this.postgresSequenceMetadata = new ArrayList<>();
         this.sequenceCreationResult = null;
+        this.constraintCreationResult = null;
         this.dataTransferResult = null;
     }
 }
