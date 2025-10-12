@@ -8,6 +8,7 @@ import me.christianrobert.orapgsync.core.job.model.transfer.DataTransferResult;
 import me.christianrobert.orapgsync.core.job.model.transfer.RowCountMetadata;
 import me.christianrobert.orapgsync.core.job.model.schema.SchemaCreationResult;
 import me.christianrobert.orapgsync.core.job.model.table.ConstraintCreationResult;
+import me.christianrobert.orapgsync.core.job.model.table.FKIndexCreationResult;
 import me.christianrobert.orapgsync.core.job.model.table.TableCreationResult;
 import me.christianrobert.orapgsync.core.job.model.table.TableMetadata;
 import me.christianrobert.orapgsync.core.job.model.sequence.SequenceMetadata;
@@ -57,6 +58,8 @@ public class StateService {
     SequenceCreationResult sequenceCreationResult;
 
     ConstraintCreationResult constraintCreationResult;
+
+    FKIndexCreationResult fkIndexCreationResult;
 
     DataTransferResult dataTransferResult;
 
@@ -238,6 +241,14 @@ public class StateService {
         this.constraintCreationResult = constraintCreationResult;
     }
 
+    public FKIndexCreationResult getFkIndexCreationResult() {
+        return fkIndexCreationResult;
+    }
+
+    public void setFkIndexCreationResult(FKIndexCreationResult fkIndexCreationResult) {
+        this.fkIndexCreationResult = fkIndexCreationResult;
+    }
+
     public void resetState() {
         log.info("Resetting all state to default values");
         this.oracleSchemaNames = new ArrayList<>();
@@ -256,6 +267,7 @@ public class StateService {
         this.postgresSequenceMetadata = new ArrayList<>();
         this.sequenceCreationResult = null;
         this.constraintCreationResult = null;
+        this.fkIndexCreationResult = null;
         this.dataTransferResult = null;
     }
 }

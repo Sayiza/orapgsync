@@ -1293,6 +1293,25 @@ td {
     margin-bottom: 1rem;
 }
 
+/* Container for items within result sections - add scrolling for long lists */
+/* All services now use .table-items wrapper for consistency */
+.created-schemas-section .table-items,
+.skipped-schemas-section .table-items,
+.error-schemas-section .table-items,
+.created-types-section .table-items,
+.skipped-types-section .table-items,
+.error-types-section .table-items,
+.created-tables-section .table-items,
+.skipped-tables-section .table-items,
+.error-tables-section .table-items,
+.created-items-section .table-items,
+.skipped-items-section .table-items,
+.error-items-section .table-items,
+.warning-tables-section .table-items {
+    max-height: 200px;
+    overflow-y: auto;
+}
+
 .created-schemas-section h4,
 .skipped-schemas-section h4,
 .error-schemas-section h4,

@@ -326,6 +326,28 @@
             </div>
           </td>
         </tr>
+        <tr class="fk-indexes-row">
+          <td class="source-cell">
+            <div class="component-info" id="oracle-fk-indexes">
+              <span class="component-text">N/A - Derived from FK Constraints</span>
+            </div>
+          </td>
+          <td class="target-cell">
+            <div class="component-info" id="postgres-fk-indexes">
+              <span class="count-badge">-</span>
+              <span class="component-text">FK Indexes created</span>
+              <button class="action-btn" onclick="createPostgresFKIndexes()" title="Create indexes on FK columns in PostgreSQL">Create FK Indexes</button>
+              <div class="table-creation-results" id="postgres-fk-index-creation-results" style="display: none;">
+                <div class="table-creation-header" onclick="toggleFKIndexCreationResults()">
+                  <span class="toggle-indicator">▼</span> FK Index Creation Results
+                </div>
+                <div class="table-creation-details" id="postgres-fk-index-creation-details">
+                  <!-- FK index creation results will be populated here -->
+                </div>
+              </div>
+            </div>
+          </td>
+        </tr>
         <tr class="views-row">
           <td class="source-cell">
             <div class="component-info" id="oracle-views">
@@ -461,6 +483,7 @@
 <script src="table-service.js"></script>
 <script src="data-transfer-service.js"></script>
 <script src="constraint-service.js"></script>
+<script src="fk-index-service.js"></script>
 
 <!-- Orchestration Script -->
 <script src="orchestration-service.js"></script>

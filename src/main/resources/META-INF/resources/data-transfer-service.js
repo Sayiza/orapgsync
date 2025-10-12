@@ -188,10 +188,12 @@ function displayDataTransferResults(result) {
         if (summary.transferredTables && Object.keys(summary.transferredTables).length > 0) {
             html += '<div class="created-items-section">';
             html += '<h4>Transferred Tables:</h4>';
+            html += '<div class="table-items">';
             Object.values(summary.transferredTables).forEach(table => {
                 const rowInfo = table.rowsTransferred ? ` (${table.rowsTransferred.toLocaleString()} rows)` : '';
-                html += `<div class="creation-item created">${table.tableName}${rowInfo} ✓</div>`;
+                html += `<div class="table-item created">${table.tableName}${rowInfo} ✓</div>`;
             });
+            html += '</div>';
             html += '</div>';
         }
 
@@ -199,9 +201,11 @@ function displayDataTransferResults(result) {
         if (summary.skippedTables && Object.keys(summary.skippedTables).length > 0) {
             html += '<div class="skipped-items-section">';
             html += '<h4>Skipped Tables:</h4>';
+            html += '<div class="table-items">';
             Object.values(summary.skippedTables).forEach(table => {
-                html += `<div class="creation-item skipped">${table.tableName} (already synced or empty)</div>`;
+                html += `<div class="table-item skipped">${table.tableName} (already synced or empty)</div>`;
             });
+            html += '</div>';
             html += '</div>';
         }
 
@@ -209,9 +213,11 @@ function displayDataTransferResults(result) {
         if (summary.errors && Object.keys(summary.errors).length > 0) {
             html += '<div class="error-items-section">';
             html += '<h4>Transfer Errors:</h4>';
+            html += '<div class="table-items">';
             Object.values(summary.errors).forEach(error => {
-                html += `<div class="creation-item error"><strong>${error.tableName}</strong>: ${error.error}</div>`;
+                html += `<div class="table-item error"><strong>${error.tableName}</strong>: ${error.error}</div>`;
             });
+            html += '</div>';
             html += '</div>';
         }
     } else {

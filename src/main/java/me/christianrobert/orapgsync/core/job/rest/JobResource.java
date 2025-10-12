@@ -21,6 +21,7 @@ import me.christianrobert.orapgsync.core.job.model.sequence.SequenceMetadata;
 import me.christianrobert.orapgsync.core.job.model.sequence.SequenceCreationResult;
 import me.christianrobert.orapgsync.core.job.model.table.ConstraintMetadata;
 import me.christianrobert.orapgsync.core.job.model.table.ConstraintCreationResult;
+import me.christianrobert.orapgsync.core.job.model.table.FKIndexCreationResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -223,7 +224,18 @@ public class JobResource {
             String jobType = execution.getJob().getJobType();
 
             // Check result object type first (more specific), then fall back to jobType string matching for Lists
-            if (result instanceof ConstraintCreationResult) {
+            if (result instanceof FKIndexCreationResult) {
+                // Handle FK index creation results (check BEFORE List check)
+                FKIndexCreationResult fkIndexResult = (FKIndexCreationResult) result;
+
+                Map<String, Object> summary = generateFKIndexCreationSummary(fkIndexResult);
+                response.put("summary", summary);
+                response.put("createdCount", fkIndexResult.getCreatedCount());
+                response.put("skippedCount", fkIndexResult.getSkippedCount());
+                response.put("errorCount", fkIndexResult.getErrorCount());
+                response.put("isSuccessful", fkIndexResult.isSuccessful());
+                response.put("result", result); // Include raw result for frontend compatibility
+            } else if (result instanceof ConstraintCreationResult) {
                 // Handle constraint creation results (check BEFORE List check)
                 ConstraintCreationResult constraintResult = (ConstraintCreationResult) result;
 
@@ -739,6 +751,12 @@ public class JobResource {
         return startJob("POSTGRES", "CONSTRAINT_CREATION", "PostgreSQL constraint creation");
     }
 
+    @POST
+    @Path("/postgres/fk-index-creation/create")
+    public Response startPostgresFKIndexCreation() {
+        return startJob("POSTGRES", "FK_INDEX_CREATION", "PostgreSQL FK index creation");
+    }
+
     private Map<String, Object> generateDataTransferSummary(DataTransferResult transferResult) {
         Map<String, Object> transferredDetails = new HashMap<>();
         Map<String, Object> skippedDetails = new HashMap<>();
@@ -933,6 +951,61 @@ public class JobResource {
                 "executionTimestamp", constraintResult.getExecutionTimestamp(),
                 "createdConstraints", createdDetails,
                 "skippedConstraints", skippedDetails,
+                "errors", errorDetails
+        );
+    }
+
+    private Map<String, Object> generateFKIndexCreationSummary(FKIndexCreationResult fkIndexResult) {
+        Map<String, Object> createdDetails = new HashMap<>();
+        Map<String, Object> skippedDetails = new HashMap<>();
+        Map<String, Object> errorDetails = new HashMap<>();
+
+        // Created indexes details
+        for (FKIndexCreationResult.IndexInfo index : fkIndexResult.getCreatedIndexes()) {
+            String key = index.getTableName() + "." + index.getIndexName();
+            createdDetails.put(key, Map.of(
+                    "tableName", index.getTableName(),
+                    "indexName", index.getIndexName(),
+                    "columns", index.getColumnsDisplay(),
+                    "status", "created",
+                    "timestamp", fkIndexResult.getExecutionDateTime().toString()
+            ));
+        }
+
+        // Skipped indexes details
+        for (FKIndexCreationResult.IndexInfo index : fkIndexResult.getSkippedIndexes()) {
+            String key = index.getTableName() + "." + index.getIndexName();
+            skippedDetails.put(key, Map.of(
+                    "tableName", index.getTableName(),
+                    "indexName", index.getIndexName(),
+                    "columns", index.getColumnsDisplay(),
+                    "status", "skipped",
+                    "reason", index.getReason() != null ? index.getReason() : "already exists"
+            ));
+        }
+
+        // Error details
+        for (FKIndexCreationResult.IndexCreationError error : fkIndexResult.getErrors()) {
+            String key = error.getTableName() + "." + error.getIndexName();
+            errorDetails.put(key, Map.of(
+                    "tableName", error.getTableName(),
+                    "indexName", error.getIndexName(),
+                    "columns", error.getColumnsDisplay(),
+                    "status", "error",
+                    "error", error.getErrorMessage(),
+                    "sql", error.getSqlStatement()
+            ));
+        }
+
+        return Map.of(
+                "totalProcessed", fkIndexResult.getTotalProcessed(),
+                "createdCount", fkIndexResult.getCreatedCount(),
+                "skippedCount", fkIndexResult.getSkippedCount(),
+                "errorCount", fkIndexResult.getErrorCount(),
+                "isSuccessful", fkIndexResult.isSuccessful(),
+                "executionTimestamp", fkIndexResult.getExecutionTimestamp(),
+                "createdIndexes", createdDetails,
+                "skippedIndexes", skippedDetails,
                 "errors", errorDetails
         );
     }

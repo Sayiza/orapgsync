@@ -33,6 +33,7 @@ class PostgresTableCreationJobTest {
     private PreparedStatement mockPreparedStatement;
     private ResultSet mockResultSet;
     private PostgresTableCreationJob tableCreationJob;
+    private me.christianrobert.orapgsync.core.tools.TableMetadataNormalizer tableMetadataNormalizer;
 
     private Consumer<JobProgress> progressCallback;
     private List<JobProgress> progressUpdates;
@@ -42,6 +43,7 @@ class PostgresTableCreationJobTest {
         // Create mocks
         postgresConnectionService = mock(PostgresConnectionService.class);
         stateService = mock(StateService.class);
+        tableMetadataNormalizer = mock(me.christianrobert.orapgsync.core.tools.TableMetadataNormalizer.class);
         mockConnection = mock(Connection.class);
         mockPreparedStatement = mock(PreparedStatement.class);
         mockResultSet = mock(ResultSet.class);
@@ -50,6 +52,10 @@ class PostgresTableCreationJobTest {
         tableCreationJob = new PostgresTableCreationJob();
         injectDependency(tableCreationJob, "postgresConnectionService", postgresConnectionService);
         injectDependency(tableCreationJob, "stateService", stateService);
+        injectDependency(tableCreationJob, "tableMetadataNormalizer", tableMetadataNormalizer);
+
+        // Configure tableMetadataNormalizer to return input as-is (identity function for tests)
+        when(tableMetadataNormalizer.normalizeTableMetadata(anyList())).thenAnswer(invocation -> invocation.getArgument(0));
 
         progressUpdates = new ArrayList<>();
         progressCallback = progress -> progressUpdates.add(progress);
