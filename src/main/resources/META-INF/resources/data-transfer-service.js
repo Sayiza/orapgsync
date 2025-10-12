@@ -69,8 +69,17 @@ async function pollDataTransferJobStatus(jobId) {
                 console.log('Data transfer job status:', status);
 
                 if (status.progress) {
-                    updateProgress(status.progress.percentage, status.progress.currentTask);
-                    updateMessage(`${status.progress.currentTask}: ${status.progress.details}`);
+                    // Show the table count in the progress bar status
+                    const progressText = status.progress.details
+                        ? `${status.progress.currentTask} (${status.progress.details})`
+                        : status.progress.currentTask;
+                    updateProgress(status.progress.percentage, progressText);
+
+                    // Show full message with details
+                    const messageText = status.progress.details
+                        ? `${status.progress.currentTask} - ${status.progress.details}`
+                        : status.progress.currentTask;
+                    updateMessage(messageText);
                 }
 
                 if (status.isComplete) {
