@@ -95,7 +95,7 @@ function updateOrchestrationProgress(percentage, status) {
 
 // Show orchestration progress bar
 function showOrchestrationProgress() {
-    const progressBar = document.querySelector('.orchestration-progress');
+    const progressBar = document.getElementById('orchestration-progress-bar');
     if (progressBar) {
         progressBar.style.display = 'block';
     }
@@ -103,7 +103,7 @@ function showOrchestrationProgress() {
 
 // Hide orchestration progress bar
 function hideOrchestrationProgress() {
-    const progressBar = document.querySelector('.orchestration-progress');
+    const progressBar = document.getElementById('orchestration-progress-bar');
     if (progressBar) {
         progressBar.style.display = 'none';
     }

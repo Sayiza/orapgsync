@@ -268,13 +268,14 @@ public class PostgresConstraintCreationJob extends AbstractDatabaseWriteJob<Cons
         } else if (constraint.isCheckConstraint()) {
             // For check constraints, use the check condition
             String checkCondition = constraint.getCheckCondition();
-            if (checkCondition != null && !checkCondition.trim().isEmpty()) {
-                sql.append(" CHECK (").append(checkCondition).append(")");
-            } else {
-                // Fallback if check condition is missing
+            if (checkCondition == null || checkCondition.trim().isEmpty()) {
+                // Some Oracle check constraints (especially system-generated ones) have null/empty conditions
+                // This should not happen for valid constraints, so we throw an exception
                 throw new IllegalArgumentException(
-                    "Check constraint '" + constraint.getConstraintName() + "' has no check condition");
+                    String.format("Check constraint '%s' on table '%s.%s' has no check condition defined",
+                        constraint.getConstraintName(), table.getSchema(), table.getTableName()));
             }
+            sql.append(" CHECK (").append(checkCondition).append(")");
         } else {
             throw new IllegalArgumentException(
                 "Unknown constraint type: " + constraint.getConstraintType());

@@ -134,7 +134,21 @@ public class ConstraintMetadata {
   public boolean isForeignKey() { return FOREIGN_KEY.equals(constraintType); }
   public boolean isUniqueConstraint() { return UNIQUE.equals(constraintType); }
   public boolean isCheckConstraint() { return CHECK.equals(constraintType); }
-  public boolean isNotNullConstraint() { return NOT_NULL.equals(constraintType); }
+  public boolean isNotNullConstraint() {
+    // In Oracle, NOT NULL constraints are stored as CHECK constraints with specific patterns
+    // Pattern: "<column_name> IS NOT NULL" (case-insensitive)
+    if (!CHECK.equals(constraintType)) {
+      return false;
+    }
+    if (checkCondition == null || checkCondition.trim().isEmpty()) {
+      // If it's a CHECK constraint with no condition, it's likely a system-generated NOT NULL
+      // These should be skipped
+      return true; // Treat as NOT NULL to be filtered out
+    }
+    String condition = checkCondition.trim().toUpperCase();
+    // Oracle NOT NULL constraints have pattern like: "COLUMN_NAME IS NOT NULL"
+    return condition.matches(".*\\bIS\\s+NOT\\s+NULL\\b.*");
+  }
   
   /**
    * Gets the human-readable constraint type name

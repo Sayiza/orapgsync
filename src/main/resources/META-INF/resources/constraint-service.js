@@ -463,7 +463,7 @@ function displayConstraintCreationResults(result, database) {
             html += '<h4>Created Constraints:</h4>';
             html += '<div class="table-items">';
             createdConstraints.forEach(constraint => {
-                html += `<div class="table-item created">${constraint.constraintName} (${constraint.constraintTypeName}) on ${constraint.tableName} ✓</div>`;
+                html += `<div class="table-item created">${constraint.constraintName} (${constraint.constraintType}) on ${constraint.tableName} ✓</div>`;
             });
             html += '</div>';
             html += '</div>';
@@ -480,7 +480,7 @@ function displayConstraintCreationResults(result, database) {
             html += '<div class="table-items">';
             skippedConstraints.forEach(constraint => {
                 const reason = constraint.reason || 'already exists';
-                html += `<div class="table-item skipped">${constraint.constraintName} (${constraint.constraintTypeName}) on ${constraint.tableName} (${reason})</div>`;
+                html += `<div class="table-item skipped">${constraint.constraintName} (${constraint.constraintType}) on ${constraint.tableName} (${reason})</div>`;
             });
             html += '</div>';
             html += '</div>';
@@ -497,7 +497,7 @@ function displayConstraintCreationResults(result, database) {
             html += '<div class="table-items">';
             errors.forEach(error => {
                 html += `<div class="table-item error">`;
-                html += `<strong>${error.constraintName}</strong> (${error.constraintTypeName}) on ${error.tableName}: ${error.errorMessage}`;
+                html += `<strong>${error.constraintName}</strong> (${error.constraintType}) on ${error.tableName}: ${error.errorMessage}`;
                 if (error.sqlStatement) {
                     html += `<div class="sql-statement"><pre>${error.sqlStatement}</pre></div>`;
                 }
