@@ -9,3 +9,4 @@
 [x] sequences before tables, because default can be a seq
 [x] special column names : "#", "end", "offset"
 [x] Failed to serialize LOB type LONG 
+[ ] Unmapped defaul values: strip comments, and brackets

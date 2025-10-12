@@ -25,7 +25,15 @@ An enterprise-grade Oracle-to-PostgreSQL migration tool built with Quarkus, feat
 - ✅ **Object Data Type Extraction**: Oracle/PostgreSQL custom type discovery with variables
 - ✅ **Object Type Creation**: Create PostgreSQL composite types with dependency ordering
 - ✅ **Synonym Extraction**: Extract Oracle synonyms (private and PUBLIC) for type resolution
+- ✅ **Sequence Extraction**: Extract Oracle sequences with all properties
+- ✅ **Sequence Creation**: Create PostgreSQL sequences from Oracle metadata
 - ✅ **Row Count Analysis**: Precise table row counting for migration planning
+
+**Data and Constraint Migration**
+- ✅ **Bulk Data Transfer**: High-performance CSV-based data transfer using PostgreSQL COPY
+- ✅ **Complex Type Serialization**: BLOB/CLOB, user-defined types, Oracle system types
+- ✅ **Constraint Extraction**: Extract constraints as part of table metadata
+- ✅ **Constraint Creation**: Create PostgreSQL constraints in dependency order
 
 **Frontend Interface**
 - ✅ **Vanilla JavaScript UI**: No framework dependencies, responsive design
@@ -33,13 +41,35 @@ An enterprise-grade Oracle-to-PostgreSQL migration tool built with Quarkus, feat
 - ✅ **Expandable Detail Views**: Schema-grouped tables, object types, and row counts
 - ✅ **Progress Indicators**: Real-time job progress with detailed status messages
 
+### 🟢 Recently Completed
+
+**Sequence Migration**
+- ✅ **Sequence Extraction**: Oracle sequences with all properties (start, increment, min/max, cache, cycle)
+- ✅ **Sequence Creation**: PostgreSQL sequences with mapped properties
+- ✅ **Error Tracking**: Comprehensive error handling and result tracking
+
+**Constraint Migration**
+- ✅ **Constraint Extraction**: Extracted as part of table metadata (PK, FK, UK, CHECK, NOT NULL)
+- ✅ **Dependency Ordering**: Topological sort for foreign key dependencies
+- ✅ **Constraint Creation**: PostgreSQL constraint creation in dependency order (PK → UK → FK → CHECK)
+- ✅ **Duplicate Detection**: Skips already-existing constraints
+- ✅ **Error Reporting**: Detailed error tracking for failed constraints
+
+**Complete Data Transfer**
+- ✅ **Bulk Data Transfer**: High-performance CSV-based copying using PostgreSQL COPY
+- ✅ **Complex Type Handling**: Full serialization of Oracle system types (ANYDATA, XMLTYPE, BLOB, CLOB, user-defined types)
+- ✅ **Row Count Validation**: Automatic verification and table truncation
+
 ### 🟡 In Progress / Next Phase
 
-**Data Migration (Priority 1)**
-- 🔄 **Constraint Migration**: Primary keys, foreign keys, unique constraints, check constraints
-- 🔄 **Bulk Data Transfer**: High-performance data copying between databases
-- 🔄 **Complex Type Handling**: Serialization of Oracle system types (ANYDATA, XMLTYPE, etc.)
-- 🔄 **Incremental Sync**: Delta synchronization for ongoing data updates
+**View and Index Migration (Priority 1)**
+- 📋 **View Migration**: Extract and convert Oracle views to PostgreSQL
+- 📋 **Index Migration**: Extract and create PostgreSQL indexes
+- 📋 **Materialized View Support**: Handle materialized views
+
+**Incremental Sync (Priority 2)**
+- 📋 **Delta Synchronization**: Ongoing data updates
+- 📋 **Change Data Capture**: Track changes for incremental sync
 
 **PL/SQL Migration (Priority 2)**
 - 📋 **Stored Procedure Analysis**: ANTLR-based PL/SQL parsing and dependency analysis
@@ -102,6 +132,8 @@ Commit the container to an image
 docker commit temp-postgres myapp-db:sprint-23-2025-10-04
 Share with team
 docker push myapp-db:sprint-23-2025-10-04
+From time to time clean up space:
+docker volume prune
 
 **Connection Settings**
 - Oracle: `jdbc:oracle:thin:@localhost:1521:sid`

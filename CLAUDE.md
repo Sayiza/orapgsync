@@ -33,11 +33,13 @@ The application uses a centralized state management approach for storing metadat
 
 **State Service Properties:**
 - Oracle/PostgreSQL schema lists
-- Oracle/PostgreSQL table metadata
+- Oracle/PostgreSQL table metadata (includes constraint metadata)
 - Oracle/PostgreSQL object type metadata
+- Oracle/PostgreSQL sequence metadata
 - Oracle/PostgreSQL row count data
 - Oracle synonyms (dual-map structure for efficient resolution)
-- Creation results (schemas, tables, object types)
+- Creation results (schemas, tables, object types, sequences, constraints)
+- Data transfer results
 
 #### 2. **Plugin-Based Job System** (`core/job/`)
 - **Auto-discovery**: Jobs are automatically discovered via CDI
@@ -58,6 +60,7 @@ Each database element type is completely independent:
 - `TableMetadata`, `ColumnMetadata`, `ConstraintMetadata`: Pure data models
 - `OracleTableMetadataExtractionJob`, `PostgresTableMetadataExtractionJob`: CDI-managed jobs
 - `TableExtractor`, `PostgresTableExtractor`: Database-specific extraction logic
+- Note: Constraint metadata is extracted as part of table metadata
 
 **Object Types** (`objectdatatype/`):
 - `ObjectDataTypeMetaData`, `ObjectDataTypeVariable`: Data models with proper constructors
@@ -71,6 +74,21 @@ Each database element type is completely independent:
 - `OracleSynonymExtractionJob`: Extracts Oracle synonyms (private and PUBLIC)
 - Synonym resolution follows Oracle rules: current schema → PUBLIC fallback
 - Used during object type creation to resolve type references
+
+**Sequences** (`sequence/`):
+- `SequenceMetadata`: Data model for Oracle/PostgreSQL sequences
+- `OracleSequenceExtractionJob`, `PostgresSequenceExtractionJob`: Extract sequence definitions
+- `PostgresSequenceCreationJob`: Creates PostgreSQL sequences from Oracle metadata
+- `OracleSequenceExtractor`, `PostgresSequenceExtractor`: Database-specific extraction logic
+- `SequenceCreationResult`: Tracks created sequences and errors
+
+**Constraints** (`constraint/`):
+- Constraint metadata already extracted as part of `TableMetadata` (via `ConstraintMetadata`)
+- `PostgresConstraintCreationJob`: Creates constraints in PostgreSQL in dependency order (PK → UK → FK → CHECK)
+- `OracleConstraintSourceStateJob`: Display-only job that aggregates constraints from table metadata
+- `PostgresConstraintVerificationJob`: Verifies constraint creation results
+- `ConstraintDependencyAnalyzer`: Topological sort for foreign key dependencies
+- `ConstraintCreationResult`: Tracks created/skipped/failed constraints
 
 **Schemas** (`schema/`):
 - Schema discovery and management services
@@ -199,6 +217,10 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
 - Object type metadata extraction (Oracle ↔ PostgreSQL)
 - Object type creation in PostgreSQL with dependency ordering
 - Synonym extraction and resolution (Oracle)
+- **Sequence extraction and creation (Oracle → PostgreSQL)** - Full implementation with:
+  - Extract Oracle sequences with all properties (start, increment, min/max, cache, cycle)
+  - Create PostgreSQL sequences with mapped properties
+  - Proper error handling and creation result tracking
 - Row count extraction (Oracle ↔ PostgreSQL)
 - **Data transfer (Oracle → PostgreSQL)** - Full implementation with:
   - CSV-based bulk transfer using PostgreSQL COPY
@@ -208,16 +230,22 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
   - Complex Oracle system type serialization to jsonb with metadata preservation
   - Memory-efficient piped streaming (producer-consumer architecture)
   - Automatic row count validation and table truncation
+- **Constraint migration (Oracle → PostgreSQL)** - Full implementation with:
+  - Constraint extraction as part of table metadata
+  - Dependency-ordered constraint creation (PK → UK → FK → CHECK)
+  - Foreign key topological sorting with circular dependency detection
+  - Existing constraint detection to avoid duplicates
+  - Comprehensive error tracking and reporting
+  - NOT NULL constraints applied during table creation
 - Generic REST API for job management
 - Database connection management and testing
 - Configuration management with UI
 
 ### 🔄 Ready for Implementation
-- **Sequence extraction and creation (Oracle → PostgreSQL)** ⬅️ Next priority
-- Constraint migration (primary keys, foreign keys, unique, check)
-- View metadata processing
-- Index metadata extraction
+- View metadata extraction and creation
+- Index metadata extraction and creation
 - Trigger migration
+- Stored procedure migration (PL/SQL → PL/pgSQL)
 
 ### 🎯 Extension Points
 - New job types: Implement `DatabaseExtractionJob<T>`
@@ -341,10 +369,14 @@ The migration handles three categories of Oracle data types with different strat
 - LOB types: BLOB→hex encoding, CLOB→text extraction (`OracleComplexTypeSerializer.serializeBlobToHex/serializeClobToText()`)
 - PostgreSQL COPY for batch performance (CSV format with piped streaming)
 
-**Step C: Constraint Creation (🔄 To Be Implemented)**
+**Step C: Constraint Creation (✅ Implemented)**
 - Add primary keys, foreign keys, unique constraints
 - Add check constraints
 - Executed after data transfer to avoid constraint violation issues
+- Dependency-ordered creation: PK → UK → FK → CHECK
+- Foreign keys use topological sorting to respect table dependencies
+- Skips already-existing constraints
+- Comprehensive error tracking for failed constraints
 
 ### Code References
 

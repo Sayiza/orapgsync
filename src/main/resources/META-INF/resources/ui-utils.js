@@ -116,17 +116,3 @@ function updateMessage(message) {
         messageElement.textContent = message;
     }
 }
-
-// Utility function to simulate migration progress (for testing/demo purposes)
-function simulateMigrationProgress() {
-    let progress = 0;
-    const interval = setInterval(() => {
-        progress += 10;
-        updateProgress(progress, `Processing: ${progress}%`);
-
-        if (progress >= 100) {
-            clearInterval(interval);
-            updateMessage('Migration completed successfully');
-        }
-    }, 1000);
-}

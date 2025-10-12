@@ -9,6 +9,7 @@ import me.christianrobert.orapgsync.core.job.model.JobProgress;
 import me.christianrobert.orapgsync.core.job.model.table.ConstraintCreationResult;
 import me.christianrobert.orapgsync.core.job.model.table.ConstraintMetadata;
 import me.christianrobert.orapgsync.core.job.model.table.TableMetadata;
+import me.christianrobert.orapgsync.constraint.service.CheckConstraintTranslator;
 import me.christianrobert.orapgsync.core.tools.PostgresIdentifierNormalizer;
 import me.christianrobert.orapgsync.database.service.PostgresConnectionService;
 import org.slf4j.Logger;
@@ -210,14 +211,14 @@ public class PostgresConstraintCreationJob extends AbstractDatabaseWriteJob<Cons
                 result.addCreatedConstraint(qualifiedTableName, constraintName, constraintType);
                 log.info("Successfully created {} constraint '{}' on table '{}'",
                         getConstraintTypeDisplay(pair.constraint), constraintName, qualifiedTableName);
-            } catch (SQLException e) {
+            } catch (SQLException | IllegalArgumentException e) {
+                String sqlStatement = generateConstraintSQL(pair.table, pair.constraint);
                 String errorMessage = String.format("Failed to create %s constraint '%s' on table '%s': %s",
                         getConstraintTypeDisplay(pair.constraint), constraintName, qualifiedTableName, e.getMessage());
-                String sqlStatement = generateConstraintSQL(pair.table, pair.constraint);
                 result.addError(qualifiedTableName, constraintName, constraintType, errorMessage, sqlStatement);
                 log.error("Failed to create constraint '{}' on table '{}': {}",
                         constraintName, qualifiedTableName, e.getMessage());
-                log.debug("Failed SQL: {}", sqlStatement);
+                log.error("Failed SQL statement: {}", sqlStatement);
             }
 
             processedConstraints++;
@@ -266,7 +267,7 @@ public class PostgresConstraintCreationJob extends AbstractDatabaseWriteJob<Cons
                 sql.append(" ON DELETE ").append(constraint.getDeleteRule());
             }
         } else if (constraint.isCheckConstraint()) {
-            // For check constraints, use the check condition
+            // For check constraints, translate Oracle syntax to PostgreSQL
             String checkCondition = constraint.getCheckCondition();
             if (checkCondition == null || checkCondition.trim().isEmpty()) {
                 // Some Oracle check constraints (especially system-generated ones) have null/empty conditions
@@ -275,7 +276,10 @@ public class PostgresConstraintCreationJob extends AbstractDatabaseWriteJob<Cons
                     String.format("Check constraint '%s' on table '%s.%s' has no check condition defined",
                         constraint.getConstraintName(), table.getSchema(), table.getTableName()));
             }
-            sql.append(" CHECK (").append(checkCondition).append(")");
+
+            // Translate Oracle functions to PostgreSQL equivalents
+            String translatedCondition = CheckConstraintTranslator.translate(checkCondition);
+            sql.append(" CHECK (").append(translatedCondition).append(")");
         } else {
             throw new IllegalArgumentException(
                 "Unknown constraint type: " + constraint.getConstraintType());
