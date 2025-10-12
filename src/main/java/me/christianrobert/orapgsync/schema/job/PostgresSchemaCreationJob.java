@@ -96,7 +96,7 @@ public class PostgresSchemaCreationJob extends AbstractDatabaseWriteJob<SchemaCr
             // Mark already existing schemas as skipped
             for (String schema : schemasAlreadyExisting) {
                 result.addSkippedSchema(schema.toLowerCase());
-                log.info("Schema '{}' already exists in PostgreSQL, skipping", schema.toLowerCase());
+                log.debug("Schema '{}' already exists in PostgreSQL, skipping", schema.toLowerCase());
             }
 
             updateProgress(progressCallback, 40, "Planning creation",
@@ -122,12 +122,13 @@ public class PostgresSchemaCreationJob extends AbstractDatabaseWriteJob<SchemaCr
                 try {
                     createSchema(postgresConnection, schemaName);
                     result.addCreatedSchema(schemaName.toLowerCase());
-                    log.info("Successfully created PostgreSQL schema: {}", schemaName.toLowerCase());
+                    log.debug("Successfully created PostgreSQL schema: {}", schemaName.toLowerCase());
                 } catch (SQLException e) {
-                    String errorMessage = String.format("Failed to create schema '%s': %s", schemaName.toLowerCase(), e.getMessage());
                     String sqlStatement = String.format("CREATE SCHEMA IF NOT EXISTS %s", schemaName.toLowerCase());
+                    String errorMessage = String.format("Failed to create schema '%s': %s", schemaName.toLowerCase(), e.getMessage());
                     result.addError(schemaName.toLowerCase(), errorMessage, sqlStatement);
-                    log.error("Failed to create schema: {}", schemaName, e);
+                    log.error("Failed to create schema '{}': {}", schemaName.toLowerCase(), e.getMessage());
+                    log.error("Failed SQL statement: {}", sqlStatement);
                 }
 
                 processedSchemas++;

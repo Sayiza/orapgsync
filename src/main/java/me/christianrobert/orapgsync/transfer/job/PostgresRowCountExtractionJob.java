@@ -63,7 +63,7 @@ public class PostgresRowCountExtractionJob extends AbstractDatabaseExtractionJob
         updateProgress(progressCallback, 0, "Initializing",
             "Starting row count extraction for " + postgresTableMetadata.size() + " tables from StateService");
 
-        log.info("Starting row count extraction for {} tables from StateService", postgresTableMetadata.size());
+        log.debug("Starting row count extraction for {} tables from StateService", postgresTableMetadata.size());
 
         updateProgress(progressCallback, 5, "Connecting to PostgreSQL", "Establishing database connection");
 

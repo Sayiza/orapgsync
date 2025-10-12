@@ -36,7 +36,7 @@ async function resetAll() {
         if (response.ok) {
             console.log('State reset successfully:', result);
             updateMessage('Application state reset successfully');
-            updateProgress(0, 'Ready to start');
+            updateProgress(0, 'Welcome to Ora Pg Sync - Ready to start');
 
             // Reset all UI elements to default state
             initializeInterface();

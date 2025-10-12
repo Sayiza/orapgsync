@@ -116,7 +116,7 @@ public class PostgresObjectTypeCreationJob extends AbstractDatabaseWriteJob<Obje
             for (ObjectDataTypeMetaData objectType : typesAlreadyExisting) {
                 String qualifiedTypeName = getQualifiedTypeName(objectType);
                 result.addSkippedType(qualifiedTypeName);
-                log.info("Object type '{}' already exists in PostgreSQL, skipping", qualifiedTypeName);
+                log.debug("Object type '{}' already exists in PostgreSQL, skipping", qualifiedTypeName);
             }
 
             updateProgress(progressCallback, 40, "Planning creation",
@@ -143,12 +143,13 @@ public class PostgresObjectTypeCreationJob extends AbstractDatabaseWriteJob<Obje
                 try {
                     createObjectType(postgresConnection, objectType);
                     result.addCreatedType(qualifiedTypeName);
-                    log.info("Successfully created PostgreSQL object type: {}", qualifiedTypeName);
+                    log.debug("Successfully created PostgreSQL object type: {}", qualifiedTypeName);
                 } catch (SQLException e) {
-                    String errorMessage = String.format("Failed to create object type '%s': %s", qualifiedTypeName, e.getMessage());
                     String sqlStatement = generateCreateTypeSQL(objectType);
+                    String errorMessage = String.format("Failed to create object type '%s': %s", qualifiedTypeName, e.getMessage());
                     result.addError(qualifiedTypeName, errorMessage, sqlStatement);
-                    log.error("Failed to create object type: {}", qualifiedTypeName, e);
+                    log.error("Failed to create object type '{}': {}", qualifiedTypeName, e.getMessage());
+                    log.error("Failed SQL statement: {}", sqlStatement);
                 }
 
                 processedTypes++;

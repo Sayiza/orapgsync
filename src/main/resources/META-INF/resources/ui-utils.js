@@ -99,6 +99,10 @@ function showOrchestrationProgress() {
     if (progressBar) {
         progressBar.style.display = 'block';
     }
+    const cont = document.getElementById('idDatabaseComparisonContainer');
+    if (cont) {
+        cont.style.marginTop = '13rem';
+    }
 }
 
 // Hide orchestration progress bar
@@ -106,6 +110,11 @@ function hideOrchestrationProgress() {
     const progressBar = document.getElementById('orchestration-progress-bar');
     if (progressBar) {
         progressBar.style.display = 'none';
+    }
+
+    const cont = document.getElementById('idDatabaseComparisonContainer');
+    if (cont) {
+        cont.style.marginTop = '7rem';
     }
 }
 

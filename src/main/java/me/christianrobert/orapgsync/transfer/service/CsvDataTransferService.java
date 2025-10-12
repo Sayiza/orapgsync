@@ -68,7 +68,7 @@ public class CsvDataTransferService {
         String qualifiedOracleName = table.getSchema() + "." + table.getTableName();
         String qualifiedPostgresName = "\"" + table.getSchema() + "\".\"" + table.getTableName() + "\"";
 
-        log.info("Starting data transfer for table: {}", qualifiedOracleName);
+        log.debug("Starting data transfer for table: {}", qualifiedOracleName);
 
         // Step 1: Check if transfer is needed (compare row counts)
         long oracleRowCount = rowCountService.getRowCount(oracleConn, table.getSchema(), table.getTableName());
@@ -85,19 +85,19 @@ public class CsvDataTransferService {
         }
 
         if (oracleRowCount == 0) {
-            log.info("Table {} is empty in Oracle, skipping transfer", qualifiedOracleName);
+            log.debug("Table {} is empty in Oracle, skipping transfer", qualifiedOracleName);
             return 0;
         }
 
         if (oracleRowCount == postgresRowCount && postgresRowCount > 0) {
-            log.info("Table {} already has {} rows in PostgreSQL (matches Oracle), skipping transfer",
+            log.debug("Table {} already has {} rows in PostgreSQL (matches Oracle), skipping transfer",
                     qualifiedOracleName, postgresRowCount);
             return postgresRowCount;
         }
 
         // Step 2: If PostgreSQL has data but counts don't match, truncate
         if (postgresRowCount > 0 && postgresRowCount != oracleRowCount) {
-            log.info("Table {} has {} rows in PostgreSQL but {} in Oracle, truncating before transfer",
+            log.debug("Table {} has {} rows in PostgreSQL but {} in Oracle, truncating before transfer",
                     qualifiedOracleName, postgresRowCount, oracleRowCount);
             truncateTable(postgresConn, table.getSchema(), table.getTableName());
         }
@@ -109,7 +109,7 @@ public class CsvDataTransferService {
         // Step 4: Perform the actual data transfer
         long transferredRows = performCsvTransfer(oracleConn, postgresConn, table, batchSize);
 
-        log.info("Data transfer completed for table {}: {} rows transferred", qualifiedOracleName, transferredRows);
+        log.debug("Data transfer completed for table {}: {} rows transferred", qualifiedOracleName, transferredRows);
 
         return transferredRows;
     }
@@ -121,7 +121,7 @@ public class CsvDataTransferService {
         String sql = "TRUNCATE TABLE \"" + schema + "\".\"" + tableName + "\"";
         try (PreparedStatement stmt = postgresConn.prepareStatement(sql)) {
             stmt.execute();
-            log.info("Truncated table: {}.{}", schema, tableName);
+            log.debug("Truncated table: {}.{}", schema, tableName);
         }
     }
 

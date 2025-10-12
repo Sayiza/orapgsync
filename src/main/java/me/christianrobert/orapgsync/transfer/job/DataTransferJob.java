@@ -104,8 +104,8 @@ public class DataTransferJob extends AbstractDatabaseWriteJob<DataTransferResult
 
             updateProgress(progressCallback, 30, "Connected", "Successfully connected to both databases");
 
-            log.info("Data transfer job initialized successfully");
-            log.info("Ready to transfer data for {} tables", normalizedTables.size());
+            log.debug("Data transfer job initialized successfully");
+            log.debug("Ready to transfer data for {} tables", normalizedTables.size());
 
             int totalTables = normalizedTables.size();
             int processedTables = 0;
@@ -125,10 +125,10 @@ public class DataTransferJob extends AbstractDatabaseWriteJob<DataTransferResult
 
                     if (rowsTransferred == 0) {
                         result.addSkippedTable(qualifiedTableName);
-                        log.info("Table {} skipped (no data or already transferred)", qualifiedTableName);
+                        log.debug("Table {} skipped (no data or already transferred)", qualifiedTableName);
                     } else {
                         result.addTransferredTable(qualifiedTableName, rowsTransferred);
-                        log.info("Table {} transferred: {} rows", qualifiedTableName, rowsTransferred);
+                        log.debug("Table {} transferred: {} rows", qualifiedTableName, rowsTransferred);
                     }
 
                 } catch (Exception e) {
@@ -153,7 +153,7 @@ public class DataTransferJob extends AbstractDatabaseWriteJob<DataTransferResult
 
             updateProgress(progressCallback, 95, "Finalizing", "Data transfer operation completed");
 
-            log.info("Data transfer job completed: {}", result);
+            log.debug("Data transfer job completed: {}", result);
 
             return result;
 

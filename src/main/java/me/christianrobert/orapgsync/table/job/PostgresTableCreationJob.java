@@ -116,7 +116,7 @@ public class PostgresTableCreationJob extends AbstractDatabaseWriteJob<TableCrea
             for (TableMetadata table : tablesAlreadyExisting) {
                 String qualifiedTableName = getQualifiedTableName(table);
                 result.addSkippedTable(qualifiedTableName);
-                log.info("Table '{}' already exists in PostgreSQL, skipping", qualifiedTableName);
+                log.debug("Table '{}' already exists in PostgreSQL, skipping", qualifiedTableName);
             }
 
             updateProgress(progressCallback, 40, "Planning creation",
@@ -202,12 +202,13 @@ public class PostgresTableCreationJob extends AbstractDatabaseWriteJob<TableCrea
             try {
                 createTable(connection, table, result);
                 result.addCreatedTable(qualifiedTableName);
-                log.info("Successfully created PostgreSQL table: {}", qualifiedTableName);
+                log.debug("Successfully created PostgreSQL table: {}", qualifiedTableName);
             } catch (SQLException e) {
-                String errorMessage = String.format("Failed to create table '%s': %s", qualifiedTableName, e.getMessage());
                 String sqlStatement = generateCreateTableSQL(table, result);
+                String errorMessage = String.format("Failed to create table '%s': %s", qualifiedTableName, e.getMessage());
                 result.addError(qualifiedTableName, errorMessage, sqlStatement);
-                log.error("Failed to create table: {}", qualifiedTableName, e);
+                log.error("Failed to create table '{}': {}", qualifiedTableName, e.getMessage());
+                log.error("Failed SQL statement: {}", sqlStatement);
             }
 
             processedTables++;
@@ -297,7 +298,7 @@ public class PostgresTableCreationJob extends AbstractDatabaseWriteJob<TableCrea
                 // Complex default that couldn't be mapped - log warning and track for manual review
                 result.addUnmappedDefault(qualifiedTableName, column.getColumnName(),
                     transformResult.getOriginalValue(), transformResult.getTransformationNote());
-                log.info("Skipped default value for {}.{}: {} ({})",
+                log.debug("Skipped default value for {}.{}: {} ({})",
                     qualifiedTableName, column.getColumnName(),
                     transformResult.getOriginalValue(), transformResult.getTransformationNote());
             } else {

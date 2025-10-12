@@ -109,7 +109,7 @@ public class PostgresSequenceCreationJob extends AbstractDatabaseWriteJob<Sequen
             for (SequenceMetadata sequence : sequencesAlreadyExisting) {
                 String qualifiedSequenceName = getQualifiedSequenceName(sequence);
                 result.addSkippedSequence(qualifiedSequenceName);
-                log.info("Sequence '{}' already exists in PostgreSQL, skipping", qualifiedSequenceName);
+                log.debug("Sequence '{}' already exists in PostgreSQL, skipping", qualifiedSequenceName);
             }
 
             updateProgress(progressCallback, 40, "Planning creation",
@@ -195,13 +195,14 @@ public class PostgresSequenceCreationJob extends AbstractDatabaseWriteJob<Sequen
             try {
                 createSequence(connection, sequence);
                 result.addCreatedSequence(qualifiedSequenceName);
-                log.info("Successfully created PostgreSQL sequence: {}", qualifiedSequenceName);
+                log.debug("Successfully created PostgreSQL sequence: {}", qualifiedSequenceName);
             } catch (SQLException e) {
+                String sqlStatement = generateCreateSequenceSQL(sequence);
                 String errorMessage = String.format("Failed to create sequence '%s': %s",
                         qualifiedSequenceName, e.getMessage());
-                String sqlStatement = generateCreateSequenceSQL(sequence);
                 result.addError(qualifiedSequenceName, errorMessage, sqlStatement);
-                log.error("Failed to create sequence: {}", qualifiedSequenceName, e);
+                log.error("Failed to create sequence '{}': {}", qualifiedSequenceName, e.getMessage());
+                log.error("Failed SQL statement: {}", sqlStatement);
             }
 
             processedSequences++;

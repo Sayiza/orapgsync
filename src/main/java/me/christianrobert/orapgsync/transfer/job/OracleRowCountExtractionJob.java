@@ -63,7 +63,7 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
         updateProgress(progressCallback, 0, "Initializing",
             "Starting row count extraction for " + oracleTableMetadata.size() + " tables from StateService");
 
-        log.info("Starting row count extraction for {} tables from StateService", oracleTableMetadata.size());
+        log.debug("Starting row count extraction for {} tables from StateService", oracleTableMetadata.size());
 
         updateProgress(progressCallback, 5, "Connecting to Oracle", "Establishing database connection");
 
