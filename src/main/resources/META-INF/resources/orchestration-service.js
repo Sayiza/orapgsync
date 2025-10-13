@@ -181,11 +181,13 @@ async function startAll() {
         console.log('Full migration orchestration completed successfully');
         const completionMessage = `Migration completed successfully! Total duration: ${durationText}`;
         updateOrchestrationProgress(100, completionMessage);
-        updateMessage(completionMessage);
 
         // Hide orchestration progress bar after a short delay
         await delay(2000);
         hideOrchestrationProgress();
+        await delay(100);
+        updateMessage(completionMessage);
+
 
     } catch (error) {
         console.error('Migration orchestration failed:', error);

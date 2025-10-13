@@ -421,7 +421,7 @@ async function testConnectionsAfterConfigLoad() {
             ];
 
             await Promise.allSettled([oraclePromise, postgresPromise]);
-            updateMessage('Connection tests completed after configuration load');
+            updateMessage('Welcome to Ora Pg Sync - Ready to start');
         }, 200);
 
     } catch (error) {

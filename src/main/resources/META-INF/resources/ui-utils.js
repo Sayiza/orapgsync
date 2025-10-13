@@ -120,7 +120,7 @@ function hideOrchestrationProgress() {
 
 // Update status message in progress bar
 function updateMessage(message) {
-    const messageElement = document.querySelector('.progress-message');
+    const messageElement = document.querySelector('.progress-status');
     if (messageElement) {
         messageElement.textContent = message;
     }
