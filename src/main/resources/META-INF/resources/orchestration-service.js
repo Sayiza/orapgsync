@@ -168,16 +168,40 @@ async function startAll() {
         updateOrchestrationProgress(95, 'FK index creation completed');
 
         // Step 17: Extract Oracle view definitions
-        updateOrchestrationProgress(96, 'Step 17/18: Extracting Oracle view definitions...');
+        updateOrchestrationProgress(94, 'Step 17/20: Extracting Oracle view definitions...');
         await extractOracleViews();
         await pollCountBadge('oracle-views', { requirePositive: false, allowZero: true });
-        updateOrchestrationProgress(97, 'Oracle view definitions extracted');
+        updateOrchestrationProgress(95, 'Oracle view definitions extracted');
 
         // Step 18: Create PostgreSQL view stubs
-        updateOrchestrationProgress(98, 'Step 18/18: Creating PostgreSQL view stubs...');
+        updateOrchestrationProgress(96, 'Step 18/20: Creating PostgreSQL view stubs...');
         await createPostgresViewStubs();
         await pollCountBadge('postgres-views', { requirePositive: false, allowZero: true });
-        updateOrchestrationProgress(100, 'View stub creation completed');
+        updateOrchestrationProgress(97, 'View stub creation completed');
+
+        // Step 19: Extract Oracle functions/procedures
+        updateOrchestrationProgress(98, 'Step 19/20: Extracting Oracle functions and procedures...');
+        await extractOracleFunctions();
+        await pollCountBadge('oracle-functions', { requirePositive: false, allowZero: true });
+        updateOrchestrationProgress(99, 'Oracle functions/procedures extracted');
+
+        // Step 20: Create PostgreSQL function/procedure stubs
+        updateOrchestrationProgress(95, 'Step 20/22: Creating PostgreSQL function stubs...');
+        await createPostgresFunctionStubs();
+        await pollCountBadge('postgres-functions', { requirePositive: false, allowZero: true });
+        updateOrchestrationProgress(97, 'Function stub creation completed');
+
+        // Step 21: Extract Oracle type methods
+        updateOrchestrationProgress(98, 'Step 21/22: Extracting Oracle type methods...');
+        await extractOracleTypeMethods();
+        await pollCountBadge('oracle-type-methods', { requirePositive: false, allowZero: true });
+        updateOrchestrationProgress(99, 'Oracle type methods extracted');
+
+        // Step 22: Create PostgreSQL type method stubs
+        updateOrchestrationProgress(99, 'Step 22/22: Creating PostgreSQL type method stubs...');
+        await createPostgresTypeMethodStubs();
+        await pollCountBadge('postgres-type-methods', { requirePositive: false, allowZero: true });
+        updateOrchestrationProgress(100, 'Type method stub creation completed');
 
         // Calculate duration
         const endTime = Date.now();

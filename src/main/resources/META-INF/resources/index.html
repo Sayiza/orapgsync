@@ -389,6 +389,88 @@
             </div>
           </td>
         </tr>
+        <tr class="functions-row">
+          <td class="source-cell">
+            <div class="component-info" id="oracle-functions">
+              <span class="count-badge">-</span>
+              <span class="component-text">Functions/Procedures found</span>
+              <button class="refresh-btn" onclick="extractOracleFunctions()" title="Extract Oracle functions and procedures">⚙</button>
+              <div class="table-list" id="oracle-function-list" style="display: none;">
+                <div class="table-list-header" onclick="toggleFunctionList('oracle')">
+                  <span class="toggle-indicator">▼</span> Functions/Procedures by Schema
+                </div>
+                <div class="table-items" id="oracle-function-items">
+                  <!-- Function metadata will be populated here -->
+                </div>
+              </div>
+            </div>
+          </td>
+          <td class="target-cell">
+            <div class="component-info" id="postgres-functions">
+              <span class="count-badge">-</span>
+              <span class="component-text">Function stubs created</span>
+              <button class="refresh-btn" onclick="extractPostgresFunctions()" title="Extract PostgreSQL functions and procedures">⚙</button>
+              <button class="action-btn" onclick="createPostgresFunctionStubs()" title="Create PostgreSQL function stubs">Create Function Stubs</button>
+              <div class="table-list" id="postgres-function-list" style="display: none;">
+                <div class="table-list-header" onclick="toggleFunctionList('postgres')">
+                  <span class="toggle-indicator">▼</span> Functions/Procedures by Schema
+                </div>
+                <div class="table-items" id="postgres-function-items">
+                  <!-- Function metadata will be populated here -->
+                </div>
+              </div>
+              <div class="table-creation-results" id="postgres-function-creation-results" style="display: none;">
+                <div class="table-creation-header" onclick="toggleFunctionCreationResults()">
+                  <span class="toggle-indicator">▼</span> Function Stub Creation Results
+                </div>
+                <div class="table-creation-details" id="postgres-function-creation-details">
+                  <!-- Function stub creation results will be populated here -->
+                </div>
+              </div>
+            </div>
+          </td>
+        </tr>
+        <tr class="type-methods-row">
+          <td class="source-cell">
+            <div class="component-info" id="oracle-type-methods">
+              <span class="count-badge">-</span>
+              <span class="component-text">Type Methods found</span>
+              <button class="refresh-btn" onclick="extractOracleTypeMethods()" title="Extract Oracle type methods">⚙</button>
+              <div class="table-list" id="oracle-type-method-list" style="display: none;">
+                <div class="table-list-header" onclick="toggleTypeMethodList('oracle')">
+                  <span class="toggle-indicator">▼</span> Type Methods by Schema
+                </div>
+                <div class="table-items" id="oracle-type-method-items">
+                  <!-- Type method metadata will be populated here -->
+                </div>
+              </div>
+            </div>
+          </td>
+          <td class="target-cell">
+            <div class="component-info" id="postgres-type-methods">
+              <span class="count-badge">-</span>
+              <span class="component-text">Type method stubs created</span>
+              <button class="refresh-btn" onclick="extractPostgresTypeMethods()" title="Extract PostgreSQL type methods">⚙</button>
+              <button class="action-btn" onclick="createPostgresTypeMethodStubs()" title="Create PostgreSQL type method stubs">Create Type Method Stubs</button>
+              <div class="table-list" id="postgres-type-method-list" style="display: none;">
+                <div class="table-list-header" onclick="toggleTypeMethodList('postgres')">
+                  <span class="toggle-indicator">▼</span> Type Methods by Schema
+                </div>
+                <div class="table-items" id="postgres-type-method-items">
+                  <!-- Type method metadata will be populated here -->
+                </div>
+              </div>
+              <div class="table-creation-results" id="postgres-type-method-creation-results" style="display: none;">
+                <div class="table-creation-header" onclick="toggleTypeMethodCreationResults()">
+                  <span class="toggle-indicator">▼</span> Type Method Stub Creation Results
+                </div>
+                <div class="table-creation-details" id="postgres-type-method-creation-details">
+                  <!-- Type method stub creation results will be populated here -->
+                </div>
+              </div>
+            </div>
+          </td>
+        </tr>
       </tbody>
     </table>
   </div>
@@ -512,6 +594,8 @@
 <script src="constraint-service.js"></script>
 <script src="fk-index-service.js"></script>
 <script src="view-service.js"></script>
+<script src="function-service.js"></script>
+<script src="type-method-service.js"></script>
 
 <!-- Orchestration Script -->
 <script src="orchestration-service.js"></script>

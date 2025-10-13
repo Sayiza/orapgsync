@@ -15,6 +15,10 @@ import me.christianrobert.orapgsync.core.job.model.sequence.SequenceMetadata;
 import me.christianrobert.orapgsync.core.job.model.sequence.SequenceCreationResult;
 import me.christianrobert.orapgsync.core.job.model.viewdefinition.ViewDefinitionMetadata;
 import me.christianrobert.orapgsync.core.job.model.viewdefinition.ViewStubCreationResult;
+import me.christianrobert.orapgsync.core.job.model.function.FunctionMetadata;
+import me.christianrobert.orapgsync.core.job.model.function.FunctionStubCreationResult;
+import me.christianrobert.orapgsync.core.job.model.typemethod.TypeMethodMetadata;
+import me.christianrobert.orapgsync.core.job.model.typemethod.TypeMethodStubCreationResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -62,6 +66,14 @@ public class StateService {
     List<ViewDefinitionMetadata> oracleViewDefinitionMetadata = new ArrayList<>();
     List<ViewDefinitionMetadata> postgresViewDefinitionMetadata = new ArrayList<>();
     ViewStubCreationResult viewStubCreationResult;
+
+    List<FunctionMetadata> oracleFunctionMetadata = new ArrayList<>();
+    List<FunctionMetadata> postgresFunctionMetadata = new ArrayList<>();
+    FunctionStubCreationResult functionStubCreationResult;
+
+    List<TypeMethodMetadata> oracleTypeMethodMetadata = new ArrayList<>();
+    List<TypeMethodMetadata> postgresTypeMethodMetadata = new ArrayList<>();
+    TypeMethodStubCreationResult typeMethodStubCreationResult;
 
     ConstraintCreationResult constraintCreationResult;
 
@@ -263,6 +275,54 @@ public class StateService {
         this.viewStubCreationResult = viewStubCreationResult;
     }
 
+    public List<FunctionMetadata> getOracleFunctionMetadata() {
+        return oracleFunctionMetadata;
+    }
+
+    public void setOracleFunctionMetadata(List<FunctionMetadata> oracleFunctionMetadata) {
+        this.oracleFunctionMetadata = oracleFunctionMetadata;
+    }
+
+    public List<FunctionMetadata> getPostgresFunctionMetadata() {
+        return postgresFunctionMetadata;
+    }
+
+    public void setPostgresFunctionMetadata(List<FunctionMetadata> postgresFunctionMetadata) {
+        this.postgresFunctionMetadata = postgresFunctionMetadata;
+    }
+
+    public FunctionStubCreationResult getFunctionStubCreationResult() {
+        return functionStubCreationResult;
+    }
+
+    public void setFunctionStubCreationResult(FunctionStubCreationResult functionStubCreationResult) {
+        this.functionStubCreationResult = functionStubCreationResult;
+    }
+
+    public List<TypeMethodMetadata> getOracleTypeMethodMetadata() {
+        return oracleTypeMethodMetadata;
+    }
+
+    public void setOracleTypeMethodMetadata(List<TypeMethodMetadata> oracleTypeMethodMetadata) {
+        this.oracleTypeMethodMetadata = oracleTypeMethodMetadata;
+    }
+
+    public List<TypeMethodMetadata> getPostgresTypeMethodMetadata() {
+        return postgresTypeMethodMetadata;
+    }
+
+    public void setPostgresTypeMethodMetadata(List<TypeMethodMetadata> postgresTypeMethodMetadata) {
+        this.postgresTypeMethodMetadata = postgresTypeMethodMetadata;
+    }
+
+    public TypeMethodStubCreationResult getTypeMethodStubCreationResult() {
+        return typeMethodStubCreationResult;
+    }
+
+    public void setTypeMethodStubCreationResult(TypeMethodStubCreationResult typeMethodStubCreationResult) {
+        this.typeMethodStubCreationResult = typeMethodStubCreationResult;
+    }
+
     public ConstraintCreationResult getConstraintCreationResult() {
         return constraintCreationResult;
     }
@@ -299,6 +359,12 @@ public class StateService {
         this.oracleViewDefinitionMetadata = new ArrayList<>();
         this.postgresViewDefinitionMetadata = new ArrayList<>();
         this.viewStubCreationResult = null;
+        this.oracleFunctionMetadata = new ArrayList<>();
+        this.postgresFunctionMetadata = new ArrayList<>();
+        this.functionStubCreationResult = null;
+        this.oracleTypeMethodMetadata = new ArrayList<>();
+        this.postgresTypeMethodMetadata = new ArrayList<>();
+        this.typeMethodStubCreationResult = null;
         this.constraintCreationResult = null;
         this.fkIndexCreationResult = null;
         this.dataTransferResult = null;

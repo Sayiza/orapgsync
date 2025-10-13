@@ -104,6 +104,25 @@ Each database element type is completely independent:
 - Piped streaming architecture (producer-consumer) for memory-efficient transfer
 - Automatic table truncation and row count validation
 
+**Views** (`viewdefinition/`):
+- `ViewDefinitionMetadata`: Data model for view structure (columns only, not SQL definition)
+- `OracleViewDefinitionExtractionJob`: Extracts Oracle view column metadata from ALL_TAB_COLUMNS
+- `PostgresViewDefinitionExtractionJob`: Extracts PostgreSQL view column metadata
+- `PostgresViewStubCreationJob`: Creates PostgreSQL view stubs (empty result set views)
+- `ViewStubCreationResult`: Tracks created/skipped/failed view stubs
+- View stubs enable dependency resolution for functions/procedures before full view migration
+
+**Functions and Procedures** (`function/`):
+- `FunctionMetadata`: Data model for functions and procedures (standalone and package members)
+- `FunctionParameter`: Parameter metadata with IN/OUT/INOUT modes and custom type support
+- `OracleFunctionExtractionJob`: Extracts Oracle function/procedure signatures from ALL_ARGUMENTS
+- `PostgresFunctionStubCreationJob`: Creates PostgreSQL function/procedure stubs (empty implementations)
+- `PostgresFunctionStubVerificationJob`: Verifies created function/procedure stubs
+- `FunctionStubCreationResult`: Tracks created/skipped/failed function/procedure stubs
+- `OracleFunctionExtractor`: Database-specific extraction logic for functions/procedures
+- Naming convention: Package members use `packagename__functionname` (double underscore)
+- Function stubs return NULL, procedure stubs have empty body with comments indicating original Oracle location
+
 #### 4. **Cross-Cutting Concerns** (`core/`)
 - `TypeConverter`: Oracle-to-PostgreSQL data type mapping
 - `OracleTypeClassifier`: Identifies complex Oracle system types requiring jsonb
@@ -237,15 +256,30 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
   - Existing constraint detection to avoid duplicates
   - Comprehensive error tracking and reporting
   - NOT NULL constraints applied during table creation
+- **View stub creation (Oracle → PostgreSQL)** - Full implementation with:
+  - View definition extraction (column metadata from ALL_TAB_COLUMNS)
+  - PostgreSQL view stub creation with correct column structure
+  - Empty result set pattern: `SELECT NULL::type AS col1, ... WHERE false`
+  - Support for custom types, XMLTYPE, and complex Oracle system types
+  - Enables dependency resolution for future function/procedure migration
+- **Function/Procedure stub creation (Oracle → PostgreSQL)** - Full implementation with:
+  - Function/procedure signature extraction (standalone and package members)
+  - Parameter metadata extraction with IN/OUT/INOUT modes
+  - PostgreSQL stub creation with empty implementations (functions return NULL)
+  - Package member naming convention: `packagename__functionname`
+  - Support for custom parameter types and return types
+  - Stub verification job to validate created stubs
+  - Enables cross-referencing and dependency resolution before full PL/SQL migration
 - Generic REST API for job management
 - Database connection management and testing
 - Configuration management with UI
 
 ### 🔄 Ready for Implementation
-- View metadata extraction and creation
+- Full view migration (SQL definition conversion)
 - Index metadata extraction and creation
 - Trigger migration
-- Stored procedure migration (PL/SQL → PL/pgSQL)
+- Full PL/SQL to PL/pgSQL conversion (functions/procedures with actual logic)
+- Type member functions and procedures (object type methods)
 
 ### 🎯 Extension Points
 - New job types: Implement `DatabaseExtractionJob<T>`
@@ -462,3 +496,270 @@ Before creating PostgreSQL composite types, `PostgresObjectTypeCreationJob` norm
 
 **Important Note:**
 Synonyms are only relevant for object type attributes. Table columns in Oracle cannot use synonyms - Oracle always stores the actual type name and owner in table metadata.
+
+## Stub Implementation Strategy for Dependency Resolution
+
+### Overview and Rationale
+
+Oracle database objects often have complex interdependencies that can create circular reference problems during migration. To handle this, the application implements a **stub-first migration strategy** where structural placeholders are created before implementing full logic.
+
+**Why Stubs?**
+- **Dependency Resolution**: Functions may reference views, views may reference functions, and both may reference object types
+- **Incremental Migration**: Allows migration of structure before implementing complex PL/SQL logic
+- **Error Prevention**: Avoids "object does not exist" errors when creating dependent objects
+- **Testing**: Enables structural validation before logic migration
+- **Phased Approach**: Separates structural migration (can be automated) from logic migration (requires analysis)
+
+### Migration Phases for Complex Objects
+
+The migration follows a structured approach across multiple phases:
+
+#### Phase 1: Foundational Objects (✅ Completed)
+1. **Schemas**: Create PostgreSQL schemas
+2. **Object Types**: Create PostgreSQL composite types with dependency ordering
+3. **Sequences**: Create PostgreSQL sequences
+4. **Tables**: Create tables WITHOUT constraints (structure only)
+5. **Data Transfer**: Bulk copy data using PostgreSQL COPY
+6. **Constraints**: Add constraints in dependency order (PK → UK → FK → CHECK)
+
+#### Phase 2: Structural Stubs (✅ Completed)
+7. **View Stubs**: Create views with correct column structure but empty result sets
+8. **Function/Procedure Stubs**: Create functions/procedures with correct signatures but empty implementations
+
+#### Phase 3: Full Implementation (🔄 Future)
+9. **View Definitions**: Replace view stubs with actual SQL logic (Oracle SQL → PostgreSQL SQL conversion)
+10. **Function/Procedure Logic**: Replace stubs with actual PL/pgSQL logic (PL/SQL → PL/pgSQL conversion using ANTLR)
+11. **Type Member Functions**: Add methods to composite types (if needed)
+12. **Triggers**: Migrate Oracle triggers to PostgreSQL triggers
+13. **Packages**: Decompose Oracle packages into PostgreSQL schemas/functions
+
+### View Stub Implementation
+
+**Purpose**: Create views with correct column structure that return empty result sets
+
+**Implementation Pattern:**
+```sql
+CREATE VIEW schema.viewname AS
+SELECT
+    NULL::integer AS id,
+    NULL::text AS name,
+    NULL::timestamp AS created_at
+WHERE false  -- Ensures empty result set
+```
+
+**Key Features:**
+- Extracts column metadata from Oracle's `ALL_TAB_COLUMNS` view
+- Applies type mapping strategy (custom types → composite, complex system types → jsonb, built-in → direct mapping)
+- Uses `WHERE false` clause to guarantee empty result set
+- Preserves column names and data types accurately
+- Enables functions/procedures to reference views without errors
+
+**Code Location:**
+- `OracleViewDefinitionExtractionJob`: Extracts view column metadata
+- `PostgresViewStubCreationJob.generateCreateViewStubSQL()` (lines 236-256): Generates stub SQL
+- `PostgresViewStubCreationJob.generateViewStubColumnDefinition()` (lines 262-309): Maps column types
+
+**Example:**
+```java
+// Oracle view
+CREATE VIEW employees_v AS
+SELECT employee_id, name, address_obj, created_at
+FROM employees
+WHERE department_id = 10;
+
+// PostgreSQL stub (structure only)
+CREATE VIEW hr.employees_v AS
+SELECT
+    NULL::numeric AS employee_id,
+    NULL::text AS name,
+    NULL::hr.address_type AS address_obj,  -- User-defined composite type
+    NULL::timestamp AS created_at
+WHERE false;
+```
+
+### Function/Procedure Stub Implementation
+
+**Purpose**: Create functions and procedures with correct signatures but empty implementations
+
+**Implementation Pattern:**
+```sql
+-- Function stub (returns NULL)
+CREATE OR REPLACE FUNCTION schema.function_name(
+    IN param1 text,
+    OUT param2 integer
+) RETURNS integer AS $$
+BEGIN
+    RETURN NULL; -- Stub: Original Oracle function SCHEMA.FUNCTION_NAME
+END;
+$$ LANGUAGE plpgsql;
+
+-- Procedure stub (empty body)
+CREATE OR REPLACE PROCEDURE schema.procedure_name(
+    IN param1 text,
+    INOUT param2 integer
+) AS $$
+BEGIN
+    -- Stub: Original Oracle procedure SCHEMA.PROCEDURE_NAME
+END;
+$$ LANGUAGE plpgsql;
+```
+
+**Key Features:**
+- Extracts function/procedure signatures from Oracle's `ALL_ARGUMENTS` view
+- Supports standalone functions/procedures and package members
+- Package member naming: `schema.packagename__functionname` (double underscore separator)
+- Handles IN/OUT/INOUT parameter modes correctly
+- Maps custom return types and parameter types (composite types, jsonb for complex system types)
+- Functions return NULL, procedures have empty body
+- Includes comments indicating original Oracle location
+
+**Code Location:**
+- `OracleFunctionExtractionJob`: Extracts function/procedure metadata from ALL_ARGUMENTS
+- `PostgresFunctionStubCreationJob.generateCreateFunctionStubSQL()` (lines 241-293): Generates stub SQL
+- `PostgresFunctionStubCreationJob.generateParameterDefinition()` (lines 298-350): Maps parameter types
+- `PostgresFunctionStubCreationJob.mapReturnType()` (lines 355-388): Maps return types
+
+**Package Member Handling:**
+Oracle packages group related functions and procedures. PostgreSQL doesn't have packages, so:
+- Package members are flattened into schema-level functions/procedures
+- Naming convention: `packagename__functionname` (double underscore)
+- Example: `HR.EMP_PKG.GET_SALARY` → `hr.emp_pkg__get_salary`
+
+**Example:**
+```java
+// Oracle standalone function
+CREATE FUNCTION hr.calculate_bonus(emp_id NUMBER) RETURN NUMBER IS
+BEGIN
+    RETURN emp_id * 0.1;
+END;
+
+// PostgreSQL stub
+CREATE OR REPLACE FUNCTION hr.calculate_bonus(IN emp_id numeric) RETURNS numeric AS $$
+BEGIN
+    RETURN NULL; -- Stub: Original Oracle function HR.CALCULATE_BONUS
+END;
+$$ LANGUAGE plpgsql;
+
+// Oracle package member
+CREATE PACKAGE hr.emp_pkg IS
+    FUNCTION get_salary(emp_id NUMBER) RETURN NUMBER;
+END;
+
+// PostgreSQL stub (package flattened)
+CREATE OR REPLACE FUNCTION hr.emp_pkg__get_salary(IN emp_id numeric) RETURNS numeric AS $$
+BEGIN
+    RETURN NULL; -- Stub: Original Oracle function HR.EMP_PKG.GET_SALARY
+END;
+$$ LANGUAGE plpgsql;
+```
+
+### Type Mapping in Stubs
+
+Stubs use the same type mapping strategy as tables:
+
+1. **Built-in Oracle Types**: Direct mapping via `TypeConverter.toPostgre()`
+   - `NUMBER` → `numeric`, `VARCHAR2` → `text`, `DATE` → `timestamp`, etc.
+
+2. **User-Defined Object Types**: Use PostgreSQL composite types
+   - `HR.ADDRESS_TYPE` → `hr.address_type`
+   - Requires object types to be created first
+
+3. **Complex Oracle System Types**: Use `jsonb` serialization
+   - `SYS.ANYDATA`, `SYS.XMLTYPE`, `SYS.AQ$_*` → `jsonb`
+   - Exception: `XMLTYPE` can also map to PostgreSQL `xml` type in some contexts
+
+4. **Special Case - XMLTYPE**: Context-dependent mapping
+   - View columns: `xml` type (direct mapping)
+   - Function returns: `xml` type
+   - Table columns: `jsonb` (for consistency with complex type strategy)
+
+### Stub Verification Jobs
+
+Both view and function stubs have corresponding verification jobs:
+
+**`PostgresViewStubVerificationJob`**: (if implemented)
+- Verifies view stubs exist in PostgreSQL
+- Checks column structure matches metadata
+
+**`PostgresFunctionStubVerificationJob`**:
+- Verifies function/procedure stubs exist in PostgreSQL
+- Checks signatures match metadata
+- Located in `function/job/PostgresFunctionStubVerificationJob.java`
+
+### Migration Workflow with Stubs
+
+**Recommended Migration Order:**
+1. Extract Oracle metadata (schemas, tables, object types, sequences, views, functions)
+2. Create PostgreSQL schemas
+3. Create PostgreSQL object types (with dependency ordering)
+4. Create PostgreSQL sequences
+5. Create PostgreSQL tables (without constraints)
+6. **Create view stubs** ← Enables functions to reference views
+7. **Create function/procedure stubs** ← Enables views to reference functions
+8. Transfer data
+9. Create constraints
+10. *(Future)* Replace view stubs with actual SQL
+11. *(Future)* Replace function/procedure stubs with actual PL/pgSQL logic
+
+**Dependency Benefits:**
+- Views can reference functions (stubs already exist)
+- Functions can reference views (stubs already exist)
+- Functions can reference other functions (stubs already exist)
+- Circular dependencies are resolved structurally
+
+### Future: Type Member Functions (Not Yet Implemented)
+
+Oracle object types can have member functions and procedures:
+```sql
+CREATE TYPE employee_type AS OBJECT (
+    emp_id NUMBER,
+    name VARCHAR2(100),
+    MEMBER FUNCTION get_bonus RETURN NUMBER
+);
+```
+
+**Planned Implementation:**
+- Extract type member signatures from `ALL_TYPE_METHODS` and `ALL_METHOD_PARAMS`
+- Create PostgreSQL functions with naming: `typename__methodname` or separate schema
+- Member functions have implicit SELF parameter (first parameter is the type itself)
+- Similar stub pattern: correct signature, return NULL or empty body
+
+### State Management for Stubs
+
+**StateService Properties:**
+```java
+// View stubs
+List<ViewDefinitionMetadata> oracleViewDefinitionMetadata;
+List<ViewDefinitionMetadata> postgresViewDefinitionMetadata;
+ViewStubCreationResult viewStubCreationResult;
+
+// Function/procedure stubs
+List<FunctionMetadata> oracleFunctionMetadata;
+List<FunctionMetadata> postgresFunctionMetadata;
+FunctionStubCreationResult functionStubCreationResult;
+```
+
+### REST API Endpoints for Stubs
+
+**View Stubs:**
+- `POST /api/jobs/oracle/view_definition/extract` - Extract Oracle view column metadata
+- `POST /api/jobs/postgres/view_stub_creation/create` - Create PostgreSQL view stubs
+- `POST /api/jobs/postgres/view_definition/extract` - Extract PostgreSQL view metadata (verification)
+
+**Function/Procedure Stubs:**
+- `POST /api/jobs/oracle/function/extract` - Extract Oracle function/procedure signatures
+- `POST /api/jobs/postgres/function_stub_creation/create` - Create PostgreSQL function/procedure stubs
+- `POST /api/jobs/postgres/function_stub_verification/verify` - Verify created stubs
+
+### Summary
+
+The stub implementation strategy provides a robust foundation for handling complex Oracle database migrations:
+
+✅ **Structural Migration First**: Create all object structures before implementing logic
+✅ **Dependency Resolution**: Avoid circular dependency errors by creating stubs
+✅ **Incremental Approach**: Migrate structure (automated) before logic (manual/ANTLR)
+✅ **Type Safety**: Proper type mapping ensures PostgreSQL can validate references
+✅ **Verification**: Stub verification jobs ensure structural correctness
+✅ **Future-Proof**: Enables later replacement with actual implementations
+
+This approach is especially valuable for large Oracle databases with extensive PL/SQL codebases, where full logic migration requires careful analysis and conversion.

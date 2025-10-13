@@ -24,6 +24,10 @@ import me.christianrobert.orapgsync.core.job.model.table.ConstraintCreationResul
 import me.christianrobert.orapgsync.core.job.model.table.FKIndexCreationResult;
 import me.christianrobert.orapgsync.core.job.model.viewdefinition.ViewDefinitionMetadata;
 import me.christianrobert.orapgsync.core.job.model.viewdefinition.ViewStubCreationResult;
+import me.christianrobert.orapgsync.core.job.model.function.FunctionMetadata;
+import me.christianrobert.orapgsync.core.job.model.function.FunctionStubCreationResult;
+import me.christianrobert.orapgsync.core.job.model.typemethod.TypeMethodMetadata;
+import me.christianrobert.orapgsync.core.job.model.typemethod.TypeMethodStubCreationResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -315,6 +319,28 @@ public class JobResource {
                 response.put("errorCount", viewStubResult.getErrorCount());
                 response.put("isSuccessful", viewStubResult.isSuccessful());
                 response.put("result", result); // Include raw result for frontend compatibility
+            } else if (result instanceof FunctionStubCreationResult) {
+                // Handle function stub creation results
+                FunctionStubCreationResult functionStubResult = (FunctionStubCreationResult) result;
+
+                Map<String, Object> summary = generateFunctionStubCreationSummary(functionStubResult);
+                response.put("summary", summary);
+                response.put("createdCount", functionStubResult.getCreatedCount());
+                response.put("skippedCount", functionStubResult.getSkippedCount());
+                response.put("errorCount", functionStubResult.getErrorCount());
+                response.put("isSuccessful", functionStubResult.isSuccessful());
+                response.put("result", result); // Include raw result for frontend compatibility
+            } else if (result instanceof TypeMethodStubCreationResult) {
+                // Handle type method stub creation results
+                TypeMethodStubCreationResult typeMethodStubResult = (TypeMethodStubCreationResult) result;
+
+                Map<String, Object> summary = generateTypeMethodStubCreationSummary(typeMethodStubResult);
+                response.put("summary", summary);
+                response.put("createdCount", typeMethodStubResult.getCreatedCount());
+                response.put("skippedCount", typeMethodStubResult.getSkippedCount());
+                response.put("errorCount", typeMethodStubResult.getErrorCount());
+                response.put("isSuccessful", typeMethodStubResult.isSuccessful());
+                response.put("result", result); // Include raw result for frontend compatibility
             } else if (result instanceof List<?>) {
                 // Handle List results based on jobType
                 if (jobType.contains("SCHEMA") && !jobType.contains("SCHEMA_CREATION")) {
@@ -387,6 +413,24 @@ public class JobResource {
                     Map<String, Object> summary = generateViewDefinitionSummary(viewDefinitions);
                     response.put("summary", summary);
                     response.put("viewDefinitionCount", viewDefinitions.size());
+                    response.put("result", result); // Include raw result for frontend compatibility
+                } else if (jobType.contains("FUNCTION") && !jobType.contains("FUNCTION_STUB_CREATION")) {
+                    // Handle function/procedure extraction/verification results (NOT creation)
+                    @SuppressWarnings("unchecked")
+                    List<FunctionMetadata> functions = (List<FunctionMetadata>) result;
+
+                    Map<String, Object> summary = generateFunctionSummary(functions);
+                    response.put("summary", summary);
+                    response.put("functionCount", functions.size());
+                    response.put("result", result); // Include raw result for frontend compatibility
+                } else if (jobType.contains("TYPE_METHOD") && !jobType.contains("TYPE_METHOD_STUB_CREATION")) {
+                    // Handle type method extraction/verification results (NOT creation)
+                    @SuppressWarnings("unchecked")
+                    List<TypeMethodMetadata> typeMethods = (List<TypeMethodMetadata>) result;
+
+                    Map<String, Object> summary = generateTypeMethodSummary(typeMethods);
+                    response.put("summary", summary);
+                    response.put("typeMethodCount", typeMethods.size());
                     response.put("result", result); // Include raw result for frontend compatibility
                 } else {
                     // Generic list result
@@ -797,6 +841,42 @@ public class JobResource {
         return startJob("POSTGRES", "VIEW_STUB_CREATION", "PostgreSQL view stub creation");
     }
 
+    @POST
+    @Path("/oracle/function/extract")
+    public Response startOracleFunctionExtraction() {
+        return startExtractionJob("ORACLE", "FUNCTION", "Oracle function/procedure extraction");
+    }
+
+    @POST
+    @Path("/postgres/function-verification/extract")
+    public Response startPostgresFunctionVerification() {
+        return startExtractionJob("POSTGRES", "FUNCTION_VERIFICATION", "PostgreSQL function/procedure verification");
+    }
+
+    @POST
+    @Path("/postgres/function-stub-creation/create")
+    public Response startPostgresFunctionStubCreation() {
+        return startJob("POSTGRES", "FUNCTION_STUB_CREATION", "PostgreSQL function stub creation");
+    }
+
+    @POST
+    @Path("/oracle/type-method/extract")
+    public Response startOracleTypeMethodExtraction() {
+        return startExtractionJob("ORACLE", "TYPE_METHOD", "Oracle type method extraction");
+    }
+
+    @POST
+    @Path("/postgres/type-method-verification/extract")
+    public Response startPostgresTypeMethodVerification() {
+        return startExtractionJob("POSTGRES", "TYPE_METHOD_STUB_VERIFICATION", "PostgreSQL type method stub verification");
+    }
+
+    @POST
+    @Path("/postgres/type-method-stub-creation/create")
+    public Response startPostgresTypeMethodStubCreation() {
+        return startJob("POSTGRES", "TYPE_METHOD_STUB_CREATION", "PostgreSQL type method stub creation");
+    }
+
     private Map<String, Object> generateDataTransferSummary(DataTransferResult transferResult) {
         Map<String, Object> transferredDetails = new HashMap<>();
         Map<String, Object> skippedDetails = new HashMap<>();
@@ -1111,6 +1191,182 @@ public class JobResource {
                 "executionTimestamp", viewStubResult.getExecutionTimestamp(),
                 "createdViews", createdDetails,
                 "skippedViews", skippedDetails,
+                "errors", errorDetails
+        );
+    }
+
+    private Map<String, Object> generateFunctionSummary(List<FunctionMetadata> functions) {
+        Map<String, Integer> schemaFunctionCounts = new HashMap<>();
+        int totalParameters = 0;
+        long functionCount = 0;
+        long procedureCount = 0;
+        long standaloneCount = 0;
+        long packageMemberCount = 0;
+
+        for (FunctionMetadata function : functions) {
+            String schema = function.getSchema();
+            schemaFunctionCounts.put(schema, schemaFunctionCounts.getOrDefault(schema, 0) + 1);
+            totalParameters += function.getParameters().size();
+
+            if (function.isFunction()) {
+                functionCount++;
+            } else {
+                procedureCount++;
+            }
+
+            if (function.isStandalone()) {
+                standaloneCount++;
+            } else {
+                packageMemberCount++;
+            }
+        }
+
+        return Map.of(
+                "totalFunctions", functions.size(),
+                "totalParameters", totalParameters,
+                "functionCount", functionCount,
+                "procedureCount", procedureCount,
+                "standaloneCount", standaloneCount,
+                "packageMemberCount", packageMemberCount,
+                "schemaFunctionCounts", schemaFunctionCounts,
+                "message", String.format("Extraction completed: %d functions/procedures (%d functions, %d procedures) from %d schemas",
+                        functions.size(), functionCount, procedureCount, schemaFunctionCounts.size())
+        );
+    }
+
+    private Map<String, Object> generateFunctionStubCreationSummary(FunctionStubCreationResult functionStubResult) {
+        Map<String, Object> createdDetails = new HashMap<>();
+        Map<String, Object> skippedDetails = new HashMap<>();
+        Map<String, Object> errorDetails = new HashMap<>();
+
+        // Created function stubs details
+        for (String functionName : functionStubResult.getCreatedFunctions()) {
+            createdDetails.put(functionName, Map.of(
+                    "functionName", functionName,
+                    "status", "created",
+                    "timestamp", functionStubResult.getExecutionDateTime().toString()
+            ));
+        }
+
+        // Skipped function stubs details
+        for (String functionName : functionStubResult.getSkippedFunctions()) {
+            skippedDetails.put(functionName, Map.of(
+                    "functionName", functionName,
+                    "status", "skipped",
+                    "reason", "already exists"
+            ));
+        }
+
+        // Error details
+        for (FunctionStubCreationResult.FunctionCreationError error : functionStubResult.getErrors()) {
+            errorDetails.put(error.getFunctionName(), Map.of(
+                    "functionName", error.getFunctionName(),
+                    "status", "error",
+                    "error", error.getErrorMessage(),
+                    "sql", error.getSqlStatement()
+            ));
+        }
+
+        return Map.of(
+                "totalProcessed", functionStubResult.getTotalProcessed(),
+                "createdCount", functionStubResult.getCreatedCount(),
+                "skippedCount", functionStubResult.getSkippedCount(),
+                "errorCount", functionStubResult.getErrorCount(),
+                "isSuccessful", functionStubResult.isSuccessful(),
+                "executionTimestamp", functionStubResult.getExecutionTimestamp(),
+                "createdFunctions", createdDetails,
+                "skippedFunctions", skippedDetails,
+                "errors", errorDetails
+        );
+    }
+
+    private Map<String, Object> generateTypeMethodSummary(List<TypeMethodMetadata> typeMethods) {
+        Map<String, Integer> schemaTypeMethodCounts = new HashMap<>();
+        int totalParameters = 0;
+        long memberMethodCount = 0;
+        long staticMethodCount = 0;
+        long functionCount = 0;
+        long procedureCount = 0;
+
+        for (TypeMethodMetadata method : typeMethods) {
+            String schema = method.getSchema();
+            schemaTypeMethodCounts.put(schema, schemaTypeMethodCounts.getOrDefault(schema, 0) + 1);
+            totalParameters += method.getParameters().size();
+
+            if (method.isMemberMethod()) {
+                memberMethodCount++;
+            } else if (method.isStaticMethod()) {
+                staticMethodCount++;
+            }
+
+            if (method.isFunction()) {
+                functionCount++;
+            } else if (method.isProcedure()) {
+                procedureCount++;
+            }
+        }
+
+        return Map.of(
+                "totalTypeMethods", typeMethods.size(),
+                "totalParameters", totalParameters,
+                "memberMethodCount", memberMethodCount,
+                "staticMethodCount", staticMethodCount,
+                "functionCount", functionCount,
+                "procedureCount", procedureCount,
+                "schemaTypeMethodCounts", schemaTypeMethodCounts,
+                "message", String.format("Extraction completed: %d type methods (%d member, %d static, %d functions, %d procedures) from %d schemas",
+                        typeMethods.size(), memberMethodCount, staticMethodCount, functionCount, procedureCount, schemaTypeMethodCounts.size())
+        );
+    }
+
+    private Map<String, Object> generateTypeMethodStubCreationSummary(TypeMethodStubCreationResult typeMethodStubResult) {
+        Map<String, Object> createdDetails = new HashMap<>();
+        Map<String, Object> skippedDetails = new HashMap<>();
+        Map<String, Object> errorDetails = new HashMap<>();
+
+        // Created type method stubs details
+        for (String methodName : typeMethodStubResult.getCreatedMethods()) {
+            createdDetails.put(methodName, Map.of(
+                    "methodName", methodName,
+                    "status", "created",
+                    "timestamp", typeMethodStubResult.getExecutionDateTime().toString()
+            ));
+        }
+
+        // Skipped type method stubs details
+        for (String methodName : typeMethodStubResult.getSkippedMethods()) {
+            skippedDetails.put(methodName, Map.of(
+                    "methodName", methodName,
+                    "status", "skipped",
+                    "reason", "already exists"
+            ));
+        }
+
+        // Error details
+        for (Map.Entry<String, String> entry : typeMethodStubResult.getErrors().entrySet()) {
+            String methodName = entry.getKey();
+            String error = entry.getValue();
+            String sql = typeMethodStubResult.getFailedSqlStatements().get(methodName);
+
+            Map<String, Object> errorInfo = new HashMap<>();
+            errorInfo.put("methodName", methodName);
+            errorInfo.put("status", "error");
+            errorInfo.put("error", error);
+            if (sql != null) {
+                errorInfo.put("sql", sql);
+            }
+            errorDetails.put(methodName, errorInfo);
+        }
+
+        return Map.of(
+                "totalProcessed", typeMethodStubResult.getTotalProcessed(),
+                "createdCount", typeMethodStubResult.getCreatedCount(),
+                "skippedCount", typeMethodStubResult.getSkippedCount(),
+                "errorCount", typeMethodStubResult.getErrorCount(),
+                "isSuccessful", !typeMethodStubResult.hasErrors(),
+                "executionTimestamp", java.time.LocalDateTime.now().toString(),
+                "createdMethods", createdDetails,
+                "skippedMethods", skippedDetails,
                 "errors", errorDetails
         );
     }
