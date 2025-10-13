@@ -22,6 +22,8 @@ import me.christianrobert.orapgsync.core.job.model.sequence.SequenceCreationResu
 import me.christianrobert.orapgsync.core.job.model.table.ConstraintMetadata;
 import me.christianrobert.orapgsync.core.job.model.table.ConstraintCreationResult;
 import me.christianrobert.orapgsync.core.job.model.table.FKIndexCreationResult;
+import me.christianrobert.orapgsync.core.job.model.viewdefinition.ViewDefinitionMetadata;
+import me.christianrobert.orapgsync.core.job.model.viewdefinition.ViewStubCreationResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -302,6 +304,17 @@ public class JobResource {
                 response.put("totalRowsTransferred", transferResult.getTotalRowsTransferred());
                 response.put("isSuccessful", transferResult.isSuccessful());
                 response.put("result", result); // Include raw result for frontend compatibility
+            } else if (result instanceof ViewStubCreationResult) {
+                // Handle view stub creation results
+                ViewStubCreationResult viewStubResult = (ViewStubCreationResult) result;
+
+                Map<String, Object> summary = generateViewStubCreationSummary(viewStubResult);
+                response.put("summary", summary);
+                response.put("createdCount", viewStubResult.getCreatedCount());
+                response.put("skippedCount", viewStubResult.getSkippedCount());
+                response.put("errorCount", viewStubResult.getErrorCount());
+                response.put("isSuccessful", viewStubResult.isSuccessful());
+                response.put("result", result); // Include raw result for frontend compatibility
             } else if (result instanceof List<?>) {
                 // Handle List results based on jobType
                 if (jobType.contains("SCHEMA") && !jobType.contains("SCHEMA_CREATION")) {
@@ -365,6 +378,15 @@ public class JobResource {
                     Map<String, Object> summary = generateConstraintSummary(constraints);
                     response.put("summary", summary);
                     response.put("constraintCount", constraints.size());
+                    response.put("result", result); // Include raw result for frontend compatibility
+                } else if (jobType.contains("VIEW_DEFINITION")) {
+                    // Handle view definition extraction results
+                    @SuppressWarnings("unchecked")
+                    List<ViewDefinitionMetadata> viewDefinitions = (List<ViewDefinitionMetadata>) result;
+
+                    Map<String, Object> summary = generateViewDefinitionSummary(viewDefinitions);
+                    response.put("summary", summary);
+                    response.put("viewDefinitionCount", viewDefinitions.size());
                     response.put("result", result); // Include raw result for frontend compatibility
                 } else {
                     // Generic list result
@@ -757,6 +779,24 @@ public class JobResource {
         return startJob("POSTGRES", "FK_INDEX_CREATION", "PostgreSQL FK index creation");
     }
 
+    @POST
+    @Path("/view-definition/oracle/extract")
+    public Response startOracleViewDefinitionExtraction() {
+        return startExtractionJob("ORACLE", "VIEW_DEFINITION", "Oracle view definition extraction");
+    }
+
+    @POST
+    @Path("/view-definition/postgres/extract")
+    public Response startPostgresViewDefinitionExtraction() {
+        return startExtractionJob("POSTGRES", "VIEW_DEFINITION", "PostgreSQL view definition extraction");
+    }
+
+    @POST
+    @Path("/postgres/view_stub/create")
+    public Response startPostgresViewStubCreation() {
+        return startJob("POSTGRES", "VIEW_STUB_CREATION", "PostgreSQL view stub creation");
+    }
+
     private Map<String, Object> generateDataTransferSummary(DataTransferResult transferResult) {
         Map<String, Object> transferredDetails = new HashMap<>();
         Map<String, Object> skippedDetails = new HashMap<>();
@@ -1006,6 +1046,71 @@ public class JobResource {
                 "executionTimestamp", fkIndexResult.getExecutionTimestamp(),
                 "createdIndexes", createdDetails,
                 "skippedIndexes", skippedDetails,
+                "errors", errorDetails
+        );
+    }
+
+    private Map<String, Object> generateViewDefinitionSummary(List<ViewDefinitionMetadata> viewDefinitions) {
+        Map<String, Integer> schemaViewCounts = new HashMap<>();
+        int totalColumns = 0;
+
+        for (ViewDefinitionMetadata view : viewDefinitions) {
+            String schema = view.getSchema();
+            schemaViewCounts.put(schema, schemaViewCounts.getOrDefault(schema, 0) + 1);
+            totalColumns += view.getColumns().size();
+        }
+
+        return Map.of(
+                "totalViews", viewDefinitions.size(),
+                "totalColumns", totalColumns,
+                "schemaViewCounts", schemaViewCounts,
+                "message", String.format("Extraction completed: %d views with %d columns from %d schemas",
+                        viewDefinitions.size(), totalColumns, schemaViewCounts.size())
+        );
+    }
+
+    private Map<String, Object> generateViewStubCreationSummary(ViewStubCreationResult viewStubResult) {
+        Map<String, Object> createdDetails = new HashMap<>();
+        Map<String, Object> skippedDetails = new HashMap<>();
+        Map<String, Object> errorDetails = new HashMap<>();
+
+        // Created view stubs details
+        for (String viewName : viewStubResult.getCreatedViews()) {
+            createdDetails.put(viewName, Map.of(
+                    "viewName", viewName,
+                    "status", "created",
+                    "timestamp", viewStubResult.getExecutionDateTime().toString()
+            ));
+        }
+
+        // Skipped view stubs details
+        for (String viewName : viewStubResult.getSkippedViews()) {
+            skippedDetails.put(viewName, Map.of(
+                    "viewName", viewName,
+                    "status", "skipped",
+                    "reason", "already exists"
+            ));
+        }
+
+        // Error details
+        for (ViewStubCreationResult.ViewCreationError error : viewStubResult.getErrors()) {
+            errorDetails.put(error.getViewName(), Map.of(
+                    "viewName", error.getViewName(),
+                    "status", "error",
+                    "error", error.getErrorMessage(),
+                    "sql", error.getSqlStatement()
+            ));
+        }
+
+        return Map.of(
+                "totalProcessed", viewStubResult.getTotalProcessed(),
+                "createdCount", viewStubResult.getCreatedCount(),
+                "skippedCount", viewStubResult.getSkippedCount(),
+                "errorCount", viewStubResult.getErrorCount(),
+                "isSuccessful", viewStubResult.isSuccessful(),
+                "executionTimestamp", viewStubResult.getExecutionTimestamp(),
+                "createdViews", createdDetails,
+                "skippedViews", skippedDetails,
                 "errors", errorDetails
         );
     }

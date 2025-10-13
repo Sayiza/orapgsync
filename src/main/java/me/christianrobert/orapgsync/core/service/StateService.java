@@ -13,6 +13,8 @@ import me.christianrobert.orapgsync.core.job.model.table.TableCreationResult;
 import me.christianrobert.orapgsync.core.job.model.table.TableMetadata;
 import me.christianrobert.orapgsync.core.job.model.sequence.SequenceMetadata;
 import me.christianrobert.orapgsync.core.job.model.sequence.SequenceCreationResult;
+import me.christianrobert.orapgsync.core.job.model.viewdefinition.ViewDefinitionMetadata;
+import me.christianrobert.orapgsync.core.job.model.viewdefinition.ViewStubCreationResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -56,6 +58,10 @@ public class StateService {
     List<SequenceMetadata> oracleSequenceMetadata = new ArrayList<>();
     List<SequenceMetadata> postgresSequenceMetadata = new ArrayList<>();
     SequenceCreationResult sequenceCreationResult;
+
+    List<ViewDefinitionMetadata> oracleViewDefinitionMetadata = new ArrayList<>();
+    List<ViewDefinitionMetadata> postgresViewDefinitionMetadata = new ArrayList<>();
+    ViewStubCreationResult viewStubCreationResult;
 
     ConstraintCreationResult constraintCreationResult;
 
@@ -233,6 +239,30 @@ public class StateService {
         this.sequenceCreationResult = sequenceCreationResult;
     }
 
+    public List<ViewDefinitionMetadata> getOracleViewDefinitionMetadata() {
+        return oracleViewDefinitionMetadata;
+    }
+
+    public void setOracleViewDefinitionMetadata(List<ViewDefinitionMetadata> oracleViewDefinitionMetadata) {
+        this.oracleViewDefinitionMetadata = oracleViewDefinitionMetadata;
+    }
+
+    public List<ViewDefinitionMetadata> getPostgresViewDefinitionMetadata() {
+        return postgresViewDefinitionMetadata;
+    }
+
+    public void setPostgresViewDefinitionMetadata(List<ViewDefinitionMetadata> postgresViewDefinitionMetadata) {
+        this.postgresViewDefinitionMetadata = postgresViewDefinitionMetadata;
+    }
+
+    public ViewStubCreationResult getViewStubCreationResult() {
+        return viewStubCreationResult;
+    }
+
+    public void setViewStubCreationResult(ViewStubCreationResult viewStubCreationResult) {
+        this.viewStubCreationResult = viewStubCreationResult;
+    }
+
     public ConstraintCreationResult getConstraintCreationResult() {
         return constraintCreationResult;
     }
@@ -266,6 +296,9 @@ public class StateService {
         this.oracleSequenceMetadata = new ArrayList<>();
         this.postgresSequenceMetadata = new ArrayList<>();
         this.sequenceCreationResult = null;
+        this.oracleViewDefinitionMetadata = new ArrayList<>();
+        this.postgresViewDefinitionMetadata = new ArrayList<>();
+        this.viewStubCreationResult = null;
         this.constraintCreationResult = null;
         this.fkIndexCreationResult = null;
         this.dataTransferResult = null;

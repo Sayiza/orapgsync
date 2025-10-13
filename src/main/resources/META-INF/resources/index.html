@@ -353,12 +353,39 @@
             <div class="component-info" id="oracle-views">
               <span class="count-badge">-</span>
               <span class="component-text">Views found</span>
+              <button class="refresh-btn" onclick="extractOracleViews()" title="Extract Oracle view definitions">⚙</button>
+              <div class="table-list" id="oracle-view-list" style="display: none;">
+                <div class="table-list-header" onclick="toggleViewList('oracle')">
+                  <span class="toggle-indicator">▼</span> Views by Schema
+                </div>
+                <div class="table-items" id="oracle-view-items">
+                  <!-- View metadata will be populated here -->
+                </div>
+              </div>
             </div>
           </td>
           <td class="target-cell">
             <div class="component-info" id="postgres-views">
               <span class="count-badge">-</span>
-              <span class="component-text">Views created</span>
+              <span class="component-text">View stubs created</span>
+              <button class="refresh-btn" onclick="extractPostgresViews()" title="Extract PostgreSQL view definitions">⚙</button>
+              <button class="action-btn" onclick="createPostgresViewStubs()" title="Create PostgreSQL view stubs">Create View Stubs</button>
+              <div class="table-list" id="postgres-view-list" style="display: none;">
+                <div class="table-list-header" onclick="toggleViewList('postgres')">
+                  <span class="toggle-indicator">▼</span> Views by Schema
+                </div>
+                <div class="table-items" id="postgres-view-items">
+                  <!-- View metadata will be populated here -->
+                </div>
+              </div>
+              <div class="table-stub-creation-results" id="postgres-view-stub-creation-results" style="display: none;">
+                <div class="table-stub-creation-header" onclick="toggleViewStubCreationResults('postgres')">
+                  <span class="toggle-indicator">▼</span> View Stub Creation Results
+                </div>
+                <div class="table-stub-creation-details" id="postgres-view-stub-creation-details">
+                  <!-- View stub creation results will be populated here -->
+                </div>
+              </div>
             </div>
           </td>
         </tr>
@@ -484,6 +511,7 @@
 <script src="data-transfer-service.js"></script>
 <script src="constraint-service.js"></script>
 <script src="fk-index-service.js"></script>
+<script src="view-service.js"></script>
 
 <!-- Orchestration Script -->
 <script src="orchestration-service.js"></script>
