@@ -1,4 +1,4 @@
-package me.christianrobert.orapgsync.core.job.model.viewdefinition;
+package me.christianrobert.orapgsync.core.job.model.view;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;

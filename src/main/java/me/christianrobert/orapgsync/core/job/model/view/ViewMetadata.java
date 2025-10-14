@@ -1,4 +1,4 @@
-package me.christianrobert.orapgsync.core.job.model.viewdefinition;
+package me.christianrobert.orapgsync.core.job.model.view;
 
 import me.christianrobert.orapgsync.core.job.model.table.ColumnMetadata;
 
@@ -14,12 +14,12 @@ import java.util.List;
  *
  * This is a pure data model without dependencies on other services.
  */
-public class ViewDefinitionMetadata {
+public class ViewMetadata {
     private String schema; // Database schema (user)
     private String viewName;
     private List<ColumnMetadata> columns;
 
-    public ViewDefinitionMetadata(String schema, String viewName) {
+    public ViewMetadata(String schema, String viewName) {
         this.schema = schema;
         this.viewName = viewName;
         this.columns = new ArrayList<>();
@@ -44,7 +44,7 @@ public class ViewDefinitionMetadata {
 
     @Override
     public String toString() {
-        return "ViewDefinitionMetadata{schema='" + schema + "', viewName='" + viewName +
+        return "ViewMetadata{schema='" + schema + "', viewName='" + viewName +
                "', columns=" + columns.size() + "}";
     }
 }

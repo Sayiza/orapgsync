@@ -1,11 +1,11 @@
-package me.christianrobert.orapgsync.viewdefinition.job;
+package me.christianrobert.orapgsync.view.job;
 
 import jakarta.enterprise.context.Dependent;
 import jakarta.inject.Inject;
 import me.christianrobert.orapgsync.core.job.AbstractDatabaseExtractionJob;
 import me.christianrobert.orapgsync.core.job.model.JobProgress;
 import me.christianrobert.orapgsync.core.job.model.table.ColumnMetadata;
-import me.christianrobert.orapgsync.core.job.model.viewdefinition.ViewDefinitionMetadata;
+import me.christianrobert.orapgsync.core.job.model.view.ViewMetadata;
 import me.christianrobert.orapgsync.database.service.OracleConnectionService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,9 +26,9 @@ import java.util.function.Consumer;
  * The extracted metadata is used to create view stubs in PostgreSQL.
  */
 @Dependent
-public class OracleViewDefinitionExtractionJob extends AbstractDatabaseExtractionJob<ViewDefinitionMetadata> {
+public class OracleViewExtractionJob extends AbstractDatabaseExtractionJob<ViewMetadata> {
 
-    private static final Logger log = LoggerFactory.getLogger(OracleViewDefinitionExtractionJob.class);
+    private static final Logger log = LoggerFactory.getLogger(OracleViewExtractionJob.class);
 
     @Inject
     private OracleConnectionService oracleConnectionService;
@@ -40,21 +40,21 @@ public class OracleViewDefinitionExtractionJob extends AbstractDatabaseExtractio
 
     @Override
     public String getExtractionType() {
-        return "VIEW_DEFINITION";
+        return "VIEW";
     }
 
     @Override
-    public Class<ViewDefinitionMetadata> getResultType() {
-        return ViewDefinitionMetadata.class;
+    public Class<ViewMetadata> getResultType() {
+        return ViewMetadata.class;
     }
 
     @Override
-    protected void saveResultsToState(List<ViewDefinitionMetadata> results) {
-        stateService.setOracleViewDefinitionMetadata(results);
+    protected void saveResultsToState(List<ViewMetadata> results) {
+        stateService.setOracleViewMetadata(results);
     }
 
     @Override
-    protected List<ViewDefinitionMetadata> performExtraction(Consumer<JobProgress> progressCallback) throws Exception {
+    protected List<ViewMetadata> performExtraction(Consumer<JobProgress> progressCallback) throws Exception {
         // Determine which schemas to process based on configuration
         List<String> schemasToProcess = determineSchemasToProcess(progressCallback);
 
@@ -74,7 +74,7 @@ public class OracleViewDefinitionExtractionJob extends AbstractDatabaseExtractio
 
         updateProgress(progressCallback, 5, "Connecting to Oracle", "Establishing database connection");
 
-        List<ViewDefinitionMetadata> allViewDefinitions = new ArrayList<>();
+        List<ViewMetadata> allViewDefinitions = new ArrayList<>();
 
         try (Connection oracleConnection = oracleConnectionService.getConnection()) {
             updateProgress(progressCallback, 10, "Connected", "Successfully connected to Oracle database");
@@ -89,7 +89,7 @@ public class OracleViewDefinitionExtractionJob extends AbstractDatabaseExtractio
                         String.format("Schema %d of %d", processedSchemas + 1, totalSchemas));
 
                 try {
-                    List<ViewDefinitionMetadata> schemaViewDefinitions = extractViewsForSchema(
+                    List<ViewMetadata> schemaViewDefinitions = extractViewsForSchema(
                             oracleConnection, schema, progressCallback, processedSchemas, totalSchemas);
 
                     allViewDefinitions.addAll(schemaViewDefinitions);
@@ -116,16 +116,16 @@ public class OracleViewDefinitionExtractionJob extends AbstractDatabaseExtractio
         }
     }
 
-    private List<ViewDefinitionMetadata> extractViewsForSchema(Connection oracleConnection, String schema,
+    private List<ViewMetadata> extractViewsForSchema(Connection oracleConnection, String schema,
                                                                Consumer<JobProgress> progressCallback,
                                                                int currentSchemaIndex, int totalSchemas) throws SQLException {
-        List<ViewDefinitionMetadata> viewDefinitions = new ArrayList<>();
+        List<ViewMetadata> viewDefinitions = new ArrayList<>();
 
         // First, get all view names for this schema
         List<String> viewNames = fetchViewNames(oracleConnection, schema);
 
         for (String viewName : viewNames) {
-            ViewDefinitionMetadata viewDef = fetchViewDefinition(oracleConnection, schema, viewName);
+            ViewMetadata viewDef = fetchViewDefinition(oracleConnection, schema, viewName);
             if (viewDef != null) {
                 viewDefinitions.add(viewDef);
             }
@@ -149,8 +149,8 @@ public class OracleViewDefinitionExtractionJob extends AbstractDatabaseExtractio
         return result;
     }
 
-    private ViewDefinitionMetadata fetchViewDefinition(Connection oracleConnection, String owner, String viewName) throws SQLException {
-        ViewDefinitionMetadata viewDef = new ViewDefinitionMetadata(owner.toLowerCase(), viewName.toLowerCase());
+    private ViewMetadata fetchViewDefinition(Connection oracleConnection, String owner, String viewName) throws SQLException {
+        ViewMetadata viewDef = new ViewMetadata(owner.toLowerCase(), viewName.toLowerCase());
 
         // Fetch column metadata from ALL_TAB_COLUMNS
         // This view contains columns for both tables and views
@@ -198,11 +198,11 @@ public class OracleViewDefinitionExtractionJob extends AbstractDatabaseExtractio
     }
 
     @Override
-    protected String generateSummaryMessage(List<ViewDefinitionMetadata> results) {
+    protected String generateSummaryMessage(List<ViewMetadata> results) {
         Map<String, Integer> schemaSummary = new HashMap<>();
         int totalColumns = 0;
 
-        for (ViewDefinitionMetadata view : results) {
+        for (ViewMetadata view : results) {
             String schema = view.getSchema();
             schemaSummary.put(schema, schemaSummary.getOrDefault(schema, 0) + 1);
             totalColumns += view.getColumns().size();

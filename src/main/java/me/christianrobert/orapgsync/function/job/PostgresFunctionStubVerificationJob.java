@@ -47,7 +47,7 @@ public class PostgresFunctionStubVerificationJob extends AbstractDatabaseExtract
 
     @Override
     public String getExtractionType() {
-        return "FUNCTION_VERIFICATION";
+        return "FUNCTION_STUB_VERIFICATION";
     }
 
     @Override

@@ -82,7 +82,7 @@ async function extractPostgresFunctions() {
     updateProgress(0, 'Starting PostgreSQL function/procedure extraction');
 
     try {
-        const response = await fetch('/api/jobs/postgres/function-verification/extract', {
+        const response = await fetch('/api/jobs/postgres/function-stub-verification/verify', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -127,7 +127,7 @@ async function createPostgresFunctionStubs() {
     updateProgress(0, 'Starting PostgreSQL function stub creation');
 
     try {
-        const response = await fetch('/api/jobs/postgres/function-stub-creation/create', {
+        const response = await fetch('/api/jobs/postgres/function-stub/create', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -497,15 +497,20 @@ function displayFunctionStubCreationResults(result, database) {
 }
 
 function toggleFunctionList(database) {
-    const listDiv = document.getElementById(`${database}-function-list`);
-    const toggleIndicator = listDiv.querySelector('.toggle-indicator');
+    const functionItems = document.getElementById(`${database}-function-items`);
+    const header = document.querySelector(`#${database}-function-list .table-list-header`);
 
-    if (listDiv.style.display === 'none' || !listDiv.style.display) {
-        listDiv.style.display = 'block';
-        toggleIndicator.textContent = '▲';
+    if (!functionItems || !header) {
+        console.warn(`Function list elements not found for database: ${database}`);
+        return;
+    }
+
+    if (functionItems.style.display === 'none') {
+        functionItems.style.display = 'block';
+        header.classList.remove('collapsed');
     } else {
-        listDiv.style.display = 'none';
-        toggleIndicator.textContent = '▼';
+        functionItems.style.display = 'none';
+        header.classList.add('collapsed');
     }
 }
 

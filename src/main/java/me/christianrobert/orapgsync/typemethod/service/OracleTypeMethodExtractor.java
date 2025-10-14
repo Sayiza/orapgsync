@@ -77,9 +77,7 @@ public class OracleTypeMethodExtractor {
                 method_name,
                 method_type,
                 method_no,
-                instantiable,
-                result_type_owner,
-                result_type_name
+                instantiable
             FROM all_type_methods
             WHERE owner = ?
             ORDER BY type_name, method_name, method_no
@@ -96,26 +94,14 @@ public class OracleTypeMethodExtractor {
                     String methodType = rs.getString("method_type"); // FUNCTION or PROCEDURE
                     String methodNo = rs.getString("method_no");
                     String instantiable = rs.getString("instantiable"); // YES (member) or NO (static)
-                    String resultTypeOwner = rs.getString("result_type_owner");
-                    String resultTypeName = rs.getString("result_type_name");
 
                     TypeMethodMetadata method = new TypeMethodMetadata(owner, typeName, methodName, methodType);
                     method.setMethodNo(methodNo);
                     method.setInstantiable(instantiable);
 
-                    // Handle return type for functions
-                    if ("FUNCTION".equalsIgnoreCase(methodType) && resultTypeName != null) {
-                        if (resultTypeOwner != null && !resultTypeOwner.isEmpty()) {
-                            // Custom return type
-                            method.setCustomReturnType(true);
-                            method.setReturnTypeOwner(resultTypeOwner.toLowerCase());
-                            method.setReturnTypeName(resultTypeName.toLowerCase());
-                            method.setReturnDataType(resultTypeOwner.toLowerCase() + "." + resultTypeName.toLowerCase());
-                        } else {
-                            // Built-in return type
-                            method.setCustomReturnType(false);
-                            method.setReturnDataType(resultTypeName);
-                        }
+                    // Extract return type for functions (from ALL_METHOD_RESULTS)
+                    if ("FUNCTION".equalsIgnoreCase(methodType)) {
+                        extractReturnTypeForMethod(connection, owner, typeName, methodName, methodNo, method);
                     }
 
                     // Extract parameters for this method
@@ -129,6 +115,49 @@ public class OracleTypeMethodExtractor {
         }
 
         return typeMethods;
+    }
+
+    private void extractReturnTypeForMethod(Connection connection, String owner, String typeName,
+                                             String methodName, String methodNo, TypeMethodMetadata method) throws SQLException {
+        // Query ALL_METHOD_RESULTS to get return type information
+        String resultSql = """
+            SELECT
+                result_type_owner,
+                result_type_name
+            FROM all_method_results
+            WHERE owner = ?
+                AND type_name = ?
+                AND method_name = ?
+                AND method_no = ?
+            """;
+
+        try (PreparedStatement ps = connection.prepareStatement(resultSql)) {
+            ps.setString(1, owner.toUpperCase());
+            ps.setString(2, typeName.toUpperCase());
+            ps.setString(3, methodName.toUpperCase());
+            ps.setString(4, methodNo);
+
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    String resultTypeOwner = rs.getString("result_type_owner");
+                    String resultTypeName = rs.getString("result_type_name");
+
+                    if (resultTypeName != null) {
+                        if (resultTypeOwner != null && !resultTypeOwner.isEmpty()) {
+                            // Custom return type
+                            method.setCustomReturnType(true);
+                            method.setReturnTypeOwner(resultTypeOwner.toLowerCase());
+                            method.setReturnTypeName(resultTypeName.toLowerCase());
+                            method.setReturnDataType(resultTypeOwner.toLowerCase() + "." + resultTypeName.toLowerCase());
+                        } else {
+                            // Built-in return type
+                            method.setCustomReturnType(false);
+                            method.setReturnDataType(resultTypeName);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private void extractParametersForMethod(Connection connection, String owner, String typeName,

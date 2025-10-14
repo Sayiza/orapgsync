@@ -596,10 +596,10 @@ td {
 }
 
 .config-input {
-    padding: 0.75rem;
+    padding: 0.45rem;
     border: 1px solid #ddd;
     border-radius: 3px;
-    font-size: 0.9rem;
+    font-size: 0.8rem;
     /*transition: border-color 0.2s ease, box-shadow 0.2s ease;
 
      */

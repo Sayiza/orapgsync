@@ -13,8 +13,8 @@ import me.christianrobert.orapgsync.core.job.model.table.TableCreationResult;
 import me.christianrobert.orapgsync.core.job.model.table.TableMetadata;
 import me.christianrobert.orapgsync.core.job.model.sequence.SequenceMetadata;
 import me.christianrobert.orapgsync.core.job.model.sequence.SequenceCreationResult;
-import me.christianrobert.orapgsync.core.job.model.viewdefinition.ViewDefinitionMetadata;
-import me.christianrobert.orapgsync.core.job.model.viewdefinition.ViewStubCreationResult;
+import me.christianrobert.orapgsync.core.job.model.view.ViewMetadata;
+import me.christianrobert.orapgsync.core.job.model.view.ViewStubCreationResult;
 import me.christianrobert.orapgsync.core.job.model.function.FunctionMetadata;
 import me.christianrobert.orapgsync.core.job.model.function.FunctionStubCreationResult;
 import me.christianrobert.orapgsync.core.job.model.typemethod.TypeMethodMetadata;
@@ -63,8 +63,8 @@ public class StateService {
     List<SequenceMetadata> postgresSequenceMetadata = new ArrayList<>();
     SequenceCreationResult sequenceCreationResult;
 
-    List<ViewDefinitionMetadata> oracleViewDefinitionMetadata = new ArrayList<>();
-    List<ViewDefinitionMetadata> postgresViewDefinitionMetadata = new ArrayList<>();
+    List<ViewMetadata> oracleViewMetadata = new ArrayList<>();
+    List<ViewMetadata> postgresViewMetadata = new ArrayList<>();
     ViewStubCreationResult viewStubCreationResult;
 
     List<FunctionMetadata> oracleFunctionMetadata = new ArrayList<>();
@@ -251,20 +251,20 @@ public class StateService {
         this.sequenceCreationResult = sequenceCreationResult;
     }
 
-    public List<ViewDefinitionMetadata> getOracleViewDefinitionMetadata() {
-        return oracleViewDefinitionMetadata;
+    public List<ViewMetadata> getOracleViewMetadata() {
+        return oracleViewMetadata;
     }
 
-    public void setOracleViewDefinitionMetadata(List<ViewDefinitionMetadata> oracleViewDefinitionMetadata) {
-        this.oracleViewDefinitionMetadata = oracleViewDefinitionMetadata;
+    public void setOracleViewMetadata(List<ViewMetadata> oracleViewMetadata) {
+        this.oracleViewMetadata = oracleViewMetadata;
     }
 
-    public List<ViewDefinitionMetadata> getPostgresViewDefinitionMetadata() {
-        return postgresViewDefinitionMetadata;
+    public List<ViewMetadata> getPostgresViewMetadata() {
+        return postgresViewMetadata;
     }
 
-    public void setPostgresViewDefinitionMetadata(List<ViewDefinitionMetadata> postgresViewDefinitionMetadata) {
-        this.postgresViewDefinitionMetadata = postgresViewDefinitionMetadata;
+    public void setPostgresViewMetadata(List<ViewMetadata> postgresViewMetadata) {
+        this.postgresViewMetadata = postgresViewMetadata;
     }
 
     public ViewStubCreationResult getViewStubCreationResult() {
@@ -356,8 +356,8 @@ public class StateService {
         this.oracleSequenceMetadata = new ArrayList<>();
         this.postgresSequenceMetadata = new ArrayList<>();
         this.sequenceCreationResult = null;
-        this.oracleViewDefinitionMetadata = new ArrayList<>();
-        this.postgresViewDefinitionMetadata = new ArrayList<>();
+        this.oracleViewMetadata = new ArrayList<>();
+        this.postgresViewMetadata = new ArrayList<>();
         this.viewStubCreationResult = null;
         this.oracleFunctionMetadata = new ArrayList<>();
         this.postgresFunctionMetadata = new ArrayList<>();

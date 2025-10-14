@@ -81,7 +81,7 @@ async function extractPostgresTypeMethods() {
     updateProgress(0, 'Starting PostgreSQL type method extraction');
 
     try {
-        const response = await fetch('/api/jobs/postgres/type-method-verification/extract', {
+        const response = await fetch('/api/jobs/postgres/type-method-stub-verification/verify', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -126,7 +126,7 @@ async function createPostgresTypeMethodStubs() {
     updateProgress(0, 'Starting PostgreSQL type method stub creation');
 
     try {
-        const response = await fetch('/api/jobs/postgres/type-method-stub-creation/create', {
+        const response = await fetch('/api/jobs/postgres/type-method-stub/create', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -494,15 +494,20 @@ function displayTypeMethodStubCreationResults(result, database) {
 }
 
 function toggleTypeMethodList(database) {
-    const listDiv = document.getElementById(`${database}-type-method-list`);
-    const toggleIndicator = listDiv.querySelector('.toggle-indicator');
+    const typeMethodItems = document.getElementById(`${database}-type-method-items`);
+    const header = document.querySelector(`#${database}-type-method-list .table-list-header`);
 
-    if (listDiv.style.display === 'none' || !listDiv.style.display) {
-        listDiv.style.display = 'block';
-        toggleIndicator.textContent = '▲';
+    if (!typeMethodItems || !header) {
+        console.warn(`Type method list elements not found for database: ${database}`);
+        return;
+    }
+
+    if (typeMethodItems.style.display === 'none') {
+        typeMethodItems.style.display = 'block';
+        header.classList.remove('collapsed');
     } else {
-        listDiv.style.display = 'none';
-        toggleIndicator.textContent = '▼';
+        typeMethodItems.style.display = 'none';
+        header.classList.add('collapsed');
     }
 }
 

@@ -64,7 +64,7 @@ async function startAll() {
 
     try {
         // Step 1: Test Oracle connection (synchronous)
-        updateOrchestrationProgress(4, 'Step 1/18: Testing Oracle connection...');
+        updateOrchestrationProgress(1, 'Step 1/22: Testing Oracle connection...');
         await testOracleConnection();
         // Check if connection succeeded by looking for the "connected" status
         const oracleConnected = document.querySelector('#oracle-connection .status-indicator').classList.contains('connected');
@@ -74,7 +74,7 @@ async function startAll() {
         await delay(500);
 
         // Step 2: Test PostgreSQL connection (synchronous)
-        updateOrchestrationProgress(7, 'Step 2/18: Testing PostgreSQL connection...');
+        updateOrchestrationProgress(2, 'Step 2/22: Testing PostgreSQL connection...');
         await testPostgresConnection();
         // Check if connection succeeded
         const postgresConnected = document.querySelector('#postgres-connection .status-indicator').classList.contains('connected');
@@ -84,121 +84,121 @@ async function startAll() {
         await delay(500);
 
         // Step 3: Extract Oracle schemas
-        updateOrchestrationProgress(11, 'Step 3/18: Extracting Oracle schemas...');
+        updateOrchestrationProgress(3, 'Step 3/22: Extracting Oracle schemas...');
         await loadOracleSchemas();
         await pollCountBadge('oracle-schemas', { requirePositive: true, allowZero: false });
-        updateOrchestrationProgress(15, 'Oracle schemas extracted');
+        updateOrchestrationProgress(4, 'Oracle schemas extracted');
 
         // Step 4: Create PostgreSQL schemas
-        updateOrchestrationProgress(19, 'Step 4/18: Creating PostgreSQL schemas...');
+        updateOrchestrationProgress(5, 'Step 4/22: Creating PostgreSQL schemas...');
         await createPostgresSchemas();
         await pollCountBadge('postgres-schemas', { requirePositive: true, allowZero: false });
-        updateOrchestrationProgress(23, 'PostgreSQL schemas created');
+        updateOrchestrationProgress(6, 'PostgreSQL schemas created');
 
         // Step 5: Extract Oracle synonyms
-        updateOrchestrationProgress(26, 'Step 5/18: Extracting Oracle synonyms...');
+        updateOrchestrationProgress(7, 'Step 5/22: Extracting Oracle synonyms...');
         await loadOracleSynonyms();
         await pollCountBadge('oracle-synonyms', { requirePositive: false, allowZero: true });
-        updateOrchestrationProgress(29, 'Oracle synonyms extracted');
+        updateOrchestrationProgress(9, 'Oracle synonyms extracted');
 
         // Step 6: Extract Oracle object types
-        updateOrchestrationProgress(32, 'Step 6/18: Extracting Oracle object types...');
+        updateOrchestrationProgress(10, 'Step 6/22: Extracting Oracle object types...');
         await loadOracleObjectTypes();
         await pollCountBadge('oracle-objects', { requirePositive: false, allowZero: true });
-        updateOrchestrationProgress(36, 'Oracle object types extracted');
+        updateOrchestrationProgress(12, 'Oracle object types extracted');
 
         // Step 7: Create PostgreSQL object types
-        updateOrchestrationProgress(40, 'Step 7/18: Creating PostgreSQL object types...');
+        updateOrchestrationProgress(13, 'Step 7/22: Creating PostgreSQL object types...');
         await createPostgresObjectTypes();
         await pollCountBadge('postgres-objects', { requirePositive: false, allowZero: true });
-        updateOrchestrationProgress(44, 'PostgreSQL object types created');
+        updateOrchestrationProgress(14, 'PostgreSQL object types created');
 
         // Step 8: Extract Oracle sequences
-        updateOrchestrationProgress(47, 'Step 8/18: Extracting Oracle sequences...');
+        updateOrchestrationProgress(15, 'Step 8/22: Extracting Oracle sequences...');
         await extractOracleSequences();
         await pollCountBadge('oracle-sequences', { requirePositive: false, allowZero: true });
-        updateOrchestrationProgress(50, 'Oracle sequences extracted');
+        updateOrchestrationProgress(17, 'Oracle sequences extracted');
 
         // Step 9: Create PostgreSQL sequences
-        updateOrchestrationProgress(53, 'Step 9/18: Creating PostgreSQL sequences...');
+        updateOrchestrationProgress(18, 'Step 9/22: Creating PostgreSQL sequences...');
         await createPostgresSequences();
         await pollCountBadge('postgres-sequences', { requirePositive: false, allowZero: true });
-        updateOrchestrationProgress(56, 'PostgreSQL sequences created');
+        updateOrchestrationProgress(19, 'PostgreSQL sequences created');
 
         // Step 10: Extract Oracle table metadata
-        updateOrchestrationProgress(59, 'Step 10/18: Extracting Oracle table metadata...');
+        updateOrchestrationProgress(20, 'Step 10/22: Extracting Oracle table metadata...');
         await extractTableMetadata();
         await pollCountBadge('oracle-tables', { requirePositive: false, allowZero: true });
-        updateOrchestrationProgress(62, 'Oracle table metadata extracted');
+        updateOrchestrationProgress(21, 'Oracle table metadata extracted');
 
         // Step 11: Create PostgreSQL tables (without constraints)
-        updateOrchestrationProgress(65, 'Step 11/18: Creating PostgreSQL tables...');
+        updateOrchestrationProgress(22, 'Step 11/22: Creating PostgreSQL tables...');
         await createPostgresTables();
         await pollCountBadge('postgres-tables', { requirePositive: false, allowZero: true });
-        updateOrchestrationProgress(68, 'PostgreSQL tables created');
+        updateOrchestrationProgress(23, 'PostgreSQL tables created');
 
         // Step 12: Extract Oracle row counts
-        updateOrchestrationProgress(71, 'Step 12/18: Extracting Oracle row counts...');
+        updateOrchestrationProgress(24, 'Step 12/22: Extracting Oracle row counts...');
         await extractOracleRowCounts();
         await pollCountBadge('oracle-data', { requirePositive: false, allowZero: true });
-        updateOrchestrationProgress(74, 'Oracle row counts extracted');
+        updateOrchestrationProgress(25, 'Oracle row counts extracted');
 
         // Step 13: Transfer data from Oracle to PostgreSQL
-        updateOrchestrationProgress(77, 'Step 13/18: Transferring data...');
+        updateOrchestrationProgress(26, 'Step 13/22: Transferring data...');
         await transferData();
         await pollCountBadge('postgres-data', { requirePositive: false, allowZero: true });
-        updateOrchestrationProgress(80, 'Data transfer completed');
+        updateOrchestrationProgress(55, 'Data transfer completed');
 
         // Step 14: Extract Oracle constraints
-        updateOrchestrationProgress(83, 'Step 14/18: Extracting Oracle constraints...');
+        updateOrchestrationProgress(56, 'Step 14/22: Extracting Oracle constraints...');
         await extractOracleConstraints();
         await pollCountBadge('oracle-constraints', { requirePositive: false, allowZero: true });
-        updateOrchestrationProgress(86, 'Oracle constraints extracted');
+        updateOrchestrationProgress(60, 'Oracle constraints extracted');
 
         // Step 15: Create PostgreSQL constraints
-        updateOrchestrationProgress(88, 'Step 15/18: Creating PostgreSQL constraints...');
+        updateOrchestrationProgress(61, 'Step 15/22: Creating PostgreSQL constraints...');
         await createPostgresConstraints();
         await pollCountBadge('postgres-constraints', { requirePositive: false, allowZero: true });
-        updateOrchestrationProgress(91, 'Constraint creation completed');
+        updateOrchestrationProgress(71, 'Constraint creation completed');
 
         // Step 16: Create PostgreSQL FK indexes
-        updateOrchestrationProgress(93, 'Step 16/18: Creating FK indexes...');
+        updateOrchestrationProgress(82, 'Step 16/22: Creating FK indexes...');
         await createPostgresFKIndexes();
         await pollCountBadge('postgres-fk-indexes', { requirePositive: false, allowZero: true });
-        updateOrchestrationProgress(95, 'FK index creation completed');
+        updateOrchestrationProgress(86, 'FK index creation completed');
 
         // Step 17: Extract Oracle view definitions
-        updateOrchestrationProgress(94, 'Step 17/20: Extracting Oracle view definitions...');
+        updateOrchestrationProgress(87, 'Step 17/22: Extracting Oracle view definitions...');
         await extractOracleViews();
         await pollCountBadge('oracle-views', { requirePositive: false, allowZero: true });
-        updateOrchestrationProgress(95, 'Oracle view definitions extracted');
+        updateOrchestrationProgress(88, 'Oracle view definitions extracted');
 
         // Step 18: Create PostgreSQL view stubs
-        updateOrchestrationProgress(96, 'Step 18/20: Creating PostgreSQL view stubs...');
+        updateOrchestrationProgress(89, 'Step 18/22: Creating PostgreSQL view stubs...');
         await createPostgresViewStubs();
         await pollCountBadge('postgres-views', { requirePositive: false, allowZero: true });
-        updateOrchestrationProgress(97, 'View stub creation completed');
+        updateOrchestrationProgress(90, 'View stub creation completed');
 
         // Step 19: Extract Oracle functions/procedures
-        updateOrchestrationProgress(98, 'Step 19/20: Extracting Oracle functions and procedures...');
+        updateOrchestrationProgress(91, 'Step 19/22: Extracting Oracle functions and procedures...');
         await extractOracleFunctions();
         await pollCountBadge('oracle-functions', { requirePositive: false, allowZero: true });
-        updateOrchestrationProgress(99, 'Oracle functions/procedures extracted');
+        updateOrchestrationProgress(92, 'Oracle functions/procedures extracted');
 
         // Step 20: Create PostgreSQL function/procedure stubs
-        updateOrchestrationProgress(95, 'Step 20/22: Creating PostgreSQL function stubs...');
+        updateOrchestrationProgress(93, 'Step 20/22: Creating PostgreSQL function stubs...');
         await createPostgresFunctionStubs();
         await pollCountBadge('postgres-functions', { requirePositive: false, allowZero: true });
-        updateOrchestrationProgress(97, 'Function stub creation completed');
+        updateOrchestrationProgress(95, 'Function stub creation completed');
 
         // Step 21: Extract Oracle type methods
-        updateOrchestrationProgress(98, 'Step 21/22: Extracting Oracle type methods...');
+        updateOrchestrationProgress(97, 'Step 21/22: Extracting Oracle type methods...');
         await extractOracleTypeMethods();
         await pollCountBadge('oracle-type-methods', { requirePositive: false, allowZero: true });
-        updateOrchestrationProgress(99, 'Oracle type methods extracted');
+        updateOrchestrationProgress(96, 'Oracle type methods extracted');
 
         // Step 22: Create PostgreSQL type method stubs
-        updateOrchestrationProgress(99, 'Step 22/22: Creating PostgreSQL type method stubs...');
+        updateOrchestrationProgress(98, 'Step 22/22: Creating PostgreSQL type method stubs...');
         await createPostgresTypeMethodStubs();
         await pollCountBadge('postgres-type-methods', { requirePositive: false, allowZero: true });
         updateOrchestrationProgress(100, 'Type method stub creation completed');

@@ -22,8 +22,8 @@ import me.christianrobert.orapgsync.core.job.model.sequence.SequenceCreationResu
 import me.christianrobert.orapgsync.core.job.model.table.ConstraintMetadata;
 import me.christianrobert.orapgsync.core.job.model.table.ConstraintCreationResult;
 import me.christianrobert.orapgsync.core.job.model.table.FKIndexCreationResult;
-import me.christianrobert.orapgsync.core.job.model.viewdefinition.ViewDefinitionMetadata;
-import me.christianrobert.orapgsync.core.job.model.viewdefinition.ViewStubCreationResult;
+import me.christianrobert.orapgsync.core.job.model.view.ViewMetadata;
+import me.christianrobert.orapgsync.core.job.model.view.ViewStubCreationResult;
 import me.christianrobert.orapgsync.core.job.model.function.FunctionMetadata;
 import me.christianrobert.orapgsync.core.job.model.function.FunctionStubCreationResult;
 import me.christianrobert.orapgsync.core.job.model.typemethod.TypeMethodMetadata;
@@ -405,17 +405,19 @@ public class JobResource {
                     response.put("summary", summary);
                     response.put("constraintCount", constraints.size());
                     response.put("result", result); // Include raw result for frontend compatibility
-                } else if (jobType.contains("VIEW_DEFINITION")) {
-                    // Handle view definition extraction results
+                } else if (jobType.contains("VIEW") && !jobType.contains("VIEW_STUB_CREATION")) {
+                    // Handle view extraction/verification results (NOT stub creation)
+                    // Matches: "VIEW", "VIEW_STUB_VERIFICATION"
                     @SuppressWarnings("unchecked")
-                    List<ViewDefinitionMetadata> viewDefinitions = (List<ViewDefinitionMetadata>) result;
+                    List<ViewMetadata> viewDefinitions = (List<ViewMetadata>) result;
 
                     Map<String, Object> summary = generateViewDefinitionSummary(viewDefinitions);
                     response.put("summary", summary);
-                    response.put("viewDefinitionCount", viewDefinitions.size());
+                    response.put("viewCount", viewDefinitions.size());
                     response.put("result", result); // Include raw result for frontend compatibility
                 } else if (jobType.contains("FUNCTION") && !jobType.contains("FUNCTION_STUB_CREATION")) {
-                    // Handle function/procedure extraction/verification results (NOT creation)
+                    // Handle function/procedure extraction/verification results (NOT stub creation)
+                    // Matches: "FUNCTION", "FUNCTION_STUB_VERIFICATION"
                     @SuppressWarnings("unchecked")
                     List<FunctionMetadata> functions = (List<FunctionMetadata>) result;
 
@@ -424,7 +426,8 @@ public class JobResource {
                     response.put("functionCount", functions.size());
                     response.put("result", result); // Include raw result for frontend compatibility
                 } else if (jobType.contains("TYPE_METHOD") && !jobType.contains("TYPE_METHOD_STUB_CREATION")) {
-                    // Handle type method extraction/verification results (NOT creation)
+                    // Handle type method extraction/verification results (NOT stub creation)
+                    // Matches: "TYPE_METHOD", "TYPE_METHOD_STUB_VERIFICATION"
                     @SuppressWarnings("unchecked")
                     List<TypeMethodMetadata> typeMethods = (List<TypeMethodMetadata>) result;
 
@@ -824,19 +827,19 @@ public class JobResource {
     }
 
     @POST
-    @Path("/view-definition/oracle/extract")
-    public Response startOracleViewDefinitionExtraction() {
-        return startExtractionJob("ORACLE", "VIEW_DEFINITION", "Oracle view definition extraction");
+    @Path("/oracle/view/extract")
+    public Response startOracleViewExtraction() {
+        return startExtractionJob("ORACLE", "VIEW", "Oracle view extraction");
     }
 
     @POST
-    @Path("/view-definition/postgres/extract")
-    public Response startPostgresViewDefinitionExtraction() {
-        return startExtractionJob("POSTGRES", "VIEW_DEFINITION", "PostgreSQL view definition extraction");
+    @Path("/postgres/view-stub-verification/verify")
+    public Response startPostgresViewStubVerification() {
+        return startExtractionJob("POSTGRES", "VIEW_STUB_VERIFICATION", "PostgreSQL view stub verification");
     }
 
     @POST
-    @Path("/postgres/view_stub/create")
+    @Path("/postgres/view-stub/create")
     public Response startPostgresViewStubCreation() {
         return startJob("POSTGRES", "VIEW_STUB_CREATION", "PostgreSQL view stub creation");
     }
@@ -848,13 +851,13 @@ public class JobResource {
     }
 
     @POST
-    @Path("/postgres/function-verification/extract")
-    public Response startPostgresFunctionVerification() {
-        return startExtractionJob("POSTGRES", "FUNCTION_VERIFICATION", "PostgreSQL function/procedure verification");
+    @Path("/postgres/function-stub-verification/verify")
+    public Response startPostgresFunctionStubVerification() {
+        return startExtractionJob("POSTGRES", "FUNCTION_STUB_VERIFICATION", "PostgreSQL function stub verification");
     }
 
     @POST
-    @Path("/postgres/function-stub-creation/create")
+    @Path("/postgres/function-stub/create")
     public Response startPostgresFunctionStubCreation() {
         return startJob("POSTGRES", "FUNCTION_STUB_CREATION", "PostgreSQL function stub creation");
     }
@@ -866,13 +869,13 @@ public class JobResource {
     }
 
     @POST
-    @Path("/postgres/type-method-verification/extract")
-    public Response startPostgresTypeMethodVerification() {
+    @Path("/postgres/type-method-stub-verification/verify")
+    public Response startPostgresTypeMethodStubVerification() {
         return startExtractionJob("POSTGRES", "TYPE_METHOD_STUB_VERIFICATION", "PostgreSQL type method stub verification");
     }
 
     @POST
-    @Path("/postgres/type-method-stub-creation/create")
+    @Path("/postgres/type-method-stub/create")
     public Response startPostgresTypeMethodStubCreation() {
         return startJob("POSTGRES", "TYPE_METHOD_STUB_CREATION", "PostgreSQL type method stub creation");
     }
@@ -1130,11 +1133,11 @@ public class JobResource {
         );
     }
 
-    private Map<String, Object> generateViewDefinitionSummary(List<ViewDefinitionMetadata> viewDefinitions) {
+    private Map<String, Object> generateViewDefinitionSummary(List<ViewMetadata> viewDefinitions) {
         Map<String, Integer> schemaViewCounts = new HashMap<>();
         int totalColumns = 0;
 
-        for (ViewDefinitionMetadata view : viewDefinitions) {
+        for (ViewMetadata view : viewDefinitions) {
             String schema = view.getSchema();
             schemaViewCounts.put(schema, schemaViewCounts.getOrDefault(schema, 0) + 1);
             totalColumns += view.getColumns().size();

@@ -39,7 +39,7 @@ async function extractOracleViews() {
     updateProgress(0, 'Starting Oracle view definition extraction');
 
     try {
-        const response = await fetch('/api/jobs/view-definition/oracle/extract', {
+        const response = await fetch('/api/jobs/oracle/view/extract', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -85,7 +85,7 @@ async function extractPostgresViews() {
     updateProgress(0, 'Starting PostgreSQL view definition extraction');
 
     try {
-        const response = await fetch('/api/jobs/view-definition/postgres/extract', {
+        const response = await fetch('/api/jobs/postgres/view-stub-verification/verify', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -290,7 +290,7 @@ function populateViewList(views, database = 'oracle') {
 // Toggle view list visibility
 function toggleViewList(database) {
     const viewItems = document.getElementById(`${database}-view-items`);
-    const header = document.querySelector(`#${database}-view-list .view-list-header`);
+    const header = document.querySelector(`#${database}-view-list .table-list-header`);
 
     if (!viewItems || !header) {
         console.warn(`View list elements not found for database: ${database}`);
@@ -343,7 +343,7 @@ async function createPostgresViewStubs() {
     updateProgress(0, 'Starting PostgreSQL view stub creation');
 
     try {
-        const response = await fetch('/api/jobs/postgres/view_stub/create', {
+        const response = await fetch('/api/jobs/postgres/view-stub/create', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

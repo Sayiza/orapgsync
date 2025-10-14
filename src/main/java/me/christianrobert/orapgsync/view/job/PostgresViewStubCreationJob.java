@@ -1,12 +1,12 @@
-package me.christianrobert.orapgsync.viewdefinition.job;
+package me.christianrobert.orapgsync.view.job;
 
 import jakarta.enterprise.context.Dependent;
 import jakarta.inject.Inject;
 import me.christianrobert.orapgsync.core.job.AbstractDatabaseWriteJob;
 import me.christianrobert.orapgsync.core.job.model.JobProgress;
 import me.christianrobert.orapgsync.core.job.model.table.ColumnMetadata;
-import me.christianrobert.orapgsync.core.job.model.viewdefinition.ViewDefinitionMetadata;
-import me.christianrobert.orapgsync.core.job.model.viewdefinition.ViewStubCreationResult;
+import me.christianrobert.orapgsync.core.job.model.view.ViewMetadata;
+import me.christianrobert.orapgsync.core.job.model.view.ViewStubCreationResult;
 import me.christianrobert.orapgsync.core.tools.OracleTypeClassifier;
 import me.christianrobert.orapgsync.core.tools.PostgresIdentifierNormalizer;
 import me.christianrobert.orapgsync.core.tools.TypeConverter;
@@ -64,7 +64,7 @@ public class PostgresViewStubCreationJob extends AbstractDatabaseWriteJob<ViewSt
                 "Starting PostgreSQL view stub creation process");
 
         // Get Oracle views from state
-        List<ViewDefinitionMetadata> oracleViews = getOracleViews();
+        List<ViewMetadata> oracleViews = getOracleViews();
         if (oracleViews.isEmpty()) {
             updateProgress(progressCallback, 100, "No views to process",
                     "No Oracle views found in state. Please extract Oracle view definitions first.");
@@ -73,7 +73,7 @@ public class PostgresViewStubCreationJob extends AbstractDatabaseWriteJob<ViewSt
         }
 
         // Filter valid views (exclude system schemas)
-        List<ViewDefinitionMetadata> validOracleViews = filterValidViews(oracleViews);
+        List<ViewMetadata> validOracleViews = filterValidViews(oracleViews);
 
         updateProgress(progressCallback, 10, "Analyzing views",
                 String.format("Found %d Oracle views, %d are valid for creation",
@@ -101,10 +101,10 @@ public class PostgresViewStubCreationJob extends AbstractDatabaseWriteJob<ViewSt
                     String.format("Found %d existing PostgreSQL views", existingPostgresViews.size()));
 
             // Determine which views need to be created
-            List<ViewDefinitionMetadata> viewsToCreate = new ArrayList<>();
-            List<ViewDefinitionMetadata> viewsAlreadyExisting = new ArrayList<>();
+            List<ViewMetadata> viewsToCreate = new ArrayList<>();
+            List<ViewMetadata> viewsAlreadyExisting = new ArrayList<>();
 
-            for (ViewDefinitionMetadata view : validOracleViews) {
+            for (ViewMetadata view : validOracleViews) {
                 String qualifiedViewName = getQualifiedViewName(view);
                 if (existingPostgresViews.contains(qualifiedViewName.toLowerCase())) {
                     viewsAlreadyExisting.add(view);
@@ -114,7 +114,7 @@ public class PostgresViewStubCreationJob extends AbstractDatabaseWriteJob<ViewSt
             }
 
             // Mark already existing views as skipped
-            for (ViewDefinitionMetadata view : viewsAlreadyExisting) {
+            for (ViewMetadata view : viewsAlreadyExisting) {
                 String qualifiedViewName = getQualifiedViewName(view);
                 result.addSkippedView(qualifiedViewName);
                 log.debug("View '{}' already exists in PostgreSQL, skipping", qualifiedViewName);
@@ -146,13 +146,13 @@ public class PostgresViewStubCreationJob extends AbstractDatabaseWriteJob<ViewSt
         }
     }
 
-    private List<ViewDefinitionMetadata> getOracleViews() {
-        return stateService.getOracleViewDefinitionMetadata();
+    private List<ViewMetadata> getOracleViews() {
+        return stateService.getOracleViewMetadata();
     }
 
-    private List<ViewDefinitionMetadata> filterValidViews(List<ViewDefinitionMetadata> views) {
-        List<ViewDefinitionMetadata> validViews = new ArrayList<>();
-        for (ViewDefinitionMetadata view : views) {
+    private List<ViewMetadata> filterValidViews(List<ViewMetadata> views) {
+        List<ViewMetadata> validViews = new ArrayList<>();
+        for (ViewMetadata view : views) {
             if (!filterValidSchemas(List.of(view.getSchema())).isEmpty()) {
                 validViews.add(view);
             }
@@ -184,16 +184,16 @@ public class PostgresViewStubCreationJob extends AbstractDatabaseWriteJob<ViewSt
         return views;
     }
 
-    private String getQualifiedViewName(ViewDefinitionMetadata view) {
+    private String getQualifiedViewName(ViewMetadata view) {
         return String.format("%s.%s", view.getSchema(), view.getViewName());
     }
 
-    private void createViewStubs(Connection connection, List<ViewDefinitionMetadata> views,
+    private void createViewStubs(Connection connection, List<ViewMetadata> views,
                                   ViewStubCreationResult result, Consumer<JobProgress> progressCallback) throws SQLException {
         int totalViews = views.size();
         int processedViews = 0;
 
-        for (ViewDefinitionMetadata view : views) {
+        for (ViewMetadata view : views) {
             int progressPercentage = 40 + (processedViews * 50 / totalViews);
             String qualifiedViewName = getQualifiedViewName(view);
             updateProgress(progressCallback, progressPercentage,
@@ -217,7 +217,7 @@ public class PostgresViewStubCreationJob extends AbstractDatabaseWriteJob<ViewSt
         }
     }
 
-    private void createViewStub(Connection connection, ViewDefinitionMetadata view) throws SQLException {
+    private void createViewStub(Connection connection, ViewMetadata view) throws SQLException {
         String sql = generateCreateViewStubSQL(view);
 
         try (PreparedStatement stmt = connection.prepareStatement(sql)) {
@@ -233,7 +233,7 @@ public class PostgresViewStubCreationJob extends AbstractDatabaseWriteJob<ViewSt
      *
      * This creates a view with the correct structure but returns an empty result set.
      */
-    private String generateCreateViewStubSQL(ViewDefinitionMetadata view) {
+    private String generateCreateViewStubSQL(ViewMetadata view) {
         StringBuilder sql = new StringBuilder();
 
         sql.append("CREATE VIEW ");
@@ -259,7 +259,7 @@ public class PostgresViewStubCreationJob extends AbstractDatabaseWriteJob<ViewSt
      * Generates a column definition for a view stub.
      * Pattern: NULL::type AS column_name
      */
-    private String generateViewStubColumnDefinition(ColumnMetadata column, ViewDefinitionMetadata view) {
+    private String generateViewStubColumnDefinition(ColumnMetadata column, ViewMetadata view) {
         StringBuilder def = new StringBuilder();
 
         // Start with NULL cast to the appropriate type
