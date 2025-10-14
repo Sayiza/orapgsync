@@ -15,6 +15,7 @@ import me.christianrobert.orapgsync.core.job.model.sequence.SequenceMetadata;
 import me.christianrobert.orapgsync.core.job.model.sequence.SequenceCreationResult;
 import me.christianrobert.orapgsync.core.job.model.view.ViewMetadata;
 import me.christianrobert.orapgsync.core.job.model.view.ViewStubCreationResult;
+import me.christianrobert.orapgsync.core.job.model.view.ViewImplementationResult;
 import me.christianrobert.orapgsync.core.job.model.function.FunctionMetadata;
 import me.christianrobert.orapgsync.core.job.model.function.FunctionStubCreationResult;
 import me.christianrobert.orapgsync.core.job.model.typemethod.TypeMethodMetadata;
@@ -66,6 +67,7 @@ public class StateService {
     List<ViewMetadata> oracleViewMetadata = new ArrayList<>();
     List<ViewMetadata> postgresViewMetadata = new ArrayList<>();
     ViewStubCreationResult viewStubCreationResult;
+    ViewImplementationResult viewImplementationResult;
 
     List<FunctionMetadata> oracleFunctionMetadata = new ArrayList<>();
     List<FunctionMetadata> postgresFunctionMetadata = new ArrayList<>();
@@ -275,6 +277,14 @@ public class StateService {
         this.viewStubCreationResult = viewStubCreationResult;
     }
 
+    public ViewImplementationResult getViewImplementationResult() {
+        return viewImplementationResult;
+    }
+
+    public void setViewImplementationResult(ViewImplementationResult viewImplementationResult) {
+        this.viewImplementationResult = viewImplementationResult;
+    }
+
     public List<FunctionMetadata> getOracleFunctionMetadata() {
         return oracleFunctionMetadata;
     }
@@ -359,6 +369,7 @@ public class StateService {
         this.oracleViewMetadata = new ArrayList<>();
         this.postgresViewMetadata = new ArrayList<>();
         this.viewStubCreationResult = null;
+        this.viewImplementationResult = null;
         this.oracleFunctionMetadata = new ArrayList<>();
         this.postgresFunctionMetadata = new ArrayList<>();
         this.functionStubCreationResult = null;

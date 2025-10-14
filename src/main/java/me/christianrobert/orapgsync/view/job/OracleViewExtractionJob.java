@@ -22,8 +22,10 @@ import java.util.function.Consumer;
 
 /**
  * Extracts view definitions from Oracle database.
- * This job extracts column metadata for views (not the actual view SQL).
- * The extracted metadata is used to create view stubs in PostgreSQL.
+ * This job extracts both column metadata AND view SQL definitions.
+ * The metadata is used for:
+ * - Phase 1: Creating view stubs with correct column structure
+ * - Phase 2: Implementing actual views with transformed SQL
  */
 @Dependent
 public class OracleViewExtractionJob extends AbstractDatabaseExtractionJob<ViewMetadata> {
@@ -151,6 +153,21 @@ public class OracleViewExtractionJob extends AbstractDatabaseExtractionJob<ViewM
 
     private ViewMetadata fetchViewDefinition(Connection oracleConnection, String owner, String viewName) throws SQLException {
         ViewMetadata viewDef = new ViewMetadata(owner.toLowerCase(), viewName.toLowerCase());
+
+        // Fetch view SQL definition from ALL_VIEWS
+        String sqlDefinitionSql = "SELECT text FROM all_views WHERE owner = ? AND view_name = ?";
+        try (PreparedStatement ps = oracleConnection.prepareStatement(sqlDefinitionSql)) {
+            ps.setString(1, owner.toUpperCase());
+            ps.setString(2, viewName);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    String sqlText = rs.getString("text");
+                    if (sqlText != null) {
+                        viewDef.setSqlDefinition(sqlText.trim());
+                    }
+                }
+            }
+        }
 
         // Fetch column metadata from ALL_TAB_COLUMNS
         // This view contains columns for both tables and views

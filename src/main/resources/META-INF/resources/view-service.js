@@ -544,3 +544,365 @@ function toggleViewStubCreationResults(database) {
         toggleIndicator.textContent = '▼';
     }
 }
+
+// View Implementation Functions (Phase 2)
+
+// Create PostgreSQL view implementations (replaces stubs with actual SQL)
+async function createPostgresViewImplementation() {
+    console.log('Starting PostgreSQL view implementation job...');
+
+    updateComponentCount("postgres-view-implementation", "-");
+
+    const button = document.querySelector('#postgres-view-implementation .action-btn');
+    if (button) {
+        button.disabled = true;
+        button.innerHTML = '⏳';
+    }
+
+    updateMessage('Starting PostgreSQL view implementation...');
+    updateProgress(0, 'Starting PostgreSQL view implementation');
+
+    try {
+        const response = await fetch('/api/jobs/postgres/view-implementation/create', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+
+        const result = await response.json();
+
+        if (result.status === 'success') {
+            console.log('PostgreSQL view implementation job started:', result.jobId);
+            updateMessage('PostgreSQL view implementation job started successfully');
+
+            // Start polling for progress and AWAIT completion
+            await pollViewImplementationJobStatus(result.jobId, 'postgres');
+        } else {
+            throw new Error(result.message || 'Failed to start PostgreSQL view implementation job');
+        }
+
+    } catch (error) {
+        console.error('Error starting PostgreSQL view implementation job:', error);
+        updateMessage('Failed to start PostgreSQL view implementation: ' + error.message);
+        updateProgress(0, 'Failed to start PostgreSQL view implementation');
+
+        // Re-enable button
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = 'Implement Views';
+        }
+    }
+}
+
+async function pollViewImplementationJobStatus(jobId, database) {
+    console.log(`Polling view implementation job status for ${database}:`, jobId);
+
+    return new Promise((resolve, reject) => {
+        const pollOnce = async () => {
+            try {
+                const response = await fetch(`/api/jobs/${jobId}/status`);
+                const status = await response.json();
+
+                if (status.status === 'error') {
+                    throw new Error(status.message || 'Job status check failed');
+                }
+
+                console.log(`View implementation job status for ${database}:`, status);
+
+                if (status.progress) {
+                    updateProgress(status.progress.percentage, status.progress.currentTask);
+                    updateMessage(`${status.progress.currentTask}: ${status.progress.details}`);
+                }
+
+                if (status.isComplete) {
+                    console.log(`View implementation job completed for ${database}`);
+                    // Get final results
+                    const resultResponse = await fetch(`/api/jobs/${jobId}/result`);
+                    const result = await resultResponse.json();
+
+                    if (result.status === 'success') {
+                        handleViewImplementationJobComplete(result, database);
+                    } else {
+                        throw new Error(result.message || 'Job completed with errors');
+                    }
+
+                    // Re-enable button
+                    const button = document.querySelector(`#${database}-view-implementation .action-btn`);
+                    if (button) {
+                        button.disabled = false;
+                        button.innerHTML = 'Implement Views';
+                    }
+
+                    // Resolve the promise to signal completion
+                    resolve();
+                } else {
+                    // Continue polling
+                    setTimeout(pollOnce, 1000);
+                }
+            } catch (error) {
+                console.error('Error polling view implementation job status:', error);
+                updateMessage('Error checking view implementation progress: ' + error.message);
+                updateProgress(0, 'Error checking progress');
+                // Re-enable button
+                const button = document.querySelector(`#${database}-view-implementation .action-btn`);
+                if (button) {
+                    button.disabled = false;
+                    button.innerHTML = 'Implement Views';
+                }
+                // Reject the promise to signal error
+                reject(error);
+            }
+        };
+
+        // Start polling
+        pollOnce();
+    });
+}
+
+function handleViewImplementationJobComplete(result, database) {
+    console.log(`View implementation job results for ${database}:`, result);
+
+    const implementedCount = result.implementedCount || 0;
+    const skippedCount = result.skippedCount || 0;
+    const errorCount = result.errorCount || 0;
+
+    updateProgress(100, `View implementation completed: ${implementedCount} implemented, ${skippedCount} skipped, ${errorCount} errors`);
+
+    if (result.isSuccessful) {
+        updateMessage(`View implementation completed successfully: ${implementedCount} views implemented, ${skippedCount} skipped`);
+    } else {
+        updateMessage(`View implementation completed with errors: ${implementedCount} implemented, ${skippedCount} skipped, ${errorCount} errors`);
+    }
+
+    // Update view implementation results section
+    displayViewImplementationResults(result, database);
+}
+
+function displayViewImplementationResults(result, database) {
+    const resultsDiv = document.getElementById(`${database}-view-implementation-results`);
+    const detailsDiv = document.getElementById(`${database}-view-implementation-details`);
+
+    if (!resultsDiv || !detailsDiv) {
+        console.error('View implementation results container not found');
+        return;
+    }
+
+    let html = '';
+
+    if (result.summary) {
+        const summary = result.summary;
+
+        updateComponentCount("postgres-view-implementation", summary.implementedCount + summary.skippedCount + summary.errorCount);
+
+        html += '<div class="table-creation-summary">';
+        html += `<div class="summary-stats">`;
+        html += `<span class="stat-item created">Implemented: ${summary.implementedCount}</span>`;
+        html += `<span class="stat-item skipped">Skipped: ${summary.skippedCount}</span>`;
+        html += `<span class="stat-item errors">Errors: ${summary.errorCount}</span>`;
+        html += `</div>`;
+        html += '</div>';
+
+        // Show implemented views
+        if (summary.implementedCount > 0) {
+            html += '<div class="created-tables-section">';
+            html += '<h4>Implemented Views:</h4>';
+            html += '<div class="table-items">';
+            Object.values(summary.implementedViews).forEach(view => {
+                html += `<div class="table-item created">${view.viewName} ✓</div>`;
+            });
+            html += '</div>';
+            html += '</div>';
+        }
+
+        // Show skipped views
+        if (summary.skippedCount > 0) {
+            html += '<div class="skipped-tables-section">';
+            html += '<h4>Skipped Views:</h4>';
+            html += '<div class="table-items">';
+            Object.values(summary.skippedViews).forEach(view => {
+                html += `<div class="table-item skipped">${view.viewName} (${view.reason})</div>`;
+            });
+            html += '</div>';
+            html += '</div>';
+        }
+
+        // Show errors
+        if (summary.errorCount > 0) {
+            html += '<div class="error-tables-section">';
+            html += '<h4>Failed Views:</h4>';
+            html += '<div class="table-items">';
+            Object.values(summary.errors).forEach(error => {
+                html += `<div class="table-item error">`;
+                html += `<strong>${error.viewName}</strong>: ${error.error}`;
+                if (error.sql) {
+                    html += `<div class="sql-statement"><pre>${error.sql}</pre></div>`;
+                }
+                html += `</div>`;
+            });
+            html += '</div>';
+            html += '</div>';
+        }
+    }
+
+    detailsDiv.innerHTML = html;
+
+    // Show the results section
+    resultsDiv.style.display = 'block';
+}
+
+function toggleViewImplementationResults(database) {
+    const resultsDiv = document.getElementById(`${database}-view-implementation-results`);
+    const detailsDiv = document.getElementById(`${database}-view-implementation-details`);
+    const toggleIndicator = resultsDiv.querySelector('.toggle-indicator');
+
+    if (detailsDiv.style.display === 'none' || !detailsDiv.style.display) {
+        detailsDiv.style.display = 'block';
+        toggleIndicator.textContent = '▲';
+    } else {
+        detailsDiv.style.display = 'none';
+        toggleIndicator.textContent = '▼';
+    }
+}
+
+// Verify PostgreSQL view implementations
+async function verifyPostgresViewImplementation() {
+    console.log('Starting PostgreSQL view implementation verification job...');
+
+    const button = document.querySelector('#postgres-view-implementation .refresh-btn');
+    if (button) {
+        button.disabled = true;
+        button.innerHTML = '⏳';
+    }
+
+    updateMessage('Starting PostgreSQL view implementation verification...');
+    updateProgress(0, 'Starting PostgreSQL view implementation verification');
+
+    try {
+        const response = await fetch('/api/jobs/postgres/view-implementation-verification/verify', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+
+        const result = await response.json();
+
+        if (result.status === 'success') {
+            console.log('PostgreSQL view implementation verification job started:', result.jobId);
+            updateMessage('PostgreSQL view implementation verification job started successfully');
+
+            // Start polling for progress
+            pollViewImplementationVerificationJobStatus(result.jobId);
+        } else {
+            throw new Error(result.message || 'Failed to start PostgreSQL view implementation verification job');
+        }
+
+    } catch (error) {
+        console.error('Error starting PostgreSQL view implementation verification job:', error);
+        updateMessage('Failed to start PostgreSQL view implementation verification: ' + error.message);
+        updateProgress(0, 'Failed to start PostgreSQL view implementation verification');
+
+        // Re-enable button
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = '⚙';
+        }
+    }
+}
+
+async function pollViewImplementationVerificationJobStatus(jobId) {
+    console.log('Polling view implementation verification job status for:', jobId);
+
+    try {
+        const response = await fetch(`/api/jobs/${jobId}/status`);
+        const result = await response.json();
+
+        if (result.status === 'error') {
+            throw new Error(result.message);
+        }
+
+        console.log('View implementation verification job status:', result);
+
+        // Update progress if available
+        if (result.progress) {
+            const percentage = result.progress.percentage;
+            const currentTask = result.progress.currentTask || 'Processing...';
+            const details = result.progress.details || '';
+
+            updateProgress(percentage, currentTask);
+            if (details) {
+                updateMessage(details);
+            }
+        }
+
+        // Check if job is complete
+        if (result.isComplete) {
+            if (result.status === 'COMPLETED') {
+                console.log('View implementation verification job completed successfully');
+                updateProgress(100, 'View implementation verification completed successfully');
+                updateMessage('View implementation verification completed');
+
+                // Get job results
+                await getViewImplementationVerificationJobResults(jobId);
+            } else if (result.status === 'FAILED') {
+                console.error('View implementation verification job failed:', result.error);
+                updateProgress(0, 'View implementation verification failed');
+                updateMessage('View implementation verification failed: ' + (result.error || 'Unknown error'));
+            }
+
+            // Re-enable button
+            const button = document.querySelector('#postgres-view-implementation .refresh-btn');
+            if (button) {
+                button.disabled = false;
+                button.innerHTML = '⚙';
+            }
+        } else {
+            // Continue polling
+            setTimeout(() => pollViewImplementationVerificationJobStatus(jobId), 1000);
+        }
+
+    } catch (error) {
+        console.error('Error polling view implementation verification job status:', error);
+        updateMessage('Error checking view implementation verification job status: ' + error.message);
+        updateProgress(0, 'Error checking view implementation verification job status');
+
+        // Re-enable button
+        const button = document.querySelector('#postgres-view-implementation .refresh-btn');
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = '⚙';
+        }
+    }
+}
+
+async function getViewImplementationVerificationJobResults(jobId) {
+    console.log('Getting view implementation verification job results for:', jobId);
+
+    try {
+        const response = await fetch(`/api/jobs/${jobId}/result`);
+        const result = await response.json();
+
+        if (result.status === 'success') {
+            console.log('View implementation verification job results:', result);
+
+            const verifiedCount = result.verifiedCount || 0;
+            const failedCount = result.failedCount || 0;
+            const warningCount = result.warningCount || 0;
+
+            if (result.isSuccessful) {
+                updateMessage(`View implementation verification completed: ${verifiedCount} verified, ${failedCount} failed, ${warningCount} warnings`);
+            } else {
+                updateMessage(`View implementation verification found issues: ${verifiedCount} verified, ${failedCount} failed, ${warningCount} warnings`);
+            }
+
+            updateComponentCount("postgres-view-implementation", verifiedCount);
+        } else {
+            throw new Error(result.message || 'Failed to get view implementation verification job results');
+        }
+
+    } catch (error) {
+        console.error('Error getting view implementation verification job results:', error);
+        updateMessage('Error getting view implementation verification results: ' + error.message);
+    }
+}

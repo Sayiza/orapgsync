@@ -24,6 +24,8 @@ import me.christianrobert.orapgsync.core.job.model.table.ConstraintCreationResul
 import me.christianrobert.orapgsync.core.job.model.table.FKIndexCreationResult;
 import me.christianrobert.orapgsync.core.job.model.view.ViewMetadata;
 import me.christianrobert.orapgsync.core.job.model.view.ViewStubCreationResult;
+import me.christianrobert.orapgsync.core.job.model.view.ViewImplementationResult;
+import me.christianrobert.orapgsync.core.job.model.view.ViewImplementationVerificationResult;
 import me.christianrobert.orapgsync.core.job.model.function.FunctionMetadata;
 import me.christianrobert.orapgsync.core.job.model.function.FunctionStubCreationResult;
 import me.christianrobert.orapgsync.core.job.model.typemethod.TypeMethodMetadata;
@@ -340,6 +342,28 @@ public class JobResource {
                 response.put("skippedCount", typeMethodStubResult.getSkippedCount());
                 response.put("errorCount", typeMethodStubResult.getErrorCount());
                 response.put("isSuccessful", typeMethodStubResult.isSuccessful());
+                response.put("result", result); // Include raw result for frontend compatibility
+            } else if (result instanceof ViewImplementationResult) {
+                // Handle view implementation results
+                ViewImplementationResult viewImplResult = (ViewImplementationResult) result;
+
+                Map<String, Object> summary = generateViewImplementationSummary(viewImplResult);
+                response.put("summary", summary);
+                response.put("implementedCount", viewImplResult.getImplementedCount());
+                response.put("skippedCount", viewImplResult.getSkippedCount());
+                response.put("errorCount", viewImplResult.getErrorCount());
+                response.put("isSuccessful", viewImplResult.isSuccessful());
+                response.put("result", result); // Include raw result for frontend compatibility
+            } else if (result instanceof ViewImplementationVerificationResult) {
+                // Handle view implementation verification results
+                ViewImplementationVerificationResult viewImplVerifyResult = (ViewImplementationVerificationResult) result;
+
+                Map<String, Object> summary = generateViewImplementationVerificationSummary(viewImplVerifyResult);
+                response.put("summary", summary);
+                response.put("verifiedCount", viewImplVerifyResult.getVerifiedCount());
+                response.put("failedCount", viewImplVerifyResult.getFailedCount());
+                response.put("warningCount", viewImplVerifyResult.getWarningCount());
+                response.put("isSuccessful", viewImplVerifyResult.isSuccessful());
                 response.put("result", result); // Include raw result for frontend compatibility
             } else if (result instanceof List<?>) {
                 // Handle List results based on jobType
@@ -880,6 +904,18 @@ public class JobResource {
         return startJob("POSTGRES", "TYPE_METHOD_STUB_CREATION", "PostgreSQL type method stub creation");
     }
 
+    @POST
+    @Path("/postgres/view-implementation/create")
+    public Response startPostgresViewImplementation() {
+        return startJob("POSTGRES", "VIEW_IMPLEMENTATION", "PostgreSQL view implementation");
+    }
+
+    @POST
+    @Path("/postgres/view-implementation-verification/verify")
+    public Response startPostgresViewImplementationVerification() {
+        return startExtractionJob("POSTGRES", "VIEW_IMPLEMENTATION_VERIFICATION", "PostgreSQL view implementation verification");
+    }
+
     private Map<String, Object> generateDataTransferSummary(DataTransferResult transferResult) {
         Map<String, Object> transferredDetails = new HashMap<>();
         Map<String, Object> skippedDetails = new HashMap<>();
@@ -1371,6 +1407,91 @@ public class JobResource {
                 "createdMethods", createdDetails,
                 "skippedMethods", skippedDetails,
                 "errors", errorDetails
+        );
+    }
+
+    private Map<String, Object> generateViewImplementationSummary(ViewImplementationResult viewImplResult) {
+        Map<String, Object> implementedDetails = new HashMap<>();
+        Map<String, Object> skippedDetails = new HashMap<>();
+        Map<String, Object> errorDetails = new HashMap<>();
+
+        // Implemented views details
+        for (String viewName : viewImplResult.getImplementedViews()) {
+            implementedDetails.put(viewName, Map.of(
+                    "viewName", viewName,
+                    "status", "implemented",
+                    "timestamp", viewImplResult.getExecutionDateTime().toString()
+            ));
+        }
+
+        // Skipped views details
+        for (String viewName : viewImplResult.getSkippedViews()) {
+            skippedDetails.put(viewName, Map.of(
+                    "viewName", viewName,
+                    "status", "skipped",
+                    "reason", "already implemented or no SQL available"
+            ));
+        }
+
+        // Error details
+        for (ViewImplementationResult.ViewImplementationError error : viewImplResult.getErrors()) {
+            errorDetails.put(error.getViewName(), Map.of(
+                    "viewName", error.getViewName(),
+                    "status", "error",
+                    "error", error.getErrorMessage(),
+                    "sql", error.getSqlStatement()
+            ));
+        }
+
+        return Map.of(
+                "totalProcessed", viewImplResult.getTotalProcessed(),
+                "implementedCount", viewImplResult.getImplementedCount(),
+                "skippedCount", viewImplResult.getSkippedCount(),
+                "errorCount", viewImplResult.getErrorCount(),
+                "isSuccessful", viewImplResult.isSuccessful(),
+                "executionTimestamp", viewImplResult.getExecutionTimestamp(),
+                "implementedViews", implementedDetails,
+                "skippedViews", skippedDetails,
+                "errors", errorDetails
+        );
+    }
+
+    private Map<String, Object> generateViewImplementationVerificationSummary(ViewImplementationVerificationResult viewImplVerifyResult) {
+        Map<String, Object> verifiedDetails = new HashMap<>();
+        Map<String, Object> failedDetails = new HashMap<>();
+        List<String> warnings = viewImplVerifyResult.getWarnings();
+
+        // Verified views details
+        for (ViewImplementationVerificationResult.VerifiedView verifiedView : viewImplVerifyResult.getVerifiedViews()) {
+            verifiedDetails.put(verifiedView.getViewName(), Map.of(
+                    "viewName", verifiedView.getViewName(),
+                    "status", "verified",
+                    "rowCount", verifiedView.getRowCount(),
+                    "timestamp", viewImplVerifyResult.getExecutionDateTime().toString()
+            ));
+        }
+
+        // Failed views details
+        Map<String, String> failureReasons = viewImplVerifyResult.getFailureReasons();
+        for (String viewName : viewImplVerifyResult.getFailedViews()) {
+            String reason = failureReasons.getOrDefault(viewName, "Unknown failure");
+            failedDetails.put(viewName, Map.of(
+                    "viewName", viewName,
+                    "status", "failed",
+                    "reason", reason
+            ));
+        }
+
+        return Map.of(
+                "totalProcessed", viewImplVerifyResult.getTotalProcessed(),
+                "verifiedCount", viewImplVerifyResult.getVerifiedCount(),
+                "failedCount", viewImplVerifyResult.getFailedCount(),
+                "warningCount", viewImplVerifyResult.getWarningCount(),
+                "isSuccessful", viewImplVerifyResult.isSuccessful(),
+                "executionTimestamp", viewImplVerifyResult.getExecutionTimestamp(),
+                "verifiedViews", verifiedDetails,
+                "failedViews", failedDetails,
+                "warnings", warnings
         );
     }
 }
