@@ -26,6 +26,154 @@ Oracle SQL/PL/SQL → ANTLR AST → Semantic Tree → PostgreSQL SQL/PL/pgSQL
 
 ---
 
+## Metadata Strategy
+
+### Required Context for Transformation
+
+The transformation module requires **minimal metadata** to disambiguate Oracle syntax patterns. We use existing metadata already in `StateService` rather than querying Oracle during transformation.
+
+**Two Types of Metadata:**
+
+1. **Synonym Resolution** (already implemented)
+   - `StateService.resolveSynonym(name, schema)` resolves synonyms to actual object names
+   - Follows Oracle rules: current schema → PUBLIC fallback
+   - Essential because PostgreSQL has no synonyms
+
+2. **Structural Indices** (to be implemented)
+   - Table → Column → Type mappings
+   - Type → Method mappings
+   - Package → Function mappings
+   - Built once at transformation session start from existing StateService data
+
+### Why This Approach?
+
+**Transformation is syntax conversion, not validation:**
+- We transform Oracle SQL patterns → PostgreSQL SQL patterns
+- PostgreSQL validates the result when executed
+- No need to duplicate Oracle's compile-time checks
+
+**Critical disambiguation** (where metadata IS needed):
+
+```sql
+-- Type method call (requires metadata to identify)
+SELECT emp.address.get_street() FROM employees emp;
+-- → (emp.address).get_street()
+
+-- Package function call (pattern-based transformation)
+SELECT emp_pkg.get_salary(emp.empno) FROM employees emp;
+-- → emp_pkg__get_salary(emp.empno)
+
+-- Type attribute access (pattern-based transformation)
+SELECT emp.address.street FROM employees emp;
+-- → (emp.address).street
+```
+
+Without metadata, `a.b.c()` is ambiguous. With indices, we can resolve:
+1. Is `a` a table alias? → Look up in query context
+2. Does table have column `b` of custom type? → Look up in table index
+3. Does that type have method `c`? → Look up in type method index
+4. Otherwise, is `a.b` a package function? → Look up in package function index
+
+### Metadata Indexing Architecture
+
+**Build indices once per transformation session:**
+
+```java
+public class MetadataIndexBuilder {
+    /**
+     * Build lookup indices from StateService metadata.
+     * Called once at transformation session start.
+     */
+    public static TransformationIndices build(StateService state, List<String> schemas) {
+        // Index table columns: "SCHEMA.TABLE" → "COLUMN" → type info
+        Map<String, Map<String, ColumnTypeInfo>> tableColumns = indexTableColumns(state, schemas);
+
+        // Index type methods: "SCHEMA.TYPE_NAME" → Set("METHOD1", "METHOD2", ...)
+        Map<String, Set<String>> typeMethods = indexTypeMethods(state, schemas);
+
+        // Index package functions: Set("SCHEMA.PACKAGE.FUNCTION", ...)
+        Set<String> packageFunctions = indexPackageFunctions(state, schemas);
+
+        return new TransformationIndices(tableColumns, typeMethods, packageFunctions);
+    }
+}
+```
+
+**Use during transformation:**
+
+```java
+public class TransformationContext {
+    private final TransformationIndices indices;
+    private final Map<String, String> synonyms;  // Pre-resolved
+    private final Map<String, String> aliases;   // Per-query state
+
+    /**
+     * Resolve a.b.c() pattern to type method or package function.
+     */
+    public CallType resolveCallPattern(String a, String b, String c) {
+        // 1. Is 'a' a table alias?
+        String table = resolveAlias(a);
+        if (table != null) {
+            // 2. Does table have column 'b' of custom type?
+            String columnType = indices.getColumnType(table, b);
+            if (columnType != null) {
+                // 3. Does type have method 'c'?
+                if (indices.hasTypeMethod(columnType, c)) {
+                    return CallType.TYPE_METHOD;
+                }
+            }
+        }
+
+        // 4. Is a.b a package function?
+        if (indices.isPackageFunction(a + "." + b)) {
+            return CallType.PACKAGE_FUNCTION;
+        }
+
+        return CallType.UNKNOWN;
+    }
+}
+```
+
+### Benefits of This Approach
+
+✅ **Uses existing data**: All metadata already in StateService
+✅ **No database dependency**: Transformation doesn't query Oracle
+✅ **Fast**: O(1) lookups via hash maps
+✅ **Testable**: Mock indices for unit tests
+✅ **Clean architecture**: Parse → Index → Transform
+✅ **Offline capable**: Can transform without Oracle connection
+
+### Alternative Approaches Considered
+
+**ALL_DEPENDENCIES per view** (deferred):
+- Could query Oracle's `ALL_DEPENDENCIES` for each view
+- Provides validation and better error messages
+- Adds complexity and Oracle connection dependency
+- **Decision**: Not needed for MVP, add later if needed
+
+**Query during transformation** (rejected):
+- Query Oracle metadata as needed during transformation
+- Tight coupling, slow, complex error handling
+- **Decision**: Architectural regression, not pursued
+
+### Metadata Coverage
+
+**Complete metadata available from StateService:**
+- ✅ Tables: `TableMetadata` with columns, types, type owners
+- ✅ Views: `ViewMetadata` with columns (same as tables)
+- ✅ Object Types: `ObjectDataTypeMetaData` with attributes
+- ✅ Type Methods: `TypeMethodMetadata` with schema, type, method names
+- ✅ Functions: `FunctionMetadata` with package names
+- ✅ Synonyms: Dual-map structure for efficient resolution
+
+**This is sufficient for:**
+- Type method vs package function disambiguation
+- Synonym resolution
+- Custom type identification
+- Schema-qualified name resolution
+
+---
+
 ## Module Structure
 
 ```
@@ -86,7 +234,9 @@ transformation/                          # Oracle→PostgreSQL code transformati
 │   └── SemanticTreeBuilder.java         # Visitor: ANTLR AST → Semantic Tree
 │
 ├── context/                             # Transformation Context
-│   ├── TransformationContext.java       # Global state (StateService, schema, etc.)
+│   ├── TransformationContext.java       # Global state with metadata indices
+│   ├── TransformationIndices.java       # Pre-built metadata lookup indices
+│   ├── MetadataIndexBuilder.java        # Builds indices from StateService
 │   ├── TransformationResult.java        # Success/error result wrapper
 │   └── TransformationException.java     # Custom exception for transform errors
 │
@@ -121,18 +271,29 @@ public interface SemanticNode {
 ```java
 /**
  * Provides global context for transformation process.
- * Injected into semantic nodes to access StateService, synonym resolution, etc.
+ * Contains pre-built metadata indices for fast lookups during transformation.
  */
 public class TransformationContext {
-    private final StateService stateService;
-    private final String currentSchema;
-    private final Map<String, String> localAliases;
+    private final TransformationIndices indices;     // Pre-built metadata indices
+    private final Map<String, String> synonyms;      // Pre-resolved synonyms
+    private final String currentSchema;              // Current schema context
+    private final Map<String, String> localAliases;  // Per-query table aliases
 
-    // Helper methods
+    // Metadata lookup methods
+    public String getColumnType(String qualifiedTable, String columnName);
+    public boolean hasTypeMethod(String qualifiedType, String methodName);
+    public boolean isPackageFunction(String qualifiedName);
+
+    // Synonym and alias resolution
     public String resolveSynonym(String name);
-    public String convertType(String oracleType);
     public void registerAlias(String alias, String tableName);
     public String resolveAlias(String alias);
+
+    // Type conversion
+    public String convertType(String oracleType);
+
+    // Pattern disambiguation
+    public CallType resolveCallPattern(String a, String b, String c);
 }
 ```
 
@@ -182,28 +343,37 @@ public class SemanticTreeBuilder extends PlSqlParserBaseVisitor<SemanticNode> {
 1. **Base Infrastructure**
    - `SemanticNode` interface
    - `TransformationContext` class
+   - `TransformationIndices` class (data holder for indices)
+   - `MetadataIndexBuilder` class (builds indices from StateService)
    - `TransformationResult` class
    - `TransformationException` class
 
-2. **Parser Layer**
+2. **Metadata Indexing**
+   - Index table columns: Schema.Table → Column → Type
+   - Index type methods: Schema.Type → Set of method names
+   - Index package functions: Set of Schema.Package.Function
+   - Build indices once at transformation session start
+
+3. **Parser Layer**
    - `SqlType` enum (VIEW_SELECT, FUNCTION_BODY, etc.)
    - `ParseResult` class (wraps parse tree + errors)
    - `AntlrParser` class (SELECT statement parsing only)
 
-3. **Minimal Semantic Nodes**
+4. **Minimal Semantic Nodes**
    - `Identifier` - Column/table names
    - `Literal` - String, number literals
    - `TableReference` - Simple table reference with optional alias
    - `ColumnReference` - Column reference (optionally qualified)
 
-4. **Builder**
+5. **Builder**
    - `SemanticTreeBuilder` (visits only the nodes above)
 
-5. **Tests**
+6. **Tests**
    - Unit tests for each semantic node
+   - Metadata index builder tests
    - Parser tests for simple SELECT statements
 
-**Deliverable**: Parse and transform `SELECT col1, col2 FROM table1`
+**Deliverable**: Parse and transform `SELECT col1, col2 FROM table1` with metadata context
 
 **Test Coverage:**
 ```java
@@ -412,16 +582,26 @@ public class ViewTransformationService {
     @Inject AntlrParser parser;
 
     public TransformationResult transformView(ViewMetadata view) {
-        // 1. Parse Oracle SQL
+        // 1. Build metadata indices (cached for session)
+        TransformationIndices indices = MetadataIndexBuilder.build(
+            stateService,
+            List.of(view.getSchema())
+        );
+
+        // 2. Parse Oracle SQL
         ParseResult parseResult = parser.parseSelectStatement(view.getSqlDefinition());
 
-        // 2. Build semantic tree
+        // 3. Build semantic tree
         SemanticNode tree = new SemanticTreeBuilder().visit(parseResult.getTree());
 
-        // 3. Create context
-        TransformationContext ctx = new TransformationContext(stateService, view.getSchema());
+        // 4. Create context with indices
+        TransformationContext ctx = new TransformationContext(
+            indices,
+            stateService,
+            view.getSchema()
+        );
 
-        // 4. Transform
+        // 5. Transform
         String postgresSql = tree.toPostgres(ctx);
 
         return TransformationResult.success(view, postgresSql);

@@ -104,13 +104,15 @@ Each database element type is completely independent:
 - Piped streaming architecture (producer-consumer) for memory-efficient transfer
 - Automatic table truncation and row count validation
 
-**Views** (`viewdefinition/`):
-- `ViewDefinitionMetadata`: Data model for view structure (columns only, not SQL definition)
-- `OracleViewDefinitionExtractionJob`: Extracts Oracle view column metadata from ALL_TAB_COLUMNS
-- `PostgresViewDefinitionExtractionJob`: Extracts PostgreSQL view column metadata
+**Views** (`view/`):
+- `ViewMetadata`: Data model for view structure (columns only, not SQL definition)
+- `OracleViewExtractionJob`: Extracts Oracle view column metadata from ALL_TAB_COLUMNS
+- `PostgresViewExtractionJob`: Extracts PostgreSQL view column metadata
 - `PostgresViewStubCreationJob`: Creates PostgreSQL view stubs (empty result set views)
+- `PostgresViewStubVerificationJob`: Verifies created view stubs
 - `ViewStubCreationResult`: Tracks created/skipped/failed view stubs
 - View stubs enable dependency resolution for functions/procedures before full view migration
+- Note: Full view SQL transformation (replacing stubs) is in progress via `transformation/` module
 
 **Functions and Procedures** (`function/`):
 - `FunctionMetadata`: Data model for functions and procedures (standalone and package members)
@@ -122,6 +124,17 @@ Each database element type is completely independent:
 - `OracleFunctionExtractor`: Database-specific extraction logic for functions/procedures
 - Naming convention: Package members use `packagename__functionname` (double underscore)
 - Function stubs return NULL, procedure stubs have empty body with comments indicating original Oracle location
+
+**Type Methods** (`typemethod/`):
+- `TypeMethodMetadata`: Data model for object type member methods (MEMBER and STATIC)
+- `TypeMethodParameter`: Parameter metadata with IN/OUT/INOUT modes and custom type support
+- `OracleTypeMethodExtractionJob`: Extracts Oracle type method signatures from ALL_TYPE_METHODS
+- `PostgresTypeMethodStubCreationJob`: Creates PostgreSQL type method stubs (flattened functions)
+- `PostgresTypeMethodStubVerificationJob`: Verifies created type method stubs
+- `TypeMethodStubCreationResult`: Tracks created/skipped/failed type method stubs
+- `OracleTypeMethodExtractor`: Database-specific extraction logic for type methods
+- Naming convention: Type members use `typename__methodname` (double underscore)
+- Method stubs return NULL for functions, empty body for procedures
 
 #### 4. **Cross-Cutting Concerns** (`core/`)
 - `TypeConverter`: Oracle-to-PostgreSQL data type mapping
@@ -243,13 +256,19 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
 7. **View Stubs**: Empty result set views with correct column structure (`WHERE false` pattern)
 8. **Function/Procedure Stubs**: Signatures with empty implementations (return NULL / empty body)
    - Package members flattened: `packagename__functionname`
+9. **Type Method Stubs**: Object type member functions/procedures with empty implementations
+   - Pattern: `typename__methodname`
 
-### 🔄 Phase 3: Full Implementation (Future)
-9. **View SQL**: Replace stubs with actual Oracle→PostgreSQL SQL conversion
-10. **Function/Procedure Logic**: PL/SQL→PL/pgSQL conversion using ANTLR
-11. **Type Methods**: Member functions/procedures extraction and stub creation
-12. **Triggers**: Migration from Oracle to PostgreSQL
-13. **Indexes**: Extraction and creation
+### 🔄 Phase 3: Full Implementation (In Progress)
+10. **View SQL Transformation**: ANTLR-based Oracle→PostgreSQL SQL conversion
+    - Architecture documented in `TRANSFORMATION.md`
+    - Semantic syntax tree approach with self-transforming nodes
+    - Metadata-driven disambiguation (type methods vs package functions)
+    - Target: Replace view stubs with actual transformed SQL
+11. **Function/Procedure Logic**: PL/SQL→PL/pgSQL conversion using ANTLR (Future)
+12. **Type Method Logic**: Member method implementations (Future)
+13. **Triggers**: Migration from Oracle to PostgreSQL (Future)
+14. **Indexes**: Extraction and creation (Future)
 
 ## Database Configuration
 
@@ -559,11 +578,113 @@ Oracle synonyms provide alternative names. PostgreSQL doesn't have synonyms, so 
 - `PostgresFunctionStubCreationJob` - Create PostgreSQL stubs
 - `PostgresFunctionStubVerificationJob` - Verify created stubs
 
-### Type Method Stubs (Future)
+### Type Method Stubs
 
-**Pattern:** Similar to function stubs but for object type member methods
+**Pattern:** Object type member methods with empty implementations (return NULL / empty body)
 
-**Planned Jobs:**
-- `OracleTypeMethodExtractionJob` - Extract from `ALL_TYPE_METHODS` and `ALL_METHOD_RESULTS`
-- `PostgresTypeMethodStubCreationJob` - Create method stubs
+- Extracts signatures from Oracle `ALL_TYPE_METHODS` and `ALL_METHOD_RESULTS`
+- Flattened naming: `typename__methodname` (double underscore)
+- Handles MEMBER (instance) vs STATIC methods
+- Same type mapping as tables and functions
+
+**Jobs:**
+- `OracleTypeMethodExtractionJob` - Extract Oracle type method signatures
+- `PostgresTypeMethodStubCreationJob` - Create PostgreSQL stubs
 - `PostgresTypeMethodStubVerificationJob` - Verify created stubs
+
+**Metadata:**
+- `TypeMethodMetadata` - Schema, type name, method name, parameters, return type
+- Includes `isMemberMethod()`, `isStaticMethod()`, `isFunction()`, `isProcedure()`
+- State stored in `StateService.oracleTypeMethodMetadata` and `postgresTypeMethodMetadata`
+
+## SQL/PL-SQL Transformation Module
+
+**Status:** Architecture designed, implementation in progress
+
+The transformation module converts Oracle SQL and PL/SQL code to PostgreSQL-compatible equivalents using ANTLR-based parsing and a semantic syntax tree approach.
+
+### Architecture Overview
+
+**Core Pipeline:**
+```
+Oracle SQL/PL-SQL → ANTLR Parser → Semantic Tree → PostgreSQL SQL/PL-pgSQL
+                         ↓               ↓                ↓
+                    PlSqlParser    SemanticNode      toPostgres()
+```
+
+**Key Design Principles:**
+1. **Self-transforming nodes**: Each semantic node knows how to transform itself
+2. **Metadata-driven**: Uses existing StateService metadata for disambiguation
+3. **Decoupled**: Independent transformation logic, no database queries during transformation
+4. **Test-driven**: Comprehensive unit tests for all components
+5. **Reusable**: Same infrastructure for views, functions, procedures, triggers
+
+### Metadata Strategy
+
+**Two types of metadata required:**
+1. **Synonym resolution** (already in StateService)
+   - Resolves Oracle synonyms to actual object names
+   - PostgreSQL has no synonyms, so resolution is essential
+
+2. **Structural indices** (built from StateService)
+   - Table → Column → Type mappings
+   - Type → Method mappings (for type method disambiguation)
+   - Package → Function mappings
+   - Built once at transformation session start for fast O(1) lookups
+
+**Why metadata is needed:**
+- Disambiguate `emp.address.get_street()` (type method) vs `emp_pkg.get_salary()` (package function)
+- Both use dot notation in Oracle, different syntax in PostgreSQL
+- Type methods: `(emp.address).get_street()` (instance method call)
+- Package functions: `emp_pkg__get_salary()` (flattened naming)
+
+**Architecture benefits:**
+- ✅ No database queries during transformation (fast, offline-capable)
+- ✅ Uses existing metadata from StateService
+- ✅ Clean separation: Parse → Index → Transform
+- ✅ Testable with mocked metadata
+
+### Implementation Phases
+
+See `TRANSFORMATION.md` for detailed implementation plan.
+
+**Phase 1-4: SQL Views** (5 weeks)
+- Foundation: Infrastructure, semantic nodes, metadata indexing
+- Basic SELECT: WHERE, ORDER BY, expressions
+- Oracle-specific: NVL→COALESCE, DECODE→CASE, ROWNUM, DUAL, sequences
+- Advanced: JOINs, subqueries, aggregation, window functions
+
+**Phase 5: Integration** (1 week)
+- Create `PostgresViewImplementationJob` to replace stubs with transformed SQL
+- Integration with existing job infrastructure
+- Error reporting and transformation success metrics
+
+**Phase 6+: PL/SQL** (Future)
+- Extend to function/procedure bodies
+- Control flow: IF, LOOP, CURSOR, EXCEPTION
+- Reuse same semantic nodes and context
+
+### Module Location
+
+**Package:** `me.christianrobert.orapgsync.transformation`
+
+**Key Classes:**
+- `TransformationContext` - Metadata indices and resolution logic
+- `MetadataIndexBuilder` - Builds indices from StateService
+- `SemanticNode` - Base interface for all syntax tree nodes
+- `AntlrParser` - Thin wrapper around PlSqlParser
+- `ViewTransformationService` - High-level API for job integration
+
+### Current Status
+
+**Completed:**
+- ✅ Architecture design documented in `TRANSFORMATION.md`
+- ✅ Metadata strategy defined (index-based approach)
+- ✅ All required metadata available in StateService
+
+**In Progress:**
+- 🔄 Phase 1: Foundation implementation
+
+**Future:**
+- ⏳ Phases 2-5: SQL transformation
+- ⏳ Phase 6+: PL/SQL transformation
