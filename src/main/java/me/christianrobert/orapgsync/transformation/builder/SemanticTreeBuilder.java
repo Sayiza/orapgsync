@@ -6,6 +6,10 @@ import me.christianrobert.orapgsync.transformation.context.TransformationExcepti
 import me.christianrobert.orapgsync.transformation.semantic.SemanticNode;
 import me.christianrobert.orapgsync.transformation.semantic.element.TableReference;
 import me.christianrobert.orapgsync.transformation.semantic.expression.Identifier;
+import me.christianrobert.orapgsync.transformation.semantic.query.FromClause;
+import me.christianrobert.orapgsync.transformation.semantic.query.QueryBlock;
+import me.christianrobert.orapgsync.transformation.semantic.query.SelectListElement;
+import me.christianrobert.orapgsync.transformation.semantic.query.SelectedList;
 import me.christianrobert.orapgsync.transformation.semantic.statement.SelectStatement;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,18 +21,23 @@ import java.util.List;
  * Visitor that converts ANTLR parse tree to semantic syntax tree.
  * This is the only class that directly touches ANTLR classes.
  *
- * In this minimal implementation, handles only:
+ * <p>Architecture: Uses visitor pattern to delegate to child nodes.
+ * Each visit method creates a semantic node and calls visit() on children.
+ * No manual extraction logic - all traversal is via visitor pattern.
+ *
+ * <p>Current implementation supports:
  * - Simple SELECT column1, column2 FROM table
  *
- * Future phases will add support for:
- * - WHERE, JOIN, GROUP BY, ORDER BY, etc.
- * - Complex expressions
- * - Subqueries
- * - Set operations (UNION, INTERSECT, MINUS)
+ * <p>Future phases will add:
+ * - WHERE, JOIN, GROUP BY, ORDER BY, HAVING
+ * - Complex expressions, function calls
+ * - Subqueries, set operations (UNION, INTERSECT, MINUS)
  */
 public class SemanticTreeBuilder extends PlSqlParserBaseVisitor<SemanticNode> {
 
     private static final Logger log = LoggerFactory.getLogger(SemanticTreeBuilder.class);
+
+    // ========== SELECT STATEMENT ==========
 
     @Override
     public SemanticNode visitSelect_statement(PlSqlParser.Select_statementContext ctx) {
@@ -57,96 +66,124 @@ public class SemanticTreeBuilder extends PlSqlParserBaseVisitor<SemanticNode> {
             throw new TransformationException("SELECT statement missing query_block");
         }
 
-        /* Instead of visitQuery_block(queryBlock) we should do
-          SemanticNode visitedQuery = (QueryBlock) visit(queryBlock); ... and then add visitedQuery to the SelectStatement as a child element
-         */
-        return visitQuery_block(queryBlock);
+        // Use visitor pattern - delegate to visitQuery_block
+        QueryBlock visitedQueryBlock = (QueryBlock) visit(queryBlock);
+        return new SelectStatement(visitedQueryBlock);
     }
+
+    // ========== QUERY BLOCK ==========
 
     @Override
     public SemanticNode visitQuery_block(PlSqlParser.Query_blockContext ctx) {
         log.debug("Visiting query_block");
 
-        // Extract SELECT list
-        PlSqlParser.Selected_listContext selectedList = ctx.selected_list();
-        if (selectedList == null) {
+        // Extract SELECT list - use visitor pattern
+        PlSqlParser.Selected_listContext selectedListCtx = ctx.selected_list();
+        if (selectedListCtx == null) {
             throw new TransformationException("Query block missing selected_list");
         }
+        SelectedList selectedList = (SelectedList) visit(selectedListCtx);
 
-        List<Identifier> columns = extractSelectColumns(selectedList);
-
-        // Extract FROM clause
-        PlSqlParser.From_clauseContext fromClause = ctx.from_clause();
-        if (fromClause == null) {
+        // Extract FROM clause - use visitor pattern
+        PlSqlParser.From_clauseContext fromClauseCtx = ctx.from_clause();
+        if (fromClauseCtx == null) {
             throw new TransformationException("Query block missing from_clause (FROM DUAL not yet supported in minimal implementation)");
         }
+        FromClause fromClause = (FromClause) visit(fromClauseCtx);
 
-        TableReference table = extractFromTable(fromClause);
-
-        return new SelectStatement(columns, table);
+        return new QueryBlock(selectedList, fromClause);
     }
 
-    /**
-     * Extracts column identifiers from the SELECT list.
-     * In this minimal implementation, only handles simple column names (no expressions, no aliases).
-     */
-    private List<Identifier> extractSelectColumns(PlSqlParser.Selected_listContext ctx) {
-        List<Identifier> columns = new ArrayList<>();
+    // ========== SELECTED LIST (SELECT columns) ==========
+
+    @Override
+    public SemanticNode visitSelected_list(PlSqlParser.Selected_listContext ctx) {
+        log.debug("Visiting selected_list");
 
         if (ctx.ASTERISK() != null) {
             // SELECT * - not supported in minimal implementation
             throw new TransformationException("SELECT * not supported in minimal implementation");
         }
 
-        // Extract each select_list_elements
-        for (PlSqlParser.Select_list_elementsContext element : ctx.select_list_elements()) {
-            if (element.ASTERISK() != null) {
-                // table.* syntax not supported yet
-                throw new TransformationException("SELECT table.* not supported in minimal implementation");
-            }
-
-            // Extract the expression
-            PlSqlParser.ExpressionContext expr = element.expression();
-            if (expr == null) {
-                throw new TransformationException("Select list element missing expression");
-            }
-
-            // In minimal implementation, assume expression is just a simple identifier
-            String columnName = extractSimpleIdentifier(expr);
-            columns.add(new Identifier(columnName));
+        // Visit each select_list_elements child
+        List<SelectListElement> elements = new ArrayList<>();
+        for (PlSqlParser.Select_list_elementsContext elementCtx : ctx.select_list_elements()) {
+            SelectListElement element = (SelectListElement) visit(elementCtx);
+            elements.add(element);
         }
 
-        return columns;
+        return new SelectedList(elements);
     }
 
-    /**
-     * Extracts the table reference from the FROM clause.
-     * In this minimal implementation, only handles a single table (no joins).
-     */
-    private TableReference extractFromTable(PlSqlParser.From_clauseContext ctx) {
-        PlSqlParser.Table_ref_listContext tableRefList = ctx.table_ref_list();
-        if (tableRefList == null) {
+    @Override
+    public SemanticNode visitSelect_list_elements(PlSqlParser.Select_list_elementsContext ctx) {
+        log.debug("Visiting select_list_elements");
+
+        if (ctx.ASTERISK() != null) {
+            // table.* syntax not supported yet
+            throw new TransformationException("SELECT table.* not supported in minimal implementation");
+        }
+
+        // Visit expression child
+        PlSqlParser.ExpressionContext exprCtx = ctx.expression();
+        if (exprCtx == null) {
+            throw new TransformationException("Select list element missing expression");
+        }
+        SemanticNode expression = visit(exprCtx);
+
+        // Future: handle column_alias from ctx.column_alias()
+
+        return new SelectListElement(expression);
+    }
+
+    // ========== EXPRESSION (simplified for minimal implementation) ==========
+
+    @Override
+    public SemanticNode visitExpression(PlSqlParser.ExpressionContext ctx) {
+        log.debug("Visiting expression (simplified)");
+
+        // In minimal implementation, assume expression is just a simple identifier
+        // Future phases will handle complex expressions, function calls, operators, etc.
+        String text = ctx.getText();
+        return new Identifier(text);
+    }
+
+    // ========== FROM CLAUSE ==========
+
+    @Override
+    public SemanticNode visitFrom_clause(PlSqlParser.From_clauseContext ctx) {
+        log.debug("Visiting from_clause");
+
+        PlSqlParser.Table_ref_listContext tableRefListCtx = ctx.table_ref_list();
+        if (tableRefListCtx == null) {
             throw new TransformationException("FROM clause missing table_ref_list");
         }
 
-        List<PlSqlParser.Table_refContext> tableRefs = tableRefList.table_ref();
+        // Visit each table_ref child
+        List<TableReference> tableRefs = new ArrayList<>();
+        for (PlSqlParser.Table_refContext tableRefCtx : tableRefListCtx.table_ref()) {
+            TableReference tableRef = (TableReference) visit(tableRefCtx);
+            tableRefs.add(tableRef);
+        }
+
         if (tableRefs.isEmpty()) {
             throw new TransformationException("FROM clause has no table references");
         }
 
+        // Minimal implementation: only single table supported
         if (tableRefs.size() > 1) {
             throw new TransformationException("Multiple tables in FROM clause not supported in minimal implementation");
         }
 
-        // Extract the single table reference
-        PlSqlParser.Table_refContext tableRef = tableRefs.get(0);
-        return extractTableReference(tableRef);
+        return new FromClause(tableRefs);
     }
 
-    /**
-     * Extracts a table reference (table name and optional alias).
-     */
-    private TableReference extractTableReference(PlSqlParser.Table_refContext ctx) {
+    // ========== TABLE REFERENCE ==========
+
+    @Override
+    public SemanticNode visitTable_ref(PlSqlParser.Table_refContext ctx) {
+        log.debug("Visiting table_ref");
+
         // Navigate: table_ref -> table_ref_aux -> table_ref_aux_internal -> ...
         PlSqlParser.Table_ref_auxContext tableRefAux = ctx.table_ref_aux();
         if (tableRefAux == null) {
@@ -159,8 +196,6 @@ public class SemanticTreeBuilder extends PlSqlParserBaseVisitor<SemanticNode> {
         }
 
         // ANTLR generates subclasses for labeled alternatives in the grammar
-        // The table_ref_aux_internal rule has labels (#table_ref_aux_internal_one, etc.)
-        // We need to handle the specific subclass type
         PlSqlParser.Dml_table_expression_clauseContext dmlTable = null;
 
         if (internal instanceof PlSqlParser.Table_ref_aux_internal_oneContext) {
@@ -183,7 +218,7 @@ public class SemanticTreeBuilder extends PlSqlParserBaseVisitor<SemanticNode> {
             throw new TransformationException("Table reference missing tableview_name");
         }
 
-        String tableName = extractTableName(tableviewName);
+        String tableName = tableviewName.getText();
 
         // Check for alias
         PlSqlParser.Table_aliasContext aliasCtx = tableRefAux.table_alias();
@@ -193,24 +228,5 @@ public class SemanticTreeBuilder extends PlSqlParserBaseVisitor<SemanticNode> {
         }
 
         return new TableReference(tableName, alias);
-    }
-
-    /**
-     * Extracts a simple table name from tableview_name context.
-     */
-    private String extractTableName(PlSqlParser.Tableview_nameContext ctx) {
-        // In minimal implementation, just get the full text
-        // Future phases will handle schema qualification, synonyms, etc.
-        return ctx.getText();
-    }
-
-    /**
-     * Extracts a simple identifier from an expression context.
-     * In this minimal implementation, only handles the simplest case (just an identifier).
-     */
-    private String extractSimpleIdentifier(PlSqlParser.ExpressionContext ctx) {
-        // In minimal implementation, just get the text
-        // Future phases will handle complex expressions, function calls, etc.
-        return ctx.getText();
     }
 }

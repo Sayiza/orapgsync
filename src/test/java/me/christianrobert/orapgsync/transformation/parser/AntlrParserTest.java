@@ -80,7 +80,7 @@ class AntlrParserTest {
         assertInstanceOf(SelectStatement.class, tree);
 
         SelectStatement select = (SelectStatement) tree;
-        assertEquals(3, select.getSelectColumns().size());
+        assertEquals(3, select.getQueryBlock().getSelectedList().getElements().size());
     }
 
     @Test

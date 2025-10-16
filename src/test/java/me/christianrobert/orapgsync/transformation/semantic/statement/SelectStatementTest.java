@@ -4,11 +4,14 @@ import me.christianrobert.orapgsync.transformation.context.MetadataIndexBuilder;
 import me.christianrobert.orapgsync.transformation.context.TransformationContext;
 import me.christianrobert.orapgsync.transformation.semantic.element.TableReference;
 import me.christianrobert.orapgsync.transformation.semantic.expression.Identifier;
+import me.christianrobert.orapgsync.transformation.semantic.query.FromClause;
+import me.christianrobert.orapgsync.transformation.semantic.query.QueryBlock;
+import me.christianrobert.orapgsync.transformation.semantic.query.SelectListElement;
+import me.christianrobert.orapgsync.transformation.semantic.query.SelectedList;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -21,10 +24,12 @@ class SelectStatementTest {
 
     @Test
     void simpleSingleColumnSelect() {
-        List<Identifier> columns = Collections.singletonList(new Identifier("empno"));
-        TableReference table = new TableReference("emp");
+        SelectStatement select = buildSelect(
+                Collections.singletonList("empno"),
+                "emp",
+                null
+        );
 
-        SelectStatement select = new SelectStatement(columns, table);
         String result = select.toPostgres(context);
 
         assertEquals("SELECT empno FROM emp", result);
@@ -32,13 +37,12 @@ class SelectStatementTest {
 
     @Test
     void simpleMultiColumnSelect() {
-        List<Identifier> columns = Arrays.asList(
-                new Identifier("empno"),
-                new Identifier("ename")
+        SelectStatement select = buildSelect(
+                Arrays.asList("empno", "ename"),
+                "emp",
+                null
         );
-        TableReference table = new TableReference("emp");
 
-        SelectStatement select = new SelectStatement(columns, table);
         String result = select.toPostgres(context);
 
         assertEquals("SELECT empno, ename FROM emp", result);
@@ -46,14 +50,12 @@ class SelectStatementTest {
 
     @Test
     void selectThreeColumns() {
-        List<Identifier> columns = Arrays.asList(
-                new Identifier("empno"),
-                new Identifier("ename"),
-                new Identifier("sal")
+        SelectStatement select = buildSelect(
+                Arrays.asList("empno", "ename", "sal"),
+                "emp",
+                null
         );
-        TableReference table = new TableReference("emp");
 
-        SelectStatement select = new SelectStatement(columns, table);
         String result = select.toPostgres(context);
 
         assertEquals("SELECT empno, ename, sal FROM emp", result);
@@ -61,72 +63,70 @@ class SelectStatementTest {
 
     @Test
     void selectWithTableAlias() {
-        List<Identifier> columns = Collections.singletonList(new Identifier("empno"));
-        TableReference table = new TableReference("employees", "e");
+        SelectStatement select = buildSelect(
+                Collections.singletonList("empno"),
+                "employees",
+                "e"
+        );
 
-        SelectStatement select = new SelectStatement(columns, table);
         String result = select.toPostgres(context);
 
         assertEquals("SELECT empno FROM employees e", result);
     }
 
     @Test
-    void nullColumnsThrowsException() {
-        TableReference table = new TableReference("emp");
-        assertThrows(IllegalArgumentException.class, () -> new SelectStatement(null, table));
-    }
-
-    @Test
-    void emptyColumnsThrowsException() {
-        TableReference table = new TableReference("emp");
-        assertThrows(IllegalArgumentException.class, () -> new SelectStatement(Collections.emptyList(), table));
-    }
-
-    @Test
-    void nullTableThrowsException() {
-        List<Identifier> columns = Collections.singletonList(new Identifier("empno"));
-        assertThrows(IllegalArgumentException.class, () -> new SelectStatement(columns, null));
+    void nullQueryBlockThrowsException() {
+        assertThrows(IllegalArgumentException.class, () -> new SelectStatement(null));
     }
 
     @Test
     void gettersReturnCorrectValues() {
-        List<Identifier> columns = Arrays.asList(
-                new Identifier("empno"),
-                new Identifier("ename")
+        SelectStatement select = buildSelect(
+                Arrays.asList("empno", "ename"),
+                "emp",
+                null
         );
-        TableReference table = new TableReference("emp");
 
-        SelectStatement select = new SelectStatement(columns, table);
-
-        assertEquals(2, select.getSelectColumns().size());
-        assertEquals("empno", select.getSelectColumns().get(0).getName());
-        assertEquals("ename", select.getSelectColumns().get(1).getName());
-        assertEquals("emp", select.getFromTable().getTableName());
+        assertNotNull(select.getQueryBlock());
+        assertEquals(2, select.getQueryBlock().getSelectedList().getElements().size());
+        assertEquals("emp", select.getQueryBlock().getFromClause().getTableReferences().get(0).getTableName());
     }
 
     @Test
-    void gettersReturnUnmodifiableList() {
-        List<Identifier> columns = Collections.singletonList(new Identifier("empno"));
-        TableReference table = new TableReference("emp");
-
-        SelectStatement select = new SelectStatement(columns, table);
-        List<Identifier> returned = select.getSelectColumns();
-
-        assertThrows(UnsupportedOperationException.class, () -> returned.add(new Identifier("test")));
-    }
-
-    @Test
-    void toStringIncludesColumnAndTableInfo() {
-        List<Identifier> columns = Arrays.asList(
-                new Identifier("empno"),
-                new Identifier("ename")
+    void toStringIncludesQueryBlockInfo() {
+        SelectStatement select = buildSelect(
+                Arrays.asList("empno", "ename"),
+                "emp",
+                null
         );
-        TableReference table = new TableReference("emp");
 
-        SelectStatement select = new SelectStatement(columns, table);
         String str = select.toString();
 
-        assertTrue(str.contains("2"));  // column count
-        assertTrue(str.contains("emp")); // table name
+        assertTrue(str.contains("SelectStatement"));
+        assertTrue(str.contains("QueryBlock"));
+    }
+
+    // ========== Helper Methods ==========
+
+    /**
+     * Helper to build a SelectStatement for testing.
+     */
+    private SelectStatement buildSelect(java.util.List<String> columnNames, String tableName, String tableAlias) {
+        // Build SELECT list elements
+        java.util.List<SelectListElement> elements = new java.util.ArrayList<>();
+        for (String colName : columnNames) {
+            elements.add(new SelectListElement(new Identifier(colName)));
+        }
+        SelectedList selectedList = new SelectedList(elements);
+
+        // Build FROM clause
+        TableReference tableRef = new TableReference(tableName, tableAlias);
+        FromClause fromClause = new FromClause(tableRef);
+
+        // Build QueryBlock
+        QueryBlock queryBlock = new QueryBlock(selectedList, fromClause);
+
+        // Build SelectStatement
+        return new SelectStatement(queryBlock);
     }
 }
