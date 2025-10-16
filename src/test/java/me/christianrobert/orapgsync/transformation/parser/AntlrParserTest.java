@@ -1,6 +1,7 @@
 package me.christianrobert.orapgsync.transformation.parser;
 
 import me.christianrobert.orapgsync.transformation.builder.SemanticTreeBuilder;
+import me.christianrobert.orapgsync.transformation.context.MetadataIndexBuilder;
 import me.christianrobert.orapgsync.transformation.context.TransformationContext;
 import me.christianrobert.orapgsync.transformation.context.TransformationException;
 import me.christianrobert.orapgsync.transformation.semantic.SemanticNode;
@@ -24,7 +25,7 @@ class AntlrParserTest {
     void setUp() {
         parser = new AntlrParser();
         builder = new SemanticTreeBuilder();
-        context = new TransformationContext("test_schema");
+        context = new TransformationContext("test_schema", MetadataIndexBuilder.buildEmpty());
     }
 
     @Test

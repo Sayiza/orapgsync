@@ -57,6 +57,9 @@ public class SemanticTreeBuilder extends PlSqlParserBaseVisitor<SemanticNode> {
             throw new TransformationException("SELECT statement missing query_block");
         }
 
+        /* Instead of visitQuery_block(queryBlock) we should do
+          SemanticNode visitedQuery = (QueryBlock) visit(queryBlock); ... and then add visitedQuery to the SelectStatement as a child element
+         */
         return visitQuery_block(queryBlock);
     }
 

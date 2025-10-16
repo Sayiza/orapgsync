@@ -1,5 +1,6 @@
 package me.christianrobert.orapgsync.transformation.semantic.statement;
 
+import me.christianrobert.orapgsync.transformation.context.MetadataIndexBuilder;
 import me.christianrobert.orapgsync.transformation.context.TransformationContext;
 import me.christianrobert.orapgsync.transformation.semantic.element.TableReference;
 import me.christianrobert.orapgsync.transformation.semantic.expression.Identifier;
@@ -16,7 +17,7 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class SelectStatementTest {
 
-    private final TransformationContext context = new TransformationContext("test_schema");
+    private final TransformationContext context = new TransformationContext("test_schema", MetadataIndexBuilder.buildEmpty());
 
     @Test
     void simpleSingleColumnSelect() {

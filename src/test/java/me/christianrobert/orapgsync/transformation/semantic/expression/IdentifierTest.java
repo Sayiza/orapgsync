@@ -1,5 +1,6 @@
 package me.christianrobert.orapgsync.transformation.semantic.expression;
 
+import me.christianrobert.orapgsync.transformation.context.MetadataIndexBuilder;
 import me.christianrobert.orapgsync.transformation.context.TransformationContext;
 import org.junit.jupiter.api.Test;
 
@@ -10,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class IdentifierTest {
 
-    private final TransformationContext context = new TransformationContext("test_schema");
+    private final TransformationContext context = new TransformationContext("test_schema", MetadataIndexBuilder.buildEmpty());
 
     @Test
     void simpleIdentifierPassesThrough() {
