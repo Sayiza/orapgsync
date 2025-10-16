@@ -6,13 +6,9 @@ import me.christianrobert.orapgsync.transformation.context.TransformationExcepti
 import me.christianrobert.orapgsync.transformation.semantic.SemanticNode;
 import me.christianrobert.orapgsync.transformation.semantic.element.TableReference;
 import me.christianrobert.orapgsync.transformation.semantic.expression.Identifier;
-import me.christianrobert.orapgsync.transformation.semantic.query.FromClause;
-import me.christianrobert.orapgsync.transformation.semantic.query.QueryBlock;
-import me.christianrobert.orapgsync.transformation.semantic.query.SelectListElement;
-import me.christianrobert.orapgsync.transformation.semantic.query.SelectedList;
+import me.christianrobert.orapgsync.transformation.semantic.query.*;
+import me.christianrobert.orapgsync.transformation.semantic.statement.SelectOnlyStatement;
 import me.christianrobert.orapgsync.transformation.semantic.statement.SelectStatement;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -25,57 +21,93 @@ import java.util.List;
  * Each visit method creates a semantic node and calls visit() on children.
  * No manual extraction logic - all traversal is via visitor pattern.
  *
- * <p>Current implementation supports:
- * - Simple SELECT column1, column2 FROM table
- *
- * <p>Future phases will add:
- * - WHERE, JOIN, GROUP BY, ORDER BY, HAVING
- * - Complex expressions, function calls
- * - Subqueries, set operations (UNION, INTERSECT, MINUS)
+ * <p>To be continously expanded...
  */
 public class SemanticTreeBuilder extends PlSqlParserBaseVisitor<SemanticNode> {
 
-    private static final Logger log = LoggerFactory.getLogger(SemanticTreeBuilder.class);
+    // no loggin is desired, this is would create an overkill of logs
 
     // ========== SELECT STATEMENT ==========
 
     @Override
     public SemanticNode visitSelect_statement(PlSqlParser.Select_statementContext ctx) {
-        log.debug("Visiting select_statement");
+        // with_clause? select_only_statement
 
-        // Navigate to the actual query_block
-        // select_statement -> select_only_statement -> subquery -> ... -> query_block
-        PlSqlParser.Select_only_statementContext selectOnly = ctx.select_only_statement();
-        if (selectOnly == null) {
+        // Note: WITH clause detection would go here when implementing CTEs
+        // Current grammar doesn't expose with_clause() method in this context
+
+        // Visit select_only_statement
+        PlSqlParser.Select_only_statementContext selectOnlyCtx = ctx.select_only_statement();
+        if (selectOnlyCtx == null) {
             throw new TransformationException("SELECT statement missing select_only_statement");
         }
 
-        PlSqlParser.SubqueryContext subquery = selectOnly.subquery();
-        if (subquery == null) {
-            throw new TransformationException("SELECT statement missing subquery");
+        SelectOnlyStatement selectOnlyStatement = (SelectOnlyStatement) visit(selectOnlyCtx);
+        return new SelectStatement(selectOnlyStatement);
+    }
+
+    @Override
+    public SemanticNode visitSelect_only_statement(PlSqlParser.Select_only_statementContext ctx) {
+        // subquery for_update_clause?
+
+        // Note: FOR UPDATE detection would go here when implementing
+        // Current grammar doesn't expose for_update_clause() method in this context
+
+        // Visit subquery
+        PlSqlParser.SubqueryContext subqueryCtx = ctx.subquery();
+        if (subqueryCtx == null) {
+            throw new TransformationException("SELECT_ONLY statement missing subquery");
         }
 
-        // Get the first query block (minimal implementation: no UNION/INTERSECT support yet)
-        PlSqlParser.Subquery_basic_elementsContext basicElements = subquery.subquery_basic_elements();
-        if (basicElements == null) {
-            throw new TransformationException("SELECT statement missing subquery_basic_elements");
+        Subquery subquery = (Subquery) visit(subqueryCtx);
+        return new SelectOnlyStatement(subquery);
+    }
+
+    @Override
+    public SemanticNode visitSubquery(PlSqlParser.SubqueryContext ctx) {
+        // subquery_basic_elements subquery_operation_part*
+
+        // Visit basic elements (required)
+        PlSqlParser.Subquery_basic_elementsContext basicElementsCtx = ctx.subquery_basic_elements();
+        if (basicElementsCtx == null) {
+            throw new TransformationException("Subquery missing subquery_basic_elements");
         }
 
-        PlSqlParser.Query_blockContext queryBlock = basicElements.query_block();
-        if (queryBlock == null) {
-            throw new TransformationException("SELECT statement missing query_block");
+        SubqueryBasicElements basicElements = (SubqueryBasicElements) visit(basicElementsCtx);
+
+        // Visit operation parts (UNION/INTERSECT/MINUS) if present
+        List<PlSqlParser.Subquery_operation_partContext> operationParts = ctx.subquery_operation_part();
+        if (operationParts != null && !operationParts.isEmpty()) {
+            throw new TransformationException("Set operations (UNION/INTERSECT/MINUS) not yet supported");
         }
 
-        // Use visitor pattern - delegate to visitQuery_block
-        QueryBlock visitedQueryBlock = (QueryBlock) visit(queryBlock);
-        return new SelectStatement(visitedQueryBlock);
+        return new Subquery(basicElements);
+    }
+
+    @Override
+    public SemanticNode visitSubquery_basic_elements(PlSqlParser.Subquery_basic_elementsContext ctx) {
+        // query_block | LEFT_PAREN subquery RIGHT_PAREN
+
+        // Check for query_block (normal case)
+        PlSqlParser.Query_blockContext queryBlockCtx = ctx.query_block();
+        if (queryBlockCtx != null) {
+            QueryBlock queryBlock = (QueryBlock) visit(queryBlockCtx);
+            return new SubqueryBasicElements(queryBlock);
+        }
+
+        // Check for parenthesized subquery
+        PlSqlParser.SubqueryContext nestedSubqueryCtx = ctx.subquery();
+        if (nestedSubqueryCtx != null) {
+            throw new TransformationException("Parenthesized subqueries not yet supported");
+        }
+
+        throw new TransformationException("Subquery basic elements missing query_block");
     }
 
     // ========== QUERY BLOCK ==========
 
     @Override
     public SemanticNode visitQuery_block(PlSqlParser.Query_blockContext ctx) {
-        log.debug("Visiting query_block");
 
         // Extract SELECT list - use visitor pattern
         PlSqlParser.Selected_listContext selectedListCtx = ctx.selected_list();
@@ -98,7 +130,6 @@ public class SemanticTreeBuilder extends PlSqlParserBaseVisitor<SemanticNode> {
 
     @Override
     public SemanticNode visitSelected_list(PlSqlParser.Selected_listContext ctx) {
-        log.debug("Visiting selected_list");
 
         if (ctx.ASTERISK() != null) {
             // SELECT * - not supported in minimal implementation
@@ -117,7 +148,6 @@ public class SemanticTreeBuilder extends PlSqlParserBaseVisitor<SemanticNode> {
 
     @Override
     public SemanticNode visitSelect_list_elements(PlSqlParser.Select_list_elementsContext ctx) {
-        log.debug("Visiting select_list_elements");
 
         if (ctx.ASTERISK() != null) {
             // table.* syntax not supported yet
@@ -140,7 +170,6 @@ public class SemanticTreeBuilder extends PlSqlParserBaseVisitor<SemanticNode> {
 
     @Override
     public SemanticNode visitExpression(PlSqlParser.ExpressionContext ctx) {
-        log.debug("Visiting expression (simplified)");
 
         // In minimal implementation, assume expression is just a simple identifier
         // Future phases will handle complex expressions, function calls, operators, etc.
@@ -152,7 +181,6 @@ public class SemanticTreeBuilder extends PlSqlParserBaseVisitor<SemanticNode> {
 
     @Override
     public SemanticNode visitFrom_clause(PlSqlParser.From_clauseContext ctx) {
-        log.debug("Visiting from_clause");
 
         PlSqlParser.Table_ref_listContext tableRefListCtx = ctx.table_ref_list();
         if (tableRefListCtx == null) {
@@ -182,7 +210,6 @@ public class SemanticTreeBuilder extends PlSqlParserBaseVisitor<SemanticNode> {
 
     @Override
     public SemanticNode visitTable_ref(PlSqlParser.Table_refContext ctx) {
-        log.debug("Visiting table_ref");
 
         // Navigate: table_ref -> table_ref_aux -> table_ref_aux_internal -> ...
         PlSqlParser.Table_ref_auxContext tableRefAux = ctx.table_ref_aux();

@@ -4,10 +4,8 @@ import me.christianrobert.orapgsync.transformation.context.MetadataIndexBuilder;
 import me.christianrobert.orapgsync.transformation.context.TransformationContext;
 import me.christianrobert.orapgsync.transformation.semantic.element.TableReference;
 import me.christianrobert.orapgsync.transformation.semantic.expression.Identifier;
-import me.christianrobert.orapgsync.transformation.semantic.query.FromClause;
-import me.christianrobert.orapgsync.transformation.semantic.query.QueryBlock;
-import me.christianrobert.orapgsync.transformation.semantic.query.SelectListElement;
-import me.christianrobert.orapgsync.transformation.semantic.query.SelectedList;
+import me.christianrobert.orapgsync.transformation.semantic.query.*;
+import me.christianrobert.orapgsync.transformation.semantic.statement.SelectOnlyStatement;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
@@ -75,7 +73,7 @@ class SelectStatementTest {
     }
 
     @Test
-    void nullQueryBlockThrowsException() {
+    void nullSelectOnlyStatementThrowsException() {
         assertThrows(IllegalArgumentException.class, () -> new SelectStatement(null));
     }
 
@@ -87,13 +85,16 @@ class SelectStatementTest {
                 null
         );
 
-        assertNotNull(select.getQueryBlock());
-        assertEquals(2, select.getQueryBlock().getSelectedList().getElements().size());
-        assertEquals("emp", select.getQueryBlock().getFromClause().getTableReferences().get(0).getTableName());
+        assertNotNull(select.getSelectOnlyStatement());
+        assertNotNull(select.getSelectOnlyStatement().getSubquery());
+        assertNotNull(select.getSelectOnlyStatement().getSubquery().getBasicElements());
+        assertNotNull(select.getSelectOnlyStatement().getSubquery().getBasicElements().getQueryBlock());
+        assertEquals(2, select.getSelectOnlyStatement().getSubquery().getBasicElements().getQueryBlock().getSelectedList().getElements().size());
+        assertEquals("emp", select.getSelectOnlyStatement().getSubquery().getBasicElements().getQueryBlock().getFromClause().getTableReferences().get(0).getTableName());
     }
 
     @Test
-    void toStringIncludesQueryBlockInfo() {
+    void toStringIncludesStructureInfo() {
         SelectStatement select = buildSelect(
                 Arrays.asList("empno", "ename"),
                 "emp",
@@ -103,7 +104,7 @@ class SelectStatementTest {
         String str = select.toString();
 
         assertTrue(str.contains("SelectStatement"));
-        assertTrue(str.contains("QueryBlock"));
+        assertTrue(str.contains("SelectOnlyStatement"));
     }
 
     // ========== Helper Methods ==========
@@ -126,7 +127,16 @@ class SelectStatementTest {
         // Build QueryBlock
         QueryBlock queryBlock = new QueryBlock(selectedList, fromClause);
 
+        // Build SubqueryBasicElements
+        SubqueryBasicElements basicElements = new SubqueryBasicElements(queryBlock);
+
+        // Build Subquery
+        Subquery subquery = new Subquery(basicElements);
+
+        // Build SelectOnlyStatement
+        SelectOnlyStatement selectOnlyStatement = new SelectOnlyStatement(subquery);
+
         // Build SelectStatement
-        return new SelectStatement(queryBlock);
+        return new SelectStatement(selectOnlyStatement);
     }
 }

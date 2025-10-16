@@ -24,6 +24,15 @@ public class TransformationContext {
     // Query-local state (mutable, reset per query)
     private final Map<String, String> tableAliases;  // alias → table name
 
+    // Future: Query scope tracking for subqueries and correlated references
+    // When implementing subqueries, add:
+    // - private final Deque<QueryScope> queryNesting;  // Stack of enclosing queries
+    // - private final ClauseType currentClause;        // SELECT, WHERE, HAVING, ORDER BY
+    // - public TransformationContext enterSubquery(QueryScope outerQuery);
+    // - public boolean isOuterTableAlias(String alias);
+    // This will enable proper handling of correlated subqueries and column disambiguation
+    // across query nesting levels.
+
     /**
      * Creates context with metadata indices.
      *
