@@ -5,7 +5,7 @@ import me.christianrobert.orapgsync.transformation.context.TransformationExcepti
 import me.christianrobert.orapgsync.transformation.semantic.SemanticNode;
 import me.christianrobert.orapgsync.transformation.semantic.query.SelectListElement;
 
-public class VisitSelect_list_elements {
+public class VisitSelectListElement {
   public static SemanticNode v(PlSqlParser.Select_list_elementsContext ctx, SemanticTreeBuilder b) {
 
     if (ctx.ASTERISK() != null) {

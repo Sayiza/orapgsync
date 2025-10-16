@@ -9,7 +9,7 @@ import me.christianrobert.orapgsync.transformation.semantic.query.SelectedList;
 import java.util.ArrayList;
 import java.util.List;
 
-public class VisitSelected_list {
+public class VisitSelectedList {
   public static SemanticNode v(PlSqlParser.Selected_listContext ctx, SemanticTreeBuilder b) {
 
     if (ctx.ASTERISK() != null) {

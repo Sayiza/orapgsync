@@ -7,7 +7,7 @@ import me.christianrobert.orapgsync.transformation.semantic.query.FromClause;
 import me.christianrobert.orapgsync.transformation.semantic.query.QueryBlock;
 import me.christianrobert.orapgsync.transformation.semantic.query.SelectedList;
 
-public class VisitQuery_block {
+public class VisitQueryBlock {
   public static SemanticNode v(PlSqlParser.Query_blockContext ctx, SemanticTreeBuilder b) {
 
     // Extract SELECT list - use visitor pattern

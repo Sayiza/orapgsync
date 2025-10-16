@@ -6,7 +6,7 @@ import me.christianrobert.orapgsync.transformation.semantic.SemanticNode;
 import me.christianrobert.orapgsync.transformation.semantic.query.QueryBlock;
 import me.christianrobert.orapgsync.transformation.semantic.query.SubqueryBasicElements;
 
-public class VisitSubquery_basic_elements {
+public class VisitSubqueryBasicElements {
   public static SemanticNode v(PlSqlParser.Subquery_basic_elementsContext ctx, SemanticTreeBuilder b) {
     // query_block | LEFT_PAREN subquery RIGHT_PAREN
 

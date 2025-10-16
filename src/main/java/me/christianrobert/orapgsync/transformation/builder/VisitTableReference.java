@@ -5,7 +5,7 @@ import me.christianrobert.orapgsync.transformation.context.TransformationExcepti
 import me.christianrobert.orapgsync.transformation.semantic.SemanticNode;
 import me.christianrobert.orapgsync.transformation.semantic.element.TableReference;
 
-public class VisitTable_ref {
+public class VisitTableReference {
   public static SemanticNode v(PlSqlParser.Table_refContext ctx, SemanticTreeBuilder b) {
 
     // Navigate: table_ref -> table_ref_aux -> table_ref_aux_internal -> ...

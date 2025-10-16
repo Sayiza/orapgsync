@@ -6,7 +6,7 @@ import me.christianrobert.orapgsync.transformation.semantic.SemanticNode;
 import me.christianrobert.orapgsync.transformation.semantic.query.Subquery;
 import me.christianrobert.orapgsync.transformation.semantic.statement.SelectOnlyStatement;
 
-public class VisitSelect_only_statement {
+public class VisitSelectOnlyStatement {
   public static SemanticNode v(PlSqlParser.Select_only_statementContext ctx, SemanticTreeBuilder b) {
     // subquery for_update_clause?
 

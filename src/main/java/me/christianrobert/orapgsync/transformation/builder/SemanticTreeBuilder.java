@@ -22,12 +22,12 @@ public class SemanticTreeBuilder extends PlSqlParserBaseVisitor<SemanticNode> {
 
     @Override
     public SemanticNode visitSelect_statement(PlSqlParser.Select_statementContext ctx) {
-        return VisitSelect_statement.v(ctx, this);
+        return VisitSelectStatement.v(ctx, this);
     }
 
     @Override
     public SemanticNode visitSelect_only_statement(PlSqlParser.Select_only_statementContext ctx) {
-        return VisitSelect_only_statement.v(ctx, this);
+        return VisitSelectOnlyStatement.v(ctx, this);
     }
 
     @Override
@@ -37,46 +37,56 @@ public class SemanticTreeBuilder extends PlSqlParserBaseVisitor<SemanticNode> {
 
     @Override
     public SemanticNode visitSubquery_basic_elements(PlSqlParser.Subquery_basic_elementsContext ctx) {
-        return VisitSubquery_basic_elements.v(ctx, this);
+        return VisitSubqueryBasicElements.v(ctx, this);
     }
 
     // ========== QUERY BLOCK ==========
 
     @Override
     public SemanticNode visitQuery_block(PlSqlParser.Query_blockContext ctx) {
-        return VisitQuery_block.v(ctx, this);
+        return VisitQueryBlock.v(ctx, this);
     }
 
     // ========== SELECTED LIST (SELECT columns) ==========
 
     @Override
     public SemanticNode visitSelected_list(PlSqlParser.Selected_listContext ctx) {
-        return VisitSelected_list.v(ctx, this);
+        return VisitSelectedList.v(ctx, this);
     }
 
     @Override
     public SemanticNode visitSelect_list_elements(PlSqlParser.Select_list_elementsContext ctx) {
-        return VisitSelect_list_elements.v(ctx, this);
+        return VisitSelectListElement.v(ctx, this);
     }
 
-    // ========== EXPRESSION (simplified for minimal implementation) ==========
+    // ========== EXPRESSION HIERARCHY ==========
 
     @Override
     public SemanticNode visitExpression(PlSqlParser.ExpressionContext ctx) {
         return VisitExpression.v(ctx, this);
     }
 
+    @Override
+    public SemanticNode visitLogical_expression(PlSqlParser.Logical_expressionContext ctx) {
+        return VisitLogicalExpression.v(ctx, this);
+    }
+
+    @Override
+    public SemanticNode visitUnary_logical_expression(PlSqlParser.Unary_logical_expressionContext ctx) {
+        return VisitUnaryLogicalExpression.v(ctx, this);
+    }
+
     // ========== FROM CLAUSE ==========
 
     @Override
     public SemanticNode visitFrom_clause(PlSqlParser.From_clauseContext ctx) {
-        return VisitFrom_clause.v(ctx, this);
+        return VisitFromClause.v(ctx, this);
     }
 
     // ========== TABLE REFERENCE ==========
 
     @Override
     public SemanticNode visitTable_ref(PlSqlParser.Table_refContext ctx) {
-        return VisitTable_ref.v(ctx, this);
+        return VisitTableReference.v(ctx, this);
     }
 }

@@ -9,7 +9,7 @@ import me.christianrobert.orapgsync.transformation.semantic.query.FromClause;
 import java.util.ArrayList;
 import java.util.List;
 
-public class VisitFrom_clause {
+public class VisitFromClause {
   public static SemanticNode v(PlSqlParser.From_clauseContext ctx, SemanticTreeBuilder b) {
 
     PlSqlParser.Table_ref_listContext tableRefListCtx = ctx.table_ref_list();

@@ -6,7 +6,7 @@ import me.christianrobert.orapgsync.transformation.semantic.SemanticNode;
 import me.christianrobert.orapgsync.transformation.semantic.statement.SelectOnlyStatement;
 import me.christianrobert.orapgsync.transformation.semantic.statement.SelectStatement;
 
-public class VisitSelect_statement {
+public class VisitSelectStatement {
   public static SemanticNode v(PlSqlParser.Select_statementContext ctx, SemanticTreeBuilder b) {
     PlSqlParser.Select_only_statementContext selectOnlyCtx = ctx.select_only_statement();
     if (selectOnlyCtx == null) {
