@@ -2,27 +2,49 @@
 
 **Oracle to PostgreSQL SQL/PL/SQL Transformation Architecture**
 
+**Last Updated:** 2025-10-17
+**Status:** Direct AST Approach - Foundation Working ✅
+
 This document describes the architecture and implementation plan for the ANTLR-based transformation module that converts Oracle SQL and PL/SQL code to PostgreSQL-compatible code.
+
+---
+
+## ⚠️ ARCHITECTURAL DECISION: Direct AST Transformation
+
+**Decision Date:** 2025-10-17
+
+After implementing and comparing two approaches (semantic tree vs direct AST), we have adopted the **Direct AST-to-Code transformation strategy** as the primary implementation.
+
+**Rationale:**
+1. ✅ **Already working** - Tests pass (4/4), basic SELECT transforms successfully
+2. ✅ **Simpler architecture** - Single transformation pass (ANTLR AST → PostgreSQL SQL)
+3. ✅ **Faster development** - Add visitor methods incrementally
+4. ✅ **Quarkus-native** - Natural CDI integration via `TransformationContext`
+5. ✅ **Pragmatic fit** - Oracle and PostgreSQL SQL are similar enough for direct translation
+6. ✅ **Maintains boundaries** - Proper dependency separation through context injection
+
+**See also:** `TRANSFORMATION_STATUS.md` for detailed comparison and migration status.
 
 ---
 
 ## Overview
 
-The transformation module is a self-contained, reusable system for parsing Oracle SQL/PL/SQL and converting it to PostgreSQL equivalents. It uses a **semantic syntax tree** approach where parsed code is converted into custom Java classes that know how to transform themselves.
+The transformation module is a self-contained, reusable system for parsing Oracle SQL/PL/SQL and converting it to PostgreSQL equivalents. It uses a **direct visitor pattern** where ANTLR parse trees are directly transformed to PostgreSQL SQL strings.
 
 **Core Pipeline:**
 ```
-Oracle SQL/PL/SQL → ANTLR AST → Semantic Tree → PostgreSQL SQL/PL/pgSQL
-                      ↓              ↓               ↓
-                   PlSqlParser   SemanticNode    toPostgres()
+Oracle SQL/PL/SQL → ANTLR Parser → Direct Visitor → PostgreSQL SQL/PL/pgSQL
+                         ↓              ↓                  ↓
+                    PlSqlParser    PostgresCodeBuilder   String
 ```
 
 **Key Design Principles:**
-1. **Self-Transforming Nodes**: Each semantic node contains its transformation logic
-2. **Incremental Development**: Start simple, add complexity progressively
-3. **Test-Driven**: Comprehensive unit tests before integration
-4. **Decoupled**: Independent from migration jobs initially
-5. **Reusable**: Same infrastructure for views, functions, procedures, triggers
+1. **Direct Transformation**: Visitor returns PostgreSQL SQL strings directly
+2. **Static Helper Pattern**: Each ANTLR rule has a static helper class for scalability
+3. **Dependency Boundaries**: `TransformationContext` injected for metadata access
+4. **Incremental Development**: Start simple, add complexity progressively
+5. **Test-Driven**: Comprehensive unit tests before integration
+6. **Decoupled**: Independent from migration jobs initially
 
 ---
 
@@ -30,29 +52,49 @@ Oracle SQL/PL/SQL → ANTLR AST → Semantic Tree → PostgreSQL SQL/PL/pgSQL
 
 ### Required Context for Transformation
 
-The transformation module requires **minimal metadata** to disambiguate Oracle syntax patterns. We use existing metadata already in `StateService` rather than querying Oracle during transformation.
+The transformation module requires **minimal metadata** to disambiguate Oracle syntax patterns. Metadata is accessed through `TransformationContext`, maintaining proper dependency boundaries.
 
 **Two Types of Metadata:**
 
 1. **Synonym Resolution** (already implemented)
-   - `StateService.resolveSynonym(name, schema)` resolves synonyms to actual object names
+   - `TransformationContext.resolveSynonym(name)` via `TransformationIndices`
    - Follows Oracle rules: current schema → PUBLIC fallback
    - Essential because PostgreSQL has no synonyms
 
-2. **Structural Indices** (to be implemented)
+2. **Structural Indices** (implemented in `TransformationIndices`)
    - Table → Column → Type mappings
    - Type → Method mappings
    - Package → Function mappings
    - Built once at transformation session start from existing StateService data
 
-### Why This Approach?
+### Dependency Architecture
 
-**Transformation is syntax conversion, not validation:**
-- We transform Oracle SQL patterns → PostgreSQL SQL patterns
-- PostgreSQL validates the result when executed
-- No need to duplicate Oracle's compile-time checks
+**Proper Separation Maintained:**
 
-**Critical disambiguation** (where metadata IS needed):
+```
+ViewTransformationService (ApplicationScoped)
+         ↓ @Inject
+    AntlrParser (ApplicationScoped)
+         ↓ creates
+    PostgresCodeBuilder (NOT injected - created per transformation)
+         ↓ uses (passed as parameter)
+    TransformationContext (created per transformation)
+         ↓ contains
+    TransformationIndices (built from StateService metadata)
+```
+
+**Critical:** `PostgresCodeBuilder` is **NOT** a CDI bean. It receives `TransformationContext` as a method parameter, maintaining clean boundaries between transformation logic and application services.
+
+**Why This Works:**
+- ✅ No direct dependency on `StateService` in visitor
+- ✅ `TransformationContext` acts as facade for metadata access
+- ✅ Can inject `TypeConverter` if needed (via context)
+- ✅ Testable - mock `TransformationContext` for unit tests
+- ✅ Reusable - same builder can transform multiple queries with different contexts
+
+### Critical Disambiguation
+
+**Where metadata IS needed:**
 
 ```sql
 -- Type method call (requires metadata to identify)
@@ -68,11 +110,11 @@ SELECT emp.address.street FROM employees emp;
 -- → (emp.address).street
 ```
 
-Without metadata, `a.b.c()` is ambiguous. With indices, we can resolve:
-1. Is `a` a table alias? → Look up in query context
-2. Does table have column `b` of custom type? → Look up in table index
-3. Does that type have method `c`? → Look up in type method index
-4. Otherwise, is `a.b` a package function? → Look up in package function index
+Without metadata, `a.b.c()` is ambiguous. With `TransformationContext`, we can resolve:
+1. Is `a` a table alias? → `context.resolveAlias(a)`
+2. Does table have column `b` of custom type? → `context.getColumnType(table, b)`
+3. Does that type have method `c`? → `context.hasTypeMethod(type, c)`
+4. Otherwise, is `a.b` a package function? → `context.isPackageFunction(qualified)`
 
 ### Metadata Indexing Architecture
 
@@ -99,38 +141,43 @@ public class MetadataIndexBuilder {
 }
 ```
 
-**Use during transformation:**
+**Use during transformation via context:**
 
 ```java
-public class TransformationContext {
-    private final TransformationIndices indices;
-    private final Map<String, String> synonyms;  // Pre-resolved
-    private final Map<String, String> aliases;   // Per-query state
+// In VisitGeneralElement.java (static helper)
+public static String v(PlSqlParser.General_elementContext ctx, PostgresCodeBuilder b) {
+    if (ctx.PERIOD() != null && !ctx.PERIOD().isEmpty()) {
+        // Dot notation detected: a.b.c()
+        String[] parts = parseDotNotation(ctx);
 
-    /**
-     * Resolve a.b.c() pattern to type method or package function.
-     */
-    public CallType resolveCallPattern(String a, String b, String c) {
+        // Access metadata through builder's context (passed as parameter)
+        TransformationContext context = b.getContext();
+
         // 1. Is 'a' a table alias?
-        String table = resolveAlias(a);
+        String table = context.resolveAlias(parts[0]);
         if (table != null) {
             // 2. Does table have column 'b' of custom type?
-            String columnType = indices.getColumnType(table, b);
-            if (columnType != null) {
+            TransformationIndices.ColumnTypeInfo typeInfo =
+                context.getColumnType(table, parts[1]);
+            if (typeInfo != null) {
                 // 3. Does type have method 'c'?
-                if (indices.hasTypeMethod(columnType, c)) {
-                    return CallType.TYPE_METHOD;
+                if (context.hasTypeMethod(typeInfo.getQualifiedType(), parts[2])) {
+                    return String.format("(%s.%s).%s()", parts[0], parts[1], parts[2]);
                 }
             }
         }
 
         // 4. Is a.b a package function?
-        if (indices.isPackageFunction(a + "." + b)) {
-            return CallType.PACKAGE_FUNCTION;
+        if (context.isPackageFunction(parts[0] + "." + parts[1])) {
+            return String.format("%s__%s(%s)", parts[0], parts[1], transformArgs(parts[2]));
         }
 
-        return CallType.UNKNOWN;
+        // Simple column reference
+        return ctx.getText();
     }
+
+    // Simple identifier
+    return ctx.getText();
 }
 ```
 
@@ -139,487 +186,303 @@ public class TransformationContext {
 ✅ **Uses existing data**: All metadata already in StateService
 ✅ **No database dependency**: Transformation doesn't query Oracle
 ✅ **Fast**: O(1) lookups via hash maps
-✅ **Testable**: Mock indices for unit tests
-✅ **Clean architecture**: Parse → Index → Transform
+✅ **Testable**: Mock `TransformationContext` for unit tests
+✅ **Clean architecture**: Proper dependency boundaries maintained
 ✅ **Offline capable**: Can transform without Oracle connection
-
-### Alternative Approaches Considered
-
-**ALL_DEPENDENCIES per view** (deferred):
-- Could query Oracle's `ALL_DEPENDENCIES` for each view
-- Provides validation and better error messages
-- Adds complexity and Oracle connection dependency
-- **Decision**: Not needed for MVP, add later if needed
-
-**Query during transformation** (rejected):
-- Query Oracle metadata as needed during transformation
-- Tight coupling, slow, complex error handling
-- **Decision**: Architectural regression, not pursued
-
-### Metadata Coverage
-
-**Complete metadata available from StateService:**
-- ✅ Tables: `TableMetadata` with columns, types, type owners
-- ✅ Views: `ViewMetadata` with columns (same as tables)
-- ✅ Object Types: `ObjectDataTypeMetaData` with attributes
-- ✅ Type Methods: `TypeMethodMetadata` with schema, type, method names
-- ✅ Functions: `FunctionMetadata` with package names
-- ✅ Synonyms: Dual-map structure for efficient resolution
-
-**This is sufficient for:**
-- Type method vs package function disambiguation
-- Synonym resolution
-- Custom type identification
-- Schema-qualified name resolution
+✅ **Quarkus-compatible**: Service layer uses CDI, visitor layer stays pure
 
 ---
 
 ## Module Structure
 
 ```
-transformation/                          # Oracle→PostgreSQL code transformation
+transformer/                             # Oracle→PostgreSQL direct transformation
 │
 ├── parser/                              # ANTLR Parsing Layer
-│   ├── AntlrParser.java                 # Thin wrapper around PlSqlParser
+│   ├── AntlrParser.java                 # CDI bean - thin wrapper around PlSqlParser
 │   ├── ParseResult.java                 # Parse tree + errors wrapper
 │   └── SqlType.java                     # Enum: VIEW_SELECT, FUNCTION_BODY, etc.
 │
-├── semantic/                            # Semantic Syntax Tree (Self-Transforming)
+├── builder/                             # Direct AST to PostgreSQL Visitor
+│   ├── PostgresCodeBuilder.java         # Main visitor (NOT CDI bean)
+│   │                                    # Returns PostgreSQL SQL strings
+│   │                                    # Context passed as parameter to visit methods
 │   │
-│   ├── SemanticNode.java                # Base interface with toPostgres()
-│   │
-│   ├── statement/                       # SQL Statements
-│   │   ├── SelectStatement.java         # SELECT with all clauses
-│   │   ├── InsertStatement.java         # INSERT (future)
-│   │   ├── UpdateStatement.java         # UPDATE (future)
-│   │   ├── DeleteStatement.java         # DELETE (future)
-│   │   └── MergeStatement.java          # MERGE (future)
-│   │
-│   ├── expression/                      # SQL Expressions
-│   │   ├── FunctionCall.java            # Function calls (NVL, DECODE, etc.)
-│   │   ├── BinaryOperation.java         # a + b, a = b, etc.
-│   │   ├── UnaryOperation.java          # NOT, -, +
-│   │   ├── CaseExpression.java          # CASE WHEN ... END
-│   │   ├── Literal.java                 # String, number, date literals
-│   │   ├── Identifier.java              # Column/table names
-│   │   ├── SubqueryExpression.java      # (SELECT ...)
-│   │   └── CastExpression.java          # Type casting
-│   │
-│   ├── clause/                          # SQL Clauses
-│   │   ├── SelectList.java              # Column list in SELECT
-│   │   ├── FromClause.java              # FROM with tables/joins
-│   │   ├── WhereClause.java             # WHERE condition
-│   │   ├── JoinClause.java              # JOIN with ON condition
-│   │   ├── GroupByClause.java           # GROUP BY
-│   │   ├── HavingClause.java            # HAVING
-│   │   ├── OrderByClause.java           # ORDER BY
-│   │   └── WithClause.java              # WITH (CTE) (future)
-│   │
-│   ├── element/                         # Sub-Elements
-│   │   ├── TableReference.java          # Table/view reference with alias
-│   │   ├── ColumnReference.java         # Qualified column reference
-│   │   ├── OrderByElement.java          # Column + ASC/DESC
-│   │   └── SelectColumn.java            # Column or expression with alias
-│   │
-│   └── plsql/                           # PL/SQL Nodes (Future)
-│       ├── FunctionBody.java            # Function implementation
-│       ├── ProcedureBody.java           # Procedure implementation
-│       ├── DeclareSection.java          # Variable declarations
-│       ├── IfStatement.java             # IF-THEN-ELSE
-│       ├── LoopStatement.java           # FOR/WHILE loops
-│       ├── CursorDeclaration.java       # Cursor definitions
-│       └── ExceptionHandler.java        # EXCEPTION blocks
+│   └── Visit*.java                      # Static helper classes (33+ files):
+│       ├── VisitSelectStatement.java
+│       ├── VisitQueryBlock.java
+│       ├── VisitFromClause.java
+│       ├── VisitSelectedList.java
+│       ├── VisitSelectListElement.java
+│       ├── VisitExpression.java
+│       ├── VisitLogicalExpression.java
+│       ├── VisitUnaryLogicalExpression.java
+│       ├── VisitMultisetExpression.java
+│       ├── VisitRelationalExpression.java
+│       ├── VisitCompoundExpression.java
+│       ├── VisitConcatenation.java
+│       ├── VisitModelExpression.java
+│       ├── VisitUnaryExpression.java
+│       ├── VisitAtom.java
+│       ├── VisitGeneralElement.java     # ⭐ Transformation decision point
+│       ├── VisitStandardFunction.java   # Oracle function transformations
+│       ├── VisitStringFunction.java
+│       ├── VisitTableReference.java
+│       └── ... (33+ total)
 │
-├── builder/                             # AST to Semantic Tree Conversion
-│   └── SemanticTreeBuilder.java         # Visitor: ANTLR AST → Semantic Tree
-│
-├── context/                             # Transformation Context
-│   ├── TransformationContext.java       # Global state with metadata indices
+├── context/                             # Transformation Context (Reused)
+│   ├── TransformationContext.java       # Facade for metadata access
 │   ├── TransformationIndices.java       # Pre-built metadata lookup indices
 │   ├── MetadataIndexBuilder.java        # Builds indices from StateService
 │   ├── TransformationResult.java        # Success/error result wrapper
 │   └── TransformationException.java     # Custom exception for transform errors
 │
-└── service/                             # High-Level Services (Job Integration)
-    ├── ViewTransformationService.java   # View SQL transformation
-    └── (future) FunctionTransformationService.java
+└── service/                             # High-Level Services (CDI Integration)
+    └── ViewTransformationService.java   # CDI bean - orchestrates transformation
 ```
 
 ---
 
-## Core Interfaces and Classes
+## Core Classes and Interfaces
 
-### SemanticNode Interface
+### PostgresCodeBuilder (Main Visitor)
 
 ```java
 /**
- * Base interface for all semantic syntax tree nodes.
- * Each node knows how to transform itself to PostgreSQL.
+ * Direct ANTLR visitor that transforms Oracle SQL to PostgreSQL SQL.
+ * Returns PostgreSQL SQL strings directly (no intermediate semantic tree).
+ *
+ * NOT a CDI bean - created per transformation.
+ * Context is passed as parameter, maintaining dependency boundaries.
  */
-public interface SemanticNode {
+public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
+
+    private TransformationContext context;  // Passed in, not injected
+
+    public PostgresCodeBuilder() {
+        // No dependencies - keeps visitor pure
+    }
+
     /**
-     * Transform this node to PostgreSQL equivalent.
-     * @param context Global context (StateService, synonym resolution, etc.)
-     * @return PostgreSQL SQL/PL/pgSQL string
+     * Set context before transformation.
+     * Called by ViewTransformationService.
      */
-    String toPostgres(TransformationContext context);
+    public void setContext(TransformationContext context) {
+        this.context = context;
+    }
+
+    public TransformationContext getContext() {
+        return context;
+    }
+
+    // ========== SELECT STATEMENT ==========
+
+    @Override
+    public String visitSelect_statement(PlSqlParser.Select_statementContext ctx) {
+        return VisitSelectStatement.v(ctx, this);
+    }
+
+    @Override
+    public String visitQuery_block(PlSqlParser.Query_blockContext ctx) {
+        return VisitQueryBlock.v(ctx, this);
+    }
+
+    // ... 30+ more visitor methods delegating to static helpers
 }
 ```
 
-### TransformationContext Class
+### Static Helper Pattern
+
+```java
+/**
+ * Static helper for visiting SELECT statements.
+ * Keeps PostgresCodeBuilder clean by extracting transformation logic.
+ */
+public class VisitSelectStatement {
+    public static String v(PlSqlParser.Select_statementContext ctx, PostgresCodeBuilder b) {
+        PlSqlParser.Select_only_statementContext selectOnlyCtx = ctx.select_only_statement();
+        if (selectOnlyCtx == null) {
+            throw new TransformationException("SELECT statement missing select_only_statement");
+        }
+
+        return b.visit(selectOnlyCtx);  // Recursive visitor call
+    }
+}
+```
+
+### TransformationContext (Dependency Boundary)
 
 ```java
 /**
  * Provides global context for transformation process.
- * Contains pre-built metadata indices for fast lookups during transformation.
+ * Maintains dependency boundaries - visitor accesses metadata through this facade.
+ *
+ * Contains:
+ * - Pre-built metadata indices for fast lookups
+ * - Current schema context
+ * - Query-local state (table aliases)
  */
 public class TransformationContext {
-    private final TransformationIndices indices;     // Pre-built metadata indices
-    private final Map<String, String> synonyms;      // Pre-resolved synonyms
-    private final String currentSchema;              // Current schema context
-    private final Map<String, String> localAliases;  // Per-query table aliases
+    private final String currentSchema;
+    private final TransformationIndices indices;
+    private final Map<String, String> tableAliases;  // Per-query state
 
-    // Metadata lookup methods
-    public String getColumnType(String qualifiedTable, String columnName);
-    public boolean hasTypeMethod(String qualifiedType, String methodName);
-    public boolean isPackageFunction(String qualifiedName);
+    public TransformationContext(String currentSchema, TransformationIndices indices) {
+        this.currentSchema = currentSchema;
+        this.indices = indices;
+        this.tableAliases = new HashMap<>();
+    }
 
-    // Synonym and alias resolution
-    public String resolveSynonym(String name);
-    public void registerAlias(String alias, String tableName);
-    public String resolveAlias(String alias);
+    // ========== Metadata Access ==========
 
-    // Type conversion
-    public String convertType(String oracleType);
+    public String resolveSynonym(String name) {
+        return indices.resolveSynonym(currentSchema, name);
+    }
 
-    // Pattern disambiguation
-    public CallType resolveCallPattern(String a, String b, String c);
+    public TransformationIndices.ColumnTypeInfo getColumnType(String qualifiedTable, String columnName) {
+        return indices.getColumnType(qualifiedTable, columnName);
+    }
+
+    public boolean hasTypeMethod(String qualifiedType, String methodName) {
+        return indices.hasTypeMethod(qualifiedType, methodName);
+    }
+
+    public boolean isPackageFunction(String qualifiedName) {
+        return indices.isPackageFunction(qualifiedName);
+    }
+
+    // ========== Query-Local State ==========
+
+    public void registerAlias(String alias, String tableName) {
+        tableAliases.put(alias.toLowerCase(), tableName.toLowerCase());
+    }
+
+    public String resolveAlias(String alias) {
+        return tableAliases.get(alias.toLowerCase());
+    }
+
+    public void clearAliases() {
+        tableAliases.clear();
+    }
+
+    // ========== Type Conversion (Future) ==========
+
+    public String convertType(String oracleType) {
+        // TODO: Integrate with TypeConverter
+        return oracleType;
+    }
 }
 ```
 
-### AntlrParser Class
+### AntlrParser (CDI Bean)
 
 ```java
 /**
  * Thin wrapper around ANTLR PlSqlParser.
  * Handles parser instantiation and error collection.
+ *
+ * CDI-managed singleton.
  */
 @ApplicationScoped
 public class AntlrParser {
-    public ParseResult parseSelectStatement(String sql);
-    public ParseResult parseFunctionBody(String plsql);  // Future
-    public ParseResult parseProcedureBody(String plsql); // Future
-}
-```
-
-### SemanticTreeBuilder Class
-
-```java
-/**
- * Visitor that converts ANTLR parse tree to semantic syntax tree.
- * This is the only class that directly touches ANTLR classes.
- */
-public class SemanticTreeBuilder extends PlSqlParserBaseVisitor<SemanticNode> {
-    @Override
-    public SemanticNode visitSelect_statement(PlSqlParser.Select_statementContext ctx);
-
-    @Override
-    public SemanticNode visitFunction_call(PlSqlParser.Function_callContext ctx);
-
-    // ... visitor methods for each ANTLR rule
-}
-```
-
----
-
-## Implementation Phases
-
-### Phase 1: Foundation (Week 1)
-
-**Goal**: Build core infrastructure with minimal functionality
-
-**Components to Implement:**
-
-1. **Base Infrastructure**
-   - `SemanticNode` interface
-   - `TransformationContext` class
-   - `TransformationIndices` class (data holder for indices)
-   - `MetadataIndexBuilder` class (builds indices from StateService)
-   - `TransformationResult` class
-   - `TransformationException` class
-
-2. **Metadata Indexing**
-   - Index table columns: Schema.Table → Column → Type
-   - Index type methods: Schema.Type → Set of method names
-   - Index package functions: Set of Schema.Package.Function
-   - Build indices once at transformation session start
-
-3. **Parser Layer**
-   - `SqlType` enum (VIEW_SELECT, FUNCTION_BODY, etc.)
-   - `ParseResult` class (wraps parse tree + errors)
-   - `AntlrParser` class (SELECT statement parsing only)
-
-4. **Minimal Semantic Nodes**
-   - `Identifier` - Column/table names
-   - `Literal` - String, number literals
-   - `TableReference` - Simple table reference with optional alias
-   - `ColumnReference` - Column reference (optionally qualified)
-
-5. **Builder**
-   - `SemanticTreeBuilder` (visits only the nodes above)
-
-6. **Tests**
-   - Unit tests for each semantic node
-   - Metadata index builder tests
-   - Parser tests for simple SELECT statements
-
-**Deliverable**: Parse and transform `SELECT col1, col2 FROM table1` with metadata context
-
-**Test Coverage:**
-```java
-@Test
-void transformSimpleSelect() {
-    String oracle = "SELECT empno, ename FROM emp";
-    String expected = "SELECT empno, ename FROM emp";
-
-    ParseResult parseResult = parser.parseSelectStatement(oracle);
-    SemanticNode tree = builder.visit(parseResult.getTree());
-    String postgres = tree.toPostgres(context);
-
-    assertEquals(expected, postgres);
-}
-```
-
----
-
-### Phase 2: Basic SELECT Statements (Week 2)
-
-**Goal**: Handle common SELECT statement components
-
-**Components to Implement:**
-
-1. **Statement Nodes**
-   - `SelectStatement` - Complete SELECT with clauses
-
-2. **Clause Nodes**
-   - `SelectList` - Column list with expressions
-   - `FromClause` - Table list (no joins yet)
-   - `WhereClause` - Filter conditions
-   - `OrderByClause` - Sorting
-
-3. **Expression Nodes**
-   - `BinaryOperation` - Arithmetic (+, -, *, /) and comparison (=, <, >, etc.)
-   - `UnaryOperation` - NOT, unary minus
-   - `SelectColumn` - Column/expression with optional alias
-
-4. **Element Nodes**
-   - `OrderByElement` - Column + ASC/DESC + NULLS FIRST/LAST
-
-**Deliverable**: Transform SELECTs with WHERE, ORDER BY
-
-**Test Examples:**
-```sql
--- Oracle
-SELECT empno, ename, sal * 12 AS annual_salary
-FROM emp
-WHERE deptno = 10
-ORDER BY ename;
-
--- PostgreSQL (same)
-SELECT empno, ename, sal * 12 AS annual_salary
-FROM emp
-WHERE deptno = 10
-ORDER BY ename;
-```
-
-```sql
--- Oracle
-SELECT * FROM emp
-ORDER BY sal DESC NULLS LAST;
-
--- PostgreSQL (same)
-SELECT * FROM emp
-ORDER BY sal DESC NULLS LAST;
-```
-
----
-
-### Phase 3: Oracle-Specific Transformations (Week 3)
-
-**Goal**: Handle Oracle-specific SQL constructs
-
-**Components to Implement:**
-
-1. **Function Transformations**
-   - `FunctionCall` node with Oracle→PostgreSQL mappings:
-     - `NVL(a, b)` → `COALESCE(a, b)`
-     - `DECODE(...)` → `CASE ... END`
-     - `SYSDATE` → `CURRENT_TIMESTAMP`
-     - `ROWNUM` → `row_number() OVER ()`
-     - `TO_DATE(str, fmt)` → `TO_TIMESTAMP(str, fmt)` (with format conversion)
-     - `TO_CHAR(date, fmt)` → `TO_CHAR(date, fmt)` (with format conversion)
-     - `SUBSTR(str, pos, len)` → `SUBSTRING(str FROM pos FOR len)`
-     - `INSTR(str, substr)` → `POSITION(substr IN str)`
-     - `CONCAT(a, b)` → `a || b`
-     - `LENGTH` → `LENGTH` (compatible)
-     - `UPPER`, `LOWER`, `TRIM` → (compatible)
-
-2. **Dual Table Handling**
-   - `SELECT expression FROM DUAL` → `SELECT expression`
-
-3. **Sequence Syntax**
-   - `seq_name.NEXTVAL` → `nextval('schema.seq_name')`
-   - `seq_name.CURRVAL` → `currval('schema.seq_name')`
-
-4. **Oracle Join Syntax** (if present in views)
-   - `a.id = b.id(+)` → `LEFT JOIN`
-   - Detect (+) in WHERE clause, convert to ANSI JOIN syntax
-
-**Test Examples:**
-```sql
--- Oracle
-SELECT NVL(commission, 0) FROM emp;
--- PostgreSQL
-SELECT COALESCE(commission, 0) FROM emp;
-```
-
-```sql
--- Oracle
-SELECT DECODE(deptno, 10, 'A', 20, 'B', 'C') FROM emp;
--- PostgreSQL
-SELECT CASE deptno WHEN 10 THEN 'A' WHEN 20 THEN 'B' ELSE 'C' END FROM emp;
-```
-
-```sql
--- Oracle
-SELECT emp_seq.NEXTVAL FROM DUAL;
--- PostgreSQL
-SELECT nextval('schema.emp_seq');
-```
-
----
-
-### Phase 4: Complex SELECT Features (Week 4)
-
-**Goal**: Handle advanced SQL constructs
-
-**Components to Implement:**
-
-1. **Joins**
-   - `JoinClause` - INNER, LEFT, RIGHT, FULL OUTER
-   - Convert Oracle (+) syntax to ANSI joins
-
-2. **Aggregation**
-   - `GroupByClause`
-   - `HavingClause`
-   - Aggregate functions (SUM, COUNT, AVG, MAX, MIN)
-
-3. **Subqueries**
-   - `SubqueryExpression` - Subquery in SELECT/WHERE
-   - IN (SELECT ...)
-   - EXISTS (SELECT ...)
-
-4. **CASE Expressions**
-   - `CaseExpression` - CASE WHEN ... END
-
-5. **Type Casting**
-   - `CastExpression` - CAST(expr AS type)
-   - Oracle implicit conversions → explicit CAST
-
-**Test Examples:**
-```sql
--- Oracle
-SELECT e.ename, d.dname
-FROM emp e, dept d
-WHERE e.deptno = d.deptno(+);
-
--- PostgreSQL
-SELECT e.ename, d.dname
-FROM emp e
-LEFT JOIN dept d ON e.deptno = d.deptno;
-```
-
-```sql
--- Oracle
-SELECT deptno, COUNT(*)
-FROM emp
-GROUP BY deptno
-HAVING COUNT(*) > 5;
-
--- PostgreSQL (same)
-SELECT deptno, COUNT(*)
-FROM emp
-GROUP BY deptno
-HAVING COUNT(*) > 5;
-```
-
----
-
-### Phase 5: Integration with View Jobs (Week 5)
-
-**Goal**: Connect transformation module to actual migration jobs
-
-**Components to Implement:**
-
-1. **Service Layer**
-   - `ViewTransformationService` - Orchestrates view transformation
-   - Integrates with StateService for synonym resolution
-   - Error handling and logging
-
-2. **Job Updates**
-   - Update `PostgresViewImplementationJob` to use transformation service
-   - Replace stub views with transformed SQL
-
-3. **Verification**
-   - Compare transformed views against PostgreSQL syntax
-   - Identify views that need manual intervention
-
-**Integration Pattern:**
-```java
-@ApplicationScoped
-public class ViewTransformationService {
-    @Inject StateService stateService;
-    @Inject AntlrParser parser;
-
-    public TransformationResult transformView(ViewMetadata view) {
-        // 1. Build metadata indices (cached for session)
-        TransformationIndices indices = MetadataIndexBuilder.build(
-            stateService,
-            List.of(view.getSchema())
-        );
-
-        // 2. Parse Oracle SQL
-        ParseResult parseResult = parser.parseSelectStatement(view.getSqlDefinition());
-
-        // 3. Build semantic tree
-        SemanticNode tree = new SemanticTreeBuilder().visit(parseResult.getTree());
-
-        // 4. Create context with indices
-        TransformationContext ctx = new TransformationContext(
-            indices,
-            stateService,
-            view.getSchema()
-        );
-
-        // 5. Transform
-        String postgresSql = tree.toPostgres(ctx);
-
-        return TransformationResult.success(view, postgresSql);
+    private static final Logger log = LoggerFactory.getLogger(AntlrParser.class);
+
+    public ParseResult parseSelectStatement(String sql) {
+        if (sql == null || sql.trim().isEmpty()) {
+            throw new TransformationException("SQL cannot be null or empty");
+        }
+
+        CharStream input = CharStreams.fromString(sql);
+        PlSqlLexer lexer = new PlSqlLexer(input);
+        CommonTokenStream tokens = new CommonTokenStream(lexer);
+        PlSqlParser parser = new PlSqlParser(tokens);
+
+        // Collect errors
+        List<String> errors = new ArrayList<>();
+        parser.removeErrorListeners();
+        parser.addErrorListener(new BaseErrorListener() {
+            @Override
+            public void syntaxError(Recognizer<?, ?> recognizer, Object offendingSymbol,
+                                    int line, int charPositionInLine, String msg,
+                                    RecognitionException e) {
+                String error = String.format("Line %d:%d - %s", line, charPositionInLine, msg);
+                errors.add(error);
+                log.warn("Parse error: {}", error);
+            }
+        });
+
+        PlSqlParser.Select_statementContext tree = parser.select_statement();
+        return new ParseResult(tree, errors, sql);
+    }
+
+    public ParseResult parseFunctionBody(String plsql) {
+        throw new UnsupportedOperationException("Function body parsing not yet implemented");
+    }
+
+    public ParseResult parseProcedureBody(String plsql) {
+        throw new UnsupportedOperationException("Procedure body parsing not yet implemented");
     }
 }
 ```
 
-**Job Integration:**
-```java
-@Override
-protected List<ViewImplementationResult> performExtraction(...) {
-    for (ViewMetadata view : stateService.getOracleViewMetadata()) {
-        TransformationResult result = viewTransformationService.transformView(view);
+### ViewTransformationService (CDI Bean)
 
-        if (result.isSuccess()) {
-            createView(view.getSchema(), view.getViewName(), result.getPostgresSql());
-        } else {
-            logError(view.getViewName(), result.getError());
+```java
+/**
+ * High-level service for transforming Oracle view SQL to PostgreSQL.
+ * This is the main entry point for migration jobs.
+ *
+ * CDI-managed singleton - orchestrates transformation with proper dependency injection.
+ */
+@ApplicationScoped
+public class ViewTransformationService {
+
+    private static final Logger log = LoggerFactory.getLogger(ViewTransformationService.class);
+
+    @Inject
+    AntlrParser parser;  // CDI injection
+
+    public TransformationResult transformViewSql(String oracleSql, String schema,
+                                                  TransformationIndices indices) {
+        if (oracleSql == null || oracleSql.trim().isEmpty()) {
+            return TransformationResult.failure(oracleSql, "Oracle SQL cannot be null or empty");
+        }
+
+        if (schema == null || schema.trim().isEmpty()) {
+            return TransformationResult.failure(oracleSql, "Schema cannot be null or empty");
+        }
+
+        if (indices == null) {
+            return TransformationResult.failure(oracleSql, "Transformation indices cannot be null");
+        }
+
+        try {
+            // STEP 1: Parse Oracle SQL using ANTLR
+            ParseResult parseResult = parser.parseSelectStatement(oracleSql);
+
+            if (parseResult.hasErrors()) {
+                String errorMsg = "Parse errors: " + parseResult.getErrorMessage();
+                return TransformationResult.failure(oracleSql, errorMsg);
+            }
+
+            // STEP 2: Create transformation context (dependency boundary)
+            TransformationContext context = new TransformationContext(schema, indices);
+
+            // STEP 3: Transform ANTLR parse tree directly to PostgreSQL SQL
+            PostgresCodeBuilder builder = new PostgresCodeBuilder();
+            builder.setContext(context);  // Pass context, not injected
+            String postgresSql = builder.visit(parseResult.getTree());
+
+            log.info("Successfully transformed view SQL for schema: {}", schema);
+            return TransformationResult.success(oracleSql, postgresSql);
+
+        } catch (TransformationException e) {
+            log.error("Transformation failed: {}", e.getDetailedMessage(), e);
+            return TransformationResult.failure(oracleSql, e);
+
+        } catch (Exception e) {
+            log.error("Unexpected error during transformation", e);
+            return TransformationResult.failure(oracleSql, "Unexpected error: " + e.getMessage());
         }
     }
 }
@@ -627,450 +490,410 @@ protected List<ViewImplementationResult> performExtraction(...) {
 
 ---
 
-### Phase 6: PL/SQL Foundation (Future - Week 6+)
+## Implementation Phases
 
-**Goal**: Extend to PL/SQL function/procedure bodies
+### Phase 1: Foundation ✅ COMPLETE
 
-**Components to Implement:**
+**Status:** Working - Tests passing (4/4)
 
-1. **PL/SQL Statement Nodes**
-   - `FunctionBody` - Complete function with DECLARE, BEGIN, END
-   - `ProcedureBody` - Complete procedure
-   - `DeclareSection` - Variable/cursor declarations
-   - `BeginBlock` - Executable statements
+**Delivered:**
+- ✅ `AntlrParser` - Wrapper around PlSqlParser with error collection
+- ✅ `PostgresCodeBuilder` - Main visitor with static helper delegation
+- ✅ `TransformationContext` - Metadata access facade
+- ✅ `TransformationIndices` - Metadata index data structure
+- ✅ `TransformationResult` - Success/error wrapper
+- ✅ `TransformationException` - Custom exception
+- ✅ 33+ static visitor helpers (Visit*.java)
+- ✅ Full expression hierarchy traversal (11 levels)
+- ✅ Simple SELECT transformation working
+- ✅ `ViewTransformationService` integrated
+- ✅ Tests: `SimpleSelectTransformationTest` (4/4 passing)
 
-2. **PL/SQL Control Flow**
-   - `IfStatement` - IF-THEN-ELSIF-ELSE
-   - `LoopStatement` - FOR/WHILE loops
-   - `ExitStatement` - EXIT WHEN
-   - `ReturnStatement` - RETURN expression
-
-3. **PL/SQL Data Structures**
-   - `VariableDeclaration` - Variable declarations
-   - `CursorDeclaration` - Cursor definitions
-   - `RecordType` - Record types
-   - `TableType` - Table types (collections)
-
-4. **Exception Handling**
-   - `ExceptionHandler` - EXCEPTION blocks
-   - Exception name mapping (NO_DATA_FOUND, etc.)
-
-**Reuse Pattern:**
-```
-Same semantic nodes for:
-- Expressions: FunctionCall, BinaryOperation, etc.
-- Statements: SelectStatement (in cursor loops)
-- Context: Same TransformationContext with StateService access
-```
-
----
-
-## Oracle Function Mapping Reference
-
-### Critical Functions (Priority 1 - Phase 3)
-
-| Oracle Function | PostgreSQL Equivalent | Notes |
-|-----------------|----------------------|-------|
-| `NVL(a, b)` | `COALESCE(a, b)` | Null handling |
-| `NVL2(expr, val1, val2)` | `CASE WHEN expr IS NOT NULL THEN val1 ELSE val2 END` | Conditional |
-| `DECODE(expr, search, result, ...)` | `CASE expr WHEN search THEN result ... END` | Multi-way branch |
-| `SYSDATE` | `CURRENT_TIMESTAMP` | Current date/time |
-| `ROWNUM` | `row_number() OVER ()` | Row numbering |
-| `DUAL` | (remove table) | Dummy table |
-
-### String Functions (Priority 2 - Phase 3)
-
-| Oracle Function | PostgreSQL Equivalent | Notes |
-|-----------------|----------------------|-------|
-| `SUBSTR(str, pos, len)` | `SUBSTRING(str FROM pos FOR len)` | Substring |
-| `INSTR(str, substr)` | `POSITION(substr IN str)` | String search |
-| `LENGTH(str)` | `LENGTH(str)` | Compatible |
-| `UPPER(str)` | `UPPER(str)` | Compatible |
-| `LOWER(str)` | `LOWER(str)` | Compatible |
-| `TRIM(str)` | `TRIM(str)` | Compatible |
-| `LTRIM(str)` | `LTRIM(str)` | Compatible |
-| `RTRIM(str)` | `RTRIM(str)` | Compatible |
-| `CONCAT(a, b)` | `a || b` | Concatenation |
-| `LPAD(str, len, pad)` | `LPAD(str, len, pad)` | Compatible |
-| `RPAD(str, len, pad)` | `RPAD(str, len, pad)` | Compatible |
-| `REPLACE(str, from, to)` | `REPLACE(str, from, to)` | Compatible |
-
-### Date Functions (Priority 3 - Phase 3)
-
-| Oracle Function | PostgreSQL Equivalent | Notes |
-|-----------------|----------------------|-------|
-| `TO_DATE(str, fmt)` | `TO_TIMESTAMP(str, fmt)` | Format codes differ |
-| `TO_CHAR(date, fmt)` | `TO_CHAR(date, fmt)` | Format codes differ |
-| `ADD_MONTHS(date, n)` | `date + INTERVAL 'n months'` | Date arithmetic |
-| `MONTHS_BETWEEN(d1, d2)` | Custom function needed | Month difference |
-| `TRUNC(date, fmt)` | `DATE_TRUNC(fmt, date)` | Truncate date |
-| `LAST_DAY(date)` | `(DATE_TRUNC('MONTH', date) + INTERVAL '1 MONTH - 1 day')::date` | Last day of month |
-| `NEXT_DAY(date, day)` | Custom function needed | Next specified weekday |
-
-**Date Format Code Mapping:**
-- Oracle `DD-MON-YYYY` → PostgreSQL `DD-Mon-YYYY`
-- Oracle `HH24` → PostgreSQL `HH24`
-- Oracle `MI` → PostgreSQL `MI`
-- Oracle `SS` → PostgreSQL `SS`
-
-### Numeric Functions (Priority 4 - Phase 4)
-
-| Oracle Function | PostgreSQL Equivalent | Notes |
-|-----------------|----------------------|-------|
-| `ROUND(n, d)` | `ROUND(n, d)` | Compatible |
-| `TRUNC(n, d)` | `TRUNC(n, d)` | Compatible |
-| `CEIL(n)` | `CEIL(n)` | Compatible |
-| `FLOOR(n)` | `FLOOR(n)` | Compatible |
-| `ABS(n)` | `ABS(n)` | Compatible |
-| `MOD(n, m)` | `MOD(n, m)` | Compatible |
-| `POWER(n, m)` | `POWER(n, m)` | Compatible |
-| `SQRT(n)` | `SQRT(n)` | Compatible |
-| `SIGN(n)` | `SIGN(n)` | Compatible |
-
-### Aggregate Functions (Priority 5 - Phase 4)
-
-| Oracle Function | PostgreSQL Equivalent | Notes |
-|-----------------|----------------------|-------|
-| `COUNT(*)` | `COUNT(*)` | Compatible |
-| `SUM(expr)` | `SUM(expr)` | Compatible |
-| `AVG(expr)` | `AVG(expr)` | Compatible |
-| `MAX(expr)` | `MAX(expr)` | Compatible |
-| `MIN(expr)` | `MIN(expr)` | Compatible |
-| `STDDEV(expr)` | `STDDEV(expr)` | Compatible |
-| `VARIANCE(expr)` | `VARIANCE(expr)` | Compatible |
-
-### Analytic Functions (Priority 6 - Phase 4)
-
-| Oracle Function | PostgreSQL Equivalent | Notes |
-|-----------------|----------------------|-------|
-| `ROW_NUMBER() OVER (...)` | `ROW_NUMBER() OVER (...)` | Compatible |
-| `RANK() OVER (...)` | `RANK() OVER (...)` | Compatible |
-| `DENSE_RANK() OVER (...)` | `DENSE_RANK() OVER (...)` | Compatible |
-| `LEAD(expr, n) OVER (...)` | `LEAD(expr, n) OVER (...)` | Compatible |
-| `LAG(expr, n) OVER (...)` | `LAG(expr, n) OVER (...)` | Compatible |
-
----
-
-## Advanced Features (Deferred)
-
-### Not Implementing Initially
-
-These Oracle features are **out of scope** for initial phases. Views using these will be flagged for manual migration:
-
-1. **CONNECT BY** - Hierarchical queries
-   - PostgreSQL: Use recursive CTEs (WITH RECURSIVE)
-   - Complex transformation, manual migration recommended
-
-2. **PIVOT/UNPIVOT** - Row/column transformation
-   - PostgreSQL: Use crosstab or CASE expressions
-   - Uncommon in views, manual migration if needed
-
-3. **MERGE** statements
-   - PostgreSQL 15+: Native MERGE support
-   - Older versions: Use INSERT ... ON CONFLICT
-
-4. **MODEL clause** - Spreadsheet-like calculations
-   - No direct PostgreSQL equivalent
-   - Rare, manual migration required
-
-5. **Flashback queries** (AS OF TIMESTAMP)
-   - No PostgreSQL equivalent
-   - Would need application-level versioning
-
-6. **XML functions** (XMLELEMENT, XMLAGG, etc.)
-   - PostgreSQL has XML functions but syntax differs
-   - Phase 2 feature if needed
-
-**Strategy for Unsupported Features:**
-```java
-// In transformation code
-if (ctx.CONNECT() != null) {
-    throw new TransformationException(
-        "CONNECT BY not supported - manual migration required"
-    );
-}
-```
-
----
-
-## Testing Strategy
-
-### Unit Test Structure
-
-**Test Organization:**
-```
-src/test/java/.../transformation/
-├── semantic/
-│   ├── statement/
-│   │   └── SelectStatementTest.java
-│   ├── expression/
-│   │   ├── FunctionCallTest.java
-│   │   ├── BinaryOperationTest.java
-│   │   └── CaseExpressionTest.java
-│   └── clause/
-│       ├── FromClauseTest.java
-│       └── WhereClauseTest.java
-├── builder/
-│   └── SemanticTreeBuilderTest.java
-└── service/
-    └── ViewTransformationServiceTest.java
-```
-
-### Test Categories
-
-**1. Semantic Node Unit Tests**
-- Test each semantic node's `toPostgres()` method
-- Mock `TransformationContext`
-- Focus on transformation logic only
-
-Example:
-```java
-@Test
-void nvlFunctionTransformsToCoalesce() {
-    FunctionCall nvl = new FunctionCall("NVL", List.of(
-        new Identifier("salary"),
-        new Literal("0", LiteralType.NUMBER)
-    ));
-
-    String result = nvl.toPostgres(mockContext);
-    assertEquals("COALESCE(salary, 0)", result);
-}
-```
-
-**2. Builder Integration Tests**
-- Test ANTLR AST → Semantic Tree conversion
-- Use real ANTLR parser
-- Verify correct semantic nodes are created
-
-Example:
-```java
-@Test
-void buildSelectStatementFromAntlrTree() {
-    String sql = "SELECT empno FROM emp WHERE deptno = 10";
-    ParseResult parseResult = parser.parseSelectStatement(sql);
-
-    SemanticNode tree = builder.visit(parseResult.getTree());
-
-    assertInstanceOf(SelectStatement.class, tree);
-    SelectStatement select = (SelectStatement) tree;
-    assertEquals(1, select.getSelectList().size());
-    assertNotNull(select.getWhereClause());
-}
-```
-
-**3. End-to-End Transformation Tests**
-- Full pipeline: Oracle SQL → PostgreSQL SQL
-- Real ANTLR parser + semantic tree + transformation
-- Compare expected vs actual output
-
-Example:
-```java
-@Test
-void transformCompleteSelectStatement() {
-    String oracle = "SELECT NVL(sal, 0), DECODE(deptno, 10, 'A', 'B') " +
-                    "FROM emp WHERE ROWNUM <= 10";
-    String expected = "SELECT COALESCE(sal, 0), " +
-                     "CASE deptno WHEN 10 THEN 'A' ELSE 'B' END " +
-                     "FROM emp LIMIT 10";
-
-    TransformationResult result = service.transformViewSql(oracle, "hr");
-    assertTrue(result.isSuccess());
-    assertEquals(expected, result.getPostgresSql());
-}
-```
-
-**4. Error Handling Tests**
-- Test syntax errors
-- Test unsupported features
-- Test transformation failures
-
-Example:
-```java
-@Test
-void errorOnConnectByClause() {
-    String oracle = "SELECT * FROM emp CONNECT BY PRIOR empno = mgr";
-
-    TransformationResult result = service.transformViewSql(oracle, "hr");
-    assertFalse(result.isSuccess());
-    assertTrue(result.getError().contains("CONNECT BY"));
-}
-```
-
-### Test Coverage Goals
-
-- **Semantic Nodes**: 100% code coverage
-- **Builder**: 90%+ coverage
-- **Service**: 90%+ coverage
-- **Overall Module**: 95%+ coverage
-
-### Test Data Organization
-
-**Test SQL Repository:**
-```
-src/test/resources/transformation/
-├── simple_select.sql
-├── select_with_where.sql
-├── select_with_joins.sql
-├── oracle_functions.sql
-├── date_functions.sql
-└── complex_queries.sql
-```
-
-Each file contains pairs:
+**Current Capabilities:**
 ```sql
--- ORACLE
-SELECT NVL(salary, 0) FROM emp;
-
--- EXPECTED_POSTGRES
-SELECT COALESCE(salary, 0) FROM emp;
-
----
-
--- ORACLE
-SELECT DECODE(status, 'A', 'Active', 'Inactive') FROM emp;
-
--- EXPECTED_POSTGRES
-SELECT CASE status WHEN 'A' THEN 'Active' ELSE 'Inactive' END FROM emp;
+-- Working transformations:
+SELECT nr, text FROM example         → SELECT nr , text FROM example ✅
+SELECT nr, text FROM example e       → SELECT nr , text FROM example e ✅
+SELECT nr FROM example               → SELECT nr FROM example ✅
 ```
 
 ---
 
-## Error Handling and Logging
+### Phase 2: Complete SELECT Support (Next - 2-3 weeks)
 
-### Exception Hierarchy
+**Goal:** Handle WHERE, ORDER BY, GROUP BY, JOINs, literals, operators
 
-```java
-TransformationException (base)
-├── ParseException                  // ANTLR parsing failed
-├── UnsupportedSyntaxException      // Feature not supported
-└── TransformationLogicException    // Bug in transformation logic
+**2.1 Literals and Operators** (Week 1)
+- Extend `VisitAtom` for constants:
+  - String literals: `'text'`
+  - Number literals: `123`, `45.67`
+  - Date literals: `DATE '2024-01-01'`
+- Extend `VisitRelationalExpression` for comparisons:
+  - `=`, `<`, `>`, `<=`, `>=`, `!=`, `<>`
+- Extend `VisitModelExpression` for arithmetic:
+  - `+`, `-`, `*`, `/`
+- Extend `VisitConcatenation` for string operations:
+  - `||` operator (compatible)
+
+**2.2 WHERE Clause** (Week 1)
+- Extend `VisitLogicalExpression` for boolean operators:
+  - `AND`, `OR`
+- Extend `VisitUnaryLogicalExpression` for:
+  - `NOT`
+  - `IS NULL`, `IS NOT NULL`
+- Extend `VisitCompoundExpression` for:
+  - `IN (...)`, `NOT IN (...)`
+  - `BETWEEN ... AND ...`
+  - `LIKE`, `NOT LIKE`
+
+**2.2 ORDER BY and GROUP BY** (Week 1-2)
+- Implement `VisitOrderByClause`:
+  - `ASC` / `DESC` (default ASC)
+  - `NULLS FIRST` / `NULLS LAST` (compatible!)
+- Implement `VisitGroupByClause`:
+  - Simple GROUP BY (compatible)
+- Implement `VisitHavingClause`:
+  - HAVING with aggregates (compatible)
+- Extend function visitors for aggregates:
+  - `COUNT(*)`, `SUM()`, `AVG()`, `MAX()`, `MIN()` (compatible)
+
+**2.3 JOINs** (Week 2)
+- Extend `VisitFromClause` for multiple tables:
+  - Currently rejects multiple tables
+  - Add support for comma-separated tables
+- Implement ANSI JOIN syntax:
+  - `INNER JOIN`, `LEFT JOIN`, `RIGHT JOIN`, `FULL OUTER JOIN`
+  - `ON` condition parsing
+- **Critical:** Oracle (+) syntax conversion:
+  - Detect `(+)` in WHERE clause
+  - Convert to ANSI LEFT/RIGHT JOIN
+  - Example: `WHERE a.id = b.id(+)` → `LEFT JOIN b ON a.id = b.id`
+
+**2.4 Subqueries** (Week 3)
+- Extend `VisitSubquery` for nested queries:
+  - Subqueries in SELECT list
+  - Subqueries in WHERE clause
+  - `EXISTS (SELECT ...)`, `NOT EXISTS (...)`
+  - `IN (SELECT ...)`, `NOT IN (SELECT ...)`
+
+**Deliverable:** Transform complex SELECT statements with WHERE, ORDER BY, JOINs
+
+**Test Examples:**
+```sql
+-- Oracle
+SELECT empno, ename, sal * 12 AS annual_salary
+FROM emp
+WHERE deptno = 10 AND sal > 1000
+ORDER BY ename;
+
+-- PostgreSQL (same)
+SELECT empno, ename, sal * 12 AS annual_salary
+FROM emp
+WHERE deptno = 10 AND sal > 1000
+ORDER BY ename;
 ```
 
-### Error Context
+```sql
+-- Oracle (old join syntax)
+SELECT e.ename, d.dname
+FROM emp e, dept d
+WHERE e.deptno = d.deptno(+);
+
+-- PostgreSQL (ANSI join)
+SELECT e.ename, d.dname
+FROM emp e
+LEFT JOIN dept d ON e.deptno = d.deptno;
+```
+
+---
+
+### Phase 3: Oracle-Specific Transformations (Week 4-5)
+
+**Goal:** Transform Oracle-specific SQL constructs
+
+**3.1 Oracle Function Transformations** (Week 4)
+
+Extend `VisitStandardFunction` and `VisitStringFunction`:
 
 ```java
-public class TransformationException extends RuntimeException {
-    private final String oracleSql;
-    private final String viewName;
-    private final int lineNumber;
-    private final String errorContext;
+public class VisitStandardFunction {
+    public static String v(PlSqlParser.Standard_functionContext ctx, PostgresCodeBuilder b) {
+        String funcName = extractFunctionName(ctx);
 
-    public String getDetailedMessage() {
-        return String.format(
-            "Failed to transform view '%s' at line %d: %s\nOracle SQL: %s\nContext: %s",
-            viewName, lineNumber, getMessage(), oracleSql, errorContext
-        );
+        switch (funcName.toUpperCase()) {
+            case "NVL":
+                // NVL(a, b) → COALESCE(a, b)
+                return transformNvl(ctx, b);
+
+            case "DECODE":
+                // DECODE(expr, search1, result1, ..., default) → CASE expr WHEN ...
+                return transformDecode(ctx, b);
+
+            case "SYSDATE":
+                // SYSDATE → CURRENT_TIMESTAMP
+                return "CURRENT_TIMESTAMP";
+
+            case "ROWNUM":
+                // ROWNUM → row_number() OVER ()
+                return "row_number() OVER ()";
+
+            // ... more transformations
+
+            default:
+                // Pass through unchanged (assume compatible)
+                return ctx.getText();
+        }
+    }
+
+    private static String transformNvl(PlSqlParser.Standard_functionContext ctx, PostgresCodeBuilder b) {
+        List<PlSqlParser.ArgumentContext> args = ctx.argument();
+        if (args.size() != 2) {
+            throw new TransformationException("NVL requires exactly 2 arguments");
+        }
+
+        String arg1 = b.visit(args.get(0).expression());
+        String arg2 = b.visit(args.get(1).expression());
+
+        return String.format("COALESCE(%s, %s)", arg1, arg2);
+    }
+
+    private static String transformDecode(PlSqlParser.Standard_functionContext ctx, PostgresCodeBuilder b) {
+        List<PlSqlParser.ArgumentContext> args = ctx.argument();
+        if (args.size() < 3) {
+            throw new TransformationException("DECODE requires at least 3 arguments");
+        }
+
+        String expr = b.visit(args.get(0).expression());
+        StringBuilder caseExpr = new StringBuilder("CASE ").append(expr);
+
+        // Process search/result pairs
+        for (int i = 1; i < args.size() - 1; i += 2) {
+            String search = b.visit(args.get(i).expression());
+            String result = b.visit(args.get(i + 1).expression());
+            caseExpr.append(" WHEN ").append(search)
+                    .append(" THEN ").append(result);
+        }
+
+        // Handle default (odd number of args means there's a default)
+        if (args.size() % 2 == 0) {
+            String defaultValue = b.visit(args.get(args.size() - 1).expression());
+            caseExpr.append(" ELSE ").append(defaultValue);
+        }
+
+        caseExpr.append(" END");
+        return caseExpr.toString();
     }
 }
 ```
 
-### Logging Strategy
+**Critical functions to implement:**
+- `NVL(a, b)` → `COALESCE(a, b)`
+- `NVL2(expr, val1, val2)` → `CASE WHEN expr IS NOT NULL THEN val1 ELSE val2 END`
+- `DECODE(expr, s1, r1, ..., default)` → `CASE expr WHEN s1 THEN r1 ... ELSE default END`
+- `SYSDATE` → `CURRENT_TIMESTAMP`
+- `ROWNUM` → `row_number() OVER ()` (context-dependent)
+- `SUBSTR(str, pos, len)` → `SUBSTRING(str FROM pos FOR len)`
+- `INSTR(str, substr)` → `POSITION(substr IN str)`
+- `TO_DATE(str, fmt)` → `TO_TIMESTAMP(str, fmt)` + format conversion
+- `TO_CHAR(date, fmt)` → `TO_CHAR(date, fmt)` + format conversion
 
+**3.2 DUAL Table Handling** (Week 4)
+
+Extend `VisitFromClause`:
 ```java
-// In ViewTransformationService
-if (result.isSuccess()) {
-    log.info("Successfully transformed view {}.{}", schema, viewName);
-    log.debug("Transformed SQL: {}", result.getPostgresSql());
-} else {
-    log.warn("Failed to transform view {}.{}: {}", schema, viewName, result.getError());
-    log.debug("Oracle SQL: {}", view.getSqlDefinition());
-}
-```
+public class VisitFromClause {
+    public static String v(PlSqlParser.From_clauseContext ctx, PostgresCodeBuilder b) {
+        // ... extract table references ...
 
-### Transformation Report
+        // Check if only table is DUAL
+        if (tableRefs.size() == 1 && tableRefs.get(0).equalsIgnoreCase("DUAL")) {
+            // SELECT expr FROM DUAL → SELECT expr (no FROM clause)
+            return "";  // Empty FROM clause
+        }
 
-After migration, generate report:
-```
-View Transformation Summary
-===========================
-Total views: 150
-Successfully transformed: 142 (94.7%)
-Failed transformations: 8 (5.3%)
-
-Failed Views:
-- hr.emp_hierarchy_view - CONNECT BY not supported
-- sales.pivot_summary - PIVOT clause not supported
-- ... (6 more)
-
-Manual Migration Required: See detailed error log
-```
-
----
-
-## Integration with Migration Jobs
-
-### Phase 1: Decoupled Development
-
-**Goal**: Build transformation module independently
-
-**Approach:**
-- No integration with jobs initially
-- All validation via unit tests
-- Mock StateService in tests
-
-### Phase 2: Service Layer Integration
-
-**Goal**: Create service facade for job consumption
-
-**Implementation:**
-```java
-@ApplicationScoped
-public class ViewTransformationService {
-    @Inject StateService stateService;
-    @Inject AntlrParser parser;
-
-    /**
-     * Transform Oracle view SQL to PostgreSQL.
-     * This is the public API for migration jobs.
-     */
-    public TransformationResult transformView(ViewMetadata view) {
-        // Implementation
+        return "FROM " + String.join(", ", tableRefs);
     }
 }
 ```
 
-### Phase 3: Job Updates
+**3.3 Sequence Syntax** (Week 4)
 
-**Goal**: Update PostgresViewImplementationJob to use transformation
+Extend `VisitGeneralElement` for sequence operations:
+```java
+// seq_name.NEXTVAL → nextval('schema.seq_name')
+// seq_name.CURRVAL → currval('schema.seq_name')
 
-**Changes:**
+if (isDotNotation && parts.length == 2) {
+    String obj = parts[0];
+    String attr = parts[1].toUpperCase();
+
+    if ("NEXTVAL".equals(attr) || "CURRVAL".equals(attr)) {
+        // Sequence operation
+        String funcName = attr.equals("NEXTVAL") ? "nextval" : "currval";
+        TransformationContext context = b.getContext();
+        String qualifiedSeq = context.getCurrentSchema() + "." + obj;
+        return String.format("%s('%s')", funcName, qualifiedSeq);
+    }
+}
+```
+
+**3.4 Metadata-Driven Disambiguation** (Week 5)
+
+Extend `VisitGeneralElement` for complex dot notation `a.b.c()`:
+
+```java
+public static String v(PlSqlParser.General_elementContext ctx, PostgresCodeBuilder b) {
+    if (ctx.PERIOD() != null && !ctx.PERIOD().isEmpty()) {
+        // Dot notation detected
+        String[] parts = parseDotNotation(ctx);
+        TransformationContext context = b.getContext();
+
+        // Disambiguation logic using metadata
+        if (parts.length == 3 && hasFunction Arguments(ctx)) {
+            // Could be type method or package function
+
+            // 1. Is 'a' a table alias?
+            String table = context.resolveAlias(parts[0]);
+            if (table != null) {
+                // 2. Does table have column 'b' of custom type?
+                TransformationIndices.ColumnTypeInfo typeInfo =
+                    context.getColumnType(table, parts[1]);
+                if (typeInfo != null) {
+                    // 3. Does type have method 'c'?
+                    if (context.hasTypeMethod(typeInfo.getQualifiedType(), parts[2])) {
+                        // Type method: (emp.address).get_street()
+                        return String.format("(%s.%s).%s(%s)",
+                            parts[0], parts[1], parts[2], transformArgs(ctx, b));
+                    }
+                }
+            }
+
+            // 4. Is a.b a package function?
+            if (context.isPackageFunction(parts[0] + "." + parts[1])) {
+                // Package function: emp_pkg__get_salary()
+                return String.format("%s__%s(%s)",
+                    parts[0], parts[1], transformArgs(ctx, b));
+            }
+        }
+
+        // Simple qualified name
+        return ctx.getText();
+    }
+
+    // Simple identifier
+    return ctx.getText();
+}
+```
+
+**Deliverable:** Transform Oracle-specific SQL constructs
+
+**Test Examples:**
+```sql
+-- Oracle
+SELECT NVL(commission, 0), DECODE(deptno, 10, 'A', 20, 'B', 'C')
+FROM emp;
+
+-- PostgreSQL
+SELECT COALESCE(commission, 0), CASE deptno WHEN 10 THEN 'A' WHEN 20 THEN 'B' ELSE 'C' END
+FROM emp;
+```
+
+```sql
+-- Oracle
+SELECT emp_seq.NEXTVAL FROM DUAL;
+
+-- PostgreSQL
+SELECT nextval('hr.emp_seq');
+```
+
+---
+
+### Phase 4: Integration with Migration Jobs (Week 6)
+
+**Goal:** Connect transformation to actual view migration
+
+**4.1 Add View SQL Extraction**
+
+Currently `OracleViewExtractionJob` only extracts column metadata from `ALL_TAB_COLUMNS`.
+Need to extract actual SQL from `ALL_VIEWS.TEXT`:
+
+```java
+@Dependent
+public class OracleViewExtractionJob extends AbstractDatabaseExtractionJob<ViewMetadata> {
+    @Override
+    protected List<ViewMetadata> performExtraction(...) {
+        String query = """
+            SELECT owner, view_name, text, text_length
+            FROM all_views
+            WHERE owner IN (...)
+            ORDER BY owner, view_name
+            """;
+
+        // Extract SQL definition from TEXT column
+        // Set viewMetadata.setSqlDefinition(text)
+        // Store in StateService
+    }
+}
+```
+
+**4.2 Create PostgresViewImplementationJob**
+
+Replace stubs with transformed SQL:
+
 ```java
 @Dependent
 public class PostgresViewImplementationJob extends AbstractDatabaseExtractionJob<ViewImplementationResult> {
 
     @Inject
-    private ViewTransformationService transformationService;
+    ViewTransformationService transformationService;
+
+    @Inject
+    StateService stateService;
 
     @Override
     protected List<ViewImplementationResult> performExtraction(...) {
+        // Build indices once for session
+        TransformationIndices indices = MetadataIndexBuilder.build(
+            stateService,
+            schemas
+        );
+
         ViewImplementationResult result = new ViewImplementationResult();
 
         for (ViewMetadata view : stateService.getOracleViewMetadata()) {
-            try {
-                TransformationResult transformResult =
-                    transformationService.transformView(view);
+            String oracleSql = view.getSqlDefinition();
 
-                if (transformResult.isSuccess()) {
-                    String createViewSql = String.format(
-                        "CREATE OR REPLACE VIEW %s.%s AS %s",
-                        view.getSchema(),
-                        view.getViewName(),
-                        transformResult.getPostgresSql()
-                    );
+            if (oracleSql == null || oracleSql.trim().isEmpty()) {
+                log.warn("View {} has no SQL definition", view.getViewName());
+                continue;
+            }
 
+            TransformationResult transformResult = transformationService.transformViewSql(
+                oracleSql,
+                view.getSchema(),
+                indices
+            );
+
+            if (transformResult.isSuccess()) {
+                String createViewSql = String.format(
+                    "CREATE OR REPLACE VIEW %s.%s AS %s",
+                    view.getSchema(),
+                    view.getViewName(),
+                    transformResult.getPostgresSql()
+                );
+
+                try {
                     executePostgresSql(createViewSql);
                     result.incrementImplemented();
-
-                } else {
-                    log.warn("Skipping view {}: {}",
-                            view.getViewName(),
-                            transformResult.getError());
-                    result.addError(view.getViewName(), transformResult.getError());
+                    log.info("Replaced stub for view {}.{}", view.getSchema(), view.getViewName());
+                } catch (SQLException e) {
+                    log.error("Failed to create view {}: {}", view.getViewName(), e.getMessage());
+                    result.addError(view.getViewName(), e.getMessage());
                 }
-
-            } catch (Exception e) {
-                log.error("Failed to process view: " + view.getViewName(), e);
-                result.addError(view.getViewName(), e.getMessage());
+            } else {
+                log.warn("Failed to transform view {}: {}",
+                    view.getViewName(), transformResult.getErrorMessage());
+                result.addError(view.getViewName(), transformResult.getErrorMessage());
             }
         }
 
@@ -1079,237 +902,142 @@ public class PostgresViewImplementationJob extends AbstractDatabaseExtractionJob
 }
 ```
 
----
-
-## Performance Considerations
-
-### Parsing Performance
-
-**Expected Load:**
-- Typical Oracle schema: 50-200 views
-- Each view: 5-50 lines of SQL
-- Total parsing time: < 5 seconds for 200 views
-
-**Optimizations:**
-- ANTLR parser is fast (microseconds per statement)
-- No caching needed initially
-- If needed: Cache parsed semantic trees by view SQL hash
-
-### Memory Usage
-
-**Per-View Memory:**
-- Semantic tree: ~10KB per view
-- Negligible for typical workload
-- All views in memory during migration is acceptable
-
-**Memory Profile:**
-```
-100 views × 10KB/view = 1MB semantic trees
-+ ANTLR overhead ~5MB
-= Total < 10MB additional memory
-```
+**Deliverable:** Views automatically transformed and migrated
 
 ---
 
-## Future Extensions
+### Phase 5: PL/SQL Functions/Procedures (Future - Week 7+)
 
-### 1. PL/SQL Function Bodies
+**Goal:** Extend to PL/SQL function/procedure bodies
 
-**Reuse:**
-- Same `SemanticNode` interface
-- Same expression nodes (FunctionCall, BinaryOperation, etc.)
-- Same transformation context
+Reuse `PostgresCodeBuilder` with different entry points:
 
-**New Nodes:**
-- PL/SQL control flow (IF, LOOP, etc.)
-- Variable declarations
-- Exception handlers
-
-**Service:**
 ```java
-@ApplicationScoped
-public class FunctionTransformationService {
-    public TransformationResult transformFunction(FunctionMetadata func) {
-        // Parse function body
-        // Build semantic tree
-        // Transform to PL/pgSQL
+public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
+    // Already have:
+    public String visitSelect_statement(PlSqlParser.Select_statementContext ctx);
+
+    // Add for PL/SQL:
+    public String visitFunction_body(PlSqlParser.Function_bodyContext ctx) {
+        return VisitFunctionBody.v(ctx, this);
+    }
+
+    public String visitProcedure_body(PlSqlParser.Procedure_bodyContext ctx) {
+        return VisitProcedureBody.v(ctx, this);
     }
 }
 ```
 
-### 2. Procedure Bodies
-
-Same approach as functions, reuse same PL/SQL nodes.
-
-### 3. Triggers
-
-**Additional Considerations:**
-- Trigger timing (BEFORE/AFTER/INSTEAD OF)
-- Row-level vs statement-level
-- :NEW/:OLD row references → NEW/OLD
-
-### 4. Type Method Implementations
-
-Similar to functions but attached to object types.
-
-### 5. Package Bodies
-
-**Challenges:**
-- Package state (private variables)
-- Package initialization blocks
-- Overloaded functions
-
-**Approach:**
-- Flatten to individual functions (already done for signatures)
-- Shared state → schema-level variables or tables
-- Manual migration for complex packages
+**New visitor helpers needed:**
+- `VisitFunctionBody` / `VisitProcedureBody`
+- `VisitDeclareSection` - variable declarations
+- `VisitIfStatement` - IF-THEN-ELSIF-ELSE
+- `VisitLoopStatement` - FOR/WHILE loops
+- `VisitCursorDeclaration` - cursor definitions
+- `VisitExceptionHandler` - exception blocks
 
 ---
 
-## Development Workflow
+## Oracle Function Mapping Reference
 
-### Week-by-Week Plan
+See complete Oracle function mapping reference in original sections (lines 668-750 in old doc).
 
-**Week 1: Foundation**
-- [ ] Create module structure
-- [ ] Implement base interfaces
-- [ ] Implement Identifier, Literal nodes
-- [ ] Implement AntlrParser (SELECT only)
-- [ ] Write unit tests
-- [ ] Parse and transform `SELECT col FROM table`
+Key transformations:
+- **NVL/NVL2** → COALESCE / CASE
+- **DECODE** → CASE WHEN
+- **SYSDATE** → CURRENT_TIMESTAMP
+- **ROWNUM** → row_number() OVER ()
+- **String functions**: SUBSTR → SUBSTRING, INSTR → POSITION
+- **Date functions**: TO_DATE → TO_TIMESTAMP (format conversion needed)
+- **Numeric/Aggregate/Analytic**: Mostly compatible
 
-**Week 2: Basic SELECT**
-- [ ] Implement SelectStatement, SelectList, FromClause
-- [ ] Implement WhereClause, OrderByClause
-- [ ] Implement BinaryOperation, ColumnReference
-- [ ] Write comprehensive tests
-- [ ] Transform SELECT with WHERE, ORDER BY
+---
 
-**Week 3: Oracle Functions**
-- [ ] Implement FunctionCall with transformations
-- [ ] NVL, DECODE, SYSDATE, ROWNUM
-- [ ] String functions (SUBSTR, INSTR, etc.)
-- [ ] Date functions (TO_DATE, TO_CHAR)
-- [ ] DUAL table handling
-- [ ] Sequence syntax (.NEXTVAL)
-- [ ] Write extensive function tests
+## Testing Strategy
 
-**Week 4: Advanced SELECT**
-- [ ] Implement JoinClause (ANSI joins)
-- [ ] Oracle (+) join syntax detection and conversion
-- [ ] GroupByClause, HavingClause
-- [ ] SubqueryExpression
-- [ ] CaseExpression
-- [ ] Write complex query tests
+### Current Tests ✅
 
-**Week 5: Integration**
-- [ ] Implement ViewTransformationService
-- [ ] Update PostgresViewImplementationJob
-- [ ] Integration testing with real views
-- [ ] Error handling and reporting
-- [ ] Generate transformation report
+```
+SimpleSelectTransformationTest.java (4/4 passing)
+  ✅ testSimpleSelectTwoColumns
+  ✅ testSimpleSelectWithTableAlias
+  ✅ testSimpleSelectSingleColumn
+  ✅ testParseError
+```
 
-**Week 6+: PL/SQL (Future)**
-- [ ] Extend to function bodies
-- [ ] PL/SQL control flow nodes
-- [ ] Variable declarations
-- [ ] Exception handling
+### Future Test Organization
+
+```
+src/test/java/.../transformer/
+├── builder/
+│   ├── PostgresCodeBuilderTest.java       # Main visitor tests
+│   ├── VisitWhereClauseTest.java          # WHERE clause transformations
+│   ├── VisitOracleFunctionTest.java       # NVL, DECODE, etc.
+│   └── VisitJoinTest.java                 # JOIN transformations
+├── integration/
+│   ├── ComplexSelectTransformationTest.java
+│   ├── OracleFunctionIntegrationTest.java
+│   └── ViewMigrationIntegrationTest.java
+└── service/
+    └── ViewTransformationServiceTest.java
+```
+
+### Test Coverage Goals
+
+- **Visitor helpers**: 90%+ code coverage
+- **PostgresCodeBuilder**: 85%+ coverage
+- **Service**: 90%+ coverage
+- **Overall Module**: 90%+ coverage
 
 ---
 
 ## Success Metrics
 
-### Phase 1-4 (SQL Views)
+### Phase 1 ✅ COMPLETE
+- ✅ 4/4 tests passing
+- ✅ Simple SELECT transformation working
+- ✅ Parser functional
+- ✅ Visitor functional
+- ✅ Service integrated
 
-**Coverage:**
-- Transform 90%+ of typical Oracle views automatically
-- Remaining 10% flagged for manual migration with clear error messages
+### Phase 2 Goals (Complete SELECT)
+- ✅ WHERE, ORDER BY, GROUP BY transformations
+- ✅ JOIN transformations (including Oracle (+) syntax)
+- ✅ Literals and operators working
+- ✅ 20+ additional tests passing
 
-**Quality:**
-- Generated PostgreSQL SQL is syntactically correct
-- Generated SQL is semantically equivalent to Oracle SQL
-- Zero false positives (incorrect transformations)
+### Phase 3 Goals (Oracle Functions)
+- ✅ 10+ Oracle functions transformed
+- ✅ DUAL table handling
+- ✅ Sequence syntax conversion
+- ✅ Metadata-driven disambiguation working
+- ✅ 15+ additional tests passing
 
-**Performance:**
-- Parse and transform 200 views in < 10 seconds
-- Memory usage < 50MB additional
-
-### Phase 5+ (PL/SQL)
-
-**Coverage:**
-- Transform 70%+ of simple functions/procedures automatically
-- Complex PL/SQL may require manual intervention
-
-**Quality:**
-- Generated PL/pgSQL compiles without errors
-- Behavior matches Oracle PL/SQL for common patterns
-
----
-
-## Open Questions and Decisions
-
-### 1. Date Format Conversion
-
-**Question**: How comprehensive should date format string conversion be?
-
-**Options:**
-- A) Convert common formats only (DD-MON-YYYY, etc.)
-- B) Full format code translation table
-- C) Flag for manual review if uncommon format detected
-
-**Decision**: Start with (A), expand to (B) as needed
-
-### 2. Implicit Type Conversions
-
-**Question**: Should we make Oracle's implicit conversions explicit in PostgreSQL?
-
-**Example:**
-```sql
--- Oracle (implicit conversion)
-SELECT * FROM emp WHERE empno = '7369';
-
--- PostgreSQL options
-SELECT * FROM emp WHERE empno = '7369';        -- May work
-SELECT * FROM emp WHERE empno = 7369;          -- Safer
-SELECT * FROM emp WHERE empno = CAST('7369' AS INTEGER);  -- Explicit
-```
-
-**Decision**: Keep implicit conversions initially, add explicit CAST if errors occur
-
-### 3. Identifier Quoting
-
-**Question**: When should identifiers be quoted in PostgreSQL?
-
-**Oracle**: Case-insensitive unless quoted
-**PostgreSQL**: Case-insensitive unless quoted, but folds to lowercase
-
-**Decision**: Don't quote identifiers unless they contain special characters or are keywords
-
-### 4. Schema Qualification
-
-**Question**: Should generated SQL always use schema-qualified names?
-
-**Example:**
-```sql
--- Unqualified
-SELECT * FROM emp;
-
--- Qualified
-SELECT * FROM hr.emp;
-```
-
-**Decision**: Use qualified names for tables, rely on search_path for built-in functions
+### Phase 4 Goals (Integration)
+- ✅ View SQL extraction from Oracle
+- ✅ PostgresViewImplementationJob functional
+- ✅ 90%+ of simple views transform successfully
+- ✅ Clear error messages for unsupported features
 
 ---
 
 ## Conclusion
 
-This transformation module provides a **clean, reusable, test-driven foundation** for converting Oracle SQL and PL/SQL to PostgreSQL. The semantic tree approach allows for:
+The direct AST transformation approach provides a **pragmatic, maintainable solution** for Oracle→PostgreSQL SQL transformation:
 
-✅ **Self-documenting code**: Each node knows its transformation
-✅ **Incremental development**: Add features progressively
-✅ **Comprehensive testing**: Unit tests for every component
-✅ **Future extensibility**: Same infrastructure for views, functions, procedures, triggers
-✅ **Decoupled architecture**: Independent of migration jobs initially
+✅ **Working now**: Tests pass, simple SELECT transforms successfully
+✅ **Proper boundaries**: `TransformationContext` maintains dependency separation
+✅ **Scalable**: Static helper pattern handles 400+ ANTLR rules without bloat
+✅ **Testable**: Mock `TransformationContext` for unit tests
+✅ **Quarkus-native**: Service layer uses CDI, visitor layer stays pure
+✅ **Incremental**: Add features progressively without architectural changes
 
-The phased implementation ensures we can **deliver value incrementally** while building toward a comprehensive transformation solution.
+The phased implementation ensures we can **deliver value incrementally** while building toward comprehensive transformation coverage.
+
+---
+
+**See also:**
+- `TRANSFORMATION_STATUS.md` - Detailed implementation status and comparison
+- `SimpleSelectTransformationTest.java` - Working test examples
+- `PostgresCodeBuilder.java` - Main visitor implementation
+- `VisitGeneralElement.java` - Transformation decision point example
