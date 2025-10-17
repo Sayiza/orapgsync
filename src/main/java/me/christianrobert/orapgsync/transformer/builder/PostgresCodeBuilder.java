@@ -2,10 +2,35 @@ package me.christianrobert.orapgsync.transformer.builder;
 
 import me.christianrobert.orapgsync.antlr.PlSqlParser;
 import me.christianrobert.orapgsync.antlr.PlSqlParserBaseVisitor;
+import me.christianrobert.orapgsync.transformer.context.TransformationContext;
 
 public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
 
-    // no loggin is desired, this is would create an overkill of logs
+    // no logging is desired, this would create an overkill of logs
+
+    private final TransformationContext context;
+
+    /**
+     * Creates a PostgresCodeBuilder with transformation context.
+     * @param context Transformation context for metadata lookups (can be null for simple transformations)
+     */
+    public PostgresCodeBuilder(TransformationContext context) {
+        this.context = context;
+    }
+
+    /**
+     * Creates a PostgresCodeBuilder without context (for simple transformations without metadata).
+     */
+    public PostgresCodeBuilder() {
+        this.context = null;
+    }
+
+    /**
+     * Gets the transformation context (may be null).
+     */
+    public TransformationContext getContext() {
+        return context;
+    }
 
     // ========== SELECT STATEMENT ==========
 

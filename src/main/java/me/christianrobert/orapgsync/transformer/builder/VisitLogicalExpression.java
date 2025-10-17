@@ -1,7 +1,7 @@
 package me.christianrobert.orapgsync.transformer.builder;
 
 import me.christianrobert.orapgsync.antlr.PlSqlParser;
-import me.christianrobert.orapgsync.transformation.context.TransformationException;
+import me.christianrobert.orapgsync.transformer.context.TransformationException;
 
 public class VisitLogicalExpression {
   public static String v(PlSqlParser.Logical_expressionContext ctx, PostgresCodeBuilder b) {
