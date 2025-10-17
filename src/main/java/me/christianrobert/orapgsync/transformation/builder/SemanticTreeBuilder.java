@@ -76,6 +76,58 @@ public class SemanticTreeBuilder extends PlSqlParserBaseVisitor<SemanticNode> {
         return VisitUnaryLogicalExpression.v(ctx, this);
     }
 
+    @Override
+    public SemanticNode visitMultiset_expression(PlSqlParser.Multiset_expressionContext ctx) {
+        return VisitMultisetExpression.v(ctx, this);
+    }
+
+    @Override
+    public SemanticNode visitRelational_expression(PlSqlParser.Relational_expressionContext ctx) {
+        return VisitRelationalExpression.v(ctx, this);
+    }
+
+    @Override
+    public SemanticNode visitCompound_expression(PlSqlParser.Compound_expressionContext ctx) {
+        return VisitCompoundExpression.v(ctx, this);
+    }
+
+    @Override
+    public SemanticNode visitConcatenation(PlSqlParser.ConcatenationContext ctx) {
+        return VisitConcatenation.v(ctx, this);
+    }
+
+    @Override
+    public SemanticNode visitModel_expression(PlSqlParser.Model_expressionContext ctx) {
+        return VisitModelExpression.v(ctx, this);
+    }
+
+    @Override
+    public SemanticNode visitUnary_expression(PlSqlParser.Unary_expressionContext ctx) {
+        return VisitUnaryExpression.v(ctx, this);
+    }
+
+    @Override
+    public SemanticNode visitAtom(PlSqlParser.AtomContext ctx) {
+        return VisitAtom.v(ctx, this);
+    }
+
+    @Override
+    public SemanticNode visitGeneral_element(PlSqlParser.General_elementContext ctx) {
+        return VisitGeneralElement.v(ctx, this);
+    }
+
+    // ========== STANDARD FUNCTIONS ==========
+
+    @Override
+    public SemanticNode visitStandard_function(PlSqlParser.Standard_functionContext ctx) {
+        return VisitStandardFunction.v(ctx, this);
+    }
+
+    @Override
+    public SemanticNode visitString_function(PlSqlParser.String_functionContext ctx) {
+        return VisitStringFunction.v(ctx, this);
+    }
+
     // ========== FROM CLAUSE ==========
 
     @Override

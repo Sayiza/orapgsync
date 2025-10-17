@@ -21,17 +21,13 @@ public class VisitUnaryLogicalExpression {
           "Unary logical operations (IS NULL, IS NOT NULL) not yet supported in minimal implementation");
     }
 
-    // In minimal implementation, we jump directly to getText() and create an Identifier
-    // This is the simplified placeholder that will be replaced when we implement:
-    // - multiset_expression
-    // - relational_expression
-    // - concatenation
-    // - etc.
-    //
-    // Future: Will properly visit multiset_expression child node
-    String text = ctx.getText();
-    Identifier identifier = new Identifier(text);
+    // Visit multiset_expression (the common case)
+    PlSqlParser.Multiset_expressionContext multisetCtx = ctx.multiset_expression();
+    if (multisetCtx == null) {
+      throw new TransformationException("Unary logical expression missing multiset_expression");
+    }
 
-    return new UnaryLogicalExpression(identifier);
+    SemanticNode multisetExpression = b.visit(multisetCtx);
+    return new UnaryLogicalExpression(multisetExpression);
   }
 }
