@@ -230,6 +230,16 @@ public class TransformationIndices {
             return typeName;
         }
 
+        /**
+         * Checks if this is a custom (user-defined) type.
+         * Built-in Oracle types have null typeOwner.
+         *
+         * @return true if this is a custom type with an owner/schema
+         */
+        public boolean isCustomType() {
+            return typeOwner != null && !typeOwner.isEmpty();
+        }
+
         @Override
         public String toString() {
             return "ColumnTypeInfo{type='" + getQualifiedType() + "'}";

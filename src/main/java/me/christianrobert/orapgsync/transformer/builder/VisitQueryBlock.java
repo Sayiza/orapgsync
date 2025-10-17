@@ -6,19 +6,20 @@ import me.christianrobert.orapgsync.transformer.context.TransformationException;
 public class VisitQueryBlock {
   public static String v(PlSqlParser.Query_blockContext ctx, PostgresCodeBuilder b) {
 
+    // IMPORTANT: Visit FROM clause FIRST to register table aliases
+    // before processing SELECT list (which may reference those aliases for type methods)
+    PlSqlParser.From_clauseContext fromClauseCtx = ctx.from_clause();
+    if (fromClauseCtx == null) {
+      throw new TransformationException("Query block missing from_clause (FROM DUAL not yet supported in minimal implementation)");
+    }
+    String fromClause = b.visit(fromClauseCtx);
+
     // Extract SELECT list - use visitor pattern
     PlSqlParser.Selected_listContext selectedListCtx = ctx.selected_list();
     if (selectedListCtx == null) {
       throw new TransformationException("Query block missing selected_list");
     }
     String selectedList = b.visit(selectedListCtx);
-
-    // Extract FROM clause - use visitor pattern
-    PlSqlParser.From_clauseContext fromClauseCtx = ctx.from_clause();
-    if (fromClauseCtx == null) {
-      throw new TransformationException("Query block missing from_clause (FROM DUAL not yet supported in minimal implementation)");
-    }
-    String fromClause = b.visit(fromClauseCtx);
 
     // Build the SELECT statement
     StringBuilder result = new StringBuilder();

@@ -3,7 +3,9 @@ package me.christianrobert.orapgsync.transformer.builder;
 import me.christianrobert.orapgsync.antlr.PlSqlParser;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
 import me.christianrobert.orapgsync.transformer.context.TransformationException;
+import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -64,8 +66,9 @@ public class VisitGeneralElement {
    *
    * <p>Disambiguation logic:
    * 1. If last part has function arguments → function call
-   *    - Check metadata: is this schema.package.function?
-   *    - Transform to: package__function or schema.package__function
+   *    - Check metadata: is this a type member method (table.col.method)?
+   *    - Check metadata: is this a package function (package.function)?
+   *    - Transform accordingly
    * 2. Otherwise → column reference (table.column)
    *    - Pass through as-is: table.column
    */
@@ -79,7 +82,37 @@ public class VisitGeneralElement {
     boolean isFunctionCall = lastPart.function_argument() != null && !lastPart.function_argument().isEmpty();
 
     if (isFunctionCall) {
-      // PACKAGE FUNCTION CALL: package.function(args) or schema.package.function(args)
+      // Could be:
+      // 1. Type member method: table.col.method() or table.col.method1().method2()
+      // 2. Package function: package.function() or schema.package.function()
+
+      // Try to disambiguate using metadata
+      TransformationContext context = b.getContext();
+      if (context != null && parts.size() >= 3) {
+        // Could be type member method: alias.col.method()
+        String firstPart = parts.get(0).id_expression().getText();
+        String secondPart = parts.get(1).id_expression().getText();
+
+        // 1. Is firstPart a table alias?
+        String tableName = context.resolveAlias(firstPart);
+        if (tableName != null) {
+          // 2. Is secondPart a column of custom type?
+          // Need to qualify table name with schema for lookup
+          String qualifiedTable = qualifyTableName(tableName, context);
+          TransformationIndices.ColumnTypeInfo typeInfo = context.getColumnType(qualifiedTable, secondPart);
+
+          if (typeInfo != null && typeInfo.isCustomType()) {
+            // 3. Does the type have the method we're calling?
+            String methodName = parts.get(2).id_expression().getText();
+            if (context.hasTypeMethod(typeInfo.getQualifiedType(), methodName)) {
+              // IT'S A TYPE MEMBER METHOD!
+              return handleTypeMemberMethod(parts, b, context);
+            }
+          }
+        }
+      }
+
+      // Not a type member method - assume package function
       return handlePackageFunctionCall(parts, b);
     } else {
       // COLUMN REFERENCE: table.column or table.column.subfield
@@ -298,5 +331,218 @@ public class VisitGeneralElement {
 
     // Fallback: just get the text
     return argCtx.getText();
+  }
+
+  /**
+   * Handles type member method calls: table.col.method() or chained calls.
+   *
+   * <p>Transformation (PostgreSQL has no member methods, so we use flattened functions):
+   * - Oracle: emp.address.get_street() → PostgreSQL: address_type__get_street(emp.address)
+   * - Oracle: emp.address.get_full().upper() → PostgreSQL: address_type__upper(address_type__get_full(emp.address))
+   *
+   * <p>The object instance becomes the first parameter to the flattened function.
+   */
+  private static String handleTypeMemberMethod(
+      List<PlSqlParser.General_element_partContext> parts,
+      PostgresCodeBuilder b,
+      TransformationContext context) {
+
+    if (parts.size() < 3) {
+      throw new TransformationException(
+          "Type member method call requires at least 3 parts: alias.column.method");
+    }
+
+    // For simple case: alias.column.method()
+    // parts[0] = alias (e.g., emp)
+    // parts[1] = column (e.g., address)
+    // parts[2] = method() (e.g., get_street())
+
+    // For chained case: alias.column.method1().method2()
+    // parts[0] = alias
+    // parts[1] = column
+    // parts[2] = method1()
+    // parts[3] = method2()
+    // etc.
+
+    // Build the transformation recursively for chained calls
+    return buildTypeMemberMethodChain(parts, 0, parts.size(), b, context);
+  }
+
+  /**
+   * Recursively builds type member method chains as nested function calls.
+   *
+   * <p>Pattern: typename__method(instance_expr, ...args)
+   * <p>Chained: typename2__method2(typename1__method1(instance, args1), args2)
+   *
+   * @param parts All parts of the dot notation
+   * @param startIdx Starting index in parts array
+   * @param endIdx Ending index (exclusive) in parts array
+   * @param b PostgreSQL code builder
+   * @param context Transformation context
+   * @return Transformed PostgreSQL expression
+   */
+  private static String buildTypeMemberMethodChain(
+      List<PlSqlParser.General_element_partContext> parts,
+      int startIdx,
+      int endIdx,
+      PostgresCodeBuilder b,
+      TransformationContext context) {
+
+    if (endIdx - startIdx < 3) {
+      throw new TransformationException("Type member method chain too short");
+    }
+
+    // Find the last method call in this chain segment
+    int lastMethodIdx = endIdx - 1;
+    PlSqlParser.General_element_partContext lastPart = parts.get(lastMethodIdx);
+
+    if (lastPart.function_argument() == null || lastPart.function_argument().isEmpty()) {
+      throw new TransformationException("Expected method call at end of chain");
+    }
+
+    // Check if there are chained method calls before this one
+    // Look for the previous method call (if any)
+    int prevMethodIdx = -1;
+    for (int i = lastMethodIdx - 1; i >= startIdx + 2; i--) {
+      if (parts.get(i).function_argument() != null && !parts.get(i).function_argument().isEmpty()) {
+        prevMethodIdx = i;
+        break;
+      }
+    }
+
+    if (prevMethodIdx != -1) {
+      // CHAINED CALL: recursively handle the previous method call
+      // e.g., emp.address.get_full().upper()
+      // Transform to: address_type__upper(address_type__get_full(emp.address))
+
+      // First, get the inner call
+      String innerCall = buildTypeMemberMethodChain(parts, startIdx, prevMethodIdx + 1, b, context);
+
+      // Get the type name for the outer method (from the previous method's return type)
+      // For now, we'll use the same type as the column (simplified - doesn't handle type changes)
+      String typeName = getTypeNameForMethod(parts, startIdx, context);
+
+      // Get the last method details
+      String methodName = getFunctionName(lastPart);
+      List<String> methodArgs = getMethodArguments(lastPart, b);
+
+      // Build outer call: typename__method(innerCall, args...)
+      StringBuilder result = new StringBuilder();
+      result.append(typeName).append("__").append(methodName.toLowerCase());
+      result.append("( ");
+      result.append(innerCall);
+      if (!methodArgs.isEmpty()) {
+        result.append(" , ").append(String.join(" , ", methodArgs));
+      }
+      result.append(" )");
+
+      return result.toString();
+
+    } else {
+      // SIMPLE CALL: alias.column.method()
+      // Build object reference: alias.column
+      StringBuilder objectPath = new StringBuilder();
+      for (int i = startIdx; i < lastMethodIdx; i++) {
+        if (i > startIdx) {
+          objectPath.append(" . ");
+        }
+        objectPath.append(parts.get(i).id_expression().getText());
+      }
+
+      // Get type name for the method
+      String typeName = getTypeNameForMethod(parts, startIdx, context);
+
+      // Get method details
+      String methodName = getFunctionName(lastPart);
+      List<String> methodArgs = getMethodArguments(lastPart, b);
+
+      // Build: typename__method(instance, args...)
+      StringBuilder result = new StringBuilder();
+      result.append(typeName).append("__").append(methodName.toLowerCase());
+      result.append("( ");
+      result.append(objectPath);
+      if (!methodArgs.isEmpty()) {
+        result.append(" , ").append(String.join(" , ", methodArgs));
+      }
+      result.append(" )");
+
+      return result.toString();
+    }
+  }
+
+  /**
+   * Gets the type name for a method call.
+   * Looks up the column type from metadata.
+   */
+  private static String getTypeNameForMethod(
+      List<PlSqlParser.General_element_partContext> parts,
+      int startIdx,
+      TransformationContext context) {
+
+    // parts[startIdx] = alias (e.g., emp)
+    // parts[startIdx + 1] = column (e.g., address)
+
+    String firstPart = parts.get(startIdx).id_expression().getText();
+    String secondPart = parts.get(startIdx + 1).id_expression().getText();
+
+    // Resolve alias to table name
+    String tableName = context.resolveAlias(firstPart);
+    if (tableName == null) {
+      throw new TransformationException(
+          "Cannot resolve alias '" + firstPart + "' for type member method");
+    }
+
+    // Get column type info
+    String qualifiedTable = qualifyTableName(tableName, context);
+    TransformationIndices.ColumnTypeInfo typeInfo = context.getColumnType(qualifiedTable, secondPart);
+
+    if (typeInfo == null || !typeInfo.isCustomType()) {
+      throw new TransformationException(
+          "Column '" + secondPart + "' is not a custom type");
+    }
+
+    // Return just the type name (without schema for now - will be lowercase)
+    return typeInfo.getTypeName().toLowerCase();
+  }
+
+  /**
+   * Extracts method arguments (excluding the SELF parameter which is the instance).
+   */
+  private static List<String> getMethodArguments(
+      PlSqlParser.General_element_partContext partCtx,
+      PostgresCodeBuilder b) {
+
+    List<PlSqlParser.Function_argumentContext> funcArgCtxList = partCtx.function_argument();
+    if (funcArgCtxList == null || funcArgCtxList.isEmpty()) {
+      return new ArrayList<>();
+    }
+
+    PlSqlParser.Function_argumentContext funcArgCtx = funcArgCtxList.get(0);
+    List<PlSqlParser.ArgumentContext> arguments = funcArgCtx.argument();
+    if (arguments == null || arguments.isEmpty()) {
+      return new ArrayList<>();
+    }
+
+    // Transform each argument
+    return arguments.stream()
+        .map(arg -> transformArgument(arg, b))
+        .collect(Collectors.toList());
+  }
+
+  /**
+   * Qualifies a table name with schema if needed.
+   *
+   * @param tableName Table name (may or may not have schema)
+   * @param context Transformation context
+   * @return Qualified table name "schema.table"
+   */
+  private static String qualifyTableName(String tableName, TransformationContext context) {
+    // If table name already has schema (contains dot), return as-is
+    if (tableName.contains(".")) {
+      return tableName.toLowerCase();
+    }
+
+    // Otherwise, prepend current schema
+    return context.getCurrentSchema().toLowerCase() + "." + tableName.toLowerCase();
   }
 }

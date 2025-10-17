@@ -1,6 +1,7 @@
 package me.christianrobert.orapgsync.transformer.builder;
 
 import me.christianrobert.orapgsync.antlr.PlSqlParser;
+import me.christianrobert.orapgsync.transformer.context.TransformationContext;
 import me.christianrobert.orapgsync.transformer.context.TransformationException;
 
 public class VisitTableReference {
@@ -47,6 +48,13 @@ public class VisitTableReference {
     String alias = null;
     if (aliasCtx != null) {
       alias = aliasCtx.getText();
+
+      // Register the alias in the transformation context (if available)
+      TransformationContext context = b.getContext();
+      if (context != null) {
+        context.registerAlias(alias, tableName);
+      }
+
       return tableName + " " + alias;
     }
 
