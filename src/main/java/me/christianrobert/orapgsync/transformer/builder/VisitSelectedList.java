@@ -9,9 +9,11 @@ import java.util.List;
 public class VisitSelectedList {
   public static String v(PlSqlParser.Selected_listContext ctx, PostgresCodeBuilder b) {
 
+    // selected_list: '*' | select_list_elements (',' select_list_elements)*
+
     if (ctx.ASTERISK() != null) {
-      // SELECT * - not supported in minimal implementation
-      throw new TransformationException("SELECT * not supported in minimal implementation");
+      // SELECT * - pass through as-is
+      return "*";
     }
 
     // Visit each select_list_elements child
