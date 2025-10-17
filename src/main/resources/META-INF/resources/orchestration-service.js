@@ -162,43 +162,43 @@ async function startAll() {
         updateOrchestrationProgress(71, 'Constraint creation completed');
 
         // Step 16: Create PostgreSQL FK indexes
-        updateOrchestrationProgress(82, 'Step 16/22: Creating FK indexes...');
+        updateOrchestrationProgress(72, 'Step 16/22: Creating FK indexes...');
         await createPostgresFKIndexes();
         await pollCountBadge('postgres-fk-indexes', { requirePositive: false, allowZero: true });
-        updateOrchestrationProgress(86, 'FK index creation completed');
+        updateOrchestrationProgress(76, 'FK index creation completed');
 
         // Step 17: Extract Oracle view definitions
-        updateOrchestrationProgress(87, 'Step 17/22: Extracting Oracle view definitions...');
+        updateOrchestrationProgress(77, 'Step 17/22: Extracting Oracle view definitions...');
         await extractOracleViews();
         await pollCountBadge('oracle-views', { requirePositive: false, allowZero: true });
-        updateOrchestrationProgress(88, 'Oracle view definitions extracted');
+        updateOrchestrationProgress(78, 'Oracle view definitions extracted');
 
         // Step 18: Create PostgreSQL view stubs
-        updateOrchestrationProgress(89, 'Step 18/22: Creating PostgreSQL view stubs...');
+        updateOrchestrationProgress(79, 'Step 18/22: Creating PostgreSQL view stubs...');
         await createPostgresViewStubs();
         await pollCountBadge('postgres-views', { requirePositive: false, allowZero: true });
-        updateOrchestrationProgress(90, 'View stub creation completed');
+        updateOrchestrationProgress(80, 'View stub creation completed');
 
         // Step 19: Extract Oracle functions/procedures
-        updateOrchestrationProgress(91, 'Step 19/22: Extracting Oracle functions and procedures...');
+        updateOrchestrationProgress(81, 'Step 19/22: Extracting Oracle functions and procedures...');
         await extractOracleFunctions();
         await pollCountBadge('oracle-functions', { requirePositive: false, allowZero: true });
-        updateOrchestrationProgress(92, 'Oracle functions/procedures extracted');
+        updateOrchestrationProgress(82, 'Oracle functions/procedures extracted');
 
         // Step 20: Create PostgreSQL function/procedure stubs
-        updateOrchestrationProgress(93, 'Step 20/22: Creating PostgreSQL function stubs...');
+        updateOrchestrationProgress(83, 'Step 20/22: Creating PostgreSQL function stubs...');
         await createPostgresFunctionStubs();
         await pollCountBadge('postgres-functions', { requirePositive: false, allowZero: true });
-        updateOrchestrationProgress(95, 'Function stub creation completed');
+        updateOrchestrationProgress(85, 'Function stub creation completed');
 
         // Step 21: Extract Oracle type methods
-        updateOrchestrationProgress(97, 'Step 21/22: Extracting Oracle type methods...');
+        updateOrchestrationProgress(87, 'Step 21/22: Extracting Oracle type methods...');
         await extractOracleTypeMethods();
         await pollCountBadge('oracle-type-methods', { requirePositive: false, allowZero: true });
-        updateOrchestrationProgress(96, 'Oracle type methods extracted');
+        updateOrchestrationProgress(89, 'Oracle type methods extracted');
 
         // Step 22: Create PostgreSQL type method stubs
-        updateOrchestrationProgress(98, 'Step 22/22: Creating PostgreSQL type method stubs...');
+        updateOrchestrationProgress(90, 'Step 22/22: Creating PostgreSQL type method stubs...');
         await createPostgresTypeMethodStubs();
         await pollCountBadge('postgres-type-methods', { requirePositive: false, allowZero: true });
         updateOrchestrationProgress(100, 'Type method stub creation completed');
