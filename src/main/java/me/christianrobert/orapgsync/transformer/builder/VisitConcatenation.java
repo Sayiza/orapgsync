@@ -6,10 +6,70 @@ import me.christianrobert.orapgsync.transformer.context.TransformationException;
 public class VisitConcatenation {
   public static String v(PlSqlParser.ConcatenationContext ctx, PostgresCodeBuilder b) {
 
+    // Grammar: concatenation op concatenation (left-recursive)
+    // or: model_expression (AT ... | interval_expression)? (ON OVERFLOW ...)?
+
+    // Check for binary operators (left-recursive rules)
+    if (ctx.DOUBLE_ASTERISK() != null) {
+      // ** power operator
+      java.util.List<PlSqlParser.ConcatenationContext> operands = ctx.concatenation();
+      String left = b.visit(operands.get(0));
+      String right = b.visit(operands.get(1));
+      return left + " ^ " + right;  // PostgreSQL uses ^ for power
+    }
+
+    if (ctx.ASTERISK() != null) {
+      // * multiplication
+      java.util.List<PlSqlParser.ConcatenationContext> operands = ctx.concatenation();
+      String left = b.visit(operands.get(0));
+      String right = b.visit(operands.get(1));
+      return left + " * " + right;
+    }
+
+    if (ctx.SOLIDUS() != null) {
+      // / division
+      java.util.List<PlSqlParser.ConcatenationContext> operands = ctx.concatenation();
+      String left = b.visit(operands.get(0));
+      String right = b.visit(operands.get(1));
+      return left + " / " + right;
+    }
+
+    if (ctx.MOD() != null) {
+      // MOD operator
+      java.util.List<PlSqlParser.ConcatenationContext> operands = ctx.concatenation();
+      String left = b.visit(operands.get(0));
+      String right = b.visit(operands.get(1));
+      return "MOD(" + left + ", " + right + ")";  // PostgreSQL MOD function
+    }
+
+    if (ctx.PLUS_SIGN() != null) {
+      // + addition
+      java.util.List<PlSqlParser.ConcatenationContext> operands = ctx.concatenation();
+      String left = b.visit(operands.get(0));
+      String right = b.visit(operands.get(1));
+      return left + " + " + right;
+    }
+
+    if (ctx.MINUS_SIGN() != null) {
+      // - subtraction
+      java.util.List<PlSqlParser.ConcatenationContext> operands = ctx.concatenation();
+      String left = b.visit(operands.get(0));
+      String right = b.visit(operands.get(1));
+      return left + " - " + right;
+    }
+
     // Check for || concatenation operator (BAR BAR)
     if (ctx.BAR() != null && ctx.BAR().size() >= 2) {
-      throw new TransformationException(
-          "String concatenation operator || not yet supported in minimal implementation");
+      // String concatenation (compatible with PostgreSQL!)
+      java.util.List<PlSqlParser.ConcatenationContext> operands = ctx.concatenation();
+      String left = b.visit(operands.get(0));
+      String right = b.visit(operands.get(1));
+      return left + " || " + right;
+    }
+
+    if (ctx.COLLATE() != null) {
+      // COLLATE clause
+      throw new TransformationException("COLLATE not yet supported");
     }
 
     // Check for AT LOCAL/TIME ZONE

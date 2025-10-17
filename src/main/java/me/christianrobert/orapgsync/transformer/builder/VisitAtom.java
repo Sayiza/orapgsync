@@ -14,8 +14,7 @@ public class VisitAtom {
 
     // Check for constant (literals)
     if (ctx.constant() != null) {
-      throw new TransformationException(
-          "Literal constants not yet supported in minimal implementation");
+      return VisitConstant.v(ctx.constant(), b);
     }
 
     // Check for inquiry_directive
@@ -32,8 +31,14 @@ public class VisitAtom {
 
     // Check for parenthesized expressions
     if (ctx.expressions_() != null) {
+      PlSqlParser.Expressions_Context exprsCtx = ctx.expressions_();
+      if (exprsCtx.expression() != null && !exprsCtx.expression().isEmpty()) {
+        // Single parenthesized expression
+        String expr = b.visit(exprsCtx.expression(0));
+        return "(" + expr + ")";
+      }
       throw new TransformationException(
-          "Parenthesized expressions not yet supported in minimal implementation");
+          "Multi-value parenthesized expressions not yet supported");
     }
 
     // Check for outer_join_sign (+)

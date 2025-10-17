@@ -8,12 +8,26 @@ public class VisitLogicalExpression {
 
     // Check for AND operation
     if (ctx.AND() != null) {
-      throw new TransformationException("Logical AND not yet supported in minimal implementation");
+      // Grammar: logical_expression AND logical_expression
+      java.util.List<PlSqlParser.Logical_expressionContext> logicalExprs = ctx.logical_expression();
+      if (logicalExprs == null || logicalExprs.size() != 2) {
+        throw new TransformationException("Logical AND expression must have exactly 2 operands");
+      }
+      String left = b.visit(logicalExprs.get(0));
+      String right = b.visit(logicalExprs.get(1));
+      return left + " AND " + right;
     }
 
     // Check for OR operation
     if (ctx.OR() != null) {
-      throw new TransformationException("Logical OR not yet supported in minimal implementation");
+      // Grammar: logical_expression OR logical_expression
+      java.util.List<PlSqlParser.Logical_expressionContext> logicalExprs = ctx.logical_expression();
+      if (logicalExprs == null || logicalExprs.size() != 2) {
+        throw new TransformationException("Logical OR expression must have exactly 2 operands");
+      }
+      String left = b.visit(logicalExprs.get(0));
+      String right = b.visit(logicalExprs.get(1));
+      return left + " OR " + right;
     }
 
     // Visit unary_logical_expression (the simple case)

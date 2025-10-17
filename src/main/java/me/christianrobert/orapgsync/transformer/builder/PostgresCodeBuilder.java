@@ -149,6 +149,25 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
         return VisitFromClause.v(ctx, this);
     }
 
+    // ========== WHERE CLAUSE ==========
+
+    @Override
+    public String visitWhere_clause(PlSqlParser.Where_clauseContext ctx) {
+        return VisitWhereClause.v(ctx, this);
+    }
+
+    @Override
+    public String visitCondition(PlSqlParser.ConditionContext ctx) {
+        return VisitCondition.v(ctx, this);
+    }
+
+    // ========== CONSTANTS ==========
+
+    @Override
+    public String visitConstant(PlSqlParser.ConstantContext ctx) {
+        return VisitConstant.v(ctx, this);
+    }
+
     // ========== TABLE REFERENCE ==========
 
     @Override

@@ -20,6 +20,17 @@ public class VisitQueryBlock {
     }
     String fromClause = b.visit(fromClauseCtx);
 
-    return "SELECT " + selectedList + " FROM " + fromClause;
+    // Build the SELECT statement
+    StringBuilder result = new StringBuilder();
+    result.append("SELECT ").append(selectedList).append(" FROM ").append(fromClause);
+
+    // Extract WHERE clause (if present)
+    PlSqlParser.Where_clauseContext whereCtx = ctx.where_clause();
+    if (whereCtx != null) {
+      String whereClause = b.visit(whereCtx);
+      result.append(" ").append(whereClause);
+    }
+
+    return result.toString();
   }
 }
