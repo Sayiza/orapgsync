@@ -43,6 +43,20 @@ public class VisitTableReference {
 
     String tableName = tableviewName.getText();
 
+    // Get transformation context once (used for both synonym resolution and alias registration)
+    TransformationContext context = b.getContext();
+
+    // Resolve synonyms to actual table names
+    // Oracle synonyms don't exist in PostgreSQL, so we must resolve them during transformation
+    if (context != null) {
+      String resolvedName = context.resolveSynonym(tableName);
+      if (resolvedName != null) {
+        // Synonym resolved to actual qualified table name (schema.table)
+        tableName = resolvedName;
+      }
+      // Otherwise keep original name (not a synonym, or context not available)
+    }
+
     // Check for alias
     PlSqlParser.Table_aliasContext aliasCtx = tableRefAux.table_alias();
     String alias = null;
@@ -50,7 +64,6 @@ public class VisitTableReference {
       alias = aliasCtx.getText();
 
       // Register the alias in the transformation context (if available)
-      TransformationContext context = b.getContext();
       if (context != null) {
         context.registerAlias(alias, tableName);
       }
