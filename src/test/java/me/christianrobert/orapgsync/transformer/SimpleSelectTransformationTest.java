@@ -92,4 +92,38 @@ class SimpleSelectTransformationTest {
         assertTrue(parseResult.hasErrors(), "Should have parse errors");
         assertNotNull(parseResult.getErrorMessage(), "Should have error message");
     }
+
+    @Test
+    void testParenthesizedSubquery() {
+        // Given: Oracle SQL wrapped in parentheses (like Oracle view definitions)
+        String oracleSql = "(SELECT nr, text FROM example)";
+
+        // When: Parse and transform
+        ParseResult parseResult = parser.parseSelectStatement(oracleSql);
+        assertFalse(parseResult.hasErrors(), "Parse should succeed");
+
+        String postgresSql = builder.visit(parseResult.getTree());
+        String normalized = postgresSql.trim().replaceAll("\\s+", " ");
+
+        // Then: Should preserve parentheses
+        assertEquals("(SELECT nr , text FROM example)", normalized,
+            "Parenthesized subquery should be preserved");
+    }
+
+    @Test
+    void testParenthesizedSubqueryWithAlias() {
+        // Given: Oracle SQL with parenthesized subquery and table alias
+        String oracleSql = "(SELECT nr, text FROM example e)";
+
+        // When: Parse and transform
+        ParseResult parseResult = parser.parseSelectStatement(oracleSql);
+        assertFalse(parseResult.hasErrors(), "Parse should succeed");
+
+        String postgresSql = builder.visit(parseResult.getTree());
+        String normalized = postgresSql.trim().replaceAll("\\s+", " ");
+
+        // Then: Should preserve both parentheses and alias
+        assertEquals("(SELECT nr , text FROM example e)", normalized,
+            "Parenthesized subquery with alias should be preserved");
+    }
 }

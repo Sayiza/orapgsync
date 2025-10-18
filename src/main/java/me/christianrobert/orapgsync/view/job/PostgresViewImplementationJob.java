@@ -159,10 +159,12 @@ public class PostgresViewImplementationJob extends AbstractDatabaseWriteJob<View
 
     /**
      * Implements a single view by transforming Oracle SQL to PostgreSQL.
+     * Catches and logs SQL errors to prevent job crashes - individual view failures
+     * should not stop processing of other views.
      */
     private void implementView(Connection pgConnection, ViewMetadata view,
                                TransformationIndices indices,
-                               ViewImplementationResult result) throws SQLException {
+                               ViewImplementationResult result) {
 
         String schema = view.getSchema();
         String viewName = view.getViewName();
@@ -196,10 +198,20 @@ public class PostgresViewImplementationJob extends AbstractDatabaseWriteJob<View
         // Replace stub view with actual implementation
         // IMPORTANT: Use CREATE OR REPLACE to preserve dependencies (functions/procedures)
         // This is the whole point of the two-phase stub architecture!
-        replaceView(pgConnection, schema, viewName, postgresSql);
+        try {
+            replaceView(pgConnection, schema, viewName, postgresSql);
+            result.addImplementedView(qualifiedName);
+            log.info("Successfully implemented view: {}", qualifiedName);
+        } catch (SQLException e) {
+            // Log SQL error but continue processing other views
+            log.error("SQL error creating view {}: {}", qualifiedName, e.getMessage());
+            log.debug("Failed SQL: CREATE OR REPLACE VIEW {}.{} AS {}",
+                    schema.toLowerCase(), viewName.toLowerCase(), postgresSql);
 
-        result.addImplementedView(qualifiedName);
-        log.info("Successfully implemented view: {}", qualifiedName);
+            // Add error with the transformed SQL (shows what we tried to execute)
+            String errorMsg = "SQL execution failed: " + e.getMessage();
+            result.addError(qualifiedName, errorMsg, postgresSql);
+        }
     }
 
     /**
