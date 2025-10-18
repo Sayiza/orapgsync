@@ -43,19 +43,29 @@ public class VisitTableReference {
 
     String tableName = tableviewName.getText();
 
-    // Get transformation context once (used for both synonym resolution and alias registration)
+    // Get transformation context once (used for synonym resolution, schema qualification, and alias registration)
     TransformationContext context = b.getContext();
 
-    // Resolve synonyms to actual table names
-    // Oracle synonyms don't exist in PostgreSQL, so we must resolve them during transformation
+    // Apply name resolution logic (only if context is available)
     if (context != null) {
+      // STEP 1: Try to resolve as synonym first
+      // Oracle synonyms don't exist in PostgreSQL, so we must resolve them during transformation
       String resolvedName = context.resolveSynonym(tableName);
       if (resolvedName != null) {
         // Synonym resolved to actual qualified table name (schema.table)
         tableName = resolvedName;
+      } else {
+        // STEP 2: Not a synonym - qualify unqualified names with current schema
+        // Oracle implicitly uses current schema for unqualified names
+        // PostgreSQL uses search_path, which can cause wrong table or "does not exist" errors
+        // Solution: Explicitly qualify all unqualified table names
+        if (!tableName.contains(".")) {
+          // Unqualified name → qualify with current schema
+          tableName = context.getCurrentSchema().toLowerCase() + "." + tableName.toLowerCase();
+        }
       }
-      // Otherwise keep original name (not a synonym, or context not available)
     }
+    // If context not available, keep original name (e.g., in simple tests without metadata)
 
     // Check for alias
     PlSqlParser.Table_aliasContext aliasCtx = tableRefAux.table_alias();

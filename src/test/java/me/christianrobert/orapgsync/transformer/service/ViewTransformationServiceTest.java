@@ -48,7 +48,7 @@ class ViewTransformationServiceTest {
     @Test
     void transformSimpleSingleColumnSelect() {
         String oracleSql = "SELECT empno FROM emp";
-        String expectedPostgres = "SELECT empno FROM emp";
+        String expectedPostgres = "SELECT empno FROM hr.emp";  // Qualified with schema
 
         TransformationResult result = transformationService.transformViewSql(oracleSql, "hr", emptyIndices);
 
@@ -64,7 +64,7 @@ class ViewTransformationServiceTest {
     @Test
     void transformSimpleTwoColumnSelect() {
         String oracleSql = "SELECT empno, ename FROM emp";
-        String expectedPostgres = "SELECT empno , ename FROM emp";
+        String expectedPostgres = "SELECT empno , ename FROM hr.emp";
 
         TransformationResult result = transformationService.transformViewSql(oracleSql, "hr", emptyIndices);
 
@@ -76,7 +76,7 @@ class ViewTransformationServiceTest {
     @Test
     void transformMultipleColumnsSelect() {
         String oracleSql = "SELECT empno, ename, sal, deptno FROM employees";
-        String expectedPostgres = "SELECT empno , ename , sal , deptno FROM employees";
+        String expectedPostgres = "SELECT empno , ename , sal , deptno FROM hr.employees";
 
         TransformationResult result = transformationService.transformViewSql(oracleSql, "hr", emptyIndices);
 
@@ -88,7 +88,7 @@ class ViewTransformationServiceTest {
     @Test
     void transformSelectWithTableAlias() {
         String oracleSql = "SELECT empno, ename FROM employees e";
-        String expectedPostgres = "SELECT empno , ename FROM employees e";
+        String expectedPostgres = "SELECT empno , ename FROM hr.employees e";
 
         TransformationResult result = transformationService.transformViewSql(oracleSql, "hr", emptyIndices);
 
@@ -100,7 +100,7 @@ class ViewTransformationServiceTest {
     @Test
     void transformSelectWithVariousWhitespace() {
         String oracleSql = "SELECT   empno  ,  ename   FROM   employees";
-        String expectedPostgres = "SELECT empno , ename FROM employees";
+        String expectedPostgres = "SELECT empno , ename FROM hr.employees";
 
         TransformationResult result = transformationService.transformViewSql(oracleSql, "hr", emptyIndices);
 
@@ -116,7 +116,7 @@ class ViewTransformationServiceTest {
                    ename,
                    sal
             FROM employees""";
-        String expectedPostgres = "SELECT empno , ename , sal FROM employees";
+        String expectedPostgres = "SELECT empno , ename , sal FROM hr.employees";
 
         TransformationResult result = transformationService.transformViewSql(oracleSql, "hr", emptyIndices);
 
@@ -128,7 +128,7 @@ class ViewTransformationServiceTest {
     @Test
     void transformSelectUppercaseKeywords() {
         String oracleSql = "SELECT EMPNO, ENAME FROM EMPLOYEES";
-        String expectedPostgres = "SELECT EMPNO , ENAME FROM EMPLOYEES";
+        String expectedPostgres = "SELECT EMPNO , ENAME FROM hr.employees";  // Table name lowercased by qualification
 
         TransformationResult result = transformationService.transformViewSql(oracleSql, "hr", emptyIndices);
 
@@ -140,7 +140,7 @@ class ViewTransformationServiceTest {
     @Test
     void transformSelectLowercaseKeywords() {
         String oracleSql = "select empno, ename from employees";
-        String expectedPostgres = "SELECT empno , ename FROM employees";
+        String expectedPostgres = "SELECT empno , ename FROM hr.employees";
 
         TransformationResult result = transformationService.transformViewSql(oracleSql, "hr", emptyIndices);
 
@@ -152,7 +152,7 @@ class ViewTransformationServiceTest {
     @Test
     void transformSelectMixedCase() {
         String oracleSql = "Select EmpNo, EName From Employees";
-        String expectedPostgres = "SELECT EmpNo , EName FROM Employees";
+        String expectedPostgres = "SELECT EmpNo , EName FROM hr.employees";  // Table name lowercased by qualification
 
         TransformationResult result = transformationService.transformViewSql(oracleSql, "hr", emptyIndices);
 
@@ -164,7 +164,7 @@ class ViewTransformationServiceTest {
     @Test
     void transformSelectWithUnderscoresInNames() {
         String oracleSql = "SELECT emp_no, emp_name, dept_id FROM employee_table";
-        String expectedPostgres = "SELECT emp_no , emp_name , dept_id FROM employee_table";
+        String expectedPostgres = "SELECT emp_no , emp_name , dept_id FROM hr.employee_table";
 
         TransformationResult result = transformationService.transformViewSql(oracleSql, "hr", emptyIndices);
 
@@ -176,7 +176,7 @@ class ViewTransformationServiceTest {
     @Test
     void transformSelectWithNumbers() {
         String oracleSql = "SELECT col1, col2, col3 FROM table1";
-        String expectedPostgres = "SELECT col1 , col2 , col3 FROM table1";
+        String expectedPostgres = "SELECT col1 , col2 , col3 FROM hr.table1";
 
         TransformationResult result = transformationService.transformViewSql(oracleSql, "hr", emptyIndices);
 
@@ -325,7 +325,7 @@ class ViewTransformationServiceTest {
         String normalized1 = result1.getPostgresSql().trim().replaceAll("\\s+", " ");
         String normalized2 = result2.getPostgresSql().trim().replaceAll("\\s+", " ");
 
-        assertEquals("SELECT empno FROM emp", normalized1);
-        assertEquals("SELECT deptno , dname FROM dept", normalized2);
+        assertEquals("SELECT empno FROM hr.emp", normalized1);
+        assertEquals("SELECT deptno , dname FROM hr.dept", normalized2);
     }
 }

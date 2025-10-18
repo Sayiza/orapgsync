@@ -219,9 +219,9 @@ class SelectStarTransformationTest {
         builder = new PostgresCodeBuilder(context);
         String postgresSql = builder.visit(parseResult.getTree());
 
-        // Then: SELECT * preserved (context doesn't affect it)
+        // Then: Table name qualified with schema, SELECT * preserved
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
-        assertEquals("SELECT * FROM employees", normalized,
+        assertEquals("SELECT * FROM hr.employees", normalized,
                 "SELECT * should work with context");
     }
 
@@ -239,9 +239,9 @@ class SelectStarTransformationTest {
         builder = new PostgresCodeBuilder(context);
         String postgresSql = builder.visit(parseResult.getTree());
 
-        // Then: Qualified star preserved
+        // Then: Qualified star preserved, table name qualified with schema
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
-        assertEquals("SELECT e . * FROM employees e", normalized,
+        assertEquals("SELECT e . * FROM hr.employees e", normalized,
                 "SELECT e.* should work with context");
     }
 

@@ -95,10 +95,15 @@ public class ViewTransformationService {
                 return TransformationResult.failure(oracleSql, errorMsg);
             }
 
-            // STEP 2: Transform ANTLR parse tree directly to PostgreSQL SQL
-            log.debug("Step 2: Transforming to PostgreSQL");
+            // STEP 2: Create TransformationContext with schema and indices
+            log.debug("Step 2: Creating transformation context with schema: {}", schema);
+            me.christianrobert.orapgsync.transformer.context.TransformationContext context =
+                new me.christianrobert.orapgsync.transformer.context.TransformationContext(schema, indices);
+
+            // STEP 3: Transform ANTLR parse tree to PostgreSQL SQL with context
+            log.debug("Step 3: Transforming to PostgreSQL");
             me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder builder =
-                new me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder();
+                new me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder(context);
             String postgresSql = builder.visit(parseResult.getTree());
 
             log.info("Successfully transformed view SQL for schema: {}", schema);

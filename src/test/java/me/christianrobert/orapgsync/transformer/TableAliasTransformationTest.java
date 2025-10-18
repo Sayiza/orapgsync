@@ -162,9 +162,9 @@ class TableAliasTransformationTest {
         builder = new PostgresCodeBuilder(context);
         String postgresSql = builder.visit(parseResult.getTree());
 
-        // Then: Qualified columns still preserved (context doesn't affect column references)
+        // Then: Qualified columns preserved, table name qualified with schema
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
-        assertEquals("SELECT e . empno , e . ename FROM employees e", normalized,
+        assertEquals("SELECT e . empno , e . ename FROM hr.employees e", normalized,
                 "Qualified columns should work with context");
     }
 

@@ -79,10 +79,10 @@ class ViewTransformationIntegrationTest {
         String oracleSql = "SELECT empno, ename FROM emp";
         TransformationResult result = transformationService.transformViewSql(oracleSql, "HR", indices);
 
-        // Then: Transformation succeeds (simple pass-through doesn't need metadata)
+        // Then: Transformation succeeds with schema qualification
         assertTrue(result.isSuccess(), "Transformation should succeed");
         String normalized = result.getPostgresSql().trim().replaceAll("\\s+", " ");
-        assertEquals("SELECT empno , ename FROM emp", normalized);
+        assertEquals("SELECT empno , ename FROM hr.emp", normalized);
     }
 
     /**
@@ -106,10 +106,10 @@ class ViewTransformationIntegrationTest {
         String oracleSql = "SELECT empno, ename FROM employees";
         TransformationResult result = transformationService.transformViewSql(oracleSql, "HR", indices);
 
-        // Then: Transformation succeeds
+        // Then: Transformation succeeds with schema qualification
         assertTrue(result.isSuccess(), "Transformation should succeed");
         String normalized = result.getPostgresSql().trim().replaceAll("\\s+", " ");
-        assertEquals("SELECT empno , ename FROM employees", normalized);
+        assertEquals("SELECT empno , ename FROM hr.employees", normalized);
         assertNull(result.getErrorMessage());
     }
 
@@ -199,10 +199,10 @@ class ViewTransformationIntegrationTest {
         String oracleSql = "SELECT empno FROM employees e";
         TransformationResult result = transformationService.transformViewSql(oracleSql, "HR", indices);
 
-        // Then: Transformation succeeds with alias preserved
+        // Then: Transformation succeeds with alias preserved and schema qualification
         assertTrue(result.isSuccess());
         String normalized = result.getPostgresSql().trim().replaceAll("\\s+", " ");
-        assertEquals("SELECT empno FROM employees e", normalized);
+        assertEquals("SELECT empno FROM hr.employees e", normalized);
     }
 
     /**
@@ -223,7 +223,7 @@ class ViewTransformationIntegrationTest {
         TransformationResult result2 = transformationService.transformViewSql(sql2, "HR", indices);
         TransformationResult result3 = transformationService.transformViewSql(sql3, "HR", indices);
 
-        // Then: All transformations succeed independently
+        // Then: All transformations succeed independently with schema qualification
         assertTrue(result1.isSuccess());
         assertTrue(result2.isSuccess());
         assertTrue(result3.isSuccess());
@@ -232,9 +232,9 @@ class ViewTransformationIntegrationTest {
         String normalized2 = result2.getPostgresSql().trim().replaceAll("\\s+", " ");
         String normalized3 = result3.getPostgresSql().trim().replaceAll("\\s+", " ");
 
-        assertEquals("SELECT empno FROM emp", normalized1);
-        assertEquals("SELECT deptno , dname FROM dept", normalized2);
-        assertEquals("SELECT job , sal FROM jobs", normalized3);
+        assertEquals("SELECT empno FROM hr.emp", normalized1);
+        assertEquals("SELECT deptno , dname FROM hr.dept", normalized2);
+        assertEquals("SELECT job , sal FROM hr.jobs", normalized3);
     }
 
     /**

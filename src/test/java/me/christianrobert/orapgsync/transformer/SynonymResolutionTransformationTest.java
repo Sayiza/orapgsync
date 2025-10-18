@@ -127,7 +127,7 @@ class SynonymResolutionTransformationTest {
         TransformationContext context = new TransformationContext("hr", indices);
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
 
-        // When: Oracle SQL uses actual table name
+        // When: Oracle SQL uses actual table name (unqualified)
         String oracleSql = "SELECT emp_id FROM employees";
         ParseResult parseResult = parser.parseSelectStatement(oracleSql);
         assertFalse(parseResult.hasErrors(), "Parse should succeed");
@@ -135,9 +135,10 @@ class SynonymResolutionTransformationTest {
         String postgresSql = builder.visit(parseResult.getTree());
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
 
-        // Then: Table name should be unchanged
-        assertEquals("SELECT emp_id FROM employees", normalized,
-            "Non-synonym table name should be preserved as-is");
+        // Then: Unqualified table name should be qualified with current schema
+        // This prevents "relation does not exist" errors in PostgreSQL
+        assertEquals("SELECT emp_id FROM hr.employees", normalized,
+            "Non-synonym table name should be qualified with current schema");
     }
 
     @Test

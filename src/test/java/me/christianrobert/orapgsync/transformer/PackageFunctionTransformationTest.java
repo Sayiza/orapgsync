@@ -67,9 +67,9 @@ class PackageFunctionTransformationTest {
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
         String postgresSql = builder.visit(parseResult.getTree());
 
-        // Then: Package.function becomes package__function (no schema prefix needed - same schema)
+        // Then: Package.function becomes package__function, table name qualified with schema
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
-        assertEquals("SELECT nr , testpackage__testfunction( nr ) FROM examples", normalized,
+        assertEquals("SELECT nr , testpackage__testfunction( nr ) FROM hr.examples", normalized,
                 "Package function should be flattened with double underscore");
     }
 
@@ -89,9 +89,9 @@ class PackageFunctionTransformationTest {
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
         String postgresSql = builder.visit(parseResult.getTree());
 
-        // Then: Case preserved, flattened with __
+        // Then: Case preserved, flattened with __, table name qualified with schema
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
-        assertEquals("SELECT nr , TestPackage__TestFunction( nr ) FROM examples", normalized);
+        assertEquals("SELECT nr , TestPackage__TestFunction( nr ) FROM hr.examples", normalized);
     }
 
     @Test
@@ -111,9 +111,9 @@ class PackageFunctionTransformationTest {
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
         String postgresSql = builder.visit(parseResult.getTree());
 
-        // Then: Both functions flattened
+        // Then: Both functions flattened, table name qualified with schema
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
-        assertEquals("SELECT pkg1__func1( nr ) , pkg2__func2( text ) FROM examples", normalized);
+        assertEquals("SELECT pkg1__func1( nr ) , pkg2__func2( text ) FROM hr.examples", normalized);
     }
 
     // ========== SCENARIO B: Package function via synonym ==========
@@ -136,9 +136,9 @@ class PackageFunctionTransformationTest {
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
         String postgresSql = builder.visit(parseResult.getTree());
 
-        // Then: Synonym resolved, function flattened (no schema prefix - resolves to same schema)
+        // Then: Synonym resolved, function flattened, table name qualified with schema
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
-        assertEquals("SELECT nr , testpackage__testfunction( nr ) FROM examples", normalized,
+        assertEquals("SELECT nr , testpackage__testfunction( nr ) FROM hr.examples", normalized,
                 "Synonym should resolve to actual package, then flatten");
     }
 
@@ -160,9 +160,9 @@ class PackageFunctionTransformationTest {
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
         String postgresSql = builder.visit(parseResult.getTree());
 
-        // Then: Synonym resolved, schema prefix added because different schema
+        // Then: Synonym resolved, schema prefix added for function, table name qualified with schema
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
-        assertEquals("SELECT nr , scott.testpackage__testfunction( nr ) FROM examples", normalized,
+        assertEquals("SELECT nr , scott.testpackage__testfunction( nr ) FROM hr.examples", normalized,
                 "Cross-schema package function needs schema prefix");
     }
 
@@ -184,9 +184,9 @@ class PackageFunctionTransformationTest {
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
         String postgresSql = builder.visit(parseResult.getTree());
 
-        // Then: PUBLIC synonym resolved, schema prefix added
+        // Then: PUBLIC synonym resolved, schema prefix added, table name qualified with schema
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
-        assertEquals("SELECT nr , scott.testpackage__testfunction( nr ) FROM examples", normalized,
+        assertEquals("SELECT nr , scott.testpackage__testfunction( nr ) FROM hr.examples", normalized,
                 "PUBLIC synonym should resolve and add schema prefix");
     }
 
@@ -206,9 +206,9 @@ class PackageFunctionTransformationTest {
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
         String postgresSql = builder.visit(parseResult.getTree());
 
-        // Then: Function flattened with all arguments preserved
+        // Then: Function flattened with all arguments preserved, table name qualified with schema
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
-        assertEquals("SELECT pkg__calc( nr , text ) FROM examples", normalized);
+        assertEquals("SELECT pkg__calc( nr , text ) FROM hr.examples", normalized);
     }
 
     @Test
@@ -228,9 +228,9 @@ class PackageFunctionTransformationTest {
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
         String postgresSql = builder.visit(parseResult.getTree());
 
-        // Then: Both functions flattened
+        // Then: Both functions flattened, table name qualified with schema
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
-        assertEquals("SELECT pkg__outer( pkg__inner( nr ) ) FROM examples", normalized);
+        assertEquals("SELECT pkg__outer( pkg__inner( nr ) ) FROM hr.examples", normalized);
     }
 
     // ========== EDGE CASES ==========
@@ -249,9 +249,9 @@ class PackageFunctionTransformationTest {
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
         String postgresSql = builder.visit(parseResult.getTree());
 
-        // Then: Qualified columns pass through unchanged (not package functions)
+        // Then: Qualified columns pass through unchanged (not package functions), table name qualified with schema
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
-        assertEquals("SELECT e . empno , e . ename FROM employees e", normalized,
+        assertEquals("SELECT e . empno , e . ename FROM hr.employees e", normalized,
                 "Regular qualified columns should not be transformed");
     }
 

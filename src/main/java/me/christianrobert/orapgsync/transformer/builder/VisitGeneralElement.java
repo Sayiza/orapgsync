@@ -270,6 +270,18 @@ public class VisitGeneralElement {
       // Simple function call: function(args)
       String functionName = getFunctionName(partCtx);
       String arguments = getFunctionArguments(partCtx, b);
+
+      // Apply schema qualification if context available
+      // Oracle implicit schema resolution: unqualified function → current schema
+      // PostgreSQL uses search_path which may not include the current schema
+      TransformationContext context = b.getContext();
+      if (context != null && !functionName.contains(".")) {
+        // Unqualified function → qualify with current schema
+        // Note: Built-in PostgreSQL functions (like COALESCE, UPPER, etc.) are in pg_catalog
+        // which is always in search_path, so this is safe
+        functionName = context.getCurrentSchema().toLowerCase() + "." + functionName.toLowerCase();
+      }
+
       return functionName + arguments;
     }
 
