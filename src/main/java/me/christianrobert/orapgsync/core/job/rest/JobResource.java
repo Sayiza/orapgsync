@@ -429,8 +429,11 @@ public class JobResource {
                     response.put("summary", summary);
                     response.put("constraintCount", constraints.size());
                     response.put("result", result); // Include raw result for frontend compatibility
-                } else if (jobType.contains("VIEW") && !jobType.contains("VIEW_STUB_CREATION")) {
-                    // Handle view extraction/verification results (NOT stub creation)
+                } else if (jobType.contains("VIEW")
+                        && !jobType.contains("VIEW_STUB_CREATION")
+                        && !jobType.contains("VIEW_IMPLEMENTATION")
+                        && !jobType.contains("VIEW_IMPLEMENTATION_VERIFICATION")) {
+                    // Handle view extraction/verification results (NOT stub creation, implementation, or verification)
                     // Matches: "VIEW", "VIEW_STUB_VERIFICATION"
                     @SuppressWarnings("unchecked")
                     List<ViewMetadata> viewDefinitions = (List<ViewMetadata>) result;

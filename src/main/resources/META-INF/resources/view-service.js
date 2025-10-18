@@ -470,59 +470,63 @@ function displayViewStubCreationResults(result, database) {
 
     let html = '';
 
-    if (result.summary) {
-        const summary = result.summary;
+    // Access result properties directly (not result.summary)
+    const createdCount = result.createdCount || 0;
+    const skippedCount = result.skippedCount || 0;
+    const errorCount = result.errorCount || 0;
+    const createdViews = result.createdViews || [];
+    const skippedViews = result.skippedViews || [];
+    const errors = result.errors || [];
 
-        updateComponentCount("postgres-views", summary.createdCount + summary.skippedCount + summary.errorCount);
+    updateComponentCount("postgres-views", createdCount + skippedCount + errorCount);
 
-        html += '<div class="table-creation-summary">';
-        html += `<div class="summary-stats">`;
-        html += `<span class="stat-item created">Created: ${summary.createdCount}</span>`;
-        html += `<span class="stat-item skipped">Skipped: ${summary.skippedCount}</span>`;
-        html += `<span class="stat-item errors">Errors: ${summary.errorCount}</span>`;
-        html += `</div>`;
+    html += '<div class="table-creation-summary">';
+    html += `<div class="summary-stats">`;
+    html += `<span class="stat-item created">Created: ${createdCount}</span>`;
+    html += `<span class="stat-item skipped">Skipped: ${skippedCount}</span>`;
+    html += `<span class="stat-item errors">Errors: ${errorCount}</span>`;
+    html += `</div>`;
+    html += '</div>';
+
+    // Show created views
+    if (createdCount > 0) {
+        html += '<div class="created-tables-section">';
+        html += '<h4>Created View Stubs:</h4>';
+        html += '<div class="table-items">';
+        createdViews.forEach(viewName => {
+            html += `<div class="table-item created">${viewName} ✓</div>`;
+        });
         html += '</div>';
+        html += '</div>';
+    }
 
-        // Show created views
-        if (summary.createdCount > 0) {
-            html += '<div class="created-tables-section">';
-            html += '<h4>Created View Stubs:</h4>';
-            html += '<div class="table-items">';
-            Object.values(summary.createdViews).forEach(view => {
-                html += `<div class="table-item created">${view.viewName} ✓</div>`;
-            });
-            html += '</div>';
-            html += '</div>';
-        }
+    // Show skipped views
+    if (skippedCount > 0) {
+        html += '<div class="skipped-tables-section">';
+        html += '<h4>Skipped Views (already exist):</h4>';
+        html += '<div class="table-items">';
+        skippedViews.forEach(viewName => {
+            html += `<div class="table-item skipped">${viewName}</div>`;
+        });
+        html += '</div>';
+        html += '</div>';
+    }
 
-        // Show skipped views
-        if (summary.skippedCount > 0) {
-            html += '<div class="skipped-tables-section">';
-            html += '<h4>Skipped Views (already exist):</h4>';
-            html += '<div class="table-items">';
-            Object.values(summary.skippedViews).forEach(view => {
-                html += `<div class="table-item skipped">${view.viewName} (${view.reason})</div>`;
-            });
-            html += '</div>';
-            html += '</div>';
-        }
-
-        // Show errors
-        if (summary.errorCount > 0) {
-            html += '<div class="error-tables-section">';
-            html += '<h4>Failed Views:</h4>';
-            html += '<div class="table-items">';
-            Object.values(summary.errors).forEach(error => {
-                html += `<div class="table-item error">`;
-                html += `<strong>${error.viewName}</strong>: ${error.error}`;
-                if (error.sql) {
-                    html += `<div class="sql-statement"><pre>${error.sql}</pre></div>`;
-                }
-                html += `</div>`;
-            });
-            html += '</div>';
-            html += '</div>';
-        }
+    // Show errors
+    if (errorCount > 0) {
+        html += '<div class="error-tables-section">';
+        html += '<h4>Failed Views:</h4>';
+        html += '<div class="table-items">';
+        errors.forEach(error => {
+            html += `<div class="table-item error">`;
+            html += `<strong>${error.viewName}</strong>: ${error.errorMessage}`;
+            if (error.sqlStatement) {
+                html += `<div class="sql-statement"><pre>${error.sqlStatement}</pre></div>`;
+            }
+            html += `</div>`;
+        });
+        html += '</div>';
+        html += '</div>';
     }
 
     detailsDiv.innerHTML = html;
@@ -590,7 +594,7 @@ async function createPostgresViewImplementation() {
         // Re-enable button
         if (button) {
             button.disabled = false;
-            button.innerHTML = 'Implement Views';
+            button.innerHTML = 'Create Views';
         }
     }
 }
@@ -631,7 +635,7 @@ async function pollViewImplementationJobStatus(jobId, database) {
                     const button = document.querySelector(`#${database}-view-implementation .action-btn`);
                     if (button) {
                         button.disabled = false;
-                        button.innerHTML = 'Implement Views';
+                        button.innerHTML = 'Create Views';
                     }
 
                     // Resolve the promise to signal completion
@@ -648,7 +652,7 @@ async function pollViewImplementationJobStatus(jobId, database) {
                 const button = document.querySelector(`#${database}-view-implementation .action-btn`);
                 if (button) {
                     button.disabled = false;
-                    button.innerHTML = 'Implement Views';
+                    button.innerHTML = 'Create Views';
                 }
                 // Reject the promise to signal error
                 reject(error);
@@ -690,59 +694,63 @@ function displayViewImplementationResults(result, database) {
 
     let html = '';
 
-    if (result.summary) {
-        const summary = result.summary;
+    // Access result properties directly (not result.summary)
+    const implementedCount = result.implementedCount || 0;
+    const skippedCount = result.skippedCount || 0;
+    const errorCount = result.errorCount || 0;
+    const implementedViews = result.implementedViews || [];
+    const skippedViews = result.skippedViews || [];
+    const errors = result.errors || [];
 
-        updateComponentCount("postgres-view-implementation", summary.implementedCount + summary.skippedCount + summary.errorCount);
+    updateComponentCount("postgres-view-implementation", implementedCount + skippedCount + errorCount);
 
-        html += '<div class="table-creation-summary">';
-        html += `<div class="summary-stats">`;
-        html += `<span class="stat-item created">Implemented: ${summary.implementedCount}</span>`;
-        html += `<span class="stat-item skipped">Skipped: ${summary.skippedCount}</span>`;
-        html += `<span class="stat-item errors">Errors: ${summary.errorCount}</span>`;
-        html += `</div>`;
+    html += '<div class="table-creation-summary">';
+    html += `<div class="summary-stats">`;
+    html += `<span class="stat-item created">Implemented: ${implementedCount}</span>`;
+    html += `<span class="stat-item skipped">Skipped: ${skippedCount}</span>`;
+    html += `<span class="stat-item errors">Errors: ${errorCount}</span>`;
+    html += `</div>`;
+    html += '</div>';
+
+    // Show implemented views
+    if (implementedCount > 0) {
+        html += '<div class="created-tables-section">';
+        html += '<h4>Implemented Views:</h4>';
+        html += '<div class="table-items">';
+        implementedViews.forEach(viewName => {
+            html += `<div class="table-item created">${viewName} ✓</div>`;
+        });
         html += '</div>';
+        html += '</div>';
+    }
 
-        // Show implemented views
-        if (summary.implementedCount > 0) {
-            html += '<div class="created-tables-section">';
-            html += '<h4>Implemented Views:</h4>';
-            html += '<div class="table-items">';
-            Object.values(summary.implementedViews).forEach(view => {
-                html += `<div class="table-item created">${view.viewName} ✓</div>`;
-            });
-            html += '</div>';
-            html += '</div>';
-        }
+    // Show skipped views
+    if (skippedCount > 0) {
+        html += '<div class="skipped-tables-section">';
+        html += '<h4>Skipped Views:</h4>';
+        html += '<div class="table-items">';
+        skippedViews.forEach(viewName => {
+            html += `<div class="table-item skipped">${viewName}</div>`;
+        });
+        html += '</div>';
+        html += '</div>';
+    }
 
-        // Show skipped views
-        if (summary.skippedCount > 0) {
-            html += '<div class="skipped-tables-section">';
-            html += '<h4>Skipped Views:</h4>';
-            html += '<div class="table-items">';
-            Object.values(summary.skippedViews).forEach(view => {
-                html += `<div class="table-item skipped">${view.viewName} (${view.reason})</div>`;
-            });
-            html += '</div>';
-            html += '</div>';
-        }
-
-        // Show errors
-        if (summary.errorCount > 0) {
-            html += '<div class="error-tables-section">';
-            html += '<h4>Failed Views:</h4>';
-            html += '<div class="table-items">';
-            Object.values(summary.errors).forEach(error => {
-                html += `<div class="table-item error">`;
-                html += `<strong>${error.viewName}</strong>: ${error.error}`;
-                if (error.sql) {
-                    html += `<div class="sql-statement"><pre>${error.sql}</pre></div>`;
-                }
-                html += `</div>`;
-            });
-            html += '</div>';
-            html += '</div>';
-        }
+    // Show errors
+    if (errorCount > 0) {
+        html += '<div class="error-tables-section">';
+        html += '<h4>Failed Views:</h4>';
+        html += '<div class="table-items">';
+        errors.forEach(error => {
+            html += `<div class="table-item error">`;
+            html += `<strong>${error.viewName}</strong>: ${error.errorMessage}`;
+            if (error.sqlStatement) {
+                html += `<div class="sql-statement"><pre>${error.sqlStatement}</pre></div>`;
+            }
+            html += `</div>`;
+        });
+        html += '</div>';
+        html += '</div>';
     }
 
     detailsDiv.innerHTML = html;
