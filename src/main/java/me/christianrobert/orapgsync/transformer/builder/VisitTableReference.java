@@ -18,32 +18,91 @@ public class VisitTableReference {
       throw new TransformationException("Table reference missing table_ref_aux_internal");
     }
 
-    // ANTLR generates subclasses for labeled alternatives in the grammar
-    PlSqlParser.Dml_table_expression_clauseContext dmlTable = null;
+    // Handle different types of table references:
+    // 1. table_ref_aux_internal_one: dml_table_expression_clause (table or subquery)
+    // 2. table_ref_aux_internal_two: '(' table_ref ')' (parenthesized table ref)
+    // 3. table_ref_aux_internal_thre: ONLY '(' dml_table_expression_clause ')' (ONLY syntax)
+
+    String tableExpression;
 
     if (internal instanceof PlSqlParser.Table_ref_aux_internal_oneContext) {
       PlSqlParser.Table_ref_aux_internal_oneContext internalOne =
           (PlSqlParser.Table_ref_aux_internal_oneContext) internal;
-      dmlTable = internalOne.dml_table_expression_clause();
+      PlSqlParser.Dml_table_expression_clauseContext dmlTable = internalOne.dml_table_expression_clause();
+      tableExpression = handleDmlTableExpression(dmlTable, b);
     } else if (internal instanceof PlSqlParser.Table_ref_aux_internal_threContext) {
       // ONLY (table) syntax
       PlSqlParser.Table_ref_aux_internal_threContext internalThree =
           (PlSqlParser.Table_ref_aux_internal_threContext) internal;
-      dmlTable = internalThree.dml_table_expression_clause();
+      PlSqlParser.Dml_table_expression_clauseContext dmlTable = internalThree.dml_table_expression_clause();
+      tableExpression = handleDmlTableExpression(dmlTable, b);
+    } else {
+      throw new TransformationException("Table reference type not supported: " + internal.getClass().getSimpleName());
     }
+
+    // Check for alias (applies to both tables and subqueries)
+    PlSqlParser.Table_aliasContext aliasCtx = tableRefAux.table_alias();
+    if (aliasCtx != null) {
+      String alias = aliasCtx.getText();
+
+      // Register the alias in the transformation context (if available)
+      TransformationContext context = b.getContext();
+      if (context != null) {
+        // For subqueries, we register the alias but not the "table name" (since it's a derived table)
+        // For regular tables, we've already resolved the name in handleDmlTableExpression
+        if (!tableExpression.startsWith("(")) {
+          // Regular table reference - register alias
+          context.registerAlias(alias, tableExpression);
+        }
+      }
+
+      return tableExpression + " " + alias;
+    }
+
+    return tableExpression;
+  }
+
+  /**
+   * Handles dml_table_expression_clause which can be:
+   * <ul>
+   *   <li>tableview_name - Regular table reference</li>
+   *   <li>'(' select_statement ')' - Subquery (inline view)</li>
+   *   <li>table_collection_expression - Collection operator</li>
+   *   <li>LATERAL '(' subquery ')' - Lateral subquery</li>
+   * </ul>
+   */
+  private static String handleDmlTableExpression(
+      PlSqlParser.Dml_table_expression_clauseContext dmlTable, PostgresCodeBuilder b) {
 
     if (dmlTable == null) {
-      throw new TransformationException("Table reference type not supported in minimal implementation");
+      throw new TransformationException("dml_table_expression_clause is null");
     }
 
+    // CASE 1: Regular table reference (tableview_name)
     PlSqlParser.Tableview_nameContext tableviewName = dmlTable.tableview_name();
-    if (tableviewName == null) {
-      throw new TransformationException("Table reference missing tableview_name");
+    if (tableviewName != null) {
+      return handleTableviewName(tableviewName, b);
     }
+
+    // CASE 2: Subquery in FROM clause: '(' select_statement ')'
+    PlSqlParser.Select_statementContext selectStatement = dmlTable.select_statement();
+    if (selectStatement != null) {
+      return handleSubquery(selectStatement, b);
+    }
+
+    // CASE 3: Other cases (not yet implemented)
+    throw new TransformationException(
+        "Unsupported dml_table_expression_clause type. Only tableview_name and subqueries are currently supported.");
+  }
+
+  /**
+   * Handles regular table references (tableview_name).
+   * Applies synonym resolution and schema qualification.
+   */
+  private static String handleTableviewName(
+      PlSqlParser.Tableview_nameContext tableviewName, PostgresCodeBuilder b) {
 
     String tableName = tableviewName.getText();
-
-    // Get transformation context once (used for synonym resolution, schema qualification, and alias registration)
     TransformationContext context = b.getContext();
 
     // Apply name resolution logic (only if context is available)
@@ -67,20 +126,27 @@ public class VisitTableReference {
     }
     // If context not available, keep original name (e.g., in simple tests without metadata)
 
-    // Check for alias
-    PlSqlParser.Table_aliasContext aliasCtx = tableRefAux.table_alias();
-    String alias = null;
-    if (aliasCtx != null) {
-      alias = aliasCtx.getText();
-
-      // Register the alias in the transformation context (if available)
-      if (context != null) {
-        context.registerAlias(alias, tableName);
-      }
-
-      return tableName + " " + alias;
-    }
-
     return tableName;
+  }
+
+  /**
+   * Handles subqueries in FROM clause (inline views).
+   * Recursively transforms the SELECT statement inside the subquery.
+   *
+   * <p>Example:
+   * <pre>
+   * Oracle:     (SELECT dept_id FROM departments WHERE active = 'Y')
+   * PostgreSQL: (SELECT dept_id FROM hr.departments WHERE active = 'Y')
+   * </pre>
+   */
+  private static String handleSubquery(
+      PlSqlParser.Select_statementContext selectStatement, PostgresCodeBuilder b) {
+
+    // Recursively transform the subquery using the same PostgresCodeBuilder
+    // This ensures all transformation rules (schema qualification, synonyms, etc.) apply
+    String transformedSubquery = b.visit(selectStatement);
+
+    // Wrap in parentheses (required for subqueries in FROM clause)
+    return "( " + transformedSubquery + " )";
   }
 }

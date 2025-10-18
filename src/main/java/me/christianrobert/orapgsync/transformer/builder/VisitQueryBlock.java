@@ -5,6 +5,8 @@ import me.christianrobert.orapgsync.transformer.builder.outerjoin.OuterJoinAnaly
 import me.christianrobert.orapgsync.transformer.builder.outerjoin.OuterJoinContext;
 import me.christianrobert.orapgsync.transformer.context.TransformationException;
 
+import java.util.List;
+
 public class VisitQueryBlock {
   public static String v(PlSqlParser.Query_blockContext ctx, PostgresCodeBuilder b) {
 
@@ -49,6 +51,27 @@ public class VisitQueryBlock {
         String whereClause = b.visit(whereCtx);
         if (whereClause != null && !whereClause.trim().isEmpty()) {
           result.append(" ").append(whereClause);
+        }
+      }
+
+      // Extract GROUP BY clause (if present)
+      // Note: Grammar allows multiple group_by_clause in a list, but typically just one
+      List<PlSqlParser.Group_by_clauseContext> groupByCtxList = ctx.group_by_clause();
+      if (groupByCtxList != null && !groupByCtxList.isEmpty()) {
+        for (PlSqlParser.Group_by_clauseContext groupByCtx : groupByCtxList) {
+          String groupByClause = b.visit(groupByCtx);
+          if (groupByClause != null && !groupByClause.trim().isEmpty()) {
+            result.append(" ").append(groupByClause);
+          }
+        }
+      }
+
+      // Extract ORDER BY clause (if present)
+      PlSqlParser.Order_by_clauseContext orderByCtx = ctx.order_by_clause();
+      if (orderByCtx != null) {
+        String orderByClause = b.visit(orderByCtx);
+        if (orderByClause != null && !orderByClause.trim().isEmpty()) {
+          result.append(" ").append(orderByClause);
         }
       }
 

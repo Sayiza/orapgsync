@@ -201,6 +201,27 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
         return VisitCondition.v(ctx, this);
     }
 
+    // ========== ORDER BY CLAUSE ==========
+
+    @Override
+    public String visitOrder_by_clause(PlSqlParser.Order_by_clauseContext ctx) {
+        return VisitOrderByClause.v(ctx, this);
+    }
+
+    // ========== GROUP BY CLAUSE ==========
+
+    @Override
+    public String visitGroup_by_clause(PlSqlParser.Group_by_clauseContext ctx) {
+        return VisitGroupByClause.v(ctx, this);
+    }
+
+    // ========== HAVING CLAUSE ==========
+
+    @Override
+    public String visitHaving_clause(PlSqlParser.Having_clauseContext ctx) {
+        return VisitHavingClause.v(ctx, this);
+    }
+
     // ========== CONSTANTS ==========
 
     @Override
