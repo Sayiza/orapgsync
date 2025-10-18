@@ -182,6 +182,26 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
         return VisitStringFunction.v(ctx, this);
     }
 
+    @Override
+    public String visitNumeric_function_wrapper(PlSqlParser.Numeric_function_wrapperContext ctx) {
+        return VisitNumericFunctionWrapper.v(ctx, this);
+    }
+
+    @Override
+    public String visitNumeric_function(PlSqlParser.Numeric_functionContext ctx) {
+        return VisitNumericFunction.v(ctx, this);
+    }
+
+    @Override
+    public String visitOther_function(PlSqlParser.Other_functionContext ctx) {
+        return VisitOtherFunction.v(ctx, this);
+    }
+
+    @Override
+    public String visitFunction_argument_analytic(PlSqlParser.Function_argument_analyticContext ctx) {
+        return VisitFunctionArgumentAnalytic.v(ctx, this);
+    }
+
     // ========== FROM CLAUSE ==========
 
     @Override

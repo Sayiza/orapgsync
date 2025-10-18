@@ -27,10 +27,9 @@ public class VisitStandardFunction {
             return b.visit(ctx.string_function());
         }
 
-        // Route to numeric_function_wrapper
+        // Route to numeric_function_wrapper (aggregate functions: COUNT, SUM, AVG, MIN, MAX, etc.)
         if (ctx.numeric_function_wrapper() != null) {
-            throw new TransformationException(
-                "Numeric functions not yet supported in current implementation");
+            return b.visit(ctx.numeric_function_wrapper());
         }
 
         // Route to json_function
@@ -41,8 +40,7 @@ public class VisitStandardFunction {
 
         // Route to other_function
         if (ctx.other_function() != null) {
-            throw new TransformationException(
-                "Other functions not yet supported in current implementation");
+            return b.visit(ctx.other_function());
         }
 
         throw new TransformationException(
