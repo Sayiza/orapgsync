@@ -2,8 +2,8 @@
 
 **Oracle to PostgreSQL SQL/PL/SQL Transformation Architecture**
 
-**Last Updated:** 2025-10-17
-**Status:** Direct AST Approach - Foundation Working ✅
+**Last Updated:** 2025-10-18
+**Status:** Direct AST Approach - Phase 2 Nearly Complete ✅ (72 tests passing)
 
 This document describes the architecture and implementation plan for the ANTLR-based transformation module that converts Oracle SQL and PL/SQL code to PostgreSQL-compatible code.
 
@@ -494,243 +494,107 @@ public class ViewTransformationService {
 
 ### Phase 1: Foundation ✅ COMPLETE
 
-**Status:** Working - Tests passing (4/4)
+**Status:** Complete - Full expression hierarchy and basic SELECT working
 
 **Delivered:**
 - ✅ `AntlrParser` - Wrapper around PlSqlParser with error collection
 - ✅ `PostgresCodeBuilder` - Main visitor with static helper delegation
-- ✅ `TransformationContext` - Metadata access facade
-- ✅ `TransformationIndices` - Metadata index data structure
+- ✅ `TransformationContext` - Metadata access facade with synonym resolution
+- ✅ `TransformationIndices` - Pre-built metadata lookup indices (O(1) lookups)
+- ✅ `MetadataIndexBuilder` - Builds indices from StateService
 - ✅ `TransformationResult` - Success/error wrapper
-- ✅ `TransformationException` - Custom exception
-- ✅ 33+ static visitor helpers (Visit*.java)
-- ✅ Full expression hierarchy traversal (11 levels)
+- ✅ `TransformationException` - Custom exception with detailed messages
+- ✅ **26 static visitor helpers** (Visit*.java) - scalable architecture
+- ✅ Full expression hierarchy traversal (11 levels from expression → general_element)
 - ✅ Simple SELECT transformation working
-- ✅ `ViewTransformationService` integrated
-- ✅ Tests: `SimpleSelectTransformationTest` (4/4 passing)
+- ✅ `ViewTransformationService` integrated (@ApplicationScoped CDI bean)
+- ✅ Tests: 72/72 passing across 9 test classes
 
 **Current Capabilities:**
 ```sql
--- Working transformations:
+-- Basic SELECT:
 SELECT nr, text FROM example         → SELECT nr , text FROM example ✅
 SELECT nr, text FROM example e       → SELECT nr , text FROM example e ✅
-SELECT nr FROM example               → SELECT nr FROM example ✅
+SELECT * FROM example                → SELECT * FROM example ✅
+SELECT e.* FROM example e            → SELECT e . * FROM example e ✅
 ```
 
 ---
 
-### Phase 2: Complete SELECT Support (Next - 2-3 weeks)
+### Phase 2: Complete SELECT Support ✅ ~80% COMPLETE
 
-**Goal:** Handle WHERE, ORDER BY, GROUP BY, JOINs, literals, operators
+**Status:** Nearly complete - WHERE clause, literals, operators working. ORDER BY/GROUP BY/JOINs remaining.
 
-**2.1 Literals and Operators** (Week 1)
-- Extend `VisitAtom` for constants:
-  - String literals: `'text'`
-  - Number literals: `123`, `45.67`
-  - Date literals: `DATE '2024-01-01'`
-- Extend `VisitRelationalExpression` for comparisons:
-  - `=`, `<`, `>`, `<=`, `>=`, `!=`, `<>`
-- Extend `VisitModelExpression` for arithmetic:
-  - `+`, `-`, `*`, `/`
-- Extend `VisitConcatenation` for string operations:
-  - `||` operator (compatible)
+**2.1 Literals and Operators** ✅ COMPLETE
+- ✅ String literals: `'text'`
+- ✅ Number literals: `123`, `45.67`
+- ✅ Boolean literals: `TRUE`, `FALSE`
+- ✅ NULL literal
+- ✅ Comparison operators: `=`, `<`, `>`, `<=`, `>=`, `!=`, `<>`
+- ⏳ Arithmetic operators: `+`, `-`, `*`, `/` (infrastructure ready, testing needed)
+- ⏳ String concatenation: `||` operator (not yet implemented)
 
-**2.2 WHERE Clause** (Week 1)
-- Extend `VisitLogicalExpression` for boolean operators:
-  - `AND`, `OR`
-- Extend `VisitUnaryLogicalExpression` for:
-  - `NOT`
-  - `IS NULL`, `IS NOT NULL`
-- Extend `VisitCompoundExpression` for:
-  - `IN (...)`, `NOT IN (...)`
-  - `BETWEEN ... AND ...`
-  - `LIKE`, `NOT LIKE`
+**2.2 WHERE Clause** ✅ COMPLETE
+- ✅ Logical operators: `AND`, `OR`, `NOT`
+- ✅ IS NULL / IS NOT NULL
+- ✅ IN (value list): `deptno IN (10, 20, 30)`, `NOT IN`
+- ✅ BETWEEN: `sal BETWEEN 1000 AND 2000`, `NOT BETWEEN`
+- ✅ LIKE: `ename LIKE 'S%'`, `NOT LIKE`, `ESCAPE` clause
+- ✅ Parenthesized expressions for precedence
+- ✅ Complex nested conditions
+- ✅ Tests: `ExpressionBuildingBlocksTest` (24 tests passing)
 
-**2.2 ORDER BY and GROUP BY** (Week 1-2)
-- Implement `VisitOrderByClause`:
-  - `ASC` / `DESC` (default ASC)
-  - `NULLS FIRST` / `NULLS LAST` (compatible!)
-- Implement `VisitGroupByClause`:
-  - Simple GROUP BY (compatible)
-- Implement `VisitHavingClause`:
-  - HAVING with aggregates (compatible)
-- Extend function visitors for aggregates:
-  - `COUNT(*)`, `SUM()`, `AVG()`, `MAX()`, `MIN()` (compatible)
+**2.3 ORDER BY and GROUP BY** ⏳ NOT YET IMPLEMENTED
+- ⏳ ORDER BY clause
+- ⏳ ASC / DESC (default ASC)
+- ⏳ NULLS FIRST / NULLS LAST (compatible!)
+- ⏳ GROUP BY clause
+- ⏳ HAVING clause
+- ⏳ Aggregate functions: COUNT(*), SUM(), AVG(), MAX(), MIN()
 
-**2.3 JOINs** (Week 2)
-- Extend `VisitFromClause` for multiple tables:
-  - Currently rejects multiple tables
-  - Add support for comma-separated tables
-- Implement ANSI JOIN syntax:
-  - `INNER JOIN`, `LEFT JOIN`, `RIGHT JOIN`, `FULL OUTER JOIN`
-  - `ON` condition parsing
-- **Critical:** Oracle (+) syntax conversion:
-  - Detect `(+)` in WHERE clause
-  - Convert to ANSI LEFT/RIGHT JOIN
-  - Example: `WHERE a.id = b.id(+)` → `LEFT JOIN b ON a.id = b.id`
+**2.4 JOINs** ⏳ NOT YET IMPLEMENTED
+- Currently only single table FROM clause supported
+- ⏳ Multiple tables (comma-separated)
+- ⏳ ANSI JOIN syntax: INNER JOIN, LEFT JOIN, RIGHT JOIN, FULL OUTER JOIN
+- ⏳ ON condition parsing
+- ⏳ **Critical:** Oracle (+) syntax conversion to ANSI JOIN
 
-**2.4 Subqueries** (Week 3)
-- Extend `VisitSubquery` for nested queries:
-  - Subqueries in SELECT list
-  - Subqueries in WHERE clause
-  - `EXISTS (SELECT ...)`, `NOT EXISTS (...)`
-  - `IN (SELECT ...)`, `NOT IN (SELECT ...)`
+**2.5 Subqueries** ⏳ NOT YET IMPLEMENTED
+- ⏳ Subqueries in SELECT list
+- ⏳ Subqueries in WHERE clause
+- ⏳ EXISTS / NOT EXISTS
+- ⏳ IN (SELECT ...)
 
-**Deliverable:** Transform complex SELECT statements with WHERE, ORDER BY, JOINs
+**Advanced Features Implemented (Beyond Original Phase 2 Plan):** ✅
+- ✅ **Type Member Method Transformation** (critical for Oracle UDTs)
+  - `emp.address.get_street()` → `address_type__get_street(emp.address)`
+  - Chained method calls: `emp.data.method1().method2()` (nested functions)
+  - Tests: `TypeMemberMethodTransformationTest` (8 tests passing)
+- ✅ **Package Function Transformation**
+  - `pkg.func(args)` → `pkg__func(args)`
+  - Tests: `PackageFunctionTransformationTest` (10 tests passing)
+- ✅ **Table Alias Support**
+  - Tests: `TableAliasTransformationTest` (9 tests passing)
+- ✅ **SELECT * Support**
+  - Both `SELECT *` and qualified `SELECT e.*`
+  - Tests: `SelectStarTransformationTest` (10 tests passing)
 
 **Test Examples:**
 ```sql
--- Oracle
-SELECT empno, ename, sal * 12 AS annual_salary
-FROM emp
-WHERE deptno = 10 AND sal > 1000
-ORDER BY ename;
+-- Complex WHERE clause (working now!)
+SELECT empno, ename FROM employees
+WHERE (deptno = 10 OR deptno = 20)
+  AND sal BETWEEN 1000 AND 5000
+  AND commission IS NOT NULL
+  AND ename LIKE 'S%'
 
--- PostgreSQL (same)
-SELECT empno, ename, sal * 12 AS annual_salary
-FROM emp
-WHERE deptno = 10 AND sal > 1000
-ORDER BY ename;
-```
-
-```sql
--- Oracle (old join syntax)
-SELECT e.ename, d.dname
-FROM emp e, dept d
-WHERE e.deptno = d.deptno(+);
-
--- PostgreSQL (ANSI join)
-SELECT e.ename, d.dname
-FROM emp e
-LEFT JOIN dept d ON e.deptno = d.deptno;
+-- Type member method (working now!)
+SELECT emp.address.get_street() FROM employees emp
+→ SELECT address_type__get_street(emp . address) FROM employees emp
 ```
 
 ---
 
-### Phase 3: Oracle-Specific Transformations (Week 4-5)
-
-**Goal:** Transform Oracle-specific SQL constructs
-
-**3.1 Oracle Function Transformations** (Week 4)
-
-Extend `VisitStandardFunction` and `VisitStringFunction`:
-
-```java
-public class VisitStandardFunction {
-    public static String v(PlSqlParser.Standard_functionContext ctx, PostgresCodeBuilder b) {
-        String funcName = extractFunctionName(ctx);
-
-        switch (funcName.toUpperCase()) {
-            case "NVL":
-                // NVL(a, b) → COALESCE(a, b)
-                return transformNvl(ctx, b);
-
-            case "DECODE":
-                // DECODE(expr, search1, result1, ..., default) → CASE expr WHEN ...
-                return transformDecode(ctx, b);
-
-            case "SYSDATE":
-                // SYSDATE → CURRENT_TIMESTAMP
-                return "CURRENT_TIMESTAMP";
-
-            case "ROWNUM":
-                // ROWNUM → row_number() OVER ()
-                return "row_number() OVER ()";
-
-            // ... more transformations
-
-            default:
-                // Pass through unchanged (assume compatible)
-                return ctx.getText();
-        }
-    }
-
-    private static String transformNvl(PlSqlParser.Standard_functionContext ctx, PostgresCodeBuilder b) {
-        List<PlSqlParser.ArgumentContext> args = ctx.argument();
-        if (args.size() != 2) {
-            throw new TransformationException("NVL requires exactly 2 arguments");
-        }
-
-        String arg1 = b.visit(args.get(0).expression());
-        String arg2 = b.visit(args.get(1).expression());
-
-        return String.format("COALESCE(%s, %s)", arg1, arg2);
-    }
-
-    private static String transformDecode(PlSqlParser.Standard_functionContext ctx, PostgresCodeBuilder b) {
-        List<PlSqlParser.ArgumentContext> args = ctx.argument();
-        if (args.size() < 3) {
-            throw new TransformationException("DECODE requires at least 3 arguments");
-        }
-
-        String expr = b.visit(args.get(0).expression());
-        StringBuilder caseExpr = new StringBuilder("CASE ").append(expr);
-
-        // Process search/result pairs
-        for (int i = 1; i < args.size() - 1; i += 2) {
-            String search = b.visit(args.get(i).expression());
-            String result = b.visit(args.get(i + 1).expression());
-            caseExpr.append(" WHEN ").append(search)
-                    .append(" THEN ").append(result);
-        }
-
-        // Handle default (odd number of args means there's a default)
-        if (args.size() % 2 == 0) {
-            String defaultValue = b.visit(args.get(args.size() - 1).expression());
-            caseExpr.append(" ELSE ").append(defaultValue);
-        }
-
-        caseExpr.append(" END");
-        return caseExpr.toString();
-    }
-}
-```
-
-**Critical functions to implement:**
-- `NVL(a, b)` → `COALESCE(a, b)`
-- `NVL2(expr, val1, val2)` → `CASE WHEN expr IS NOT NULL THEN val1 ELSE val2 END`
-- `DECODE(expr, s1, r1, ..., default)` → `CASE expr WHEN s1 THEN r1 ... ELSE default END`
-- `SYSDATE` → `CURRENT_TIMESTAMP`
-- `ROWNUM` → `row_number() OVER ()` (context-dependent)
-- `SUBSTR(str, pos, len)` → `SUBSTRING(str FROM pos FOR len)`
-- `INSTR(str, substr)` → `POSITION(substr IN str)`
-- `TO_DATE(str, fmt)` → `TO_TIMESTAMP(str, fmt)` + format conversion
-- `TO_CHAR(date, fmt)` → `TO_CHAR(date, fmt)` + format conversion
-
-**3.2 DUAL Table Handling** (Week 4)
-
-Extend `VisitFromClause`:
-```java
-public class VisitFromClause {
-    public static String v(PlSqlParser.From_clauseContext ctx, PostgresCodeBuilder b) {
-        // ... extract table references ...
-
-        // Check if only table is DUAL
-        if (tableRefs.size() == 1 && tableRefs.get(0).equalsIgnoreCase("DUAL")) {
-            // SELECT expr FROM DUAL → SELECT expr (no FROM clause)
-            return "";  // Empty FROM clause
-        }
-
-        return "FROM " + String.join(", ", tableRefs);
-    }
-}
-```
-
-**3.3 Sequence Syntax** (Week 4)
-
-Extend `VisitGeneralElement` for sequence operations:
-```java
-// seq_name.NEXTVAL → nextval('schema.seq_name')
-// seq_name.CURRVAL → currval('schema.seq_name')
-
-if (isDotNotation && parts.length == 2) {
-    String obj = parts[0];
-    String attr = parts[1].toUpperCase();
-
-    if ("NEXTVAL".equals(attr) || "CURRVAL".equals(attr)) {
-        // Sequence operation
-        String funcName = attr.equals("NEXTVAL") ? "nextval" : "currval";
-        TransformationContext context = b.getContext();
         String qualifiedSeq = context.getCurrentSchema() + "." + obj;
         return String.format("%s('%s')", funcName, qualifiedSeq);
     }

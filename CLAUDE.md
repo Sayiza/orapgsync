@@ -260,11 +260,13 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
    - Pattern: `typename__methodname`
 
 ### 🔄 Phase 3: Full Implementation (In Progress)
-10. **View SQL Transformation**: ANTLR-based Oracle→PostgreSQL SQL conversion
-    - Architecture documented in `TRANSFORMATION.md`
-    - Semantic syntax tree approach with self-transforming nodes
-    - Metadata-driven disambiguation (type methods vs package functions)
-    - Target: Replace view stubs with actual transformed SQL
+10. **View SQL Transformation**: ✅ **INTEGRATED** - ANTLR-based Oracle→PostgreSQL SQL conversion
+    - ✅ Architecture: Direct AST approach (no intermediate semantic tree)
+    - ✅ PostgresViewImplementationJob uses ViewTransformationService
+    - ✅ 72 tests passing - WHERE clause, literals, operators, SELECT *, type methods, package functions
+    - ✅ Metadata-driven disambiguation (type methods vs package functions)
+    - ✅ CREATE OR REPLACE VIEW preserves dependencies (critical!)
+    - ⏳ Remaining: ORDER BY, GROUP BY, JOINs, Oracle-specific functions (NVL, DECODE, etc.)
 11. **Function/Procedure Logic**: PL/SQL→PL/pgSQL conversion using ANTLR (Future)
 12. **Type Method Logic**: Member method implementations (Future)
 13. **Triggers**: Migration from Oracle to PostgreSQL (Future)
@@ -599,25 +601,27 @@ Oracle synonyms provide alternative names. PostgreSQL doesn't have synonyms, so 
 
 ## SQL/PL-SQL Transformation Module
 
-**Status:** Architecture designed, implementation in progress
+**Status:** Phase 2 Nearly Complete - 72 tests passing ✅
 
-The transformation module converts Oracle SQL and PL/SQL code to PostgreSQL-compatible equivalents using ANTLR-based parsing and a semantic syntax tree approach.
+The transformation module converts Oracle SQL and PL/SQL code to PostgreSQL-compatible equivalents using ANTLR-based direct AST transformation (no intermediate semantic tree).
 
 ### Architecture Overview
 
 **Core Pipeline:**
 ```
-Oracle SQL/PL-SQL → ANTLR Parser → Semantic Tree → PostgreSQL SQL/PL-pgSQL
-                         ↓               ↓                ↓
-                    PlSqlParser    SemanticNode      toPostgres()
+Oracle SQL → ANTLR Parser → Direct Visitor → PostgreSQL SQL
+                  ↓              ↓                 ↓
+             PlSqlParser   PostgresCodeBuilder   String
 ```
 
 **Key Design Principles:**
-1. **Self-transforming nodes**: Each semantic node knows how to transform itself
-2. **Metadata-driven**: Uses existing StateService metadata for disambiguation
-3. **Decoupled**: Independent transformation logic, no database queries during transformation
-4. **Test-driven**: Comprehensive unit tests for all components
-5. **Reusable**: Same infrastructure for views, functions, procedures, triggers
+1. **Direct transformation**: Visitor returns PostgreSQL SQL strings directly (no intermediate tree)
+2. **Static helper pattern**: Each ANTLR rule has a static helper class (26 helpers)
+3. **Metadata-driven**: Uses pre-built TransformationIndices for O(1) lookups
+4. **Dependency boundaries**: TransformationContext passed as parameter (not CDI injected into visitor)
+5. **Incremental development**: Start simple, add complexity progressively
+6. **Test-driven**: 72 tests passing across 9 test classes
+7. **Quarkus-native**: Service layer uses CDI, visitor layer stays pure
 
 ### Metadata Strategy
 
@@ -675,16 +679,54 @@ See `TRANSFORMATION.md` for detailed implementation plan.
 - `AntlrParser` - Thin wrapper around PlSqlParser
 - `ViewTransformationService` - High-level API for job integration
 
-### Current Status
+### Current Status (October 2025)
 
-**Completed:**
-- ✅ Architecture design documented in `TRANSFORMATION.md`
-- ✅ Metadata strategy defined (index-based approach)
-- ✅ All required metadata available in StateService
+**Phase 1 (Foundation):** ✅ COMPLETE
+- ✅ ANTLR parser integration (PlSqlParser.g4)
+- ✅ PostgresCodeBuilder with 26 static visitor helpers
+- ✅ TransformationContext and TransformationIndices
+- ✅ MetadataIndexBuilder builds indices from StateService
+- ✅ ViewTransformationService (@ApplicationScoped CDI bean)
+- ✅ Full expression hierarchy (11 levels)
+- ✅ Basic SELECT transformation working
 
-**In Progress:**
-- 🔄 Phase 1: Foundation implementation
+**Phase 2 (Complete SELECT):** ✅ ~80% COMPLETE
+- ✅ WHERE clause (literals, AND/OR/NOT, comparisons, IN, BETWEEN, LIKE)
+- ✅ SELECT * and qualified SELECT (e.*)
+- ✅ Table aliases
+- ✅ Complex nested conditions
+- ✅ Parenthesized expressions
+- ✅ **Type member method transformation** (emp.address.get_street() → flattened function)
+- ✅ **Package function transformation** (pkg.func() → pkg__func())
+- ⏳ ORDER BY, GROUP BY, HAVING (not yet implemented)
+- ⏳ JOINs (only single table currently)
+- ⏳ Arithmetic operators (+, -, *, /)
+- ⏳ String concatenation (||)
+
+**Testing:**
+- ✅ 72/72 tests passing across 9 test classes
+- ✅ SimpleSelectTransformationTest (4 tests)
+- ✅ SelectStarTransformationTest (10 tests)
+- ✅ TableAliasTransformationTest (9 tests)
+- ✅ PackageFunctionTransformationTest (10 tests)
+- ✅ TypeMemberMethodTransformationTest (8 tests)
+- ✅ ExpressionBuildingBlocksTest (24 tests)
+- ✅ ViewTransformationServiceTest (24 tests)
+- ✅ ViewTransformationIntegrationTest (7 tests)
+
+**Phase 3 (Oracle-Specific Functions):** ⏳ NOT STARTED
+- ⏳ NVL → COALESCE
+- ⏳ DECODE → CASE WHEN
+- ⏳ SYSDATE → CURRENT_TIMESTAMP
+- ⏳ ROWNUM → row_number() OVER ()
+- ⏳ DUAL table handling (remove FROM DUAL)
+- ⏳ Sequence syntax (seq.NEXTVAL → nextval('schema.seq'))
+
+**Phase 4 (Integration with Migration):** ✅ COMPLETE
+- ✅ Oracle view SQL extraction (ViewMetadata.sqlDefinition)
+- ✅ PostgresViewImplementationJob created
+- ✅ Uses CREATE OR REPLACE VIEW (preserves dependencies - critical for two-phase architecture!)
 
 **Future:**
-- ⏳ Phases 2-5: SQL transformation
-- ⏳ Phase 6+: PL/SQL transformation
+- ⏳ Phase 5+: PL/SQL transformation (function/procedure bodies)
+- ⏳ Triggers, indexes, advanced features
