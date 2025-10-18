@@ -10,3 +10,4 @@
 [x] special column names : "#", "end", "offset"
 [x] Failed to serialize LOB type LONG 
 [ ] Unmapped defaul values: strip comments, and brackets
+[ ] SQL Transform: subquery support in all phases, outer join support in all phases

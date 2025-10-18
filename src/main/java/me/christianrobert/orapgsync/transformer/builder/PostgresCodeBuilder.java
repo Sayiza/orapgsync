@@ -2,7 +2,11 @@ package me.christianrobert.orapgsync.transformer.builder;
 
 import me.christianrobert.orapgsync.antlr.PlSqlParser;
 import me.christianrobert.orapgsync.antlr.PlSqlParserBaseVisitor;
+import me.christianrobert.orapgsync.transformer.builder.outerjoin.OuterJoinContext;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
+
+import java.util.ArrayDeque;
+import java.util.Deque;
 
 public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
 
@@ -10,12 +14,18 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
 
     private final TransformationContext context;
 
+    // Query-local state for outer join transformation
+    // Stack to handle nested queries (subqueries)
+    // Each query_block pushes its context, pops when done
+    private final Deque<OuterJoinContext> outerJoinContextStack;
+
     /**
      * Creates a PostgresCodeBuilder with transformation context.
      * @param context Transformation context for metadata lookups (can be null for simple transformations)
      */
     public PostgresCodeBuilder(TransformationContext context) {
         this.context = context;
+        this.outerJoinContextStack = new ArrayDeque<>();
     }
 
     /**
@@ -23,6 +33,7 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
      */
     public PostgresCodeBuilder() {
         this.context = null;
+        this.outerJoinContextStack = new ArrayDeque<>();
     }
 
     /**
@@ -30,6 +41,35 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
      */
     public TransformationContext getContext() {
         return context;
+    }
+
+    /**
+     * Pushes an outer join context onto the stack for the current query level.
+     * Used by VisitQueryBlock when entering a query (including subqueries).
+     *
+     * @param outerJoinContext Outer join context for this query level
+     */
+    public void pushOuterJoinContext(OuterJoinContext outerJoinContext) {
+        outerJoinContextStack.push(outerJoinContext);
+    }
+
+    /**
+     * Pops the outer join context from the stack when exiting a query level.
+     * Used by VisitQueryBlock when leaving a query (including subqueries).
+     */
+    public void popOuterJoinContext() {
+        if (!outerJoinContextStack.isEmpty()) {
+            outerJoinContextStack.pop();
+        }
+    }
+
+    /**
+     * Gets the outer join context for the current query level.
+     *
+     * @return Outer join context or null if no context (empty stack)
+     */
+    public OuterJoinContext getOuterJoinContext() {
+        return outerJoinContextStack.peek();
     }
 
     // ========== SELECT STATEMENT ==========
