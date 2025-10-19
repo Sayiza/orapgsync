@@ -1,7 +1,7 @@
 # Oracle to PostgreSQL SQL Transformation
 
 **Last Updated:** 2025-10-19
-**Status:** Phase 2 COMPLETE, Phase 3 IN PROGRESS (NVL, SYSDATE, DECODE, Column Aliases) - 311 tests passing ✅
+**Status:** Phase 2 COMPLETE, Phase 3 IN PROGRESS (NVL, SYSDATE, DECODE, Column Aliases, CASE Expressions) - 328 tests passing ✅
 
 This document describes the ANTLR-based transformation module that converts Oracle SQL to PostgreSQL-compatible SQL using a direct AST-to-code approach.
 
@@ -83,6 +83,20 @@ This document describes the ANTLR-based transformation module that converts Orac
 - 18 new tests added (293 → 311 total)
 - **Achievement:** Column aliases now work across all SELECT list elements!
 
+**Session 9: CASE Expressions** ✅
+- **CASE expression support** (newly implemented)
+  - Oracle and PostgreSQL have **nearly identical** CASE syntax!
+  - Only difference: Oracle allows `END CASE`, PostgreSQL requires just `END`
+  - Implemented in VisitCaseExpression.java with VisitUnaryExpression integration
+  - Supports both **searched CASE** and **simple CASE**:
+    - Searched: `CASE WHEN condition THEN result ... ELSE default END`
+    - Simple: `CASE expr WHEN value THEN result ... ELSE default END`
+  - Pass-through strategy: Minimal transformation (just END CASE → END)
+  - Works in all contexts: SELECT, WHERE, ORDER BY, nested, with aliases
+  - Comprehensive test coverage: 17 tests (searched, simple, nested, complex conditions, functions)
+- 17 new tests added (311 → 328 total)
+- **Achievement:** CASE expressions now work - critical for real-world Oracle views!
+
 ---
 
 ## Table of Contents
@@ -112,7 +126,7 @@ Oracle SQL → ANTLR Parser → PostgresCodeBuilder → PostgreSQL SQL
 1. **Direct Transformation**: No intermediate semantic tree - visitor returns PostgreSQL SQL strings directly
 2. **Static Helper Pattern**: Each ANTLR rule has a static helper class (26+ helpers), keeping the main visitor clean
 3. **Dependency Boundaries**: `TransformationContext` passed as parameter (not CDI-injected) for metadata access
-4. **Test-Driven**: 311 tests across 21 test classes, all passing
+4. **Test-Driven**: 328 tests across 22 test classes, all passing
 5. **Incremental**: Features added progressively with comprehensive test coverage
 
 ### Why Direct AST Works
@@ -158,6 +172,7 @@ Oracle SQL → ANTLR Parser → PostgresCodeBuilder → PostgreSQL SQL
 - ✅ **NVL → COALESCE**: Oracle's NULL handling function
 - ✅ **SYSDATE → CURRENT_TIMESTAMP**: Current date/time pseudo-column
 - ✅ **DECODE → CASE WHEN**: Oracle's conditional value selection
+- ✅ **CASE expressions**: Both searched and simple CASE (pass-through with END normalization)
 - ✅ **WHERE clause** (complete):
   - Literals: strings `'text'`, numbers `42`, NULL, TRUE/FALSE
   - Comparison: `=`, `<`, `>`, `<=`, `>=`, `!=`, `<>`
@@ -180,7 +195,7 @@ Oracle SQL → ANTLR Parser → PostgresCodeBuilder → PostgreSQL SQL
 - ✅ **Schema qualification**: Unqualified table/function names automatically qualified with schema
 - ✅ **Synonym resolution**: Synonyms resolved to actual table names
 
-**Tests: 311/311 passing across 21 test classes**
+**Tests: 328/328 passing across 22 test classes**
 
 ### What's Not Yet Implemented ⏳
 
@@ -1031,7 +1046,8 @@ src/test/java/.../transformer/
 ├── AnsiJoinTransformationTest.java              (15 tests)
 ├── ArithmeticOperatorTransformationTest.java    (22 tests)
 ├── OracleFunctionTransformationTest.java        (24 tests) ← NVL, SYSDATE, DECODE
-├── ColumnAliasTransformationTest.java           (18 tests) ← NEW
+├── ColumnAliasTransformationTest.java           (18 tests)
+├── CaseExpressionTransformationTest.java        (17 tests) ← NEW
 ├── AntlrParserTest.java                         (15 tests)
 ├── integration/
 │   └── ViewTransformationIntegrationTest.java   (7 tests)
@@ -1041,7 +1057,7 @@ src/test/java/.../transformer/
 
 ### Test Coverage
 
-**Current:** 311/311 tests passing across 21 test classes
+**Current:** 328/328 tests passing across 22 test classes
 
 **Coverage:**
 - Parser: 100%
@@ -1059,6 +1075,7 @@ src/test/java/.../transformer/
 - Package functions: 100%
 - **Oracle-specific functions:** 100% (NVL → COALESCE, SYSDATE → CURRENT_TIMESTAMP, DECODE → CASE WHEN)
 - **Column aliases:** 100% (AS keyword, quoted aliases, implicit aliases)
+- **CASE expressions:** 100% (searched CASE, simple CASE, nested, in all contexts)
 - Service integration: 100%
 
 ---
@@ -1089,11 +1106,12 @@ src/test/java/.../transformer/
 
 **After Oracle functions → Choose between:**
 - ✅ **Column Aliases (AS keyword)** - COMPLETE! Now works for all SELECT list elements
-- **Option A: CASE expressions** - Searched CASE (CASE WHEN ... THEN ... ELSE ... END)
-- **Option B: Subqueries in SELECT/WHERE** - Enables correlated subqueries, EXISTS, scalar subqueries
-- **Option C: More Oracle functions** - ROWNUM, sequence syntax, DUAL table
+- ✅ **CASE expressions** - COMPLETE! Both searched and simple CASE
+- **Option A: Subqueries in SELECT/WHERE** - Enables correlated subqueries, EXISTS, scalar subqueries
+- **Option B: More Oracle functions** - ROWNUM, sequence syntax, DUAL table, string functions
+- **Option C: Additional improvements** - Based on real-world failure analysis
 
-**My recommendation:** ✅ NVL/SYSDATE → ✅ DECODE → ✅ Column Aliases → CASE expressions (next)
+**Progress:** ✅ NVL/SYSDATE → ✅ DECODE → ✅ Column Aliases → ✅ CASE expressions
 
 ---
 
@@ -1167,7 +1185,7 @@ src/test/java/.../transformer/
 The Oracle to PostgreSQL SQL transformation module has achieved **Phase 2 COMPLETE (100%)** with a solid, tested foundation:
 
 **Strengths:**
-- ✅ **311 tests passing** - comprehensive coverage across 21 test classes
+- ✅ **328 tests passing** - comprehensive coverage across 22 test classes
 - ✅ **Direct AST approach** - simple, fast, maintainable
 - ✅ **Static helper pattern** - scalable to 400+ ANTLR rules
 - ✅ **Proper boundaries** - TransformationContext maintains clean separation
@@ -1186,23 +1204,27 @@ The Oracle to PostgreSQL SQL transformation module has achieved **Phase 2 COMPLE
 - ✅ Type member methods and package functions
 - ✅ Schema qualification and synonym resolution
 
-**Phase 3 In Progress - NVL, SYSDATE, DECODE, and Column Aliases Complete:**
+**Phase 3 In Progress - Major Features Complete:**
 - ✅ NVL → COALESCE transformation
 - ✅ SYSDATE → CURRENT_TIMESTAMP transformation
 - ✅ DECODE → CASE WHEN transformation
 - ✅ Column aliases (AS keyword support)
+- ✅ CASE expressions (searched and simple)
 
 **Next milestones:**
-1. **Complete Oracle-Specific Functions** - **~1 week remaining**
-   - ✅ NVL → COALESCE (COMPLETE)
-   - ✅ SYSDATE → CURRENT_TIMESTAMP (COMPLETE)
-   - ✅ DECODE → CASE WHEN (COMPLETE)
-   - ✅ Column Aliases (AS keyword) (COMPLETE)
-   - ⏳ CASE expressions (searched CASE) - **2-3 days** ← **RECOMMENDED NEXT**
-   - ⏳ ROWNUM → row_number() (2-3 days)
-   - ⏳ Sequence syntax (1-2 days)
-2. **Subqueries in SELECT/WHERE** - **2-3 days**
-3. **Additional improvements** based on real-world failures
+1. **Completed Features** ✅
+   - ✅ NVL → COALESCE
+   - ✅ SYSDATE → CURRENT_TIMESTAMP
+   - ✅ DECODE → CASE WHEN
+   - ✅ Column Aliases (AS keyword)
+   - ✅ CASE expressions (searched and simple)
+
+2. **Remaining Oracle-Specific Features** - Based on real-world needs
+   - ⏳ **Subqueries in SELECT/WHERE** - Scalar subqueries, EXISTS, IN subqueries ← **HIGH PRIORITY**
+   - ⏳ **ROWNUM → row_number()** - Requires subquery wrapper
+   - ⏳ **Sequence syntax** - seq.NEXTVAL → nextval('schema.seq')
+   - ⏳ **String functions** - SUBSTR, INSTR, etc.
+   - ⏳ **Additional improvements** based on real-world failure analysis at 20% success rate
 
 **Current transformer handles ~90% of typical Oracle view syntax:**
 - Complete SELECT statement structure

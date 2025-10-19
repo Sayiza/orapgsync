@@ -161,6 +161,11 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
     }
 
     @Override
+    public String visitCase_expression(PlSqlParser.Case_expressionContext ctx) {
+        return VisitCaseExpression.v(ctx, this);
+    }
+
+    @Override
     public String visitAtom(PlSqlParser.AtomContext ctx) {
         return VisitAtom.v(ctx, this);
     }

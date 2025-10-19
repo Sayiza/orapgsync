@@ -42,10 +42,9 @@ public class VisitUnaryExpression {
           "ALL operator not yet supported in minimal implementation");
     }
 
-    // Check for case_expression
+    // Route to case_expression (CASE WHEN ... THEN ... ELSE ... END)
     if (ctx.case_expression() != null) {
-      throw new TransformationException(
-          "CASE expressions not yet supported in minimal implementation");
+      return VisitCaseExpression.v(ctx.case_expression(), b);
     }
 
     // Check for quantified_expression
