@@ -7,12 +7,32 @@ import me.christianrobert.orapgsync.transformer.context.TransformationException;
 public class VisitTableReference {
   public static String v(PlSqlParser.Table_refContext ctx, PostgresCodeBuilder b) {
 
-    // Navigate: table_ref -> table_ref_aux -> table_ref_aux_internal -> ...
+    // Grammar: table_ref = table_ref_aux join_clause*
+    // This handles both simple table references and ANSI JOINs
+
+    // STEP 1: Process the first table (table_ref_aux)
     PlSqlParser.Table_ref_auxContext tableRefAux = ctx.table_ref_aux();
     if (tableRefAux == null) {
       throw new TransformationException("Table reference missing table_ref_aux");
     }
 
+    String result = processTableRefAux(tableRefAux, b);
+
+    // STEP 2: Process ANSI JOINs (join_clause*) - zero or more
+    java.util.List<PlSqlParser.Join_clauseContext> joinClauses = ctx.join_clause();
+    if (joinClauses != null && !joinClauses.isEmpty()) {
+      for (PlSqlParser.Join_clauseContext joinClause : joinClauses) {
+        result += " " + processJoinClause(joinClause, b);
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Processes table_ref_aux (single table or subquery with optional alias).
+   */
+  private static String processTableRefAux(PlSqlParser.Table_ref_auxContext tableRefAux, PostgresCodeBuilder b) {
     PlSqlParser.Table_ref_aux_internalContext internal = tableRefAux.table_ref_aux_internal();
     if (internal == null) {
       throw new TransformationException("Table reference missing table_ref_aux_internal");
@@ -60,6 +80,94 @@ public class VisitTableReference {
     }
 
     return tableExpression;
+  }
+
+  /**
+   * Processes ANSI JOIN clause.
+   *
+   * <p>Grammar:
+   * <pre>
+   * join_clause
+   *     : query_partition_clause? (CROSS | NATURAL)? (INNER | outer_join_type)? JOIN
+   *       table_ref_aux query_partition_clause? (join_on_part | join_using_part)*
+   *
+   * outer_join_type
+   *     : (FULL | LEFT | RIGHT) OUTER?
+   * </pre>
+   *
+   * <p>Strategy: Pass through JOIN keywords, transform table and conditions.
+   */
+  private static String processJoinClause(PlSqlParser.Join_clauseContext ctx, PostgresCodeBuilder b) {
+    StringBuilder result = new StringBuilder();
+
+    // Build JOIN keywords
+    // Pattern: [CROSS | NATURAL]? [INNER | FULL/LEFT/RIGHT [OUTER]?]? JOIN
+
+    if (ctx.CROSS() != null) {
+      result.append("CROSS ");
+    }
+
+    if (ctx.NATURAL() != null) {
+      result.append("NATURAL ");
+    }
+
+    if (ctx.INNER() != null) {
+      result.append("INNER ");
+    }
+
+    // Outer join type: FULL/LEFT/RIGHT [OUTER]?
+    PlSqlParser.Outer_join_typeContext outerJoinType = ctx.outer_join_type();
+    if (outerJoinType != null) {
+      if (outerJoinType.FULL() != null) {
+        result.append("FULL ");
+      } else if (outerJoinType.LEFT() != null) {
+        result.append("LEFT ");
+      } else if (outerJoinType.RIGHT() != null) {
+        result.append("RIGHT ");
+      }
+
+      if (outerJoinType.OUTER() != null) {
+        result.append("OUTER ");
+      }
+    }
+
+    result.append("JOIN ");
+
+    // Process the joined table (table_ref_aux)
+    PlSqlParser.Table_ref_auxContext joinedTable = ctx.table_ref_aux();
+    if (joinedTable == null) {
+      throw new TransformationException("JOIN clause missing table_ref_aux");
+    }
+
+    result.append(processTableRefAux(joinedTable, b));
+
+    // Process join conditions: ON or USING clause
+    // join_on_part: ON condition
+    // join_using_part: USING paren_column_list
+
+    java.util.List<PlSqlParser.Join_on_partContext> onParts = ctx.join_on_part();
+    if (onParts != null && !onParts.isEmpty()) {
+      for (PlSqlParser.Join_on_partContext onPart : onParts) {
+        result.append(" ON ");
+        PlSqlParser.ConditionContext condition = onPart.condition();
+        if (condition != null) {
+          result.append(b.visit(condition));
+        }
+      }
+    }
+
+    java.util.List<PlSqlParser.Join_using_partContext> usingParts = ctx.join_using_part();
+    if (usingParts != null && !usingParts.isEmpty()) {
+      for (PlSqlParser.Join_using_partContext usingPart : usingParts) {
+        result.append(" USING ");
+        PlSqlParser.Paren_column_listContext parenColumnList = usingPart.paren_column_list();
+        if (parenColumnList != null) {
+          result.append(parenColumnList.getText());
+        }
+      }
+    }
+
+    return result.toString();
   }
 
   /**
