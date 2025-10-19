@@ -139,7 +139,7 @@ An enterprise-grade Oracle-to-PostgreSQL migration tool built with Quarkus, feat
 
 **PostgreSQL Test Container**
 ```bash
-docker rm -f pgtest
+docker rm -f -v pgtest
 docker run --name pgtest -e POSTGRES_PASSWORD=secret -p 5432:5432 -d postgres
 ```
 Optional docker export can be done in this way:

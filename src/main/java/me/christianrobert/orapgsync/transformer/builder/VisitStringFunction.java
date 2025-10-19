@@ -36,17 +36,67 @@ public class VisitStringFunction {
                     (expressions == null ? 0 : expressions.size()));
             }
 
-            return " COALESC( " +
+            return "COALESCE( " +
                     b.visit(expressions.get(0)) +
                     " , " +
                     b.visit(expressions.get(1)) +
                     " )";
         }
 
-        // DECODE function
+        // DECODE function: DECODE '(' expressions_ ')'
+        // Oracle: DECODE(expr, search1, result1, search2, result2, ..., default)
+        // PostgreSQL: CASE expr WHEN search1 THEN result1 WHEN search2 THEN result2 ... ELSE default END
         if (ctx.DECODE() != null) {
-            throw new TransformationException(
-                "DECODE function not yet supported in current implementation");
+            PlSqlParser.Expressions_Context exprsCtx = ctx.expressions_();
+            if (exprsCtx == null) {
+                throw new TransformationException("DECODE function missing expressions");
+            }
+
+            List<PlSqlParser.ExpressionContext> expressions = exprsCtx.expression();
+            if (expressions == null || expressions.size() < 3) {
+                throw new TransformationException(
+                    "DECODE function requires at least 3 arguments (expr, search, result), found: " +
+                    (expressions == null ? 0 : expressions.size()));
+            }
+
+            // First expression is the expression to evaluate
+            String expr = b.visit(expressions.get(0));
+
+            // Build CASE WHEN statement
+            StringBuilder result = new StringBuilder("CASE ");
+            result.append(expr);
+
+            // Process search/result pairs
+            // Format: expr, search1, result1, search2, result2, ..., [default]
+            // Pairs start at index 1
+            int argCount = expressions.size();
+            boolean hasDefault = (argCount % 2 == 0); // Even count means we have a default value
+
+            // Process WHEN/THEN pairs
+            int pairCount = (argCount - 1) / 2; // Number of search/result pairs
+            for (int i = 0; i < pairCount; i++) {
+                int searchIdx = 1 + (i * 2);  // 1, 3, 5, 7, ...
+                int resultIdx = searchIdx + 1; // 2, 4, 6, 8, ...
+
+                String searchValue = b.visit(expressions.get(searchIdx));
+                String resultValue = b.visit(expressions.get(resultIdx));
+
+                result.append(" WHEN ");
+                result.append(searchValue);
+                result.append(" THEN ");
+                result.append(resultValue);
+            }
+
+            // Add ELSE clause if we have a default value
+            if (hasDefault) {
+                int defaultIdx = argCount - 1;
+                String defaultValue = b.visit(expressions.get(defaultIdx));
+                result.append(" ELSE ");
+                result.append(defaultValue);
+            }
+
+            result.append(" END");
+            return result.toString();
         }
 
         // SUBSTR function

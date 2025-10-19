@@ -285,6 +285,17 @@ public class VisitGeneralElement {
       return functionName + arguments;
     }
 
+    // Check for Oracle pseudo-columns and special constants that need transformation
+    String identifier = partCtx.getText();
+    String upperIdentifier = identifier.toUpperCase();
+
+    // SYSDATE → CURRENT_TIMESTAMP
+    // Oracle: SYSDATE returns current date and time
+    // PostgreSQL: CURRENT_TIMESTAMP is the equivalent
+    if ("SYSDATE".equals(upperIdentifier)) {
+      return "CURRENT_TIMESTAMP";
+    }
+
     // Simple identifier - use getText()
     return partCtx.getText();
   }

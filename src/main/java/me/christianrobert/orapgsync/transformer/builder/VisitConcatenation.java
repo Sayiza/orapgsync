@@ -60,11 +60,15 @@ public class VisitConcatenation {
 
     // Check for || concatenation operator (BAR BAR)
     if (ctx.BAR() != null && ctx.BAR().size() >= 2) {
-      // String concatenation (compatible with PostgreSQL!)
+      // String concatenation - CRITICAL NULL HANDLING DIFFERENCE:
+      // Oracle: NULL is treated as empty string ('Hello' || NULL || 'World' = 'HelloWorld')
+      // PostgreSQL ||: NULL propagates ('Hello' || NULL || 'World' = NULL)
+      // PostgreSQL CONCAT(): NULL treated as empty string (matches Oracle behavior)
+      // Solution: Transform || to CONCAT() for correct Oracle semantics
       java.util.List<PlSqlParser.ConcatenationContext> operands = ctx.concatenation();
       String left = b.visit(operands.get(0));
       String right = b.visit(operands.get(1));
-      return left + " || " + right;
+      return "CONCAT( " + left + " , " + right + " )";
     }
 
     if (ctx.COLLATE() != null) {
