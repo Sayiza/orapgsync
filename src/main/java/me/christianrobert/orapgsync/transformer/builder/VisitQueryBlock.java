@@ -12,11 +12,16 @@ public class VisitQueryBlock {
 
     // Get FROM and WHERE clauses
     PlSqlParser.From_clauseContext fromClauseCtx = ctx.from_clause();
-    if (fromClauseCtx == null) {
-      throw new TransformationException("Query block missing from_clause (FROM DUAL not yet supported in minimal implementation)");
-    }
-
     PlSqlParser.Where_clauseContext whereCtx = ctx.where_clause();
+
+    // Check if this is a FROM DUAL query (Oracle-specific pattern for scalar expressions)
+    // Oracle: SELECT SYSDATE FROM DUAL → PostgreSQL: SELECT CURRENT_TIMESTAMP
+    boolean isDualQuery = (fromClauseCtx != null) && isDualTable(fromClauseCtx);
+
+    // If no FROM clause and not DUAL, this is an error
+    if (fromClauseCtx == null && !isDualQuery) {
+      throw new TransformationException("Query block missing from_clause");
+    }
 
     // PHASE 1: ANALYSIS - Scan FROM and WHERE to detect outer joins
     // This must happen BEFORE visiting FROM/WHERE to prepare transformation context
@@ -32,7 +37,11 @@ public class VisitQueryBlock {
       // IMPORTANT: Visit FROM clause FIRST to register table aliases
       // before processing SELECT list (which may reference those aliases for type methods)
       // The FROM visitor will now use outerJoinContext to generate ANSI JOIN syntax
-      String fromClause = b.visit(fromClauseCtx);
+      // NOTE: If this is a DUAL query, we'll visit but not output the FROM clause
+      String fromClause = null;
+      if (!isDualQuery && fromClauseCtx != null) {
+        fromClause = b.visit(fromClauseCtx);
+      }
 
       // Extract SELECT list - use visitor pattern
       PlSqlParser.Selected_listContext selectedListCtx = ctx.selected_list();
@@ -43,7 +52,13 @@ public class VisitQueryBlock {
 
       // Build the SELECT statement
       StringBuilder result = new StringBuilder();
-      result.append("SELECT ").append(selectedList).append(" FROM ").append(fromClause);
+      result.append("SELECT ").append(selectedList);
+
+      // Only add FROM clause if not a DUAL query
+      // Oracle: SELECT SYSDATE FROM DUAL → PostgreSQL: SELECT CURRENT_TIMESTAMP
+      if (!isDualQuery && fromClause != null) {
+        result.append(" FROM ").append(fromClause);
+      }
 
       // Extract WHERE clause (if present)
       // The WHERE visitor will now use outerJoinContext to filter out (+) conditions
@@ -82,5 +97,78 @@ public class VisitQueryBlock {
       // This ensures nested subqueries don't corrupt parent query contexts
       b.popOuterJoinContext();
     }
+  }
+
+  /**
+   * Checks if the FROM clause references only the DUAL table.
+   *
+   * <p>Oracle uses DUAL (a special single-row table) for queries without real tables:
+   * <ul>
+   *   <li>SELECT SYSDATE FROM DUAL</li>
+   *   <li>SELECT 1 + 1 FROM DUAL</li>
+   *   <li>SELECT 'Hello World' FROM DUAL</li>
+   * </ul>
+   *
+   * <p>PostgreSQL doesn't need FROM clause for scalar expressions:
+   * <ul>
+   *   <li>SELECT CURRENT_TIMESTAMP</li>
+   *   <li>SELECT 1 + 1</li>
+   *   <li>SELECT 'Hello World'</li>
+   * </ul>
+   *
+   * @param fromClauseCtx The FROM clause context
+   * @return true if FROM clause contains only DUAL table
+   */
+  private static boolean isDualTable(PlSqlParser.From_clauseContext fromClauseCtx) {
+    if (fromClauseCtx == null) {
+      return false;
+    }
+
+    PlSqlParser.Table_ref_listContext tableRefListCtx = fromClauseCtx.table_ref_list();
+    if (tableRefListCtx == null) {
+      return false;
+    }
+
+    List<PlSqlParser.Table_refContext> tableRefs = tableRefListCtx.table_ref();
+    if (tableRefs == null || tableRefs.size() != 1) {
+      // Not DUAL if multiple tables or no tables
+      return false;
+    }
+
+    // Get the single table reference
+    PlSqlParser.Table_refContext tableRef = tableRefs.get(0);
+    PlSqlParser.Table_ref_auxContext tableRefAux = tableRef.table_ref_aux();
+    if (tableRefAux == null) {
+      return false;
+    }
+
+    PlSqlParser.Table_ref_aux_internalContext internal = tableRefAux.table_ref_aux_internal();
+    if (internal == null) {
+      return false;
+    }
+
+    // Check if it's a simple table reference (not a subquery)
+    if (!(internal instanceof PlSqlParser.Table_ref_aux_internal_oneContext)) {
+      return false;
+    }
+
+    PlSqlParser.Table_ref_aux_internal_oneContext internalOne =
+        (PlSqlParser.Table_ref_aux_internal_oneContext) internal;
+    PlSqlParser.Dml_table_expression_clauseContext dmlTable = internalOne.dml_table_expression_clause();
+    if (dmlTable == null) {
+      return false;
+    }
+
+    // Check if it's a tableview_name (not a subquery)
+    PlSqlParser.Tableview_nameContext tableviewName = dmlTable.tableview_name();
+    if (tableviewName == null) {
+      return false;
+    }
+
+    // Get the table name (case-insensitive)
+    String tableName = tableviewName.getText().toUpperCase();
+
+    // Check if it's DUAL or SYS.DUAL
+    return tableName.equals("DUAL") || tableName.equals("SYS.DUAL");
   }
 }
