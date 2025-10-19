@@ -166,6 +166,11 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
     }
 
     @Override
+    public String visitQuantified_expression(PlSqlParser.Quantified_expressionContext ctx) {
+        return VisitQuantifiedExpression.v(ctx, this);
+    }
+
+    @Override
     public String visitAtom(PlSqlParser.AtomContext ctx) {
         return VisitAtom.v(ctx, this);
     }

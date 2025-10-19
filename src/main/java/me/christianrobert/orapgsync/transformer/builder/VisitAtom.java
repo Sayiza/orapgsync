@@ -24,9 +24,13 @@ public class VisitAtom {
     }
 
     // Check for parenthesized subquery
+    // Grammar: '(' subquery ')' subquery_operation_part*
+    // Oracle and PostgreSQL have identical syntax for parenthesized subqueries
+    // Used in SELECT list (scalar subqueries) and WHERE clause comparisons
     if (ctx.subquery() != null) {
-      throw new TransformationException(
-          "Parenthesized subqueries not yet supported in minimal implementation");
+      // Recursively transform the subquery (applies all transformations: schema qualification, etc.)
+      String subquerySQL = b.visit(ctx.subquery());
+      return "(" + subquerySQL + ")";
     }
 
     // Check for parenthesized expressions

@@ -30,27 +30,37 @@ public class VisitUnaryExpression {
           "NEW operator not yet supported in minimal implementation");
     }
 
-    // Check for DISTINCT operator
-    if (ctx.DISTINCT() != null) {
-      throw new TransformationException(
-          "DISTINCT operator not yet supported in minimal implementation");
-    }
-
-    // Check for ALL operator
-    if (ctx.ALL() != null) {
-      throw new TransformationException(
-          "ALL operator not yet supported in minimal implementation");
-    }
-
     // Route to case_expression (CASE WHEN ... THEN ... ELSE ... END)
     if (ctx.case_expression() != null) {
       return VisitCaseExpression.v(ctx.case_expression(), b);
     }
 
-    // Check for quantified_expression
+    // Route to quantified_expression (EXISTS, ANY, ALL, SOME)
+    // IMPORTANT: This must be checked BEFORE standalone ALL/DISTINCT operators
+    // because quantified_expression also contains ALL keyword
     if (ctx.quantified_expression() != null) {
+      return VisitQuantifiedExpression.v(ctx.quantified_expression(), b);
+    }
+
+    // Check for DISTINCT operator (prefix operator: DISTINCT unary_expression)
+    if (ctx.DISTINCT() != null) {
       throw new TransformationException(
-          "Quantified expressions (SOME, EXISTS, ALL, ANY) not yet supported in minimal implementation");
+          "DISTINCT operator not yet supported in minimal implementation");
+    }
+
+    // Check for ALL operator (prefix operator: ALL unary_expression)
+    // Grammar: ALL unary_expression
+    // Example: WHERE salary > ALL (SELECT salary FROM employees WHERE deptno = 10)
+    // Oracle and PostgreSQL: Identical syntax (pass-through)
+    if (ctx.ALL() != null) {
+      // Get the child unary_expression (note: there's only one child)
+      PlSqlParser.Unary_expressionContext childCtx = ctx.unary_expression();
+      if (childCtx == null) {
+        throw new TransformationException("ALL operator missing unary_expression");
+      }
+      // Recursively transform the child unary_expression
+      String childExpr = b.visit(childCtx);
+      return "ALL " + childExpr;
     }
 
     // Route to standard_function (NVL, DECODE, SUBSTR, etc.)
