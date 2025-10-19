@@ -105,10 +105,57 @@ public class VisitStringFunction {
                 "SUBSTR function not yet supported in current implementation");
         }
 
-        // TO_CHAR function
+        // TO_CHAR function: TO_CHAR '(' (table_element | standard_function | expression) (',' quoted_string)? (',' quoted_string)? ')'
+        // Oracle: TO_CHAR(value, 'format', 'nls_params')
+        // PostgreSQL: TO_CHAR(value, 'format')  -- NLS params not supported
         if (ctx.TO_CHAR() != null) {
-            throw new TransformationException(
-                "TO_CHAR function not yet supported in current implementation");
+            // Get the value expression
+            // Grammar: TO_CHAR '(' (table_element | standard_function | expression) ...
+            // The parser will match ONE of these alternatives
+            String value = null;
+
+            // Try table_element (e.g., simple column ref or qualified like schema.table.column)
+            if (ctx.table_element() != null && ctx.table_element().getChildCount() > 0) {
+                value = b.visit(ctx.table_element());
+            }
+
+            // Try standard_function (e.g., TO_CHAR(SYSDATE, ...))
+            if (value == null && ctx.standard_function() != null && ctx.standard_function().getChildCount() > 0) {
+                value = b.visit(ctx.standard_function());
+            }
+
+            // Try expression (e.g., TO_CHAR(empno + 1, ...))
+            if (value == null && !ctx.expression().isEmpty()) {
+                value = b.visit(ctx.expression().get(0));
+            }
+
+            if (value == null) {
+                throw new TransformationException("TO_CHAR function missing value expression");
+            }
+
+            // Get the format string (if present)
+            List<PlSqlParser.Quoted_stringContext> quotedStrings = ctx.quoted_string();
+            String format = null;
+            if (quotedStrings != null && !quotedStrings.isEmpty()) {
+                // First quoted string is the format
+                format = quotedStrings.get(0).getText();
+                // Transform Oracle-specific format codes to PostgreSQL equivalents
+                format = transformToCharFormat(format);
+            }
+
+            // Note: Third parameter (NLS params) is ignored - PostgreSQL doesn't support it
+            // If there's a third parameter, we silently drop it (with a potential future warning)
+
+            // Build the TO_CHAR call
+            StringBuilder result = new StringBuilder("TO_CHAR( ");
+            result.append(value);
+            if (format != null) {
+                result.append(" , ");
+                result.append(format);
+            }
+            result.append(" )");
+
+            return result.toString();
         }
 
         // TO_DATE function
@@ -131,5 +178,116 @@ public class VisitStringFunction {
 
         throw new TransformationException(
             "Unknown string_function type - no recognized function found");
+    }
+
+    /**
+     * Transforms Oracle TO_CHAR format string to PostgreSQL equivalent.
+     *
+     * <p>Most format codes are identical between Oracle and PostgreSQL,
+     * but some Oracle-specific codes need transformation:
+     *
+     * <p>Date format transformations:
+     * <ul>
+     *   <li>RR → YY (2-digit year)</li>
+     *   <li>RRRR → YYYY (4-digit year)</li>
+     *   <li>IYY → IYYY (ISO year - PostgreSQL needs 4 digits)</li>
+     * </ul>
+     *
+     * <p>Number format transformations:
+     * <ul>
+     *   <li>D → . (decimal point - Oracle locale-aware vs PostgreSQL literal)</li>
+     *   <li>G → , (grouping separator - Oracle locale-aware vs PostgreSQL literal)</li>
+     * </ul>
+     *
+     * <p>Format codes that work identically:
+     * <ul>
+     *   <li>YYYY, MM, DD, HH24, MI, SS (date/time)</li>
+     *   <li>9, 0, FM, PR, S, MI, RN (numbers)</li>
+     *   <li>Many others...</li>
+     * </ul>
+     *
+     * <p>Known limitations:
+     * <ul>
+     *   <li>Case sensitivity: Oracle DAY→'MONDAY', PostgreSQL DAY→'MONDAY' (same), but Day→'Monday'</li>
+     *   <li>Padding differences: Oracle pads day names, PostgreSQL doesn't always</li>
+     *   <li>J (Julian day) - not supported in PostgreSQL, left as-is (may error)</li>
+     * </ul>
+     *
+     * @param format Original Oracle format string (with quotes)
+     * @return Transformed PostgreSQL format string (with quotes)
+     */
+    private static String transformToCharFormat(String format) {
+        if (format == null) {
+            return null;
+        }
+
+        // Format comes with quotes from the parser, e.g., 'YYYY-MM-DD'
+        // We need to transform the content but preserve the quotes
+
+        // Extract the content without quotes
+        String content = format;
+        boolean hasQuotes = false;
+        if (format.startsWith("'") && format.endsWith("'") && format.length() >= 2) {
+            content = format.substring(1, format.length() - 1);
+            hasQuotes = true;
+        }
+
+        // Apply transformations (order matters - do longer patterns first)
+
+        // Date format transformations
+        content = content.replace("RRRR", "YYYY");  // 4-digit year
+        content = content.replace("RR", "YY");      // 2-digit year
+        // Note: IYY → IYYY transformation is tricky because we need to preserve IYYY
+        // and only change IYY. Do IYYY first (no-op) then IYY
+        if (!content.contains("IYYY")) {
+            content = content.replace("IYY", "IYYY");  // ISO year needs 4 digits in PostgreSQL
+        }
+
+        // Number format transformations (locale-aware → literal)
+        // Note: We need to be careful not to replace D in day names like 'DD' or 'DAY'
+        // Strategy: Replace D only when it's likely a number format (surrounded by number format chars)
+        // For now, do a simple replacement - might need refinement based on real-world usage
+        content = replaceNumberFormatD(content);
+        content = replaceNumberFormatG(content);
+
+        // Restore quotes if they were present
+        if (hasQuotes) {
+            return "'" + content + "'";
+        }
+        return content;
+    }
+
+    /**
+     * Replaces D (decimal point) in number formats with literal '.'.
+     * Tries to avoid replacing D in date formats like DD or DAY.
+     */
+    private static String replaceNumberFormatD(String format) {
+        // Simple heuristic: If format contains number format indicators (9, 0, $, etc.)
+        // and D is surrounded by them, replace it
+        // For common patterns like '999D99' or '0D00'
+        if (format.matches(".*[90$,FM].*D.*[90$,FM].*")) {
+            // Likely a number format
+            return format.replace("D", ".");
+        }
+        // If D appears in isolation with number chars nearby, also replace
+        if (format.matches(".*[90]D[90].*")) {
+            return format.replace("D", ".");
+        }
+        // Otherwise, leave it (probably a date format like DD or DAY)
+        return format;
+    }
+
+    /**
+     * Replaces G (grouping separator) in number formats with literal ','.
+     * This is primarily used in number formats.
+     */
+    private static String replaceNumberFormatG(String format) {
+        // G is almost always used in number formats, not date formats
+        // Common patterns: '999G999' or '0G000'
+        if (format.matches(".*[90$,FM].*")) {
+            // Likely contains number format indicators
+            return format.replace("G", ",");
+        }
+        return format;
     }
 }

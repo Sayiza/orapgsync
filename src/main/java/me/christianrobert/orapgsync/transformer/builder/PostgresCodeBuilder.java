@@ -175,6 +175,11 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
         return VisitGeneralElement.v(ctx, this);
     }
 
+    @Override
+    public String visitTable_element(PlSqlParser.Table_elementContext ctx) {
+        return VisitTableElement.v(ctx, this);
+    }
+
     // ========== STANDARD FUNCTIONS ==========
 
     @Override
