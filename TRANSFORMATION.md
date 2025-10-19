@@ -1,7 +1,7 @@
 # Oracle to PostgreSQL SQL Transformation
 
 **Last Updated:** 2025-10-19
-**Status:** Phase 2 COMPLETE, Phase 3 IN PROGRESS (NVL, SYSDATE, DECODE, Column Aliases, CASE Expressions) - 328 tests passing ✅
+**Status:** Phase 2 COMPLETE, Phase 3 IN PROGRESS (NVL, SYSDATE, DECODE, Column Aliases, CASE Expressions, TO_CHAR) - 349 tests passing ✅
 
 This document describes the ANTLR-based transformation module that converts Oracle SQL to PostgreSQL-compatible SQL using a direct AST-to-code approach.
 
@@ -97,6 +97,25 @@ This document describes the ANTLR-based transformation module that converts Orac
 - 17 new tests added (311 → 328 total)
 - **Achievement:** CASE expressions now work - critical for real-world Oracle views!
 
+**Session 10: TO_CHAR Function** ✅
+- **TO_CHAR transformation** (newly implemented)
+  - Oracle and PostgreSQL both have TO_CHAR but with **format code differences**
+  - Function name: Same (TO_CHAR)
+  - Most format codes: Identical (YYYY, MM, DD, HH24, MI, SS, etc.)
+  - Transformations needed:
+    - **Date formats:** RR → YY (2-digit year), RRRR → YYYY (4-digit year)
+    - **Number formats:** D → . (decimal point), G → , (grouping separator)
+    - **NLS parameters:** 3rd argument dropped (PostgreSQL doesn't support)
+  - Implemented in VisitStringFunction.java (lines 108-258)
+  - Created **VisitTableElement.java** visitor for table column references (required by TO_CHAR grammar)
+  - Smart heuristics to avoid incorrect transformations:
+    - DD (day of month) NOT transformed to .. (uses negative lookahead/lookbehind: `(?<!D)D(?!D)`)
+    - Only transforms D→. when surrounded by number format indicators (9, 0, $)
+    - Excludes comma/F/M from pattern (can appear in date formats as separators)
+  - Comprehensive test coverage: 21 tests (date formats, number formats, NLS params, edge cases)
+- 21 new tests added (328 → 349 total)
+- **Achievement:** TO_CHAR now works - critical for date/number formatting in views!
+
 ---
 
 ## Table of Contents
@@ -126,7 +145,7 @@ Oracle SQL → ANTLR Parser → PostgresCodeBuilder → PostgreSQL SQL
 1. **Direct Transformation**: No intermediate semantic tree - visitor returns PostgreSQL SQL strings directly
 2. **Static Helper Pattern**: Each ANTLR rule has a static helper class (26+ helpers), keeping the main visitor clean
 3. **Dependency Boundaries**: `TransformationContext` passed as parameter (not CDI-injected) for metadata access
-4. **Test-Driven**: 328 tests across 22 test classes, all passing
+4. **Test-Driven**: 349 tests across 22 test classes, all passing
 5. **Incremental**: Features added progressively with comprehensive test coverage
 
 ### Why Direct AST Works
@@ -194,8 +213,9 @@ Oracle SQL → ANTLR Parser → PostgresCodeBuilder → PostgreSQL SQL
 - ✅ **Package functions**: `pkg.func()` → `pkg__func()`
 - ✅ **Schema qualification**: Unqualified table/function names automatically qualified with schema
 - ✅ **Synonym resolution**: Synonyms resolved to actual table names
+- ✅ **TO_CHAR function**: Date/number formatting with format code transformations
 
-**Tests: 328/328 passing across 22 test classes**
+**Tests: 349/349 passing across 22 test classes**
 
 ### What's Not Yet Implemented ⏳
 
@@ -1045,9 +1065,10 @@ src/test/java/.../transformer/
 ├── GroupByTransformationTest.java               (20 tests)
 ├── AnsiJoinTransformationTest.java              (15 tests)
 ├── ArithmeticOperatorTransformationTest.java    (22 tests)
-├── OracleFunctionTransformationTest.java        (24 tests) ← NVL, SYSDATE, DECODE
+├── OracleFunctionTransformationTest.java        (23 tests) ← NVL, SYSDATE, DECODE
 ├── ColumnAliasTransformationTest.java           (18 tests)
-├── CaseExpressionTransformationTest.java        (17 tests) ← NEW
+├── CaseExpressionTransformationTest.java        (17 tests)
+├── ToCharTransformationTest.java                (21 tests) ← NEW
 ├── AntlrParserTest.java                         (15 tests)
 ├── integration/
 │   └── ViewTransformationIntegrationTest.java   (7 tests)
@@ -1057,7 +1078,7 @@ src/test/java/.../transformer/
 
 ### Test Coverage
 
-**Current:** 328/328 tests passing across 22 test classes
+**Current:** 349/349 tests passing across 22 test classes
 
 **Coverage:**
 - Parser: 100%
@@ -1073,9 +1094,10 @@ src/test/java/.../transformer/
 - Subqueries in FROM: 100%
 - Type methods: 100%
 - Package functions: 100%
-- **Oracle-specific functions:** 100% (NVL → COALESCE, SYSDATE → CURRENT_TIMESTAMP, DECODE → CASE WHEN)
+- **Oracle-specific functions:** 100% (NVL → COALESCE, SYSDATE → CURRENT_TIMESTAMP, DECODE → CASE WHEN, TO_CHAR)
 - **Column aliases:** 100% (AS keyword, quoted aliases, implicit aliases)
 - **CASE expressions:** 100% (searched CASE, simple CASE, nested, in all contexts)
+- **TO_CHAR function:** 100% (date formats, number formats, format code transformations, NLS parameter handling)
 - Service integration: 100%
 
 ---
@@ -1185,7 +1207,7 @@ src/test/java/.../transformer/
 The Oracle to PostgreSQL SQL transformation module has achieved **Phase 2 COMPLETE (100%)** with a solid, tested foundation:
 
 **Strengths:**
-- ✅ **328 tests passing** - comprehensive coverage across 22 test classes
+- ✅ **349 tests passing** - comprehensive coverage across 22 test classes
 - ✅ **Direct AST approach** - simple, fast, maintainable
 - ✅ **Static helper pattern** - scalable to 400+ ANTLR rules
 - ✅ **Proper boundaries** - TransformationContext maintains clean separation
@@ -1210,6 +1232,7 @@ The Oracle to PostgreSQL SQL transformation module has achieved **Phase 2 COMPLE
 - ✅ DECODE → CASE WHEN transformation
 - ✅ Column aliases (AS keyword support)
 - ✅ CASE expressions (searched and simple)
+- ✅ TO_CHAR function (date/number formatting with format code transformations)
 
 **Next milestones:**
 1. **Completed Features** ✅
@@ -1218,6 +1241,7 @@ The Oracle to PostgreSQL SQL transformation module has achieved **Phase 2 COMPLE
    - ✅ DECODE → CASE WHEN
    - ✅ Column Aliases (AS keyword)
    - ✅ CASE expressions (searched and simple)
+   - ✅ TO_CHAR function (date/number formatting)
 
 2. **Remaining Oracle-Specific Features** - Based on real-world needs
    - ⏳ **Subqueries in SELECT/WHERE** - Scalar subqueries, EXISTS, IN subqueries ← **HIGH PRIORITY**

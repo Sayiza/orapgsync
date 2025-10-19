@@ -262,16 +262,20 @@ public class VisitStringFunction {
      * Tries to avoid replacing D in date formats like DD or DAY.
      */
     private static String replaceNumberFormatD(String format) {
-        // Simple heuristic: If format contains number format indicators (9, 0, $, etc.)
+        // Simple heuristic: If format contains number format indicators (9, 0, $)
         // and D is surrounded by them, replace it
         // For common patterns like '999D99' or '0D00'
-        if (format.matches(".*[90$,FM].*D.*[90$,FM].*")) {
+        // Note: We only look for 9, 0, $ (not comma, F, M) because those can appear in date formats
+        if (format.matches(".*[90$].*D.*[90$].*")) {
             // Likely a number format
-            return format.replace("D", ".");
+            // Use regex to replace D only when NOT preceded AND NOT followed by another D
+            // This avoids transforming DD (day of month) to .. (two periods)
+            return format.replaceAll("(?<!D)D(?!D)", ".");
         }
         // If D appears in isolation with number chars nearby, also replace
         if (format.matches(".*[90]D[90].*")) {
-            return format.replace("D", ".");
+            // Use same regex to avoid DD transformation
+            return format.replaceAll("(?<!D)D(?!D)", ".");
         }
         // Otherwise, leave it (probably a date format like DD or DAY)
         return format;
@@ -284,7 +288,8 @@ public class VisitStringFunction {
     private static String replaceNumberFormatG(String format) {
         // G is almost always used in number formats, not date formats
         // Common patterns: '999G999' or '0G000'
-        if (format.matches(".*[90$,FM].*")) {
+        // Only look for 9, 0, $ as number format indicators
+        if (format.matches(".*[90$].*")) {
             // Likely contains number format indicators
             return format.replace("G", ",");
         }
