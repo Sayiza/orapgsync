@@ -1,5 +1,6 @@
 package me.christianrobert.orapgsync.table.service;
 
+import me.christianrobert.orapgsync.core.tools.CodeCleaner;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -81,8 +82,10 @@ public class DefaultValueTransformer {
             return new TransformationResult(null, false, oracleDefault, "No default value");
         }
 
-        String trimmed = oracleDefault.trim();
-        String original = trimmed;
+        // Remove comments first (handles -- and /* */ comments)
+        String withoutComments = CodeCleaner.removeComments(oracleDefault);
+        String trimmed = withoutComments.trim();
+        String original = oracleDefault.trim();
 
         // Simple literal values - pass through unchanged
         if (isSimpleLiteral(trimmed)) {

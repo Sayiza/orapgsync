@@ -2,7 +2,7 @@ package me.christianrobert.orapgsync.core.tools;
 
 public class CodeCleaner {
 
-  public static String noComments(String plsqlCode) {
+  public static String removeComments(String plsqlCode) {
     StringBuilder result = new StringBuilder();
     boolean inSingleQuote = false;  // Tracks if we're inside a single-quoted string
     boolean inSingleLineComment = false;  // Tracks single-line comment (--)
