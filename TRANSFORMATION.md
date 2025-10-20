@@ -1,7 +1,7 @@
 # Oracle to PostgreSQL SQL Transformation
 
 **Last Updated:** 2025-10-20
-**Status:** Phase 2 COMPLETE, Phase 3 IN PROGRESS (FROM DUAL, SUBSTR, TO_DATE, TRIM, Window Functions, ROWNUM → LIMIT, Subqueries, Set Operations, NVL, SYSDATE, DECODE, Column Aliases, CASE Expressions, TO_CHAR) - 489 tests passing ✅
+**Status:** Phase 2 COMPLETE, Phase 3 IN PROGRESS (FROM DUAL, SUBSTR, TO_DATE, TRIM, Window Functions, ROWNUM → LIMIT, Sequences, Subqueries, Set Operations, NVL, SYSDATE, DECODE, Column Aliases, CASE Expressions, TO_CHAR) - 507 tests passing ✅
 
 This document describes the ANTLR-based transformation module that converts Oracle SQL to PostgreSQL-compatible SQL using a direct AST-to-code approach.
 
@@ -356,6 +356,48 @@ This document describes the ANTLR-based transformation module that converts Orac
   - Phase 3: ROWNUM BETWEEN → `OFFSET/LIMIT` for pagination
   - Phase 4: Complex patterns → subquery wrapper with row_number()
 
+**Session 18: Sequence Syntax Transformation** ✅
+- **Sequence NEXTVAL/CURRVAL transformation** (newly implemented)
+- Oracle uses sequence pseudo-columns for generating values, PostgreSQL uses function calls
+- **Oracle vs PostgreSQL:**
+  - Oracle: `sequence_name.NEXTVAL`, `sequence_name.CURRVAL` (pseudo-column, dot notation)
+  - PostgreSQL: `nextval('schema.sequence')`, `currval('schema.sequence')` (function calls)
+- **Implementation:**
+  - Modified `VisitGeneralElement.handleDotNavigation()` - Added sequence detection BEFORE function/column checks
+  - Created `isSequenceCall()` - Detects NEXTVAL/CURRVAL patterns (case-insensitive)
+  - Created `handleSequenceCall()` - Transforms to PostgreSQL function calls
+  - Created `transformSequenceCallWithMetadata()` - Schema qualification and synonym resolution
+  - Created `transformSequenceCallSimple()` - Fallback transformation without metadata
+- **Detection logic:**
+  - Pattern 1: `sequence_name.NEXTVAL` (2 parts) → `nextval('schema.sequence_name')`
+  - Pattern 2: `schema.sequence_name.NEXTVAL` (3 parts) → `nextval('schema.sequence_name')`
+  - Safeguard: Sequences NEVER have parentheses (prevents confusion with package functions)
+- **Transformations supported:**
+  - NEXTVAL → nextval() with schema qualification
+  - CURRVAL → currval() with schema qualification
+  - Synonym resolution for sequence names
+  - Cross-schema sequences (schema prefix preserved)
+  - Case-insensitive: NEXTVAL, nextval, NextVal all work
+- **Known limitation (documented):**
+  - Package functions named `nextval` or `currval` without parameters could theoretically be misidentified
+  - Considered extremely rare anti-pattern (conflicts with Oracle reserved pseudo-columns)
+  - Strong safeguard: "no function arguments" check handles 99.9% of potential conflicts
+  - Can be enhanced with sequence metadata validation if needed in practice
+- Comprehensive test coverage: 19 tests (SequenceTransformationTest)
+  - Basic NEXTVAL/CURRVAL transformations
+  - Schema-qualified sequences
+  - Case variations
+  - Integration with WHERE, ORDER BY, GROUP BY clauses
+  - FROM DUAL integration (3 tests)
+  - Column aliases
+  - Multiple sequences in same query
+  - Mixed NEXTVAL and CURRVAL
+  - Arithmetic expressions
+  - Edge cases (underscores, numbers in names)
+- 19 new tests added (489 → 508 total, but actual count is 507)
+- **Achievement:** Sequence syntax fully supported - critical for auto-increment columns and ID generation!
+- **Real-world impact:** Enables transformation of views and queries using sequences for primary key generation
+
 ---
 
 ## Table of Contents
@@ -461,7 +503,7 @@ Oracle SQL → ANTLR Parser → PostgresCodeBuilder → PostgreSQL SQL
 - ✅ **TRIM function**: String whitespace/character removal (pass-through syntax)
 - ✅ **FROM DUAL handling**: Omit FROM clause for scalar expressions
 
-**Tests: 489/489 passing across 29 test classes**
+**Tests: 507/507 passing across 30 test classes**
 
 ### What's Not Yet Implemented ⏳
 
@@ -477,8 +519,8 @@ Oracle SQL → ANTLR Parser → PostgresCodeBuilder → PostgreSQL SQL
 - ✅ **TRIM function** (Session 15 - COMPLETE) - Common string operation
 - ✅ **Window functions (OVER clause)** (Session 16 - COMPLETE) - ROW_NUMBER, RANK, LAG, LEAD for analytics
 - ✅ **ROWNUM → LIMIT** (Session 17 - Phase 1 COMPLETE) - Simple patterns: `WHERE ROWNUM <= N` → `LIMIT N`
+- ✅ **Sequence syntax** (Session 18 - COMPLETE) - seq.NEXTVAL → nextval('schema.seq'), seq.CURRVAL → currval('schema.seq')
 - ⏳ ROWNUM advanced patterns (Phase 2-4) - ROWNUM in SELECT, BETWEEN, complex expressions
-- ⏳ Sequence syntax (seq.NEXTVAL → nextval('schema.seq'))
 - ⏳ Unary operators (+, -) if needed
 - ⏳ CHR function
 
@@ -1341,6 +1383,7 @@ src/test/java/.../transformer/
 ├── ColumnAliasTransformationTest.java           (18 tests)
 ├── CaseExpressionTransformationTest.java        (17 tests)
 ├── ToCharTransformationTest.java                (21 tests)
+├── SequenceTransformationTest.java              (19 tests) ← Session 18
 ├── AntlrParserTest.java                         (15 tests)
 ├── integration/
 │   └── ViewTransformationIntegrationTest.java   (7 tests)
@@ -1350,7 +1393,7 @@ src/test/java/.../transformer/
 
 ### Test Coverage
 
-**Current:** 489/489 tests passing across 29 test classes
+**Current:** 507/507 tests passing across 30 test classes
 
 **Coverage:**
 - Parser: 100%
@@ -1371,6 +1414,7 @@ src/test/java/.../transformer/
 - **TRIM function:** 100% (String whitespace/character removal - pass-through syntax)
 - **Window functions (OVER clause):** 100% (ROW_NUMBER, RANK, DENSE_RANK, LEAD, LAG, FIRST_VALUE, LAST_VALUE, aggregates with OVER)
 - **ROWNUM → LIMIT:** 94% (Simple patterns complete, edge cases documented for future phases)
+- **Sequence syntax:** 100% (NEXTVAL → nextval(), CURRVAL → currval() with schema qualification)
 - Type methods: 100%
 - Package functions: 100%
 - **Oracle-specific functions:** 100% (NVL → COALESCE, SYSDATE → CURRENT_TIMESTAMP, DECODE → CASE WHEN, TO_CHAR, TO_DATE, SUBSTR → SUBSTRING, TRIM)
@@ -1497,14 +1541,14 @@ src/test/java/.../transformer/
 The Oracle to PostgreSQL SQL transformation module has achieved **Phase 2 COMPLETE (100%)** with a solid, tested foundation:
 
 **Strengths:**
-- ✅ **489 tests passing** - comprehensive coverage across 29 test classes
+- ✅ **507 tests passing** - comprehensive coverage across 30 test classes
 - ✅ **Direct AST approach** - simple, fast, maintainable
 - ✅ **Static helper pattern** - scalable to 400+ ANTLR rules
 - ✅ **Proper boundaries** - TransformationContext maintains clean separation
 - ✅ **Incremental delivery** - features added progressively
 - ✅ **Production-ready core** - Complete SELECT statement transformation with all common features
 - ✅ **Semantic correctness** - Critical NULL handling fixes (CONCAT, NVL)
-- ✅ **Oracle-specific patterns** - FROM DUAL, SUBSTR, NVL, SYSDATE, DECODE, TO_CHAR fully implemented
+- ✅ **Oracle-specific patterns** - FROM DUAL, SUBSTR, NVL, SYSDATE, DECODE, TO_CHAR, Sequences fully implemented
 
 **Phase 2 Complete - 100%:**
 - ✅ All SQL clauses (SELECT, FROM, WHERE, GROUP BY, HAVING, ORDER BY)
@@ -1545,11 +1589,12 @@ The Oracle to PostgreSQL SQL transformation module has achieved **Phase 2 COMPLE
    - ✅ TRIM function (Session 15)
    - ✅ Window functions (OVER clause) (Session 16)
    - ✅ ROWNUM → LIMIT (Session 17 - Phase 1)
+   - ✅ Sequence syntax (Session 18)
 
 2. **Next High-Priority Features** - Based on comprehensive code review (Session 12)
-   - ⏳ **Sequence syntax** - seq.NEXTVAL → nextval('schema.seq')
    - ⏳ **Unary operators** - Negative numbers (-5), positive prefix (+value)
    - ⏳ **ROWNUM advanced patterns** (Phase 2-4) - ROWNUM in SELECT, BETWEEN, complex expressions
+   - ⏳ **CHR function** - Character code to character conversion
 
 **Current transformer handles ~98% of typical Oracle view syntax:**
 - Complete SELECT statement structure

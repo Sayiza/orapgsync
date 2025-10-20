@@ -65,17 +65,24 @@ public class VisitGeneralElement {
    * Handles dot navigation: first.second.third...
    *
    * <p>Disambiguation logic:
-   * 1. If last part has function arguments → function call
+   * 1. Check for sequence pseudo-column (seq.NEXTVAL, seq.CURRVAL)
+   * 2. If last part has function arguments → function call
    *    - Check metadata: is this a type member method (table.col.method)?
    *    - Check metadata: is this a package function (package.function)?
    *    - Transform accordingly
-   * 2. Otherwise → column reference (table.column)
+   * 3. Otherwise → column reference (table.column)
    *    - Pass through as-is: table.column
    */
   private static String handleDotNavigation(
       PlSqlParser.General_elementContext ctx,
       List<PlSqlParser.General_element_partContext> parts,
       PostgresCodeBuilder b) {
+
+    // Check for sequence NEXTVAL/CURRVAL calls FIRST (before function call check)
+    // Pattern: sequence_name.NEXTVAL or schema.sequence_name.NEXTVAL
+    if (isSequenceCall(parts)) {
+      return handleSequenceCall(parts, b);
+    }
 
     // Get the last part to check if it's a function call
     PlSqlParser.General_element_partContext lastPart = parts.get(parts.size() - 1);
@@ -118,6 +125,145 @@ public class VisitGeneralElement {
       // COLUMN REFERENCE: table.column or table.column.subfield
       return handleQualifiedColumn(parts, b);
     }
+  }
+
+  /**
+   * Checks if the dot navigation is a sequence pseudo-column call (NEXTVAL or CURRVAL).
+   *
+   * <p>Oracle sequence syntax:
+   * - sequence_name.NEXTVAL (2 parts)
+   * - sequence_name.CURRVAL (2 parts)
+   * - schema.sequence_name.NEXTVAL (3 parts)
+   * - schema.sequence_name.CURRVAL (3 parts)
+   *
+   * <p>Detection criteria:
+   * - At least 2 parts
+   * - Last part is NEXTVAL or CURRVAL (case-insensitive)
+   * - Last part has NO function arguments (sequence pseudo-columns don't use parentheses)
+   *
+   * @param parts The dot-separated parts
+   * @return true if this is a sequence NEXTVAL/CURRVAL call
+   */
+  private static boolean isSequenceCall(List<PlSqlParser.General_element_partContext> parts) {
+    if (parts.size() < 2) {
+      return false;
+    }
+
+    // Last part should be NEXTVAL or CURRVAL (no function arguments)
+    PlSqlParser.General_element_partContext lastPart = parts.get(parts.size() - 1);
+
+    // Safeguard: Sequence pseudo-columns NEVER have parentheses
+    // This prevents confusion with package functions named "nextval" or "currval"
+    if (lastPart.function_argument() != null && !lastPart.function_argument().isEmpty()) {
+      return false; // Has arguments, not a pseudo-column
+    }
+
+    String lastIdentifier = lastPart.id_expression().getText().toUpperCase();
+    return "NEXTVAL".equals(lastIdentifier) || "CURRVAL".equals(lastIdentifier);
+  }
+
+  /**
+   * Handles Oracle sequence pseudo-column calls and transforms them to PostgreSQL function calls.
+   *
+   * <p>Transformations:
+   * - Oracle: sequence_name.NEXTVAL → PostgreSQL: nextval('schema.sequence_name')
+   * - Oracle: sequence_name.CURRVAL → PostgreSQL: currval('schema.sequence_name')
+   * - Oracle: schema.sequence_name.NEXTVAL → PostgreSQL: nextval('schema.sequence_name')
+   *
+   * <p>Schema qualification:
+   * - Unqualified sequences are automatically qualified with current schema
+   * - Synonym resolution is applied if TransformationContext is available
+   * - Cross-schema sequences preserve schema prefix
+   *
+   * @param parts The dot-separated parts (2 or 3 elements)
+   * @param b PostgreSQL code builder
+   * @return Transformed PostgreSQL function call
+   */
+  private static String handleSequenceCall(
+      List<PlSqlParser.General_element_partContext> parts,
+      PostgresCodeBuilder b) {
+
+    // Extract operation (NEXTVAL or CURRVAL)
+    String operation = parts.get(parts.size() - 1).id_expression().getText().toLowerCase();
+
+    // Extract sequence name path (all parts except last)
+    List<String> sequencePath = parts.subList(0, parts.size() - 1).stream()
+        .map(part -> part.id_expression().getText())
+        .collect(Collectors.toList());
+
+    // Apply transformation with metadata context
+    TransformationContext context = b.getContext();
+    if (context != null) {
+      return transformSequenceCallWithMetadata(sequencePath, operation, context);
+    } else {
+      // No context available - simple transformation without metadata
+      return transformSequenceCallSimple(sequencePath, operation);
+    }
+  }
+
+  /**
+   * Transforms sequence call using metadata context for synonym resolution and schema handling.
+   *
+   * @param sequencePath Sequence name parts (1 or 2 elements: [sequence] or [schema, sequence])
+   * @param operation "nextval" or "currval"
+   * @param context Transformation context
+   * @return PostgreSQL function call: operation('qualified.sequence')
+   */
+  private static String transformSequenceCallWithMetadata(
+      List<String> sequencePath,
+      String operation,
+      TransformationContext context) {
+
+    String currentSchema = context.getCurrentSchema().toLowerCase();
+    String sequenceName;
+
+    if (sequencePath.size() == 1) {
+      // Single-part: sequence_name.NEXTVAL
+      String seqName = sequencePath.get(0);
+
+      // Check if it's a synonym
+      String resolved = context.resolveSynonym(seqName);
+      if (resolved != null) {
+        // Synonym resolved to "schema.sequence" - use as-is
+        sequenceName = resolved.toLowerCase();
+      } else {
+        // Not a synonym - qualify with current schema
+        sequenceName = currentSchema + "." + seqName.toLowerCase();
+      }
+
+    } else if (sequencePath.size() == 2) {
+      // Two-part: schema.sequence_name.NEXTVAL
+      String schema = sequencePath.get(0).toLowerCase();
+      String seqName = sequencePath.get(1).toLowerCase();
+      sequenceName = schema + "." + seqName;
+
+    } else {
+      throw new TransformationException(
+          "Sequence call with more than 2 path parts not supported: " + sequencePath);
+    }
+
+    // Transform to PostgreSQL function call
+    return operation + "('" + sequenceName + "')";
+  }
+
+  /**
+   * Transforms sequence call without metadata (simple heuristic).
+   *
+   * @param sequencePath Sequence name parts (1 or 2 elements: [sequence] or [schema, sequence])
+   * @param operation "nextval" or "currval"
+   * @return PostgreSQL function call: operation('qualified.sequence')
+   */
+  private static String transformSequenceCallSimple(
+      List<String> sequencePath,
+      String operation) {
+
+    // Build qualified sequence name from path parts
+    String sequenceName = sequencePath.stream()
+        .map(String::toLowerCase)
+        .collect(Collectors.joining("."));
+
+    // Transform to PostgreSQL function call
+    return operation + "('" + sequenceName + "')";
   }
 
   /**
