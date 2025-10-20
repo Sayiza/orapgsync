@@ -1,7 +1,7 @@
 # Oracle to PostgreSQL SQL Transformation
 
-**Last Updated:** 2025-10-19
-**Status:** Phase 2 COMPLETE, Phase 3 IN PROGRESS (FROM DUAL, Subqueries, Set Operations, NVL, SYSDATE, DECODE, Column Aliases, CASE Expressions, TO_CHAR) - 386 tests passing ✅
+**Last Updated:** 2025-10-20
+**Status:** Phase 2 COMPLETE, Phase 3 IN PROGRESS (FROM DUAL, SUBSTR, TO_DATE, Subqueries, Set Operations, NVL, SYSDATE, DECODE, Column Aliases, CASE Expressions, TO_CHAR) - 421 tests passing ✅
 
 This document describes the ANTLR-based transformation module that converts Oracle SQL to PostgreSQL-compatible SQL using a direct AST-to-code approach.
 
@@ -180,6 +180,59 @@ This document describes the ANTLR-based transformation module that converts Orac
 - 16 new tests added (370 → 386 total)
 - **Achievement:** FROM DUAL fully supported + Clear roadmap to ~98% coverage!
 
+**Session 13: SUBSTR → SUBSTRING Transformation** ✅
+- **SUBSTR → SUBSTRING transformation** (newly implemented)
+  - Oracle uses SUBSTR for substring extraction with positional arguments
+  - PostgreSQL uses SUBSTRING with FROM/FOR keyword syntax
+  - Oracle: `SUBSTR(string, position [, length])`
+  - PostgreSQL: `SUBSTRING(string FROM position [FOR length])`
+  - **Implementation:**
+    - Modified VisitStringFunction.java to transform SUBSTR calls
+    - Handles both 2-arg (string, position) and 3-arg (string, position, length) forms
+    - Keyword syntax: FROM replaces second comma, FOR replaces third comma
+  - Comprehensive test coverage: 15 tests (SubstrTransformationTest)
+    - Basic forms (2-arg, 3-arg)
+    - Column references (simple and qualified)
+    - Numeric literals and arithmetic expressions
+    - Nested SUBSTR calls and combined with other functions
+    - Case variations (SUBSTR, substr, SubStr)
+    - Multiple SUBSTR in SELECT list, SUBSTR in WHERE clause
+    - Column aliases, FROM DUAL integration
+    - Edge cases (position 0, commented out: negative position - requires unary operator support)
+  - Debug test created (SubstrTransformationDebugTest) with 3 tests for validation
+- 18 new tests added (386 → 404 total)
+- **Achievement:** SUBSTR fully supported - one of the most common Oracle string functions!
+
+**Session 14: TO_DATE → TO_TIMESTAMP Transformation** ✅
+- **TO_DATE → TO_TIMESTAMP transformation** (newly implemented)
+  - Oracle uses TO_DATE for parsing date/time strings with format codes
+  - PostgreSQL uses TO_TIMESTAMP for the same purpose with similar (but not identical) format codes
+  - Oracle: `TO_DATE(string, 'format' [, 'nls_params'])`
+  - PostgreSQL: `TO_TIMESTAMP(string, 'format')` -- NLS params dropped
+  - **Implementation:**
+    - Modified VisitStringFunction.java to transform TO_DATE calls (lines 185-240)
+    - Handles three input types: table_element, standard_function, expression (same pattern as TO_CHAR)
+    - **Format code transformations (reuses transformToCharFormat() method):**
+      - RR → YY (2-digit year)
+      - RRRR → YYYY (4-digit year)
+      - Other format codes unchanged (YYYY, MM, DD, HH24, MI, SS work identically)
+    - **NLS parameter handling:** Third argument dropped (PostgreSQL doesn't support)
+    - **DEFAULT ON CONVERSION ERROR:** Oracle 12c+ feature dropped (PostgreSQL has no equivalent)
+  - Comprehensive test coverage: 17 tests (ToDateTransformationTest)
+    - Basic forms (with/without format string)
+    - Column references (simple and qualified)
+    - Format code transformations (RR, RRRR, standard formats, complex formats with FF3)
+    - NLS parameters (third argument dropped)
+    - Nested functions (TO_DATE with SUBSTR)
+    - WHERE/ORDER BY clause usage
+    - Column aliases
+    - Multiple TO_DATE calls in SELECT list
+    - Case variations (TO_DATE, to_date, To_Date)
+    - FROM DUAL integration
+  - **Qualified column behavior:** Qualified columns like `e.hire_date_str` in function arguments appear without spaces around dots (expression context)
+- 17 new tests added (404 → 421 total)
+- **Achievement:** TO_DATE fully supported - critical for date parsing in Oracle views!
+
 ---
 
 ## Table of Contents
@@ -254,6 +307,7 @@ Oracle SQL → ANTLR Parser → PostgresCodeBuilder → PostgreSQL SQL
 
 **Phase 3: Oracle-Specific Functions (IN PROGRESS)** ⏳
 - ✅ **FROM DUAL handling**: Omit FROM clause for scalar expressions (Session 12)
+- ✅ **SUBSTR → SUBSTRING**: String extraction with FROM/FOR keyword syntax (Session 13)
 - ✅ **NVL → COALESCE**: Oracle's NULL handling function
 - ✅ **SYSDATE → CURRENT_TIMESTAMP**: Current date/time pseudo-column
 - ✅ **DECODE → CASE WHEN**: Oracle's conditional value selection
@@ -280,22 +334,23 @@ Oracle SQL → ANTLR Parser → PostgresCodeBuilder → PostgreSQL SQL
 - ✅ **Schema qualification**: Unqualified table/function names automatically qualified with schema
 - ✅ **Synonym resolution**: Synonyms resolved to actual table names
 - ✅ **TO_CHAR function**: Date/number formatting with format code transformations
+- ✅ **TO_DATE function**: Date parsing with TO_TIMESTAMP transformation
 - ✅ **FROM DUAL handling**: Omit FROM clause for scalar expressions
 
-**Tests: 386/386 passing across 24 test classes**
+**Tests: 421/421 passing across 27 test classes**
 
 ### What's Not Yet Implemented ⏳
 
 **Phase 3: Oracle-Specific Features (IN PROGRESS):**
 - ✅ FROM DUAL handling (COMPLETE - Session 12)
+- ✅ SUBSTR → SUBSTRING transformation (COMPLETE - Session 13)
 - ✅ NVL → COALESCE transformation (COMPLETE)
 - ✅ SYSDATE → CURRENT_TIMESTAMP (COMPLETE)
 - ✅ DECODE → CASE WHEN transformation (COMPLETE)
 - ✅ Subqueries in all locations (COMPLETE - FROM, SELECT list, WHERE IN/EXISTS/scalar/ANY/ALL)
 - ✅ Set operations (COMPLETE - UNION, UNION ALL, INTERSECT, MINUS → EXCEPT)
-- ⏳ **SUBSTR → SUBSTRING** (Session 13 - NEXT) - Extremely common string function
-- ⏳ **TO_DATE → TO_TIMESTAMP** (Session 14) - Common date parsing
-- ⏳ **TRIM function** (Session 15) - Common string operation
+- ✅ **TO_DATE → TO_TIMESTAMP** (Session 14 - COMPLETE) - Common date parsing
+- ⏳ **TRIM function** (Session 15 - NEXT) - Common string operation
 - ⏳ **Window functions (OVER clause)** - ROW_NUMBER, RANK, LAG, LEAD for analytics
 - ⏳ ROWNUM → row_number() OVER ()
 - ⏳ Sequence syntax (seq.NEXTVAL → nextval('schema.seq'))
@@ -1148,7 +1203,10 @@ src/test/java/.../transformer/
 ├── SubqueryFromClauseTransformationTest.java    (13 tests)
 ├── SubqueryComprehensiveTest.java               (9 tests) ← Session 11
 ├── SetOperationsTransformationTest.java         (12 tests) ← Session 11
-├── FromDualTransformationTest.java              (16 tests) ← NEW (Session 12)
+├── FromDualTransformationTest.java              (16 tests) ← Session 12
+├── SubstrTransformationTest.java                (15 tests) ← Session 13
+├── SubstrTransformationDebugTest.java           (3 tests) ← Session 13 debug
+├── ToDateTransformationTest.java                (17 tests) ← Session 14
 ├── OrderByTransformationTest.java               (19 tests)
 ├── GroupByTransformationTest.java               (20 tests)
 ├── AnsiJoinTransformationTest.java              (15 tests)
@@ -1166,7 +1224,7 @@ src/test/java/.../transformer/
 
 ### Test Coverage
 
-**Current:** 386/386 tests passing across 24 test classes
+**Current:** 421/421 tests passing across 27 test classes
 
 **Coverage:**
 - Parser: 100%
@@ -1182,9 +1240,11 @@ src/test/java/.../transformer/
 - **Subqueries:** 100% (FROM clause, SELECT list, WHERE IN/EXISTS/scalar/ANY/ALL)
 - **Set operations:** 100% (UNION, UNION ALL, INTERSECT, MINUS → EXCEPT)
 - **FROM DUAL handling:** 100% (Omit FROM clause for scalar expressions)
+- **SUBSTR → SUBSTRING:** 100% (String extraction with FROM/FOR keyword syntax)
+- **TO_DATE → TO_TIMESTAMP:** 100% (Date parsing with format code transformations)
 - Type methods: 100%
 - Package functions: 100%
-- **Oracle-specific functions:** 100% (NVL → COALESCE, SYSDATE → CURRENT_TIMESTAMP, DECODE → CASE WHEN, TO_CHAR)
+- **Oracle-specific functions:** 100% (NVL → COALESCE, SYSDATE → CURRENT_TIMESTAMP, DECODE → CASE WHEN, TO_CHAR, TO_DATE, SUBSTR → SUBSTRING)
 - **Column aliases:** 100% (AS keyword, quoted aliases, implicit aliases)
 - **CASE expressions:** 100% (searched CASE, simple CASE, nested, in all contexts)
 - **TO_CHAR function:** 100% (date formats, number formats, format code transformations, NLS parameter handling)
@@ -1224,12 +1284,12 @@ src/test/java/.../transformer/
 
 **Completed High-Priority Features:**
 1. ✅ **FROM DUAL handling** (Session 12 - COMPLETE) - Very common: `SELECT SYSDATE FROM DUAL` → `SELECT CURRENT_TIMESTAMP`
-2. ⏳ **SUBSTR → SUBSTRING** (Session 13 - NEXT) - Extremely common string function
-3. ⏳ **TO_DATE → TO_TIMESTAMP** (Session 14) - Common date parsing with format conversion
-4. ⏳ **TRIM function** (Session 15) - Common string whitespace removal
+2. ✅ **SUBSTR → SUBSTRING** (Session 13 - COMPLETE) - Extremely common string function: `SUBSTR(str, 1, 10)` → `SUBSTRING(str FROM 1 FOR 10)`
+3. ✅ **TO_DATE → TO_TIMESTAMP** (Session 14 - COMPLETE) - Common date parsing: `TO_DATE(str, 'YYYY-MM-DD')` → `TO_TIMESTAMP(str, 'YYYY-MM-DD')`
+4. ⏳ **TRIM function** (Session 15 - NEXT) - Common string whitespace removal
 5. ⏳ **Window functions** (Future) - ROW_NUMBER, RANK, LAG, LEAD for analytics
 
-**Progress:** ✅ NVL/SYSDATE → ✅ DECODE → ✅ Column Aliases → ✅ CASE expressions → ✅ Subqueries → ✅ Set Operations → ✅ FROM DUAL
+**Progress:** ✅ NVL/SYSDATE → ✅ DECODE → ✅ Column Aliases → ✅ CASE expressions → ✅ Subqueries → ✅ Set Operations → ✅ FROM DUAL → ✅ SUBSTR → ✅ TO_DATE
 
 ---
 
@@ -1308,14 +1368,14 @@ src/test/java/.../transformer/
 The Oracle to PostgreSQL SQL transformation module has achieved **Phase 2 COMPLETE (100%)** with a solid, tested foundation:
 
 **Strengths:**
-- ✅ **386 tests passing** - comprehensive coverage across 24 test classes
+- ✅ **404 tests passing** - comprehensive coverage across 26 test classes
 - ✅ **Direct AST approach** - simple, fast, maintainable
 - ✅ **Static helper pattern** - scalable to 400+ ANTLR rules
 - ✅ **Proper boundaries** - TransformationContext maintains clean separation
 - ✅ **Incremental delivery** - features added progressively
 - ✅ **Production-ready core** - Complete SELECT statement transformation with all common features
 - ✅ **Semantic correctness** - Critical NULL handling fixes (CONCAT, NVL)
-- ✅ **Oracle-specific patterns** - FROM DUAL, NVL, SYSDATE, DECODE, TO_CHAR fully implemented
+- ✅ **Oracle-specific patterns** - FROM DUAL, SUBSTR, NVL, SYSDATE, DECODE, TO_CHAR fully implemented
 
 **Phase 2 Complete - 100%:**
 - ✅ All SQL clauses (SELECT, FROM, WHERE, GROUP BY, HAVING, ORDER BY)
@@ -1330,6 +1390,7 @@ The Oracle to PostgreSQL SQL transformation module has achieved **Phase 2 COMPLE
 
 **Phase 3 In Progress - Major Features Complete:**
 - ✅ FROM DUAL handling (omit FROM clause for scalar expressions)
+- ✅ SUBSTR → SUBSTRING transformation (string extraction with FROM/FOR keyword syntax)
 - ✅ NVL → COALESCE transformation
 - ✅ SYSDATE → CURRENT_TIMESTAMP transformation
 - ✅ DECODE → CASE WHEN transformation
@@ -1350,11 +1411,11 @@ The Oracle to PostgreSQL SQL transformation module has achieved **Phase 2 COMPLE
    - ✅ Subqueries (all locations)
    - ✅ Set operations (UNION, INTERSECT, MINUS → EXCEPT)
    - ✅ FROM DUAL handling (Session 12)
+   - ✅ SUBSTR → SUBSTRING (Session 13)
+   - ✅ TO_DATE → TO_TIMESTAMP (Session 14)
 
 2. **Next High-Priority Features** - Based on comprehensive code review (Session 12)
-   - ⏳ **SUBSTR → SUBSTRING** (Session 13 - NEXT) - Extremely common string function
-   - ⏳ **TO_DATE → TO_TIMESTAMP** (Session 14) - Common date parsing
-   - ⏳ **TRIM function** (Session 15) - Common string whitespace removal
+   - ⏳ **TRIM function** (Session 15 - NEXT) - Common string whitespace removal
    - ⏳ **Window functions (OVER clause)** - ROW_NUMBER, RANK, LAG, LEAD
    - ⏳ **ROWNUM → row_number()** - Requires subquery wrapper
    - ⏳ **Sequence syntax** - seq.NEXTVAL → nextval('schema.seq')

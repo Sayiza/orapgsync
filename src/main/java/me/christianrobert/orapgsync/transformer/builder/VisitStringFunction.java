@@ -99,10 +99,34 @@ public class VisitStringFunction {
             return result.toString();
         }
 
-        // SUBSTR function
+        // SUBSTR function: SUBSTR '(' expression ',' expression (',' expression)? ')'
+        // Oracle: SUBSTR(string, position [, length])
+        // PostgreSQL: SUBSTRING(string FROM position [FOR length])
         if (ctx.SUBSTR() != null) {
-            throw new TransformationException(
-                "SUBSTR function not yet supported in current implementation");
+            List<PlSqlParser.ExpressionContext> expressions = ctx.expression();
+            if (expressions == null || expressions.size() < 2 || expressions.size() > 3) {
+                throw new TransformationException(
+                    "SUBSTR function requires 2 or 3 expressions (string, position, [length]), found: " +
+                    (expressions == null ? 0 : expressions.size()));
+            }
+
+            String stringExpr = b.visit(expressions.get(0));
+            String positionExpr = b.visit(expressions.get(1));
+
+            StringBuilder result = new StringBuilder("SUBSTRING( ");
+            result.append(stringExpr);
+            result.append(" FROM ");
+            result.append(positionExpr);
+
+            // Handle optional third argument (length)
+            if (expressions.size() == 3) {
+                String lengthExpr = b.visit(expressions.get(2));
+                result.append(" FOR ");
+                result.append(lengthExpr);
+            }
+
+            result.append(" )");
+            return result.toString();
         }
 
         // TO_CHAR function: TO_CHAR '(' (table_element | standard_function | expression) (',' quoted_string)? (',' quoted_string)? ')'
@@ -158,10 +182,61 @@ public class VisitStringFunction {
             return result.toString();
         }
 
-        // TO_DATE function
+        // TO_DATE function: TO_DATE '(' (table_element | standard_function | expression) (DEFAULT concatenation ON CONVERSION ERROR)? (',' quoted_string (',' quoted_string)?)? ')'
+        // Oracle: TO_DATE(string, 'format', 'nls_params')
+        // PostgreSQL: TO_TIMESTAMP(string, 'format')  -- NLS params not supported
         if (ctx.TO_DATE() != null) {
-            throw new TransformationException(
-                "TO_DATE function not yet supported in current implementation");
+            // Get the value expression
+            // Grammar: TO_DATE '(' (table_element | standard_function | expression) ...
+            // The parser will match ONE of these alternatives
+            String value = null;
+
+            // Try table_element (e.g., simple column ref or qualified like schema.table.column)
+            if (ctx.table_element() != null && ctx.table_element().getChildCount() > 0) {
+                value = b.visit(ctx.table_element());
+            }
+
+            // Try standard_function (e.g., TO_DATE(SUBSTR(...), ...))
+            if (value == null && ctx.standard_function() != null && ctx.standard_function().getChildCount() > 0) {
+                value = b.visit(ctx.standard_function());
+            }
+
+            // Try expression (e.g., TO_DATE('2025-01-15', ...))
+            if (value == null && !ctx.expression().isEmpty()) {
+                value = b.visit(ctx.expression().get(0));
+            }
+
+            if (value == null) {
+                throw new TransformationException("TO_DATE function missing value expression");
+            }
+
+            // Get the format string (if present)
+            List<PlSqlParser.Quoted_stringContext> quotedStrings = ctx.quoted_string();
+            String format = null;
+            if (quotedStrings != null && !quotedStrings.isEmpty()) {
+                // First quoted string is the format
+                format = quotedStrings.get(0).getText();
+                // Transform Oracle-specific format codes to PostgreSQL equivalents
+                // Same transformations as TO_CHAR (date formats)
+                format = transformToCharFormat(format);
+            }
+
+            // Note: DEFAULT ... ON CONVERSION ERROR clause is Oracle-specific and not supported in PostgreSQL
+            // We silently drop it (error handling would need to be done differently in PostgreSQL)
+
+            // Note: Third parameter (NLS params) is ignored - PostgreSQL doesn't support it
+            // If there's a third parameter, we silently drop it
+
+            // Build the TO_TIMESTAMP call
+            StringBuilder result = new StringBuilder("TO_TIMESTAMP( ");
+            result.append(value);
+            if (format != null) {
+                result.append(" , ");
+                result.append(format);
+            }
+            result.append(" )");
+
+            return result.toString();
         }
 
         // TRIM function
