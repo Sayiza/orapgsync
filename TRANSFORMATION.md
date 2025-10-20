@@ -1,402 +1,43 @@
 # Oracle to PostgreSQL SQL Transformation
 
 **Last Updated:** 2025-10-20
-**Status:** Phase 2 COMPLETE, Phase 3 IN PROGRESS (FROM DUAL, SUBSTR, TO_DATE, TRIM, Window Functions, ROWNUM → LIMIT, Sequences, Subqueries, Set Operations, NVL, SYSDATE, DECODE, Column Aliases, CASE Expressions, TO_CHAR) - 507 tests passing ✅
+**Status:** Phase 2 COMPLETE ✅, Phase 3 ~50% COMPLETE ⏳ - 507 tests passing
 
 This document describes the ANTLR-based transformation module that converts Oracle SQL to PostgreSQL-compatible SQL using a direct AST-to-code approach.
 
-## Recent Progress (October 18-19, 2025)
+## Quick Summary
 
-**Session 1: Subqueries in FROM Clause** ✅
-- Added support for inline views (derived tables) in FROM clause
-- Recursive transformation: all rules apply to subqueries
-- 13 new tests added (194 → 207 total)
-- Examples: `SELECT * FROM (SELECT dept_id FROM departments) d`
+**Architecture:** Direct AST transformation (no intermediate semantic tree)
+**Visitor Classes:** 37 static helpers organized by ANTLR grammar rules
+**Test Coverage:** 507/507 passing across 30 test classes
 
-**Session 2: ORDER BY Clause** ✅
-- Implemented ORDER BY with critical NULL ordering fix
-- Oracle DESC → PostgreSQL DESC NULLS FIRST (automatic)
-- Handles ASC/DESC, explicit NULLS FIRST/LAST, position-based, expressions
-- 19 new tests added (207 → 226 total)
-- **Why critical:** Prevents incorrect results due to different NULL defaults
+**Coverage Analysis (Realistic Assessment):**
+- **Simple Oracle views** (no CTEs, no CONNECT BY, basic functions): ~95% ✅
+- **Real-world Oracle views** (including CTEs, CONNECT BY, advanced functions): ~40-50% ⚠️
+- **Current focus**: Core SELECT features complete, major gaps in advanced Oracle-specific features
 
-**Session 3: GROUP BY and HAVING** ✅
-- Implemented GROUP BY clause (single/multiple columns, position-based, expressions)
-- Implemented HAVING clause (simple and complex conditions)
-- Added aggregate function support: COUNT, SUM, AVG, MIN, MAX, ROUND, LEAST, GREATEST
-- 20 new tests added (226 → 246 total)
-- **Pass-through strategy:** Oracle and PostgreSQL have identical GROUP BY syntax
+## Implementation Sessions Summary
 
-**Session 4: ANSI JOIN Syntax** ✅
-- Implemented full ANSI JOIN support (INNER, LEFT, RIGHT, FULL, CROSS)
-- Pass-through strategy with schema qualification
-- Handles ON and USING clauses
-- Works alongside existing Oracle (+) outer join transformation
-- 15 new tests added (233 → 248 total)
-- **Achievement:** Full JOIN support - both Oracle (+) and ANSI syntax!
+**18 sessions completed** implementing comprehensive Oracle→PostgreSQL SQL transformation:
 
-**Session 5: Arithmetic Operators and String Concatenation** ✅
-- Discovered arithmetic operators were already fully implemented in VisitConcatenation
-- Created comprehensive test suite: ArithmeticOperatorTransformationTest (22 tests)
-- **CRITICAL NULL HANDLING FIX:** String concatenation transformed from || to CONCAT()
-  - Oracle: NULL treated as empty string (`'Hello' || NULL || 'World'` = `'HelloWorld'`)
-  - PostgreSQL ||: NULL propagates (`'Hello' || NULL || 'World'` = `NULL`) ❌
-  - PostgreSQL CONCAT(): NULL treated as empty string (matches Oracle) ✅
-- 22 new tests added (248 → 270 total)
-- **Pass-through strategy:** All operators identical except ** (Oracle) → ^ (PostgreSQL)
-- **Operators supported:** +, -, *, /, MOD, ** (power)
-- **Transformation required:** || (Oracle) → CONCAT() (PostgreSQL)
-
-**Session 6: Oracle-Specific Functions - NVL and SYSDATE** ✅
-- **NVL → COALESCE transformation** (already implemented, had typo)
-  - Fixed typo in VisitStringFunction: `COALESC` → `COALESCE`
-  - Oracle: `NVL(commission, 0)` → PostgreSQL: `COALESCE(commission, 0)`
-  - Comprehensive test coverage: 8 tests (simple, nested, in WHERE/ORDER BY, with expressions)
-- **SYSDATE → CURRENT_TIMESTAMP transformation** (newly implemented)
-  - Oracle: `SYSDATE` → PostgreSQL: `CURRENT_TIMESTAMP`
-  - Added to VisitGeneralElement.handleSimplePart() as pseudo-column transformation
-  - Comprehensive test coverage: 6 tests (SELECT, WHERE, ORDER BY, arithmetic, case-insensitive)
-- 14 new tests added (270 → 284 total)
-- **Achievement:** Two most common Oracle-specific functions now supported!
-
-**Session 7: Oracle-Specific Functions - DECODE** ✅
-- **DECODE → CASE WHEN transformation** (newly implemented)
-  - Oracle: `DECODE(expr, search1, result1, search2, result2, ..., default)`
-  - PostgreSQL: `CASE expr WHEN search1 THEN result1 WHEN search2 THEN result2 ... ELSE default END`
-  - Implemented in VisitStringFunction.java (lines 46-100)
-  - Handles variable arguments: minimum 3 args (expr, search, result)
-  - Optional default value: Even arg count = has ELSE, Odd = no ELSE
-  - Pair calculation: `(argCount - 1) / 2` search/result pairs
-  - Comprehensive test coverage: 10 tests (simple, with default, multiple pairs, nested, in WHERE/ORDER BY, NULL values)
-- 10 new tests added (284 → 293 total, OracleFunctionTransformationTest now has 24 tests)
-- **Achievement:** All three most common Oracle-specific functions now supported!
-
-**Session 8: Column Aliases** ✅
-- **Column alias support** (newly implemented)
-  - Oracle supports both `AS alias` and implicit `alias` (without AS keyword)
-  - PostgreSQL supports same syntax - we always output AS for clarity
-  - Implemented in VisitSelectListElement.java (buildColumnAlias method)
-  - Handles: simple aliases, quoted aliases, aliases on expressions, functions, CASE expressions
-  - Grammar: `column_alias : AS? (identifier | quoted_string) | AS`
-  - Pass-through strategy: Aliases preserved as-is with AS keyword normalized
-  - Comprehensive test coverage: 18 tests (simple, quoted, expressions, aggregates, mixed, edge cases)
-- 18 new tests added (293 → 311 total)
-- **Achievement:** Column aliases now work across all SELECT list elements!
-
-**Session 9: CASE Expressions** ✅
-- **CASE expression support** (newly implemented)
-  - Oracle and PostgreSQL have **nearly identical** CASE syntax!
-  - Only difference: Oracle allows `END CASE`, PostgreSQL requires just `END`
-  - Implemented in VisitCaseExpression.java with VisitUnaryExpression integration
-  - Supports both **searched CASE** and **simple CASE**:
-    - Searched: `CASE WHEN condition THEN result ... ELSE default END`
-    - Simple: `CASE expr WHEN value THEN result ... ELSE default END`
-  - Pass-through strategy: Minimal transformation (just END CASE → END)
-  - Works in all contexts: SELECT, WHERE, ORDER BY, nested, with aliases
-  - Comprehensive test coverage: 17 tests (searched, simple, nested, complex conditions, functions)
-- 17 new tests added (311 → 328 total)
-- **Achievement:** CASE expressions now work - critical for real-world Oracle views!
-
-**Session 10: TO_CHAR Function** ✅
-- **TO_CHAR transformation** (newly implemented)
-  - Oracle and PostgreSQL both have TO_CHAR but with **format code differences**
-  - Function name: Same (TO_CHAR)
-  - Most format codes: Identical (YYYY, MM, DD, HH24, MI, SS, etc.)
-  - Transformations needed:
-    - **Date formats:** RR → YY (2-digit year), RRRR → YYYY (4-digit year)
-    - **Number formats:** D → . (decimal point), G → , (grouping separator)
-    - **NLS parameters:** 3rd argument dropped (PostgreSQL doesn't support)
-  - Implemented in VisitStringFunction.java (lines 108-258)
-  - Created **VisitTableElement.java** visitor for table column references (required by TO_CHAR grammar)
-  - Smart heuristics to avoid incorrect transformations:
-    - DD (day of month) NOT transformed to .. (uses negative lookahead/lookbehind: `(?<!D)D(?!D)`)
-    - Only transforms D→. when surrounded by number format indicators (9, 0, $)
-    - Excludes comma/F/M from pattern (can appear in date formats as separators)
-  - Comprehensive test coverage: 21 tests (date formats, number formats, NLS params, edge cases)
-- 21 new tests added (328 → 349 total)
-- **Achievement:** TO_CHAR now works - critical for date/number formatting in views!
-
-**Session 11: Subqueries and Set Operations** ✅
-- **Subquery support** (newly implemented)
-  - **All subquery locations now supported:**
-    - ✅ FROM clause subqueries (inline views) - already working
-    - ✅ SELECT list scalar subqueries: `SELECT (SELECT dname FROM dept WHERE deptno = e.deptno)`
-    - ✅ WHERE IN/NOT IN: `WHERE deptno IN (SELECT deptno FROM departments)`
-    - ✅ WHERE EXISTS/NOT EXISTS: `WHERE EXISTS (SELECT 1 FROM departments d WHERE d.deptno = e.deptno)`
-    - ✅ WHERE scalar comparisons: `WHERE salary > (SELECT AVG(salary) FROM employees)`
-    - ✅ WHERE ANY: `WHERE salary > ANY (SELECT salary FROM employees WHERE deptno = 10)`
-    - ✅ WHERE ALL: `WHERE salary > ALL (SELECT salary FROM employees WHERE deptno = 10)`
-  - **Transformations:**
-    - Oracle SOME → PostgreSQL ANY (keyword transformation)
-    - All other subquery syntax identical in Oracle and PostgreSQL
-  - **Implementation:**
-    - Modified VisitAtom.java to enable parenthesized subqueries (removed exception)
-    - Created VisitQuantifiedExpression.java for EXISTS/ANY/ALL/SOME operators
-    - Updated VisitUnaryExpression.java to route to quantified expressions
-    - Handled ALL operator precedence (quantified_expression vs prefix operator)
-  - Comprehensive test coverage: 9 tests (SubqueryComprehensiveTest)
-- **Set operations support** (newly implemented)
-  - **All set operations now supported:**
-    - ✅ UNION (removes duplicates) - identical in Oracle and PostgreSQL
-    - ✅ UNION ALL (keeps duplicates) - identical in Oracle and PostgreSQL
-    - ✅ INTERSECT (returns common rows) - identical in Oracle and PostgreSQL
-    - ✅ MINUS → EXCEPT (Oracle-specific keyword transformation)
-  - **Only transformation needed:** MINUS → EXCEPT (simple keyword replacement)
-  - **Implementation:**
-    - Modified VisitSubquery.java to handle subquery_operation_part
-    - Created transformSetOperation() method with MINUS → EXCEPT transformation
-    - Pass-through strategy for UNION, UNION ALL, INTERSECT
-  - Comprehensive test coverage: 12 tests (SetOperationsTransformationTest)
-    - Simple/multiple UNIONs, UNION ALL, INTERSECT
-    - MINUS → EXCEPT transformation
-    - Mixed set operations
-    - Set operations with multiple columns and ORDER BY
-- 21 new tests added (349 → 370 total)
-- **Achievement:** Full subquery and set operations support - critical for complex Oracle views!
-
-**Session 12: Code Review and FROM DUAL Implementation** 📋✅
-- **Part 1: Comprehensive Code Review**
-  - Reviewed all 35 Visit*.java visitor classes
-  - Found 48 distinct not-yet-implemented features across the codebase
-  - Categorized by priority:
-    - **HIGH PRIORITY (7 features):** FROM DUAL, SUBSTR, TO_DATE, TRIM, Window Functions
-    - **MEDIUM PRIORITY (5 features):** Unary operators, DISTINCT operator, Bind variables
-    - **LOW PRIORITY (36 features):** Hierarchical queries, Cursor ops, MULTISET, JSON, etc.
-  - Updated implementation roadmap based on real-world Oracle view usage patterns
-- **Part 2: FROM DUAL Handling** (newly implemented)
-  - Oracle uses DUAL (special single-row table) for queries without real tables
-  - Oracle: `SELECT SYSDATE FROM DUAL`, `SELECT 1 + 1 FROM DUAL`
-  - PostgreSQL: `SELECT CURRENT_TIMESTAMP`, `SELECT 1 + 1` (no FROM needed)
-  - **Implementation:**
-    - Modified VisitQueryBlock.java to detect DUAL-only FROM clauses
-    - Created isDualTable() helper method (case-insensitive, handles SYS.DUAL)
-    - Omits FROM clause entirely when only DUAL is referenced
-  - Comprehensive test coverage: 16 tests (FromDualTransformationTest)
-    - Simple expressions, SYSDATE, strings, arithmetic, functions
-    - Case variations (DUAL, dual, Dual, SYS.DUAL)
-    - Complex expressions (CASE, concatenation)
-    - Edge cases (with WHERE, ORDER BY, multiple expressions)
-    - Negative tests (regular tables, multiple tables)
-- 16 new tests added (370 → 386 total)
-- **Achievement:** FROM DUAL fully supported + Clear roadmap to ~98% coverage!
-
-**Session 13: SUBSTR → SUBSTRING Transformation** ✅
-- **SUBSTR → SUBSTRING transformation** (newly implemented)
-  - Oracle uses SUBSTR for substring extraction with positional arguments
-  - PostgreSQL uses SUBSTRING with FROM/FOR keyword syntax
-  - Oracle: `SUBSTR(string, position [, length])`
-  - PostgreSQL: `SUBSTRING(string FROM position [FOR length])`
-  - **Implementation:**
-    - Modified VisitStringFunction.java to transform SUBSTR calls
-    - Handles both 2-arg (string, position) and 3-arg (string, position, length) forms
-    - Keyword syntax: FROM replaces second comma, FOR replaces third comma
-  - Comprehensive test coverage: 15 tests (SubstrTransformationTest)
-    - Basic forms (2-arg, 3-arg)
-    - Column references (simple and qualified)
-    - Numeric literals and arithmetic expressions
-    - Nested SUBSTR calls and combined with other functions
-    - Case variations (SUBSTR, substr, SubStr)
-    - Multiple SUBSTR in SELECT list, SUBSTR in WHERE clause
-    - Column aliases, FROM DUAL integration
-    - Edge cases (position 0, commented out: negative position - requires unary operator support)
-  - Debug test created (SubstrTransformationDebugTest) with 3 tests for validation
-- 18 new tests added (386 → 404 total)
-- **Achievement:** SUBSTR fully supported - one of the most common Oracle string functions!
-
-**Session 14: TO_DATE → TO_TIMESTAMP Transformation** ✅
-- **TO_DATE → TO_TIMESTAMP transformation** (newly implemented)
-  - Oracle uses TO_DATE for parsing date/time strings with format codes
-  - PostgreSQL uses TO_TIMESTAMP for the same purpose with similar (but not identical) format codes
-  - Oracle: `TO_DATE(string, 'format' [, 'nls_params'])`
-  - PostgreSQL: `TO_TIMESTAMP(string, 'format')` -- NLS params dropped
-  - **Implementation:**
-    - Modified VisitStringFunction.java to transform TO_DATE calls (lines 185-240)
-    - Handles three input types: table_element, standard_function, expression (same pattern as TO_CHAR)
-    - **Format code transformations (reuses transformToCharFormat() method):**
-      - RR → YY (2-digit year)
-      - RRRR → YYYY (4-digit year)
-      - Other format codes unchanged (YYYY, MM, DD, HH24, MI, SS work identically)
-    - **NLS parameter handling:** Third argument dropped (PostgreSQL doesn't support)
-    - **DEFAULT ON CONVERSION ERROR:** Oracle 12c+ feature dropped (PostgreSQL has no equivalent)
-  - Comprehensive test coverage: 17 tests (ToDateTransformationTest)
-    - Basic forms (with/without format string)
-    - Column references (simple and qualified)
-    - Format code transformations (RR, RRRR, standard formats, complex formats with FF3)
-    - NLS parameters (third argument dropped)
-    - Nested functions (TO_DATE with SUBSTR)
-    - WHERE/ORDER BY clause usage
-    - Column aliases
-    - Multiple TO_DATE calls in SELECT list
-    - Case variations (TO_DATE, to_date, To_Date)
-    - FROM DUAL integration
-  - **Qualified column behavior:** Qualified columns like `e.hire_date_str` in function arguments appear without spaces around dots (expression context)
-- 17 new tests added (404 → 421 total)
-- **Achievement:** TO_DATE fully supported - critical for date parsing in Oracle views!
-
-**Session 15: TRIM Function** ✅
-- **TRIM function transformation** (newly implemented)
-  - Oracle and PostgreSQL have **nearly identical** TRIM syntax - pass-through strategy!
-  - Both support: LEADING, TRAILING, BOTH keywords
-  - Both support: custom trim characters
-  - Oracle: `TRIM([LEADING|TRAILING|BOTH] ['x'] FROM string)`
-  - PostgreSQL: `TRIM([LEADING|TRAILING|BOTH] ['x'] FROM string)` -- identical!
-  - **Implementation:**
-    - Modified VisitStringFunction.java to transform TRIM calls (lines 242-285)
-    - Grammar: `TRIM '(' ((LEADING | TRAILING | BOTH)? expression? FROM)? concatenation ')'`
-    - Handles all TRIM variations:
-      - Simple: `TRIM(string)` - removes leading and trailing spaces
-      - Directional: `TRIM(LEADING FROM string)`, `TRIM(TRAILING FROM string)`, `TRIM(BOTH FROM string)`
-      - Custom character: `TRIM('x' FROM string)`
-      - Combined: `TRIM(LEADING '0' FROM account_number)`
-    - **Pass-through strategy:** Syntax is identical, minimal transformation needed
-  - Comprehensive test coverage: 19 tests (TrimTransformationTest)
-    - Basic forms (default behavior, string literals)
-    - LEADING/TRAILING/BOTH keywords
-    - Custom trim characters (single character removal)
-    - Combined directional + custom character
-    - Column references (simple and qualified)
-    - WHERE/ORDER BY clause usage
-    - Column aliases
-    - Multiple TRIM calls in SELECT list
-    - Case variations (TRIM, trim, Trim)
-    - FROM DUAL integration
-    - Nested functions (TRIM with UPPER, UPPER with TRIM)
-- 19 new tests added (421 → 440 total)
-- **Achievement:** TRIM fully supported - one of the most common Oracle string functions!
-
-**Session 16: Window Functions (OVER Clause)** ✅
-- **Window function transformation** (newly implemented)
-- Oracle and PostgreSQL have **nearly identical** window function syntax - pass-through strategy!
-  - Oracle and PostgreSQL have **nearly identical** window function syntax - pass-through strategy!
-  - Both support: PARTITION BY, ORDER BY, windowing frames (ROWS/RANGE)
-  - Oracle: `ROW_NUMBER() OVER (PARTITION BY dept ORDER BY sal DESC)`
-  - PostgreSQL: `ROW_NUMBER() OVER (PARTITION BY dept ORDER BY sal DESC NULLS FIRST)` -- identical except NULL ordering!
-  - **Implementation:**
-    - Created VisitOverClause.java for OVER clause transformation (173 lines)
-    - Created VisitExpressions.java for comma-separated expression lists (47 lines)
-    - Updated VisitOtherFunction.java to handle RANK, DENSE_RANK, LEAD, LAG, FIRST_VALUE, LAST_VALUE
-    - Updated VisitNumericFunction.java to support window functions (COUNT, SUM, AVG, MIN, MAX with OVER)
-    - Updated PostgresCodeBuilder.java with visit methods for over_clause and expressions_
-  - **Window functions supported:**
-    - **Ranking functions:** ROW_NUMBER, RANK, DENSE_RANK, PERCENT_RANK, CUME_DIST
-    - **Offset functions:** LEAD, LAG (with optional offset and default values)
-    - **Value functions:** FIRST_VALUE, LAST_VALUE (with RESPECT/IGNORE NULLS support)
-    - **Aggregate functions with OVER:** COUNT, SUM, AVG, MIN, MAX
-    - **NTILE** and other analytic functions via over_clause_keyword
-  - **OVER clause components:**
-    - PARTITION BY: Single/multiple columns, qualified columns, expressions
-    - ORDER BY: ASC/DESC with automatic NULLS FIRST for DESC
-    - Windowing frames: ROWS/RANGE UNBOUNDED PRECEDING, CURRENT ROW, N PRECEDING/FOLLOWING
-    - BETWEEN form: `ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW`
-    - Empty OVER clause: `OVER ()`
-  - **Pass-through strategy:** Syntax is nearly identical, leverages existing ORDER BY visitor for NULL ordering fix
-  - Comprehensive test coverage: 31 tests (WindowFunctionTransformationTest)
-    - Basic window functions (ROW_NUMBER, RANK, DENSE_RANK)
-    - PARTITION BY variations (single/multiple columns, qualified columns)
-    - Window frames (ROWS/RANGE UNBOUNDED PRECEDING, BETWEEN forms, numeric bounds)
-    - Aggregate functions with OVER (COUNT, SUM, AVG, MIN, MAX)
-    - Analytic functions (LEAD, LAG with offsets, FIRST_VALUE, LAST_VALUE with frames)
-    - Empty OVER clause
-    - Complex scenarios (multiple window functions, WITH WHERE clause, FROM DUAL integration)
-    - COUNT DISTINCT with OVER (pass-through)
-    - Full window specification (partition + order + frame)
-- 31 new tests added (440 → 471 total, plus 2 debug tests = 473 total)
-- **Achievement:** Window functions fully supported - critical for analytics and reporting queries!
-- **Real-world impact:** Enables transformation of complex analytics queries with ROW_NUMBER, RANK, running totals, moving averages, and offset analysis
-
-**Session 17: ROWNUM → LIMIT Optimization (Phase 1)** ✅
-- **ROWNUM → LIMIT transformation** (newly implemented - Phase 1: Simple patterns only)
-- Oracle uses ROWNUM pseudo-column to limit rows, PostgreSQL uses LIMIT clause
-- **Architecture: Proper AST walking** - No getText() shortcuts, follows OuterJoinAnalyzer pattern
-- **Two-phase approach:**
-  - Phase 1 (Detection): RownumAnalyzer walks WHERE clause AST to detect simple ROWNUM patterns
-  - Phase 2 (Filtering): RownumContext filters ROWNUM conditions during transformation
-- **Context stack pattern:** RownumContext pushed/popped like OuterJoinContext for nested queries
-- **Transformations supported (Phase 1 - LIMIT optimization):**
-  - Simple LIMIT: `WHERE ROWNUM <= 10` → `LIMIT 10`
-  - Adjusted for <: `WHERE ROWNUM < 10` → `LIMIT 9`
-  - Reversed comparisons: `WHERE 10 >= ROWNUM` → `LIMIT 10`
-  - Combined with AND: `WHERE dept = 10 AND ROWNUM <= 5` → `WHERE dept = 10 LIMIT 5`
-  - Multiple AND conditions: ROWNUM filtered out, other conditions preserved
-  - With ORDER BY: `WHERE ROWNUM <= 10 ORDER BY sal DESC` → `ORDER BY sal DESC NULLS FIRST LIMIT 10`
-  - Case-insensitive: ROWNUM, rownum, RowNum all work
-- **Implementation:**
-  - Created `rownum/` subfolder for organization
-  - `RownumAnalyzer.java` - AST-based detection using visitor pattern (376 lines)
-  - `RownumContext.java` - AST-based filtering with isRownumCondition() (241 lines)
-  - Updated `VisitQueryBlock.java` - Push/pop context, add LIMIT clause after ORDER BY
-  - Updated `VisitLogicalExpression.java` - Filter ROWNUM from AND chains (returns null)
-  - Updated `VisitWhereClause.java` - Handle null conditions (no WHERE if only ROWNUM)
-- **Proper AST navigation:**
-  - Detection: unary_logical_expression → multiset_expression → relational_expression → checks for ROWNUM identifier
-  - Identifier check: relational_expression → compound_expression → concatenation → model_expression → unary_expression → atom → general_element → id_expression
-  - Numeric constant extraction: Same path but validates constant node and UNSIGNED_INTEGER
-  - No regex, no getText() shortcuts - structural pattern matching only
-- **Pattern rejection (Phase 1 limitations):**
-  - ROWNUM with OR: Rejected (requires complex query rewriting)
-  - ROWNUM BETWEEN: Rejected (requires OFFSET/LIMIT for pagination)
-  - ROWNUM in SELECT list: Not yet supported (future phase)
-  - Complex ROWNUM expressions: Not yet supported (future phase)
-- Comprehensive test coverage: 17 tests (RownumLimitTransformationTest)
-  - Simple patterns (<=, <, >=, >)
-  - Reversed comparisons
-  - AND conditions (before, after, between)
-  - ORDER BY integration
-  - Case variations
-  - FROM DUAL integration
-  - SELECT * integration
-  - Complex WHERE conditions
-  - Regression tests (no ROWNUM → no LIMIT)
-- 16 new tests added (473 → 489 total)
-- **Test results:** 16/17 passing (94% success rate)
-  - 1 edge case with IN clause (formatting issue, manually resolved)
-- **Achievement:** Simple ROWNUM patterns (80%+ of real-world usage) now fully supported!
-- **Future phases (documented for later):**
-  - Phase 2: ROWNUM in SELECT list → `row_number() OVER ()`
-  - Phase 3: ROWNUM BETWEEN → `OFFSET/LIMIT` for pagination
-  - Phase 4: Complex patterns → subquery wrapper with row_number()
-
-**Session 18: Sequence Syntax Transformation** ✅
-- **Sequence NEXTVAL/CURRVAL transformation** (newly implemented)
-- Oracle uses sequence pseudo-columns for generating values, PostgreSQL uses function calls
-- **Oracle vs PostgreSQL:**
-  - Oracle: `sequence_name.NEXTVAL`, `sequence_name.CURRVAL` (pseudo-column, dot notation)
-  - PostgreSQL: `nextval('schema.sequence')`, `currval('schema.sequence')` (function calls)
-- **Implementation:**
-  - Modified `VisitGeneralElement.handleDotNavigation()` - Added sequence detection BEFORE function/column checks
-  - Created `isSequenceCall()` - Detects NEXTVAL/CURRVAL patterns (case-insensitive)
-  - Created `handleSequenceCall()` - Transforms to PostgreSQL function calls
-  - Created `transformSequenceCallWithMetadata()` - Schema qualification and synonym resolution
-  - Created `transformSequenceCallSimple()` - Fallback transformation without metadata
-- **Detection logic:**
-  - Pattern 1: `sequence_name.NEXTVAL` (2 parts) → `nextval('schema.sequence_name')`
-  - Pattern 2: `schema.sequence_name.NEXTVAL` (3 parts) → `nextval('schema.sequence_name')`
-  - Safeguard: Sequences NEVER have parentheses (prevents confusion with package functions)
-- **Transformations supported:**
-  - NEXTVAL → nextval() with schema qualification
-  - CURRVAL → currval() with schema qualification
-  - Synonym resolution for sequence names
-  - Cross-schema sequences (schema prefix preserved)
-  - Case-insensitive: NEXTVAL, nextval, NextVal all work
-- **Known limitation (documented):**
-  - Package functions named `nextval` or `currval` without parameters could theoretically be misidentified
-  - Considered extremely rare anti-pattern (conflicts with Oracle reserved pseudo-columns)
-  - Strong safeguard: "no function arguments" check handles 99.9% of potential conflicts
-  - Can be enhanced with sequence metadata validation if needed in practice
-- Comprehensive test coverage: 19 tests (SequenceTransformationTest)
-  - Basic NEXTVAL/CURRVAL transformations
-  - Schema-qualified sequences
-  - Case variations
-  - Integration with WHERE, ORDER BY, GROUP BY clauses
-  - FROM DUAL integration (3 tests)
-  - Column aliases
-  - Multiple sequences in same query
-  - Mixed NEXTVAL and CURRVAL
-  - Arithmetic expressions
-  - Edge cases (underscores, numbers in names)
-- 19 new tests added (489 → 508 total, but actual count is 507)
-- **Achievement:** Sequence syntax fully supported - critical for auto-increment columns and ID generation!
-- **Real-world impact:** Enables transformation of views and queries using sequences for primary key generation
+1. **Subqueries in FROM** - VisitTableReference (13 tests)
+2. **ORDER BY** - VisitOrderByClause with DESC NULLS FIRST fix (19 tests)
+3. **GROUP BY/HAVING** - VisitGroupByClause, VisitHavingClause (20 tests)
+4. **ANSI JOINs** - VisitTableReference for INNER/LEFT/RIGHT/FULL/CROSS (15 tests)
+5. **Arithmetic/Concatenation** - VisitConcatenation, || → CONCAT() for NULL safety (22 tests)
+6. **NVL/SYSDATE** - VisitStringFunction, VisitGeneralElement (14 tests)
+7. **DECODE** - VisitStringFunction with CASE WHEN transformation (10 tests)
+8. **Column Aliases** - VisitSelectListElement (18 tests)
+9. **CASE Expressions** - VisitCaseExpression, END CASE → END (17 tests)
+10. **TO_CHAR** - VisitStringFunction, format code transformations (21 tests)
+11. **Subqueries/Set Ops** - VisitAtom, VisitQuantifiedExpression, VisitSubquery, MINUS → EXCEPT (21 tests)
+12. **FROM DUAL** - VisitQueryBlock, omits FROM for scalar expressions (16 tests)
+13. **SUBSTR** - VisitStringFunction, FROM/FOR keyword syntax (18 tests)
+14. **TO_DATE** - VisitStringFunction, TO_TIMESTAMP transformation (17 tests)
+15. **TRIM** - VisitStringFunction, pass-through (19 tests)
+16. **Window Functions** - VisitOverClause, VisitExpressions (31 tests)
+17. **ROWNUM Phase 1** - RownumAnalyzer, RownumContext, simple LIMIT optimization (16 tests)
+18. **Sequences** - VisitGeneralElement, seq.NEXTVAL → nextval('schema.seq') (19 tests)
 
 ---
 
@@ -447,93 +88,111 @@ Oracle SQL → ANTLR Parser → PostgresCodeBuilder → PostgreSQL SQL
 
 ## Current Status
 
-### What Works Now ✅
+### ✅ Complete Features (507/507 tests passing)
 
-**Phase 1: Foundation (Complete)**
-- ✅ ANTLR parser integration (PlSqlParser.g4)
-- ✅ 26 static visitor helpers for scalability
-- ✅ Full expression hierarchy (11 levels)
-- ✅ TransformationContext with metadata indices
-- ✅ ViewTransformationService (@ApplicationScoped CDI bean)
+**Phase 1: Foundation**
+- AntlrParser, 37 visitor helpers, 11-level expression hierarchy, TransformationContext, MetadataIndexBuilder
 
-**Phase 2: SELECT Statement (100% COMPLETE)** 🎉
-- ✅ **Basic SELECT**: Column lists, SELECT *, qualified SELECT (e.*)
-- ✅ **Column aliases**: AS keyword support for all expressions
-- ✅ **Table aliases**: `FROM employees e`
-- ✅ **Subqueries**: All locations supported (FROM, SELECT list, WHERE IN/EXISTS/scalar/ANY/ALL)
-- ✅ **Set operations**: UNION, UNION ALL, INTERSECT, MINUS → EXCEPT
-- ✅ **ORDER BY clause**: ASC/DESC with automatic NULLS FIRST for DESC columns
-- ✅ **GROUP BY clause**: Single/multiple columns, position-based, expressions
-- ✅ **HAVING clause**: Simple and complex conditions with aggregate functions
-- ✅ **Aggregate functions**: COUNT, SUM, AVG, MIN, MAX, ROUND, LEAST, GREATEST
-- ✅ **ANSI JOINs**: INNER, LEFT, RIGHT, FULL, CROSS with ON/USING clauses
-- ✅ **Arithmetic operators**: +, -, *, /, MOD, ** (power)
-- ✅ **String concatenation**: || → CONCAT() (for NULL-safe Oracle behavior)
+**Phase 2: Complete SELECT Support (100%)**
+- Basic SELECT (columns, *, qualified, aliases)
+- FROM clause (table/subquery aliases, implicit/ANSI JOINs, Oracle (+) → LEFT/RIGHT JOIN)
+- WHERE clause (literals, comparison, logical, IN, BETWEEN, LIKE, IS NULL, complex nested)
+- GROUP BY/HAVING (single/multiple columns, position-based, expressions, aggregates)
+- ORDER BY (ASC/DESC, DESC → DESC NULLS FIRST fix, position-based, expressions)
+- Arithmetic operators (+, -, *, /, MOD, ** → ^)
+- String concatenation (|| → CONCAT() for NULL-safe Oracle semantics)
+- Subqueries (FROM, SELECT list, WHERE IN/EXISTS/scalar/ANY/ALL)
+- Set operations (UNION, UNION ALL, INTERSECT, MINUS → EXCEPT)
 
-**Phase 3: Oracle-Specific Functions (IN PROGRESS)** ⏳
-- ✅ **FROM DUAL handling**: Omit FROM clause for scalar expressions (Session 12)
-- ✅ **SUBSTR → SUBSTRING**: String extraction with FROM/FOR keyword syntax (Session 13)
-- ✅ **NVL → COALESCE**: Oracle's NULL handling function
-- ✅ **SYSDATE → CURRENT_TIMESTAMP**: Current date/time pseudo-column
-- ✅ **DECODE → CASE WHEN**: Oracle's conditional value selection
-- ✅ **CASE expressions**: Both searched and simple CASE (pass-through with END normalization)
-- ✅ **WHERE clause** (complete):
-  - Literals: strings `'text'`, numbers `42`, NULL, TRUE/FALSE
-  - Comparison: `=`, `<`, `>`, `<=`, `>=`, `!=`, `<>`
-  - Logical: `AND`, `OR`, `NOT`
-  - IS NULL / IS NOT NULL
-  - IN operator: `deptno IN (10, 20, 30)`, `NOT IN`
-  - BETWEEN: `sal BETWEEN 1000 AND 2000`, `NOT BETWEEN`
-  - LIKE: `ename LIKE 'S%'`, `NOT LIKE`, `ESCAPE`
-  - Parenthesized expressions for precedence
-  - Complex nested conditions
-- ✅ **Implicit JOINs**: Comma-separated tables in FROM clause
-- ✅ **Oracle (+) Outer Joins**: Converted to ANSI LEFT/RIGHT JOIN syntax
-  - Two-phase transformation: analysis → generation
-  - Handles chained outer joins: `a.f1 = b.f1(+) AND b.f2 = c.f2(+)`
-  - Multi-column joins: `a.f1 = b.f1(+) AND a.f2 = b.f2(+)`
-  - Mixed joins: outer joins + implicit joins in same query
-  - Nested subqueries with context isolation (stack-based)
-- ✅ **Type member methods**: `emp.address.get_street()` → `address_type__get_street(emp.address)`
-- ✅ **Package functions**: `pkg.func()` → `pkg__func()`
-- ✅ **Schema qualification**: Unqualified table/function names automatically qualified with schema
-- ✅ **Synonym resolution**: Synonyms resolved to actual table names
-- ✅ **TO_CHAR function**: Date/number formatting with format code transformations
-- ✅ **TO_DATE function**: Date parsing with TO_TIMESTAMP transformation
-- ✅ **TRIM function**: String whitespace/character removal (pass-through syntax)
-- ✅ **FROM DUAL handling**: Omit FROM clause for scalar expressions
+**Phase 3: Oracle-Specific Transformations (~90%)**
+- FROM DUAL (omit FROM clause) - VisitQueryBlock
+- SUBSTR → SUBSTRING (FROM/FOR syntax) - VisitStringFunction
+- NVL → COALESCE - VisitStringFunction
+- SYSDATE → CURRENT_TIMESTAMP - VisitGeneralElement
+- DECODE → CASE WHEN - VisitStringFunction
+- CASE expressions (END CASE → END) - VisitCaseExpression
+- TO_CHAR (format code transformations: RR→YY, RRRR→YYYY, D→., G→,) - VisitStringFunction
+- TO_DATE → TO_TIMESTAMP - VisitStringFunction
+- TRIM (pass-through) - VisitStringFunction
+- Window functions (OVER clause: ROW_NUMBER, RANK, LEAD, LAG, aggregates) - VisitOverClause
+- ROWNUM → LIMIT (Phase 1: simple patterns WHERE ROWNUM <= N) - RownumAnalyzer, RownumContext
+- Sequences (seq.NEXTVAL → nextval('schema.seq')) - VisitGeneralElement
+- Type member methods (emp.address.get_street() → address_type__get_street(emp.address)) - VisitGeneralElement
+- Package functions (pkg.func() → pkg__func()) - VisitGeneralElement
+- Schema qualification, synonym resolution - TransformationContext
 
-**Tests: 507/507 passing across 30 test classes**
+### ⏳ Not Yet Implemented
 
-### What's Not Yet Implemented ⏳
+**CRITICAL GAPS (High Impact on Real-World Coverage):**
 
-**Phase 3: Oracle-Specific Features (IN PROGRESS):**
-- ✅ FROM DUAL handling (COMPLETE - Session 12)
-- ✅ SUBSTR → SUBSTRING transformation (COMPLETE - Session 13)
-- ✅ NVL → COALESCE transformation (COMPLETE)
-- ✅ SYSDATE → CURRENT_TIMESTAMP (COMPLETE)
-- ✅ DECODE → CASE WHEN transformation (COMPLETE)
-- ✅ Subqueries in all locations (COMPLETE - FROM, SELECT list, WHERE IN/EXISTS/scalar/ANY/ALL)
-- ✅ Set operations (COMPLETE - UNION, UNION ALL, INTERSECT, MINUS → EXCEPT)
-- ✅ **TO_DATE → TO_TIMESTAMP** (Session 14 - COMPLETE) - Common date parsing
-- ✅ **TRIM function** (Session 15 - COMPLETE) - Common string operation
-- ✅ **Window functions (OVER clause)** (Session 16 - COMPLETE) - ROW_NUMBER, RANK, LAG, LEAD for analytics
-- ✅ **ROWNUM → LIMIT** (Session 17 - Phase 1 COMPLETE) - Simple patterns: `WHERE ROWNUM <= N` → `LIMIT N`
-- ✅ **Sequence syntax** (Session 18 - COMPLETE) - seq.NEXTVAL → nextval('schema.seq'), seq.CURRVAL → currval('schema.seq')
-- ⏳ ROWNUM advanced patterns (Phase 2-4) - ROWNUM in SELECT, BETWEEN, complex expressions
-- ⏳ Unary operators (+, -) if needed
-- ⏳ CHR function
+1. **CTEs (WITH clause / Common Table Expressions)** 🔴 **BLOCKING**
+   - Usage: 40-60% of complex Oracle views
+   - Oracle: `WITH dept_totals AS (SELECT ...) SELECT ... FROM dept_totals`
+   - PostgreSQL: Mostly compatible, need non-recursive and recursive support
+   - Estimated effort: 2-3 days (non-recursive), +2 days (recursive WITH)
+   - Grammar: `with_clause`, `subquery_factoring_clause`
 
-**Low Priority Features (Specialized/Rare):**
-- Hierarchical queries (CONNECT BY, PRIOR) → PostgreSQL recursive CTEs
-- Cursor operations (CURSOR, SQL%, CURRENT OF) - PL/SQL features
-- Collection operations (MULTISET, MEMBER, SUBMULTISET)
-- JSON functions (JSON_EQUAL, etc.) - Modern Oracle features
-- Time zone operations (AT LOCAL, AT TIME ZONE)
-- INTERVAL literals and expressions
+2. **CONNECT BY (Hierarchical Queries)** 🔴 **BLOCKING**
+   - Usage: 10-20% of Oracle views
+   - Oracle: `SELECT ... START WITH ... CONNECT BY PRIOR ...`
+   - PostgreSQL: Requires conversion to recursive CTEs
+   - Estimated effort: 5-7 days (complex transformation)
+   - Grammar: `hierarchical_query_clause`, `CONNECT_BY_ROOT`, `PRIOR`
+
+3. **Common Date/Time Functions** 🟡 **HIGH IMPACT**
+   - Usage: 20-30% of views
+   - Missing: ADD_MONTHS, MONTHS_BETWEEN, NEXT_DAY, LAST_DAY, TRUNC(date), ROUND(date)
+   - Missing: INTERVAL expressions (INTERVAL '1' DAY)
+   - Estimated effort: 3-5 days
+
+4. **Common String Functions** 🟡 **HIGH IMPACT**
+   - Usage: 20-30% of views
+   - Missing: INSTR, LPAD, RPAD, TRANSLATE
+   - Missing: REGEXP_REPLACE, REGEXP_SUBSTR, REGEXP_INSTR
+   - Estimated effort: 3-4 days
+
+5. **Advanced Analytic Functions** 🟡 **MEDIUM IMPACT**
+   - Usage: 10-15% of views
+   - Missing: LISTAGG (string aggregation)
+   - Missing: KEEP clause (FIRST_VALUE KEEP DENSE_RANK...)
+   - Missing: XMLAGG
+   - Estimated effort: 3-4 days
+
+6. **PIVOT/UNPIVOT** 🟡 **MEDIUM IMPACT**
+   - Usage: 5-10% of views
+   - Requires dynamic transformation to CASE WHEN or PostgreSQL crosstab
+   - Estimated effort: 4-5 days
+
+**Quick Wins (Low Effort, Moderate Impact):**
+
+7. **Unary operators (+, -)** 🟢 **TRIVIAL**
+   - Current: Throws exception
+   - Fix: Pass-through (identical in Oracle and PostgreSQL)
+   - Estimated effort: 5 minutes
+
+8. **ROWNUM advanced patterns** 🟢 **LOW EFFORT**
+   - Phase 2-4: ROWNUM in SELECT list, BETWEEN, complex expressions
+   - Estimated effort: 1-2 days
+
+9. **CHR function** 🟢 **TRIVIAL**
+   - Oracle: `CHR(65)` → PostgreSQL: `CHR(65)` (identical)
+   - Estimated effort: 10 minutes
+
+10. **Additional conversion functions** 🟢 **LOW EFFORT**
+    - TO_NUMBER (with format)
+    - CAST expressions (mostly pass-through)
+    - Estimated effort: 1 day
+
+**Low Priority (Rare/Specialized):**
+
+- MODEL clause (<1% usage, very high complexity)
+- MERGE statement (rare in views, more common in procedures)
+- Collection operations (MULTISET, MEMBER OF, SUBMULTISET)
+- JSON functions (JSON_EQUAL, JSON_OBJECT, etc.)
+- Cursor operations (SQL%ROWCOUNT, CURSOR expressions)
+- Advanced time zones (AT LOCAL, AT TIME ZONE)
 - Character set introducers and COLLATE
-- Advanced analytic clauses (RESPECT/IGNORE NULLS, KEEP)
-- Bind variables - more relevant for prepared statements than views
+- Bind variables (more relevant for prepared statements than views)
 
 ---
 
@@ -624,34 +283,30 @@ transformer/
 ├── builder/
 │   ├── PostgresCodeBuilder.java         # Main visitor (NOT CDI bean)
 │   │
-│   ├── outerjoin/                       # Outer join transformation helpers
+│   ├── outerjoin/                       # Outer join transformation (4 classes)
+│   │   ├── OuterJoinAnalyzer.java       # Two-phase analyzer (FROM + WHERE)
 │   │   ├── OuterJoinContext.java        # Query-level outer join state
 │   │   ├── OuterJoinCondition.java      # Single outer join relationship
-│   │   ├── OuterJoinAnalyzer.java       # Two-phase analyzer (FROM + WHERE)
 │   │   └── TableInfo.java               # Table name + alias
 │   │
-│   └── Visit*.java                      # 33+ static helper classes:
+│   ├── rownum/                          # ROWNUM → LIMIT transformation (2 classes)
+│   │   ├── RownumAnalyzer.java          # AST-based pattern detection
+│   │   └── RownumContext.java           # Filtering and transformation
+│   │
+│   └── Visit*.java                      # 37 static visitor helpers:
 │       ├── VisitSelectStatement.java
-│       ├── VisitQueryBlock.java         # SELECT list + FROM + WHERE
+│       ├── VisitQueryBlock.java         # SELECT list + FROM + WHERE + ORDER BY
 │       ├── VisitFromClause.java         # Outer join generation
-│       ├── VisitWhereClause.java        # Filters out (+) conditions
+│       ├── VisitWhereClause.java        # Filters out (+) and ROWNUM conditions
 │       ├── VisitSelectedList.java
-│       ├── VisitSelectListElement.java
-│       ├── VisitExpression.java         # 11-level expression hierarchy:
-│       ├── VisitLogicalExpression.java      # AND, OR
-│       ├── VisitUnaryLogicalExpression.java # NOT
-│       ├── VisitMultisetExpression.java
-│       ├── VisitRelationalExpression.java   # =, <, >, etc.
-│       ├── VisitCompoundExpression.java     # IN, BETWEEN, LIKE
-│       ├── VisitConcatenation.java
-│       ├── VisitModelExpression.java
-│       ├── VisitUnaryExpression.java
-│       ├── VisitAtom.java                   # Literals, NULL
-│       ├── VisitGeneralElement.java     # ⭐ Transformation decision point
-│       ├── VisitStandardFunction.java
-│       ├── VisitStringFunction.java
-│       ├── VisitTableReference.java     # Schema qualification
-│       └── ... (33+ total)
+│       ├── VisitSelectListElement.java  # Column aliases
+│       ├── VisitExpression.java (11-level hierarchy)
+│       ├── VisitGeneralElement.java     # ⭐ SYSDATE, sequences, type methods, packages
+│       ├── VisitStringFunction.java     # NVL, DECODE, SUBSTR, TO_CHAR, TO_DATE, TRIM
+│       ├── VisitCaseExpression.java     # END CASE → END
+│       ├── VisitOverClause.java         # Window functions
+│       ├── VisitTableReference.java     # Schema qualification, JOINs
+│       └── ... (37 total, see Glob for complete list)
 │
 ├── context/
 │   ├── TransformationContext.java       # Metadata access facade
@@ -661,952 +316,216 @@ transformer/
 │   └── TransformationException.java     # Custom exception
 │
 └── service/
-    └── ViewTransformationService.java   # CDI bean - high-level API
+    └── SqlTransformationService.java    # CDI bean - high-level API
 ```
+
+**Key Visitor Classes by Feature:**
+- **VisitGeneralElement**: SYSDATE, sequences (NEXTVAL/CURRVAL), type methods, package functions
+- **VisitStringFunction**: NVL, DECODE, SUBSTR, TO_CHAR, TO_DATE, TRIM
+- **VisitConcatenation**: Arithmetic operators, || → CONCAT()
+- **VisitQueryBlock**: FROM DUAL handling, ROWNUM LIMIT generation
+- **VisitOverClause**: Window functions (ROW_NUMBER, RANK, LEAD, LAG, aggregates)
+- **OuterJoinAnalyzer + VisitFromClause**: Oracle (+) → ANSI LEFT/RIGHT JOIN
+- **RownumAnalyzer + RownumContext**: ROWNUM → LIMIT optimization
 
 ---
 
 ## Implementation Phases
 
 ### Phase 1: Foundation ✅ COMPLETE
+- AntlrParser, PostgresCodeBuilder (37 visitors), TransformationContext, TransformationIndices, MetadataIndexBuilder, 11-level expression hierarchy, SqlTransformationService
+- Initial 72 tests: basic SELECT, *, qualified SELECT, table aliases
 
-**Delivered:**
-- ✅ AntlrParser with error collection
-- ✅ PostgresCodeBuilder with 26+ static helpers
-- ✅ TransformationContext with synonym resolution
-- ✅ TransformationIndices with O(1) lookups
-- ✅ MetadataIndexBuilder
-- ✅ Full 11-level expression hierarchy
-- ✅ ViewTransformationService (@ApplicationScoped)
-- ✅ 72/72 initial tests passing
+### Phase 2: Complete SELECT Support ✅ 100% COMPLETE
 
-**Test examples:**
-```sql
-SELECT nr, text FROM example         → SELECT nr , text FROM example ✅
-SELECT nr, text FROM example e       → SELECT nr , text FROM example e ✅
-SELECT * FROM example                → SELECT * FROM example ✅
-SELECT e.* FROM example e            → SELECT e . * FROM example e ✅
-```
+All SQL clauses, operators, and join types fully implemented with comprehensive test coverage (270 tests).
+
+**Core Features:**
+- Literals and operators - VisitAtom, VisitConcatenation (24 tests)
+- WHERE clause (IN, BETWEEN, LIKE, IS NULL, complex nested) - VisitLogicalExpression, VisitCompoundExpression
+- Oracle (+) outer joins → ANSI LEFT/RIGHT JOIN - OuterJoinAnalyzer, VisitFromClause (17 tests)
+- Type methods, package functions - VisitGeneralElement (18 tests)
+- Subqueries in FROM - VisitTableReference (13 tests)
+- ORDER BY with DESC → DESC NULLS FIRST fix - VisitOrderByClause (19 tests)
+- GROUP BY/HAVING with aggregates - VisitGroupByClause, VisitHavingClause (20 tests)
+- ANSI JOINs (INNER/LEFT/RIGHT/FULL/CROSS) - VisitTableReference (15 tests)
+- Arithmetic/concatenation (|| → CONCAT() for NULL safety) - VisitConcatenation (22 tests)
 
 ---
 
-### Phase 2: Complete SELECT Support ✅ 95% COMPLETE
-
-#### 2.1 Literals and Operators ✅ COMPLETE
-
-**Implemented:**
-- ✅ String literals: `'text'`, `'O''Brien'` (escaped quotes)
-- ✅ Number literals: `123`, `45.67`, `-10`
-- ✅ Boolean literals: `TRUE`, `FALSE`
-- ✅ NULL literal
-- ✅ Comparison operators: `=`, `<`, `>`, `<=`, `>=`, `!=`, `<>`
-
-**Tests:** ExpressionBuildingBlocksTest (24/24 passing)
-
-```sql
--- Literals
-WHERE name = 'John' AND age > 25 AND active = TRUE AND bonus IS NULL
-```
-
-#### 2.2 WHERE Clause ✅ COMPLETE
-
-**Implemented:**
-- ✅ Logical operators: `AND`, `OR`, `NOT`
-- ✅ IS NULL / IS NOT NULL
-- ✅ IN operator: `deptno IN (10, 20, 30)`, `NOT IN`
-- ✅ BETWEEN: `sal BETWEEN 1000 AND 2000`, `NOT BETWEEN`
-- ✅ LIKE: `ename LIKE 'S%'`, `NOT LIKE`, `ESCAPE '_'`
-- ✅ Parenthesized expressions for precedence
-- ✅ Complex nested conditions
-
-**Test example:**
-```sql
-SELECT empno, ename FROM employees
-WHERE (deptno = 10 OR deptno = 20)
-  AND sal BETWEEN 1000 AND 5000
-  AND commission IS NOT NULL
-  AND ename LIKE 'S%' ESCAPE '_'
-```
-
-#### 2.3 Oracle (+) Outer Join Transformation ✅ COMPLETE
-
-**Two-Phase Algorithm:**
-
-**Phase 1: Analysis**
-- Scan FROM clause to identify tables and aliases
-- Scan WHERE clause to identify (+) conditions
-- Store in `OuterJoinContext`
-
-**Phase 2: Transformation**
-- Generate ANSI JOIN syntax from context
-- Filter out (+) conditions from WHERE clause
-- Preserve regular WHERE conditions
-
-**Implemented Features:**
-- ✅ Simple outer joins: `a.f1 = b.f1(+)` → `LEFT JOIN b ON a.f1 = b.f1`
-- ✅ Chained outer joins: `a.f1 = b.f1(+) AND b.f2 = c.f2(+)`
-- ✅ Multi-column joins: `a.f1 = b.f1(+) AND a.f2 = b.f2(+)` (combined with AND)
-- ✅ RIGHT joins: `a.f1(+) = b.f1` → `RIGHT JOIN a ON a.f1 = b.f1`
-- ✅ Mixed joins: Outer joins + implicit joins in same query
-- ✅ Implicit joins preserved: `SELECT a.col, b.col FROM a, b WHERE a.id = b.id` (no change)
-- ✅ Nested subqueries: Context stack prevents corruption
-- ✅ Regular WHERE conditions preserved
-
-**Tests:** OuterJoinTransformationTest (17/17 passing)
-
-**Test examples:**
-```sql
--- Oracle
-SELECT a.col1, b.col2 FROM a, b WHERE a.field1 = b.field1(+)
--- PostgreSQL
-SELECT a.col1, b.col2 FROM a LEFT JOIN b ON a.field1 = b.field1
-
--- Chained
-SELECT a.col1, b.col2, c.col3 FROM a, b, c
-WHERE a.field1 = b.field1(+) AND b.field2 = c.field2(+)
--- PostgreSQL
-SELECT a.col1, b.col2, c.col3
-FROM a LEFT JOIN b ON a.field1 = b.field1 LEFT JOIN c ON b.field2 = c.field2
-
--- Multi-column
-SELECT a.col1, b.col2 FROM a, b
-WHERE a.field1 = b.field1(+) AND a.field2 = b.field2(+)
--- PostgreSQL
-SELECT a.col1, b.col2 FROM a LEFT JOIN b ON a.field1 = b.field1 AND a.field2 = b.field2
-
--- Mixed (outer + implicit)
-SELECT a.col1, b.col2, c.col3 FROM a, b, c
-WHERE a.f1 = b.f1(+) AND a.f2 = c.f2
--- PostgreSQL
-SELECT a.col1, b.col2, c.col3
-FROM a LEFT JOIN b ON a.f1 = b.f1, c WHERE a.f2 = c.f2
-```
-
-#### 2.4 Advanced Features ✅ COMPLETE
-
-**Type Member Method Transformation:**
-```sql
--- Oracle
-SELECT emp.address.get_street() FROM employees emp;
--- PostgreSQL
-SELECT address_type__get_street(emp.address) FROM employees emp;
-```
-
-**Chained method calls:**
-```sql
--- Oracle
-SELECT emp.data.method1().method2() FROM employees emp;
--- PostgreSQL
-SELECT data_type__method2(data_type__method1(emp.data)) FROM employees emp;
-```
-
-**Tests:** TypeMemberMethodTransformationTest (8/8 passing)
-
-**Package Function Transformation:**
-```sql
--- Oracle
-SELECT pkg.func(args) FROM employees;
--- PostgreSQL
-SELECT pkg__func(args) FROM employees;
-```
-
-**Tests:** PackageFunctionTransformationTest (10/10 passing)
-
-**Schema Qualification:**
-```sql
--- Oracle (unqualified)
-SELECT empno FROM employees;
--- PostgreSQL (qualified)
-SELECT empno FROM hr.employees;
-```
-
-**Tests:** All tests updated to expect schema-qualified names
-
-#### 2.5 Subquery in FROM Clause ✅ COMPLETE
-
-**Implemented:**
-- ✅ Simple subqueries (inline views/derived tables)
-- ✅ Subqueries with WHERE conditions
-- ✅ Nested subqueries (recursively transformed)
-- ✅ Multiple subqueries in same FROM clause
-- ✅ Mixed regular tables and subqueries
-- ✅ Recursive transformation (all transformation rules apply to subquery)
-
-**Oracle allows subqueries in FROM clause:**
-```sql
--- Oracle
-SELECT d.dept_id, d.dept_name
-FROM employees e,
-     (SELECT dept_id, dept_name FROM departments WHERE active = 'Y') d
-WHERE e.dept_id = d.dept_id
-```
-
-**PostgreSQL uses same syntax with schema qualification:**
-```sql
--- PostgreSQL
-SELECT d.dept_id, d.dept_name
-FROM hr.employees e,
-     (SELECT dept_id, dept_name FROM hr.departments WHERE active = 'Y') d
-WHERE e.dept_id = d.dept_id
-```
-
-**Key features:**
-- Subquery SQL is **recursively transformed** (tables qualified, synonyms resolved, outer joins converted, etc.)
-- Subquery must have an **alias** (mandatory in both Oracle and PostgreSQL)
-- **Nested subqueries** work correctly (subquery within subquery)
-- All transformation rules apply to subqueries (schema qualification, type methods, package functions, etc.)
-
-**Tests:** SubqueryFromClauseTransformationTest (13/13 passing)
-
-**Test examples:**
-```sql
--- Simple subquery
-SELECT d.dept_id FROM (SELECT dept_id FROM departments) d
-→ SELECT d . dept_id FROM ( SELECT dept_id FROM hr.departments ) d
-
--- Subquery with WHERE
-SELECT d.dept_id FROM (SELECT dept_id FROM departments WHERE active = 'Y') d
-→ SELECT d . dept_id FROM ( SELECT dept_id FROM hr.departments WHERE active = 'Y' ) d
-
--- Nested subquery (2 levels)
-SELECT outer_alias.dept_id
-FROM (SELECT d.dept_id FROM (SELECT dept_id FROM departments) d) outer_alias
-→ SELECT outer_alias . dept_id FROM ( SELECT d . dept_id FROM ( SELECT dept_id FROM hr.departments ) d ) outer_alias
-
--- Mixed table and subquery
-SELECT e.empno, d.dept_name
-FROM employees e, (SELECT dept_id, dept_name FROM departments) d
-→ SELECT e . empno , d . dept_name FROM hr.employees e , ( SELECT dept_id , dept_name FROM hr.departments ) d
-```
-
-**Implementation:**
-- Extended `VisitTableReference.handleDmlTableExpression()` to detect subqueries
-- Added `handleSubquery()` method that recursively calls `builder.visit(select_statement)`
-- Wraps result in parentheses: `( transformed_subquery )`
-- Alias handling works for both tables and subqueries
-
-#### 2.6 ORDER BY Clause ✅ COMPLETE
-
-**Critical Difference: NULL Ordering**
-
-Oracle and PostgreSQL have **different default NULL ordering** for DESC:
-- **Oracle**: `ORDER BY col DESC` → NULLs come **FIRST** (highest value)
-- **PostgreSQL**: `ORDER BY col DESC` → NULLs come **LAST** (lowest value)
-
-**Solution:** Add explicit `NULLS FIRST` to DESC columns without explicit NULL ordering:
-
-```sql
--- Oracle (implicit NULLs first for DESC)
-SELECT empno FROM employees ORDER BY empno DESC
-
--- PostgreSQL (explicit to match Oracle behavior)
-SELECT empno FROM hr.employees ORDER BY empno DESC NULLS FIRST
-```
-
-**Implemented:**
-- ✅ ASC/DESC ordering (ASC defaults match in both databases)
-- ✅ Automatic `NULLS FIRST` for DESC columns
-- ✅ Explicit NULLS FIRST/LAST clauses (pass through)
-- ✅ Multiple columns with mixed directions
-- ✅ Position-based ordering: `ORDER BY 1, 2`
-- ✅ Expression ordering: `ORDER BY UPPER(ename)`
-- ✅ Works with WHERE clause
-
-**Tests:** OrderByTransformationTest (19/19 passing)
-
-**Test examples:**
-
-```sql
--- Basic DESC (transformation required)
-Oracle:     ORDER BY empno DESC
-PostgreSQL: ORDER BY empno DESC NULLS FIRST
-
--- ASC (no transformation needed - same defaults)
-Oracle:     ORDER BY empno ASC
-PostgreSQL: ORDER BY empno ASC
-
--- Explicit NULL ordering (pass through)
-Oracle:     ORDER BY empno DESC NULLS LAST
-PostgreSQL: ORDER BY empno DESC NULLS LAST
-
--- Multiple columns with mixed directions
-Oracle:     ORDER BY empno DESC, ename ASC, sal DESC
-PostgreSQL: ORDER BY empno DESC NULLS FIRST , ename ASC , sal DESC NULLS FIRST
-
--- Position-based ordering
-Oracle:     ORDER BY 1 DESC, 2 ASC
-PostgreSQL: ORDER BY 1 DESC NULLS FIRST , 2 ASC
-
--- With WHERE clause
-Oracle:     SELECT empno FROM employees WHERE deptno = 10 ORDER BY empno DESC
-PostgreSQL: SELECT empno FROM hr.employees WHERE deptno = 10 ORDER BY empno DESC NULLS FIRST
-```
-
-**Why This Matters:**
-
-Without this transformation, queries that rely on NULL ordering would produce **incorrect results** in PostgreSQL. For example:
-```sql
--- Oracle: Returns records with NULL salaries first, then descending salaries
-SELECT empno, sal FROM employees ORDER BY sal DESC
-
--- PostgreSQL (without fix): Returns descending salaries, then NULL salaries last (WRONG!)
--- PostgreSQL (with fix): Returns NULL salaries first, then descending salaries (CORRECT!)
-```
-
-**Implementation:**
-- `VisitOrderByClause` - Main visitor for ORDER BY clause
-- `VisitQueryBlock` - Adds ORDER BY after WHERE clause
-- Logic: If DESC without explicit NULLS → append ` NULLS FIRST`
-
-#### 2.7 GROUP BY and HAVING ✅ COMPLETE
-
-**Key Insight:** Oracle and PostgreSQL have nearly identical GROUP BY and HAVING syntax, so we use a **pass-through strategy**.
-
-**Implemented:**
-- ✅ GROUP BY with single/multiple columns
-- ✅ Position-based GROUP BY: `GROUP BY 1, 2`
-- ✅ Expression-based GROUP BY: `GROUP BY EXTRACT(YEAR FROM hire_date)`
-- ✅ HAVING clause with simple and complex conditions
-- ✅ Aggregate functions: COUNT(*), COUNT(col), SUM, AVG, MIN, MAX
-- ✅ Additional functions: ROUND, LEAST, GREATEST, COALESCE, EXTRACT
-- ✅ Works with WHERE and ORDER BY clauses in correct order
-
-**Aggregate Functions - Two Grammar Paths:**
-
-Oracle aggregate functions appear in two ANTLR grammar rules:
-1. **numeric_function**: SUM, COUNT, AVG, MAX, ROUND, LEAST, GREATEST
-2. **other_function**: MIN (via over_clause_keyword), COALESCE, EXTRACT
-
-**Pass-Through Strategy:**
-- GROUP BY elements → delegate to expression visitor
-- HAVING conditions → delegate to condition visitor (reuses WHERE logic)
-- Aggregate functions → minimal transformation (identical in Oracle and PostgreSQL)
-
-**Tests:** GroupByTransformationTest (20/20 passing)
-
-**Test examples:**
-
-```sql
--- Single column GROUP BY
-Oracle:     SELECT dept_id, COUNT(*) FROM employees GROUP BY dept_id
-PostgreSQL: SELECT dept_id , COUNT( * ) FROM hr.employees GROUP BY dept_id
-
--- Multiple columns
-Oracle:     SELECT dept_id, job_id, COUNT(*) FROM employees GROUP BY dept_id, job_id
-PostgreSQL: SELECT dept_id , job_id , COUNT( * ) FROM hr.employees GROUP BY dept_id , job_id
-
--- Position-based
-Oracle:     SELECT dept_id, COUNT(*) FROM employees GROUP BY 1
-PostgreSQL: SELECT dept_id , COUNT( * ) FROM hr.employees GROUP BY 1
-
--- HAVING clause
-Oracle:     SELECT dept_id, COUNT(*) FROM employees GROUP BY dept_id HAVING COUNT(*) > 5
-PostgreSQL: SELECT dept_id , COUNT( * ) FROM hr.employees GROUP BY dept_id HAVING COUNT( * ) > 5
-
--- Complex HAVING with AND
-Oracle:     SELECT dept_id, COUNT(*), AVG(salary) FROM employees
-            GROUP BY dept_id HAVING COUNT(*) > 5 AND AVG(salary) > 50000
-PostgreSQL: SELECT dept_id , COUNT( * ) , AVG( salary ) FROM hr.employees
-            GROUP BY dept_id HAVING COUNT( * ) > 5 AND AVG( salary ) > 50000
-
--- All clauses together (correct order: WHERE → GROUP BY → HAVING → ORDER BY)
-Oracle:     SELECT dept_id, COUNT(*) FROM employees
-            WHERE status = 'ACTIVE'
-            GROUP BY dept_id
-            HAVING COUNT(*) > 5
-            ORDER BY COUNT(*) DESC
-PostgreSQL: SELECT dept_id , COUNT( * ) FROM hr.employees
-            WHERE status = 'ACTIVE'
-            GROUP BY dept_id
-            HAVING COUNT( * ) > 5
-            ORDER BY COUNT( * ) DESC NULLS FIRST
-```
-
-**Aggregate Functions Supported:**
-- `COUNT(*)` - Count all rows
-- `COUNT(column)` - Count non-null values
-- `COUNT(DISTINCT column)` - Count distinct values (UNIQUE treated as DISTINCT)
-- `SUM(column)` - Sum values
-- `AVG(column)` - Average values
-- `MIN(column)` - Minimum value
-- `MAX(column)` - Maximum value
-- `ROUND(value, precision)` - Round to precision
-- `LEAST(values...)` - Smallest value
-- `GREATEST(values...)` - Largest value
-
-**Implementation:**
-- `VisitGroupByClause` - Main visitor for GROUP BY clause
-- `VisitHavingClause` - Delegates to condition visitor
-- `VisitNumericFunction` - Handles SUM, COUNT, AVG, MAX, ROUND, LEAST, GREATEST
-- `VisitNumericFunctionWrapper` - Wrapper for numeric functions
-- `VisitOtherFunction` - Handles MIN, COALESCE, EXTRACT
-- `VisitFunctionArgumentAnalytic` - Function argument transformation
-- `VisitQueryBlock` - Adds GROUP BY/HAVING between WHERE and ORDER BY
-
-**Note:** Advanced features like ROLLUP, CUBE, GROUPING SETS are passed through as-is (both databases support them).
-
-#### 2.8 ANSI JOIN Syntax ✅ COMPLETE
-
-**Key Insight:** Oracle and PostgreSQL have **identical** ANSI JOIN syntax! This complements our existing Oracle (+) outer join transformation.
-
-**Implemented:**
-- ✅ INNER JOIN with ON clause
-- ✅ JOIN without INNER keyword (INNER is default)
-- ✅ LEFT [OUTER] JOIN
-- ✅ RIGHT [OUTER] JOIN
-- ✅ FULL [OUTER] JOIN
-- ✅ CROSS JOIN (Cartesian product)
-- ✅ Multiple chained JOINs
-- ✅ Mixed JOIN types (INNER + LEFT in same query)
-- ✅ ON clause with complex conditions (AND, OR, multiple columns)
-- ✅ USING clause (implicit equality join)
-- ✅ JOINs combined with WHERE clause
-
-**Pass-Through Strategy:**
-- JOIN keywords → preserved as-is (identical syntax)
-- Joined tables → schema-qualified automatically
-- ON conditions → transformed using existing condition visitor (reuses WHERE logic)
-- USING clause → passed through unchanged
-
-**Full JOIN Coverage:**
-Now we support BOTH Oracle-specific and standard syntax:
-1. **Oracle (+) syntax** → Converted to ANSI LEFT/RIGHT JOIN (via OuterJoinAnalyzer)
-2. **ANSI JOIN syntax** → Passed through with schema qualification
-
-**Tests:** AnsiJoinTransformationTest (15/15 passing)
-
-**Test examples:**
-
-```sql
--- INNER JOIN
-Oracle:     SELECT e.empno, d.dname FROM employees e
-            INNER JOIN departments d ON e.deptno = d.deptno
-PostgreSQL: SELECT e . empno , d . dname FROM hr.employees e
-            INNER JOIN hr.departments d ON e . deptno = d . deptno
-
--- LEFT JOIN
-Oracle:     SELECT e.empno, d.dname FROM employees e
-            LEFT JOIN departments d ON e.deptno = d.deptno
-PostgreSQL: SELECT e . empno , d . dname FROM hr.employees e
-            LEFT JOIN hr.departments d ON e . deptno = d . deptno
-
--- Multiple JOINs
-Oracle:     SELECT e.empno, d.dname, l.city FROM employees e
-            INNER JOIN departments d ON e.deptno = d.deptno
-            INNER JOIN locations l ON d.location_id = l.location_id
-PostgreSQL: SELECT e . empno , d . dname , l . city FROM hr.employees e
-            INNER JOIN hr.departments d ON e . deptno = d . deptno
-            INNER JOIN hr.locations l ON d . location_id = l . location_id
-
--- Mixed JOIN types
-Oracle:     SELECT e.empno, d.dname, m.ename FROM employees e
-            INNER JOIN departments d ON e.deptno = d.deptno
-            LEFT JOIN employees m ON e.manager_id = m.empno
-PostgreSQL: SELECT e . empno , d . dname , m . ename FROM hr.employees e
-            INNER JOIN hr.departments d ON e . deptno = d . deptno
-            LEFT JOIN hr.employees m ON e . manager_id = m . empno
-
--- JOIN with WHERE
-Oracle:     SELECT e.empno, d.dname FROM employees e
-            INNER JOIN departments d ON e.deptno = d.deptno
-            WHERE e.salary > 50000
-PostgreSQL: SELECT e . empno , d . dname FROM hr.employees e
-            INNER JOIN hr.departments d ON e . deptno = d . deptno
-            WHERE e . salary > 50000
-
--- USING clause
-Oracle:     SELECT e.empno, d.dname FROM employees e
-            INNER JOIN departments d USING (deptno)
-PostgreSQL: SELECT e . empno , d . dname FROM hr.employees e
-            INNER JOIN hr.departments d USING (deptno)
-```
-
-**Implementation:**
-- `VisitTableReference` - Refactored to handle `table_ref = table_ref_aux join_clause*`
-- `processJoinClause()` - Processes ANSI JOIN keywords, table, and ON/USING conditions
-- `processTableRefAux()` - Helper to process single table or subquery with alias
-- Reuses existing condition visitor for ON clause transformation
-
-**Why This Matters:**
-
-Many production Oracle views use a mix of both syntaxes:
-```sql
--- Real-world example: Mix of Oracle (+) and ANSI JOIN
-SELECT e.empno, d.dname, l.city, m.ename
-FROM employees e, departments d
-INNER JOIN locations l ON d.location_id = l.location_id
-LEFT JOIN employees m ON e.manager_id = m.empno
-WHERE e.deptno = d.deptno(+)
-```
-
-We now handle this correctly:
-1. Oracle (+) outer joins → converted to ANSI LEFT/RIGHT JOIN
-2. Existing ANSI JOINs → passed through with schema qualification
-3. All tables → schema-qualified automatically
-
-#### 2.9 Arithmetic Operators and String Concatenation ✅ COMPLETE
-
-**Key Insight:** Oracle and PostgreSQL have **nearly identical** arithmetic operator syntax! The implementation was already complete in VisitConcatenation - we just added comprehensive test coverage.
-
-**Implemented:**
-- ✅ Addition (+) - Same in both databases
-- ✅ Subtraction (-) - Same in both databases
-- ✅ Multiplication (*) - Same in both databases
-- ✅ Division (/) - Same in both databases
-- ✅ Modulo (MOD) - Oracle MOD operator → PostgreSQL MOD() function
-- ✅ Power (**) - Oracle ** → PostgreSQL ^ (transformation needed)
-- ✅ String concatenation (||) - **CRITICAL TRANSFORMATION:** Oracle || → PostgreSQL CONCAT()
-- ✅ Works in SELECT, WHERE, ORDER BY, GROUP BY clauses
-
-**Pass-Through Strategy:**
-- All operators pass through unchanged except:
-  - ** → ^ (power operator)
-  - MOD → MOD() (function call)
-  - || → CONCAT() (NULL-safe concatenation)
-
-**Tests:** ArithmeticOperatorTransformationTest (22/22 passing)
-
-**Test examples:**
-
-```sql
--- Simple multiplication (annual salary)
-Oracle:     SELECT salary * 12 FROM employees
-PostgreSQL: SELECT salary * 12 FROM hr.employees
-
--- Complex arithmetic expression
-Oracle:     SELECT (salary * 12) + bonus - tax FROM employees
-PostgreSQL: SELECT ( salary * 12 ) + bonus - tax FROM hr.employees
-
--- Arithmetic in WHERE clause
-Oracle:     SELECT empno FROM employees WHERE salary * 12 > 100000
-PostgreSQL: SELECT empno FROM hr.employees WHERE salary * 12 > 100000
-
--- Power operator (Oracle ** → PostgreSQL ^)
-Oracle:     SELECT radius ** 2 FROM circles
-PostgreSQL: SELECT radius ^ 2 FROM hr.circles
-
--- MOD operator
-Oracle:     SELECT empno MOD 2 FROM employees
-PostgreSQL: SELECT MOD( empno , 2 ) FROM hr.employees
-
--- String concatenation (CRITICAL NULL HANDLING FIX)
-Oracle:     SELECT first_name || ' ' || last_name FROM employees
-PostgreSQL: SELECT CONCAT( first_name , CONCAT( ' ' , last_name ) ) FROM hr.employees
-
--- Why CONCAT() instead of ||?
--- Oracle ||: NULL treated as empty string ('Hello' || NULL || 'World' = 'HelloWorld')
--- PostgreSQL ||: NULL propagates ('Hello' || NULL || 'World' = NULL) ❌
--- PostgreSQL CONCAT(): NULL treated as empty string (matches Oracle) ✅
-
--- Arithmetic with ORDER BY
-Oracle:     SELECT empno FROM employees ORDER BY salary * 12 DESC
-PostgreSQL: SELECT empno FROM hr.employees ORDER BY salary * 12 DESC NULLS FIRST
-```
-
-**Operator Precedence:**
-- Parentheses preserved for correct evaluation order
-- Works with complex nested expressions
-- Arithmetic precedence follows standard SQL rules (PEMDAS)
-
-**Implementation:**
-- `VisitConcatenation` - Handles all arithmetic and concatenation operators
-- Left-recursive grammar rules for binary operators
-- Delegation to expression visitor for operands
-- Special transformations: ** → ^, MOD → MOD(), || → CONCAT()
-
-**Why String Concatenation Needs CONCAT():**
-
-This is a **critical semantic difference** that prevents data corruption:
-
-```sql
--- Example: Employee full names with middle name (nullable)
-Oracle:     SELECT first_name || ' ' || middle_name || ' ' || last_name FROM employees
-Result:     'John NULL Smith' treated as 'John  Smith' (spaces preserved, NULL ignored)
-
-PostgreSQL ||: 'John' || ' ' || NULL || ' ' || 'Smith' = NULL (entire expression NULL!)
-PostgreSQL CONCAT(): CONCAT(CONCAT(CONCAT('John', ' '), NULL), CONCAT(' ', 'Smith'))
-                   = 'John  Smith' (matches Oracle behavior)
-```
-
-**Without this transformation:**
-- Any string concatenation with nullable columns produces NULL in PostgreSQL
-- Silent data loss in migrated views
-- Reports and queries return incomplete or missing data
-
-**Why This Matters:**
-
-Arithmetic operators enable calculated fields, percentage calculations, date arithmetic, and more:
-```sql
--- Real-world examples
-SELECT
-    salary * 12 AS annual_salary,
-    (commission / salary) * 100 AS commission_pct,
-    months_employed MOD 12 AS months_in_current_year,
-    base_price ** discount_rate AS discounted_price,
-    first_name || ' ' || last_name AS full_name  -- Transformed to CONCAT() for NULL safety
-FROM employees;
-```
-
-**Note:** Column aliases (AS keyword) are not yet implemented - this is a separate feature tracked for future work.
-
----
-
-## Phase 2 COMPLETE! 🎉
-
-Phase 2 is now **100% complete** with full SELECT statement support:
-- ✅ All SQL clauses (SELECT, FROM, WHERE, GROUP BY, HAVING, ORDER BY)
-- ✅ All JOIN types (implicit, Oracle (+), ANSI)
-- ✅ Arithmetic operators (+, -, *, /, MOD, **)
-- ✅ String concatenation (|| → CONCAT() for NULL-safe Oracle behavior)
-- ✅ Subqueries in FROM clause
-- ✅ Aggregate functions
-- ✅ Type methods and package functions
-- ✅ Schema qualification and synonym resolution
-
-**270 tests passing across 19 test classes**
-
-The transformer is now **production-ready for ~90% of typical Oracle views**!
-
----
-
-### Phase 3: Oracle-Specific Functions ⏳ NOT STARTED
-
-**Planned transformations:**
-
-```sql
--- NVL → COALESCE
-SELECT NVL(commission, 0) FROM emp;
-→ SELECT COALESCE(commission, 0) FROM emp;
-
--- DECODE → CASE WHEN
-SELECT DECODE(deptno, 10, 'A', 20, 'B', 'C') FROM emp;
-→ SELECT CASE deptno WHEN 10 THEN 'A' WHEN 20 THEN 'B' ELSE 'C' END FROM emp;
-
--- SYSDATE → CURRENT_TIMESTAMP
-SELECT SYSDATE FROM DUAL;
-→ SELECT CURRENT_TIMESTAMP;
-
--- ROWNUM → row_number()
-SELECT empno FROM emp WHERE ROWNUM <= 10;
-→ SELECT empno FROM (SELECT empno, row_number() OVER () as rn FROM emp) WHERE rn <= 10;
-
--- Sequence syntax
-SELECT emp_seq.NEXTVAL FROM DUAL;
-→ SELECT nextval('hr.emp_seq');
-
--- DUAL table handling
-SELECT 1 + 1 FROM DUAL;
-→ SELECT 1 + 1;  (remove FROM clause)
-```
-
-**Functions to implement:**
-- NVL, NVL2 → COALESCE
-- DECODE → CASE WHEN
-- SYSDATE → CURRENT_TIMESTAMP
-- ROWNUM → row_number() OVER ()
-- SUBSTR → SUBSTRING
-- INSTR → POSITION
-- TO_DATE → TO_TIMESTAMP (with format conversion)
-- Sequence syntax (seq.NEXTVAL, seq.CURRVAL)
-- DUAL table removal
+### Phase 3: Oracle-Specific Functions ✅ ~90% COMPLETE
+
+Oracle-specific transformations for functions, pseudo-columns, and special syntax (237 tests).
+
+**Completed:**
+- NVL → COALESCE - VisitStringFunction (8 tests)
+- SYSDATE → CURRENT_TIMESTAMP - VisitGeneralElement (6 tests)
+- DECODE → CASE WHEN - VisitStringFunction (10 tests)
+- Column aliases - VisitSelectListElement (18 tests)
+- CASE expressions (END CASE → END) - VisitCaseExpression (17 tests)
+- TO_CHAR (format code transformations) - VisitStringFunction (21 tests)
+- Subqueries (FROM, SELECT list, WHERE IN/EXISTS/ANY/ALL) - VisitAtom, VisitQuantifiedExpression (9 tests)
+- Set operations (MINUS → EXCEPT) - VisitSubquery (12 tests)
+- FROM DUAL (omit FROM clause) - VisitQueryBlock (16 tests)
+- SUBSTR → SUBSTRING (FROM/FOR syntax) - VisitStringFunction (18 tests)
+- TO_DATE → TO_TIMESTAMP - VisitStringFunction (17 tests)
+- TRIM - VisitStringFunction (19 tests)
+- Window functions (OVER clause) - VisitOverClause (31 tests)
+- ROWNUM → LIMIT (Phase 1: simple patterns) - RownumAnalyzer, RownumContext (16 tests)
+- Sequences (seq.NEXTVAL → nextval()) - VisitGeneralElement (19 tests)
+
+**Remaining:**
+- ROWNUM Phase 2-4: SELECT list, BETWEEN, complex expressions
+- Unary operators (+, -)
+- CHR function
 
 ---
 
 ### Phase 4: Integration with Migration Jobs ✅ COMPLETE
 
-**Status:** ✅ PostgresViewImplementationJob is integrated and running in production pipeline
-
-**What works:**
-- ViewTransformationService extracts Oracle view SQL from ALL_VIEWS.TEXT
-- PostgresViewImplementationJob replaces stubs with transformed SQL
-- Uses CREATE OR REPLACE VIEW (preserves dependencies correctly)
-
-**Current success rate:** ~20% of views transform successfully in real-world databases
-
-**Remaining issues to address:**
-- Missing CASE expression support
-- Function signature mismatches
-- Additional Oracle-specific syntax not yet implemented
-- Column aliases (AS keyword) - next priority
-
----
+- **PostgresViewImplementationJob** replaces view stubs with transformed SQL
+- Uses CREATE OR REPLACE VIEW (preserves dependencies - critical for two-phase architecture)
+- SqlTransformationService extracts Oracle view SQL from ALL_VIEWS.TEXT
+- Success rate: ~20% initially → expected ~98% with Phase 3 completion
 
 ### Phase 5: PL/SQL Functions/Procedures ⏳ FUTURE
 
-**Goal:** Extend to PL/SQL function/procedure bodies
-
-**Approach:** Reuse PostgresCodeBuilder with different entry points
-
-```java
-public String visitFunction_body(PlSqlParser.Function_bodyContext ctx) {
-    return VisitFunctionBody.v(ctx, this);
-}
-```
-
-**New visitor helpers needed:**
-- VisitFunctionBody / VisitProcedureBody
-- VisitDeclareSection (variable declarations)
-- VisitIfStatement (IF-THEN-ELSIF-ELSE)
-- VisitLoopStatement (FOR/WHILE loops)
-- VisitCursorDeclaration
-- VisitExceptionHandler
+Extend PostgresCodeBuilder with new visitors for PL/SQL control flow: VisitFunctionBody, VisitDeclareSection, VisitIfStatement, VisitLoopStatement, VisitCursorDeclaration, VisitExceptionHandler
 
 ---
 
 ## Testing
 
-### Test Organization
+### Test Organization (30 test classes, 507 tests)
 
-```
-src/test/java/.../transformer/
-├── SimpleSelectTransformationTest.java          (6 tests)
-├── SelectStarTransformationTest.java            (10 tests)
-├── TableAliasTransformationTest.java            (9 tests)
-├── SynonymResolutionTransformationTest.java     (7 tests)
-├── ExpressionBuildingBlocksTest.java            (24 tests)
-├── PackageFunctionTransformationTest.java       (10 tests)
-├── TypeMemberMethodTransformationTest.java      (8 tests)
-├── OuterJoinTransformationTest.java             (17 tests)
-├── SubqueryFromClauseTransformationTest.java    (13 tests)
-├── SubqueryComprehensiveTest.java               (9 tests) ← Session 11
-├── SetOperationsTransformationTest.java         (12 tests) ← Session 11
-├── FromDualTransformationTest.java              (16 tests) ← Session 12
-├── SubstrTransformationTest.java                (15 tests) ← Session 13
-├── SubstrTransformationDebugTest.java           (3 tests) ← Session 13 debug
-├── ToDateTransformationTest.java                (17 tests) ← Session 14
-├── TrimTransformationTest.java                  (19 tests) ← Session 15
-├── OrderByTransformationTest.java               (19 tests)
-├── GroupByTransformationTest.java               (20 tests)
-├── AnsiJoinTransformationTest.java              (15 tests)
-├── ArithmeticOperatorTransformationTest.java    (22 tests)
-├── OracleFunctionTransformationTest.java        (23 tests) ← NVL, SYSDATE, DECODE
-├── ColumnAliasTransformationTest.java           (18 tests)
-├── CaseExpressionTransformationTest.java        (17 tests)
-├── ToCharTransformationTest.java                (21 tests)
-├── SequenceTransformationTest.java              (19 tests) ← Session 18
-├── AntlrParserTest.java                         (15 tests)
-├── integration/
-│   └── ViewTransformationIntegrationTest.java   (7 tests)
-└── service/
-    └── ViewTransformationServiceTest.java       (24 tests)
-```
+**Foundation:** AntlrParserTest (15), SqlTransformationServiceTest (24), ViewTransformationIntegrationTest (7)
+**Basic SELECT:** SimpleSelect (6), SelectStar (10), TableAlias (9), SynonymResolution (7), ExpressionBuildingBlocks (24)
+**Advanced Features:** PackageFunction (10), TypeMemberMethod (8), OuterJoin (17), SubqueryFromClause (13)
+**Operators:** Arithmetic (22), OrderBy (19), GroupBy (20), AnsiJoin (15)
+**Oracle Functions:** NVL/SYSDATE/DECODE (23), ColumnAlias (18), CaseExpression (17), TO_CHAR (21), SUBSTR (18), TO_DATE (17), TRIM (19)
+**Complex Features:** SubqueryComprehensive (9), SetOperations (12), FromDual (16), WindowFunctions (31), ROWNUM (16), Sequences (19)
 
-### Test Coverage
+### Coverage Summary
 
-**Current:** 507/507 tests passing across 30 test classes
-
-**Coverage:**
-- Parser: 100%
-- Expression hierarchy: 100% for implemented features
-- WHERE clause: 100%
-- ORDER BY clause: 100%
-- GROUP BY and HAVING: 100%
-- Aggregate functions: 100% (COUNT, SUM, AVG, MIN, MAX, ROUND, LEAST, GREATEST)
-- ANSI JOINs: 100% (INNER, LEFT, RIGHT, FULL, CROSS)
-- Arithmetic operators: 100% (+, -, *, /, MOD, **)
-- String concatenation: 100% (|| → CONCAT() with NULL handling tests)
-- Oracle (+) outer joins: 100%
-- **Subqueries:** 100% (FROM clause, SELECT list, WHERE IN/EXISTS/scalar/ANY/ALL)
-- **Set operations:** 100% (UNION, UNION ALL, INTERSECT, MINUS → EXCEPT)
-- **FROM DUAL handling:** 100% (Omit FROM clause for scalar expressions)
-- **SUBSTR → SUBSTRING:** 100% (String extraction with FROM/FOR keyword syntax)
-- **TO_DATE → TO_TIMESTAMP:** 100% (Date parsing with format code transformations)
-- **TRIM function:** 100% (String whitespace/character removal - pass-through syntax)
-- **Window functions (OVER clause):** 100% (ROW_NUMBER, RANK, DENSE_RANK, LEAD, LAG, FIRST_VALUE, LAST_VALUE, aggregates with OVER)
-- **ROWNUM → LIMIT:** 94% (Simple patterns complete, edge cases documented for future phases)
-- **Sequence syntax:** 100% (NEXTVAL → nextval(), CURRVAL → currval() with schema qualification)
-- Type methods: 100%
-- Package functions: 100%
-- **Oracle-specific functions:** 100% (NVL → COALESCE, SYSDATE → CURRENT_TIMESTAMP, DECODE → CASE WHEN, TO_CHAR, TO_DATE, SUBSTR → SUBSTRING, TRIM)
-- **Column aliases:** 100% (AS keyword, quoted aliases, implicit aliases)
-- **CASE expressions:** 100% (searched CASE, simple CASE, nested, in all contexts)
-- **TO_CHAR function:** 100% (date formats, number formats, format code transformations, NLS parameter handling)
-- Service integration: 100%
+**100% coverage** for all implemented features: Parser, expression hierarchy, WHERE/ORDER BY/GROUP BY, JOINs, arithmetic, Oracle functions (NVL, SYSDATE, DECODE, TO_CHAR, TO_DATE, SUBSTR, TRIM), subqueries, set operations, window functions, type methods, package functions, schema qualification, synonym resolution
 
 ---
 
 ## Next Steps
 
-### 🎯 Recommended Next Step: Oracle-Specific Functions
+### Realistic Roadmap to 80-90% Real-World Coverage
 
-**Why Oracle functions should be next:**
+**Phase 3A: Quick Wins (1-2 days)** 🟢
+1. Unary operators (+, -) - 5 minutes
+2. CHR function - 10 minutes
+3. ROWNUM advanced patterns - 1-2 days
+4. TO_NUMBER, CAST - 1 day
 
-1. **High Business Value** ✅
-   - NVL, DECODE, SYSDATE are extremely common in production Oracle views
-   - These are blocking transformations - views won't work without them
-   - Arithmetic and JOINs are complete, so this fills a critical gap
+**Phase 3B: CTEs (4-5 days)** 🔴 **CRITICAL**
+1. Non-recursive CTEs (WITH clause) - 2-3 days
+   - Parse `with_clause` and `subquery_factoring_clause`
+   - Pass-through strategy (mostly compatible)
+   - Handle column aliases in CTE definitions
+2. Recursive CTEs - 2 days
+   - Detect UNION ALL pattern
+   - Verify recursive reference
+   - Add RECURSIVE keyword for PostgreSQL
 
-2. **Natural Progression** ✅
-   - We have a solid foundation with 284 passing tests
-   - Expression infrastructure is complete (11-level hierarchy)
-   - Can implement as new visitor helpers (same pattern)
-   - NVL and SYSDATE already complete!
+**Phase 3C: Common Functions (7-9 days)** 🟡
+1. Date/Time Functions - 3-5 days
+   - ADD_MONTHS, MONTHS_BETWEEN, NEXT_DAY, LAST_DAY
+   - TRUNC(date), ROUND(date)
+   - INTERVAL expressions
+2. String Functions - 3-4 days
+   - INSTR → POSITION/STRPOS
+   - LPAD, RPAD (mostly compatible)
+   - TRANSLATE (compatible)
+   - REGEXP functions (mostly compatible with syntax adjustments)
 
-3. **Implementation Order:**
-   - ✅ **NVL → COALESCE** (COMPLETE) - Simplest, high-impact
-   - ✅ **SYSDATE → CURRENT_TIMESTAMP** (COMPLETE) - Direct replacement
-   - ✅ **DECODE → CASE WHEN** (COMPLETE) - More complex transformation
-   - ⏳ **ROWNUM → row_number()** (2-3 days) - Requires subquery wrapper
-   - ⏳ **Sequence syntax** (1-2 days) - seq.NEXTVAL → nextval('schema.seq')
+**Phase 3D: CONNECT BY (5-7 days)** 🔴 **HIGH COMPLEXITY**
+1. Hierarchical query detection - 1 day
+2. Convert to recursive CTE structure - 2-3 days
+   - START WITH → base case
+   - CONNECT BY → recursive case with JOIN
+   - PRIOR operator → reference to recursive CTE
+3. LEVEL pseudo-column - 1 day
+4. CONNECT_BY_ROOT, SYS_CONNECT_BY_PATH - 2 days
 
-**Completed Major Features:**
-- ✅ **Column Aliases (AS keyword)** - COMPLETE! Now works for all SELECT list elements
-- ✅ **CASE expressions** - COMPLETE! Both searched and simple CASE
-- ✅ **Subqueries in SELECT/WHERE** - COMPLETE! All subquery locations now supported
-- ✅ **Set operations** - COMPLETE! UNION, UNION ALL, INTERSECT, MINUS → EXCEPT
+**Phase 3E: Advanced Analytics (3-4 days)** 🟡
+1. LISTAGG - 1-2 days
+   - Oracle: `LISTAGG(col, ',') WITHIN GROUP (ORDER BY ...)`
+   - PostgreSQL: `STRING_AGG(col, ',' ORDER BY ...)`
+2. KEEP clause - 2 days
+   - Requires transformation to subquery with window functions
 
-**Completed High-Priority Features:**
-1. ✅ **FROM DUAL handling** (Session 12 - COMPLETE) - Very common: `SELECT SYSDATE FROM DUAL` → `SELECT CURRENT_TIMESTAMP`
-2. ✅ **SUBSTR → SUBSTRING** (Session 13 - COMPLETE) - Extremely common string function: `SUBSTR(str, 1, 10)` → `SUBSTRING(str FROM 1 FOR 10)`
-3. ✅ **TO_DATE → TO_TIMESTAMP** (Session 14 - COMPLETE) - Common date parsing: `TO_DATE(str, 'YYYY-MM-DD')` → `TO_TIMESTAMP(str, 'YYYY-MM-DD')`
-4. ✅ **TRIM function** (Session 15 - COMPLETE) - Common string whitespace removal: `TRIM(str)` → `TRIM(str)` (pass-through)
-5. ⏳ **Window functions** (Session 16 - NEXT) - ROW_NUMBER, RANK, LAG, LEAD for analytics
+**Phase 3F: PIVOT/UNPIVOT (4-5 days)** 🟡
+- Complex transformation to CASE WHEN or crosstab
+- May defer to later phase
 
-**Progress:** ✅ NVL/SYSDATE → ✅ DECODE → ✅ Column Aliases → ✅ CASE expressions → ✅ Subqueries → ✅ Set Operations → ✅ FROM DUAL → ✅ SUBSTR → ✅ TO_DATE → ✅ TRIM
+### Coverage Milestones
 
----
+- **After Phase 3A (Quick Wins):** ~50% → ~55% real-world coverage
+- **After Phase 3B (CTEs):** ~55% → ~75% real-world coverage 🎯
+- **After Phase 3C (Common Functions):** ~75% → ~85% real-world coverage 🎯
+- **After Phase 3D (CONNECT BY):** ~85% → ~90% real-world coverage 🎯
+- **After Phase 3E (Advanced Analytics):** ~90% → ~92% real-world coverage
+- **After Phase 3F (PIVOT/UNPIVOT):** ~92% → ~95% real-world coverage
 
-### Remaining Phase 2/3 Tasks
+### Recommended Priority Order
 
-**Phase 2 Complete:** ✅
-- ✅ All SQL clauses (SELECT, FROM, WHERE, GROUP BY, HAVING, ORDER BY)
-- ✅ All JOIN types (implicit, Oracle (+), ANSI)
-- ✅ Arithmetic operators (+, -, *, /, MOD, **)
-- ✅ String concatenation (|| → CONCAT() for NULL safety)
-- ✅ Aggregate functions
-- ✅ Subqueries in FROM clause
+1. **Start with CTEs (Phase 3B)** - Highest ROI
+   - Unlocks 40-60% of currently failing views
+   - Moderate complexity (non-recursive is straightforward)
+   - Foundation for CONNECT BY transformation
 
-**Phase 3 - Oracle-Specific Features:**
+2. **Then Common Functions (Phase 3C)** - High ROI
+   - Unlocks another 20-30% of views
+   - Many are simple transformations or pass-through
 
-1. ✅ **NVL → COALESCE** (COMPLETE)
-   - Oracle: `NVL(commission, 0)`
-   - PostgreSQL: `COALESCE(commission, 0)`
-   - Implementation: VisitStringFunction
-   - Tests: 8 comprehensive tests
+3. **Then CONNECT BY (Phase 3D)** - High ROI but complex
+   - Unlocks 10-20% of views
+   - Builds on CTE infrastructure
+   - Most complex transformation in the roadmap
 
-2. ✅ **SYSDATE → CURRENT_TIMESTAMP** (COMPLETE)
-   - Oracle: `SYSDATE`
-   - PostgreSQL: `CURRENT_TIMESTAMP`
-   - Implementation: VisitGeneralElement.handleSimplePart()
-   - Tests: 6 comprehensive tests
-
-3. ✅ **DECODE → CASE WHEN** (COMPLETE)
-   - Oracle: `DECODE(deptno, 10, 'A', 20, 'B', 'C')`
-   - PostgreSQL: `CASE deptno WHEN 10 THEN 'A' WHEN 20 THEN 'B' ELSE 'C' END`
-   - Implementation: VisitStringFunction (lines 46-100)
-   - Handles variable arguments, optional default value
-   - Tests: 10 comprehensive tests
-
-4. **ROWNUM → row_number()** (2-3 days)
-   - Requires subquery wrapper
-   - Oracle: `WHERE ROWNUM <= 10`
-   - PostgreSQL: `WHERE rn <= 10` (with row_number() OVER () in subquery)
-
-5. **Sequence syntax** (1-2 days)
-   - Oracle: `emp_seq.NEXTVAL`
-   - PostgreSQL: `nextval('hr.emp_seq')`
-
-6. ✅ **Subqueries in SELECT/WHERE** (COMPLETE)
-   - Scalar subqueries: `SELECT (SELECT dname FROM dept WHERE deptno = e.deptno) FROM emp e`
-   - IN subqueries: `WHERE deptno IN (SELECT deptno FROM dept WHERE loc = 'NY')`
-   - EXISTS: `WHERE EXISTS (SELECT 1 FROM ...)`
-   - ANY/ALL: `WHERE salary > ALL (SELECT salary FROM emp WHERE deptno = 10)`
-   - Correlated subqueries
-
-7. ✅ **Set Operations** (COMPLETE)
-   - UNION, UNION ALL, INTERSECT (pass-through)
-   - MINUS → EXCEPT (transformation)
-
-### Phase 3 (Oracle Functions)
-
-1. **NVL → COALESCE** (simplest transformation)
-2. **SYSDATE → CURRENT_TIMESTAMP**
-3. **DUAL table handling**
-4. **DECODE → CASE WHEN** (complex)
-5. **ROWNUM → row_number()** (complex - requires subquery wrapper)
-6. **Sequence syntax** (seq.NEXTVAL → nextval('schema.seq'))
-7. **String functions** (SUBSTR, INSTR, etc.)
-
-### Phase 4 (Integration)
-
-1. **Oracle view SQL extraction** from ALL_VIEWS.TEXT
-2. **PostgresViewImplementationJob** implementation
-3. **Error handling and reporting**
-4. **Success metrics tracking**
+4. **Finally Advanced Features (Phase 3E-F)** - Diminishing returns
+   - Smaller impact per unit of effort
+   - Can be deferred if needed
 
 ---
 
 ## Conclusion
 
-The Oracle to PostgreSQL SQL transformation module has achieved **Phase 2 COMPLETE (100%)** with a solid, tested foundation:
+### Current Status (Honest Assessment)
 
-**Strengths:**
-- ✅ **507 tests passing** - comprehensive coverage across 30 test classes
-- ✅ **Direct AST approach** - simple, fast, maintainable
-- ✅ **Static helper pattern** - scalable to 400+ ANTLR rules
-- ✅ **Proper boundaries** - TransformationContext maintains clean separation
-- ✅ **Incremental delivery** - features added progressively
-- ✅ **Production-ready core** - Complete SELECT statement transformation with all common features
-- ✅ **Semantic correctness** - Critical NULL handling fixes (CONCAT, NVL)
-- ✅ **Oracle-specific patterns** - FROM DUAL, SUBSTR, NVL, SYSDATE, DECODE, TO_CHAR, Sequences fully implemented
+**Architecture Strengths:**
+- ✅ Direct AST approach (simple, fast, maintainable)
+- ✅ 37 static visitor helpers (scalable, testable)
+- ✅ Clean boundaries via TransformationContext
+- ✅ 507/507 tests passing across 30 test classes
+- ✅ Solid foundation for incremental feature additions
 
-**Phase 2 Complete - 100%:**
-- ✅ All SQL clauses (SELECT, FROM, WHERE, GROUP BY, HAVING, ORDER BY)
-- ✅ All JOIN types (implicit, Oracle (+), ANSI)
-- ✅ Arithmetic operators (+, -, *, /, MOD, **)
-- ✅ String concatenation (|| → CONCAT() for NULL-safe Oracle behavior)
-- ✅ Aggregate functions (COUNT, SUM, AVG, MIN, MAX, ROUND, LEAST, GREATEST)
-- ✅ **Subqueries in all locations** (FROM, SELECT list, WHERE IN/EXISTS/scalar/ANY/ALL)
-- ✅ **Set operations** (UNION, UNION ALL, INTERSECT, MINUS → EXCEPT)
-- ✅ Type member methods and package functions
-- ✅ Schema qualification and synonym resolution
+**What Works Well:**
+- ✅ **Phase 2 (100% Complete):** Full SELECT support - all clauses, JOINs, operators, aggregates, subqueries, set operations
+- ✅ **Phase 3 Core (~50% Complete):** NVL, SYSDATE, DECODE, TO_CHAR, TO_DATE, SUBSTR, TRIM, window functions, ROWNUM→LIMIT, sequences, type methods, package functions
+- ✅ **Phase 4 (Complete):** PostgresViewImplementationJob integrated with CREATE OR REPLACE VIEW
 
-**Phase 3 In Progress - Major Features Complete:**
-- ✅ FROM DUAL handling (omit FROM clause for scalar expressions)
-- ✅ SUBSTR → SUBSTRING transformation (string extraction with FROM/FOR keyword syntax)
-- ✅ NVL → COALESCE transformation
-- ✅ SYSDATE → CURRENT_TIMESTAMP transformation
-- ✅ DECODE → CASE WHEN transformation
-- ✅ Column aliases (AS keyword support)
-- ✅ CASE expressions (searched and simple)
-- ✅ TO_CHAR function (date/number formatting with format code transformations)
-- ✅ **Subqueries** (all locations: FROM, SELECT list, WHERE IN/EXISTS/scalar/ANY/ALL)
-- ✅ **Set operations** (UNION, UNION ALL, INTERSECT, MINUS → EXCEPT)
+**Coverage Reality Check:**
+- **Simple Oracle views** (basic SELECT, no CTEs, no CONNECT BY): ~**95% coverage** ✅
+- **Real-world Oracle views** (with CTEs, CONNECT BY, advanced functions): ~**40-50% coverage** ⚠️
 
-**Next milestones:**
-1. **Completed Features** ✅
-   - ✅ NVL → COALESCE
-   - ✅ SYSDATE → CURRENT_TIMESTAMP
-   - ✅ DECODE → CASE WHEN
-   - ✅ Column Aliases (AS keyword)
-   - ✅ CASE expressions (searched and simple)
-   - ✅ TO_CHAR function (date/number formatting)
-   - ✅ Subqueries (all locations)
-   - ✅ Set operations (UNION, INTERSECT, MINUS → EXCEPT)
-   - ✅ FROM DUAL handling (Session 12)
-   - ✅ SUBSTR → SUBSTRING (Session 13)
-   - ✅ TO_DATE → TO_TIMESTAMP (Session 14)
-   - ✅ TRIM function (Session 15)
-   - ✅ Window functions (OVER clause) (Session 16)
-   - ✅ ROWNUM → LIMIT (Session 17 - Phase 1)
-   - ✅ Sequence syntax (Session 18)
+**Critical Gaps Blocking Production Use:**
+1. 🔴 **CTEs (WITH clause)** - 0% implemented, used in 40-60% of complex views
+2. 🔴 **CONNECT BY** - 0% implemented, used in 10-20% of views
+3. 🟡 **Common date/string functions** - 0% implemented, used in 20-30% of views
 
-2. **Next High-Priority Features** - Based on comprehensive code review (Session 12)
-   - ⏳ **Unary operators** - Negative numbers (-5), positive prefix (+value)
-   - ⏳ **ROWNUM advanced patterns** (Phase 2-4) - ROWNUM in SELECT, BETWEEN, complex expressions
-   - ⏳ **CHR function** - Character code to character conversion
+**Path to Production Readiness:**
+- **After CTEs implementation:** ~75% real-world coverage (4-5 days)
+- **After common functions:** ~85% real-world coverage (+7-9 days)
+- **After CONNECT BY:** ~90% real-world coverage (+5-7 days)
 
-**Current transformer handles ~98% of typical Oracle view syntax:**
-- Complete SELECT statement structure
-- All common operators and functions
-- Complex joins (both Oracle and ANSI syntax)
-- Calculated fields and string operations
-- Grouping and aggregation
-- Subqueries in all locations
-- Set operations (UNION, INTERSECT, MINUS)
-- Proper NULL handling and schema qualification
+**Total estimated effort to 90% coverage:** ~16-21 days
 
-The architecture is proven, the tests are comprehensive, and the transformer now handles the vast majority of real-world Oracle view syntax.
+**Recommendation:** Implement CTEs first (highest ROI) - will immediately unlock 40-60% of currently failing views
 
 ---
 
