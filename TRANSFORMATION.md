@@ -1,7 +1,7 @@
 # Oracle to PostgreSQL SQL Transformation
 
 **Last Updated:** 2025-10-20
-**Status:** Phase 2 COMPLETE, Phase 3 IN PROGRESS (FROM DUAL, SUBSTR, TO_DATE, Subqueries, Set Operations, NVL, SYSDATE, DECODE, Column Aliases, CASE Expressions, TO_CHAR) - 421 tests passing ✅
+**Status:** Phase 2 COMPLETE, Phase 3 IN PROGRESS (FROM DUAL, SUBSTR, TO_DATE, TRIM, Subqueries, Set Operations, NVL, SYSDATE, DECODE, Column Aliases, CASE Expressions, TO_CHAR) - 440 tests passing ✅
 
 This document describes the ANTLR-based transformation module that converts Oracle SQL to PostgreSQL-compatible SQL using a direct AST-to-code approach.
 
@@ -233,6 +233,37 @@ This document describes the ANTLR-based transformation module that converts Orac
 - 17 new tests added (404 → 421 total)
 - **Achievement:** TO_DATE fully supported - critical for date parsing in Oracle views!
 
+**Session 15: TRIM Function** ✅
+- **TRIM function transformation** (newly implemented)
+  - Oracle and PostgreSQL have **nearly identical** TRIM syntax - pass-through strategy!
+  - Both support: LEADING, TRAILING, BOTH keywords
+  - Both support: custom trim characters
+  - Oracle: `TRIM([LEADING|TRAILING|BOTH] ['x'] FROM string)`
+  - PostgreSQL: `TRIM([LEADING|TRAILING|BOTH] ['x'] FROM string)` -- identical!
+  - **Implementation:**
+    - Modified VisitStringFunction.java to transform TRIM calls (lines 242-285)
+    - Grammar: `TRIM '(' ((LEADING | TRAILING | BOTH)? expression? FROM)? concatenation ')'`
+    - Handles all TRIM variations:
+      - Simple: `TRIM(string)` - removes leading and trailing spaces
+      - Directional: `TRIM(LEADING FROM string)`, `TRIM(TRAILING FROM string)`, `TRIM(BOTH FROM string)`
+      - Custom character: `TRIM('x' FROM string)`
+      - Combined: `TRIM(LEADING '0' FROM account_number)`
+    - **Pass-through strategy:** Syntax is identical, minimal transformation needed
+  - Comprehensive test coverage: 19 tests (TrimTransformationTest)
+    - Basic forms (default behavior, string literals)
+    - LEADING/TRAILING/BOTH keywords
+    - Custom trim characters (single character removal)
+    - Combined directional + custom character
+    - Column references (simple and qualified)
+    - WHERE/ORDER BY clause usage
+    - Column aliases
+    - Multiple TRIM calls in SELECT list
+    - Case variations (TRIM, trim, Trim)
+    - FROM DUAL integration
+    - Nested functions (TRIM with UPPER, UPPER with TRIM)
+- 19 new tests added (421 → 440 total)
+- **Achievement:** TRIM fully supported - one of the most common Oracle string functions!
+
 ---
 
 ## Table of Contents
@@ -335,9 +366,10 @@ Oracle SQL → ANTLR Parser → PostgresCodeBuilder → PostgreSQL SQL
 - ✅ **Synonym resolution**: Synonyms resolved to actual table names
 - ✅ **TO_CHAR function**: Date/number formatting with format code transformations
 - ✅ **TO_DATE function**: Date parsing with TO_TIMESTAMP transformation
+- ✅ **TRIM function**: String whitespace/character removal (pass-through syntax)
 - ✅ **FROM DUAL handling**: Omit FROM clause for scalar expressions
 
-**Tests: 421/421 passing across 27 test classes**
+**Tests: 440/440 passing across 28 test classes**
 
 ### What's Not Yet Implemented ⏳
 
@@ -350,8 +382,8 @@ Oracle SQL → ANTLR Parser → PostgresCodeBuilder → PostgreSQL SQL
 - ✅ Subqueries in all locations (COMPLETE - FROM, SELECT list, WHERE IN/EXISTS/scalar/ANY/ALL)
 - ✅ Set operations (COMPLETE - UNION, UNION ALL, INTERSECT, MINUS → EXCEPT)
 - ✅ **TO_DATE → TO_TIMESTAMP** (Session 14 - COMPLETE) - Common date parsing
-- ⏳ **TRIM function** (Session 15 - NEXT) - Common string operation
-- ⏳ **Window functions (OVER clause)** - ROW_NUMBER, RANK, LAG, LEAD for analytics
+- ✅ **TRIM function** (Session 15 - COMPLETE) - Common string operation
+- ⏳ **Window functions (OVER clause)** (Session 16 - NEXT) - ROW_NUMBER, RANK, LAG, LEAD for analytics
 - ⏳ ROWNUM → row_number() OVER ()
 - ⏳ Sequence syntax (seq.NEXTVAL → nextval('schema.seq'))
 - ⏳ Unary operators (+, -) if needed
@@ -1207,6 +1239,7 @@ src/test/java/.../transformer/
 ├── SubstrTransformationTest.java                (15 tests) ← Session 13
 ├── SubstrTransformationDebugTest.java           (3 tests) ← Session 13 debug
 ├── ToDateTransformationTest.java                (17 tests) ← Session 14
+├── TrimTransformationTest.java                  (19 tests) ← Session 15
 ├── OrderByTransformationTest.java               (19 tests)
 ├── GroupByTransformationTest.java               (20 tests)
 ├── AnsiJoinTransformationTest.java              (15 tests)
@@ -1224,7 +1257,7 @@ src/test/java/.../transformer/
 
 ### Test Coverage
 
-**Current:** 421/421 tests passing across 27 test classes
+**Current:** 440/440 tests passing across 28 test classes
 
 **Coverage:**
 - Parser: 100%
@@ -1242,9 +1275,10 @@ src/test/java/.../transformer/
 - **FROM DUAL handling:** 100% (Omit FROM clause for scalar expressions)
 - **SUBSTR → SUBSTRING:** 100% (String extraction with FROM/FOR keyword syntax)
 - **TO_DATE → TO_TIMESTAMP:** 100% (Date parsing with format code transformations)
+- **TRIM function:** 100% (String whitespace/character removal - pass-through syntax)
 - Type methods: 100%
 - Package functions: 100%
-- **Oracle-specific functions:** 100% (NVL → COALESCE, SYSDATE → CURRENT_TIMESTAMP, DECODE → CASE WHEN, TO_CHAR, TO_DATE, SUBSTR → SUBSTRING)
+- **Oracle-specific functions:** 100% (NVL → COALESCE, SYSDATE → CURRENT_TIMESTAMP, DECODE → CASE WHEN, TO_CHAR, TO_DATE, SUBSTR → SUBSTRING, TRIM)
 - **Column aliases:** 100% (AS keyword, quoted aliases, implicit aliases)
 - **CASE expressions:** 100% (searched CASE, simple CASE, nested, in all contexts)
 - **TO_CHAR function:** 100% (date formats, number formats, format code transformations, NLS parameter handling)
@@ -1286,10 +1320,10 @@ src/test/java/.../transformer/
 1. ✅ **FROM DUAL handling** (Session 12 - COMPLETE) - Very common: `SELECT SYSDATE FROM DUAL` → `SELECT CURRENT_TIMESTAMP`
 2. ✅ **SUBSTR → SUBSTRING** (Session 13 - COMPLETE) - Extremely common string function: `SUBSTR(str, 1, 10)` → `SUBSTRING(str FROM 1 FOR 10)`
 3. ✅ **TO_DATE → TO_TIMESTAMP** (Session 14 - COMPLETE) - Common date parsing: `TO_DATE(str, 'YYYY-MM-DD')` → `TO_TIMESTAMP(str, 'YYYY-MM-DD')`
-4. ⏳ **TRIM function** (Session 15 - NEXT) - Common string whitespace removal
-5. ⏳ **Window functions** (Future) - ROW_NUMBER, RANK, LAG, LEAD for analytics
+4. ✅ **TRIM function** (Session 15 - COMPLETE) - Common string whitespace removal: `TRIM(str)` → `TRIM(str)` (pass-through)
+5. ⏳ **Window functions** (Session 16 - NEXT) - ROW_NUMBER, RANK, LAG, LEAD for analytics
 
-**Progress:** ✅ NVL/SYSDATE → ✅ DECODE → ✅ Column Aliases → ✅ CASE expressions → ✅ Subqueries → ✅ Set Operations → ✅ FROM DUAL → ✅ SUBSTR → ✅ TO_DATE
+**Progress:** ✅ NVL/SYSDATE → ✅ DECODE → ✅ Column Aliases → ✅ CASE expressions → ✅ Subqueries → ✅ Set Operations → ✅ FROM DUAL → ✅ SUBSTR → ✅ TO_DATE → ✅ TRIM
 
 ---
 
@@ -1413,10 +1447,10 @@ The Oracle to PostgreSQL SQL transformation module has achieved **Phase 2 COMPLE
    - ✅ FROM DUAL handling (Session 12)
    - ✅ SUBSTR → SUBSTRING (Session 13)
    - ✅ TO_DATE → TO_TIMESTAMP (Session 14)
+   - ✅ TRIM function (Session 15)
 
 2. **Next High-Priority Features** - Based on comprehensive code review (Session 12)
-   - ⏳ **TRIM function** (Session 15 - NEXT) - Common string whitespace removal
-   - ⏳ **Window functions (OVER clause)** - ROW_NUMBER, RANK, LAG, LEAD
+   - ⏳ **Window functions (OVER clause)** (Session 16 - NEXT) - ROW_NUMBER, RANK, LAG, LEAD
    - ⏳ **ROWNUM → row_number()** - Requires subquery wrapper
    - ⏳ **Sequence syntax** - seq.NEXTVAL → nextval('schema.seq')
 

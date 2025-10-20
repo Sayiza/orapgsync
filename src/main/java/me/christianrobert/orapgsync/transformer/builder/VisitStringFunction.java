@@ -239,10 +239,49 @@ public class VisitStringFunction {
             return result.toString();
         }
 
-        // TRIM function
+        // TRIM function: TRIM '(' ((LEADING | TRAILING | BOTH)? expression? FROM)? concatenation ')'
+        // Oracle and PostgreSQL have nearly identical TRIM syntax
+        // Oracle: TRIM([LEADING|TRAILING|BOTH] ['x'] FROM string)
+        // PostgreSQL: TRIM([LEADING|TRAILING|BOTH] ['x'] FROM string)
         if (ctx.TRIM() != null) {
-            throw new TransformationException(
-                "TRIM function not yet supported in current implementation");
+            StringBuilder result = new StringBuilder("TRIM( ");
+
+            // Check for LEADING, TRAILING, or BOTH keywords
+            boolean hasDirection = false;
+            if (ctx.LEADING() != null) {
+                result.append("LEADING ");
+                hasDirection = true;
+            } else if (ctx.TRAILING() != null) {
+                result.append("TRAILING ");
+                hasDirection = true;
+            } else if (ctx.BOTH() != null) {
+                result.append("BOTH ");
+                hasDirection = true;
+            }
+
+            // Check for trim character expression (optional)
+            List<PlSqlParser.ExpressionContext> expressions = ctx.expression();
+            boolean hasTrimChar = (expressions != null && !expressions.isEmpty());
+            if (hasTrimChar) {
+                // Visit the trim character expression
+                result.append(b.visit(expressions.get(0)));
+                result.append(" ");
+            }
+
+            // Add FROM keyword if we have direction or trim character
+            if (hasDirection || hasTrimChar) {
+                result.append("FROM ");
+            }
+
+            // Visit the string to be trimmed (concatenation context)
+            PlSqlParser.ConcatenationContext concat = ctx.concatenation();
+            if (concat == null) {
+                throw new TransformationException("TRIM function missing string expression");
+            }
+            result.append(b.visit(concat));
+
+            result.append(" )");
+            return result.toString();
         }
 
         // CHR function
