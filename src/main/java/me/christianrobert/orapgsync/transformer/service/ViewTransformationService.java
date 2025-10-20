@@ -34,7 +34,7 @@ import org.slf4j.LoggerFactory;
  *
  * <p>Current implementation status:
  * - Phase 1: Simple SELECT statements (column list, single table)
- * - Future: WHERE, ORDER BY, JOINs, Oracle-specific functions, etc.
+ * - Future: ALL select statement, with any oracle native features :-)
  */
 @ApplicationScoped
 public class ViewTransformationService {

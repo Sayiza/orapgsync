@@ -359,14 +359,17 @@ class RownumLimitTransformationTest {
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
         String postgresSql = builder.visit(parseResult.getTree());
 
+        System.out.println(oracleSql);
+        System.out.println(postgresSql);
         // Then: All non-ROWNUM conditions kept, LIMIT added
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
         //System.out.println("DEBUG: " + normalized);  // TODO: Investigate why IN clause missing
         assertTrue(normalized.contains("salary > 50000"), "salary condition should remain");
-        assertTrue(normalized.contains("dept_id IN ( 10 , 20 )"), "dept_id IN condition should remain");
+        assertTrue(normalized.contains("dept_id IN (10, 20)"), "dept_id IN condition should remain");
         assertTrue(normalized.contains("status = 'ACTIVE'"), "status condition should remain");
         assertFalse(normalized.contains("ROWNUM"), "ROWNUM should be removed from WHERE");
         assertTrue(normalized.contains("LIMIT 10"), "Should add LIMIT 10");
+
     }
 
     // ==================== NO ROWNUM (REGRESSION TESTS) ====================
