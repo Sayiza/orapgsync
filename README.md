@@ -175,6 +175,11 @@ docker volume prune
 - `GET /api/database/test/oracle` - Test Oracle connection
 - `GET /api/database/test/postgres` - Test PostgreSQL connection
 
+Check SQL with:
+curl -X POST "http://localhost:8080/api/transformation/sql?schema=HR" \
+-H "Content-Type: text/plain" \
+--data "SELECT * FROM employees"
+
 ## C) Architecture and Technical Design
 
 ### Frontend-Driven Architecture

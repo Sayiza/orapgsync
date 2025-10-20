@@ -262,7 +262,7 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
 ### 🔄 Phase 3: Full Implementation (In Progress)
 10. **View SQL Transformation**: ✅ **INTEGRATED** - ANTLR-based Oracle→PostgreSQL SQL conversion
     - ✅ Architecture: Direct AST approach (no intermediate semantic tree)
-    - ✅ PostgresViewImplementationJob uses ViewTransformationService
+    - ✅ PostgresViewImplementationJob uses SqlTransformationService
     - ✅ 72 tests passing - WHERE clause, literals, operators, SELECT *, type methods, package functions
     - ✅ Metadata-driven disambiguation (type methods vs package functions)
     - ✅ CREATE OR REPLACE VIEW preserves dependencies (critical!)
@@ -290,6 +290,53 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
 - **Job Management**: `/api/jobs/*` - Generic endpoints for any job type
 - **Configuration**: `/api/config/*` - Database connection configuration
 - **Status**: Various status endpoints for monitoring extraction progress
+- **SQL Transformation**: `/api/transformation/sql` - Transform Oracle SQL to PostgreSQL (development/testing)
+
+### SQL Transformation REST Endpoint
+
+Direct access to the SQL transformation service for development testing and future dynamic SQL conversion.
+
+**Endpoint:** `POST /api/transformation/sql`
+
+**Purpose:**
+- Development testing - quickly test SQL transformations without modifying test files
+- Interactive debugging - see transformed SQL immediately
+- Future use case - dynamic SQL conversion in PL/pgSQL migration
+
+**Usage Examples:**
+
+```bash
+# Transform SQL with default schema (first in state)
+curl -X POST "http://localhost:8080/api/transformation/sql" \
+  -H "Content-Type: text/plain" \
+  --data "SELECT empno, ename FROM emp WHERE dept_id = 10"
+
+# Transform SQL with specific schema
+curl -X POST "http://localhost:8080/api/transformation/sql?schema=HR" \
+  -H "Content-Type: text/plain" \
+  --data "SELECT * FROM employees"
+
+# Transform SQL from file
+curl -X POST "http://localhost:8080/api/transformation/sql" \
+  -H "Content-Type: text/plain" \
+  --data @query.sql
+```
+
+**Response Format (JSON):**
+```json
+{
+  "success": true,
+  "oracleSql": "SELECT empno FROM emp",
+  "postgresSql": "SELECT empno FROM hr.emp",
+  "errorMessage": null
+}
+```
+
+**Notes:**
+- Always returns HTTP 200. Check `success` field in response.
+- Transformation failure is a valid business outcome, not an HTTP error.
+- Requires Oracle metadata to be extracted first (builds indices from StateService).
+- Schema defaults to first schema in state if not specified.
 
 ## Naming Conventions and Module Organization
 
@@ -677,7 +724,7 @@ See `TRANSFORMATION.md` for detailed implementation plan.
 - `MetadataIndexBuilder` - Builds indices from StateService
 - `SemanticNode` - Base interface for all syntax tree nodes
 - `AntlrParser` - Thin wrapper around PlSqlParser
-- `ViewTransformationService` - High-level API for job integration
+- `SqlTransformationService` - High-level API for job integration
 
 ### Current Status (October 2025)
 
@@ -686,7 +733,7 @@ See `TRANSFORMATION.md` for detailed implementation plan.
 - ✅ PostgresCodeBuilder with 26 static visitor helpers
 - ✅ TransformationContext and TransformationIndices
 - ✅ MetadataIndexBuilder builds indices from StateService
-- ✅ ViewTransformationService (@ApplicationScoped CDI bean)
+- ✅ SqlTransformationService (@ApplicationScoped CDI bean)
 - ✅ Full expression hierarchy (11 levels)
 - ✅ Basic SELECT transformation working
 
@@ -711,7 +758,7 @@ See `TRANSFORMATION.md` for detailed implementation plan.
 - ✅ PackageFunctionTransformationTest (10 tests)
 - ✅ TypeMemberMethodTransformationTest (8 tests)
 - ✅ ExpressionBuildingBlocksTest (24 tests)
-- ✅ ViewTransformationServiceTest (24 tests)
+- ✅ SqlTransformationServiceTest (24 tests)
 - ✅ ViewTransformationIntegrationTest (7 tests)
 
 **Phase 3 (Oracle-Specific Functions):** ⏳ NOT STARTED

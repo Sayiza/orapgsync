@@ -11,7 +11,7 @@ import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Integration tests for ViewTransformationService (direct AST approach).
+ * Integration tests for SqlTransformationService (direct AST approach).
  * Tests the complete end-to-end transformation pipeline.
  *
  * These tests validate:
@@ -23,15 +23,15 @@ import static org.junit.jupiter.api.Assertions.*;
  * Note: Currently creates service manually. Can be converted to @QuarkusTest
  * when CDI integration testing is needed.
  */
-class ViewTransformationServiceTest {
+class SqlTransformationServiceTest {
 
-    private ViewTransformationService transformationService;
+    private SqlTransformationService transformationService;
     private TransformationIndices emptyIndices;
 
     @BeforeEach
     void setUp() {
         // Manually create service and inject dependencies
-        transformationService = new ViewTransformationService();
+        transformationService = new SqlTransformationService();
         transformationService.parser = new AntlrParser();
 
         // Create empty indices for simple tests (no metadata needed)
@@ -50,7 +50,7 @@ class ViewTransformationServiceTest {
         String oracleSql = "SELECT empno FROM emp";
         String expectedPostgres = "SELECT empno FROM hr.emp";  // Qualified with schema
 
-        TransformationResult result = transformationService.transformViewSql(oracleSql, "hr", emptyIndices);
+        TransformationResult result = transformationService.transformSql(oracleSql, "hr", emptyIndices);
 
         assertTrue(result.isSuccess(), "Transformation should succeed");
 
@@ -66,7 +66,7 @@ class ViewTransformationServiceTest {
         String oracleSql = "SELECT empno, ename FROM emp";
         String expectedPostgres = "SELECT empno , ename FROM hr.emp";
 
-        TransformationResult result = transformationService.transformViewSql(oracleSql, "hr", emptyIndices);
+        TransformationResult result = transformationService.transformSql(oracleSql, "hr", emptyIndices);
 
         assertTrue(result.isSuccess());
         String normalized = result.getPostgresSql().trim().replaceAll("\\s+", " ");
@@ -78,7 +78,7 @@ class ViewTransformationServiceTest {
         String oracleSql = "SELECT empno, ename, sal, deptno FROM employees";
         String expectedPostgres = "SELECT empno , ename , sal , deptno FROM hr.employees";
 
-        TransformationResult result = transformationService.transformViewSql(oracleSql, "hr", emptyIndices);
+        TransformationResult result = transformationService.transformSql(oracleSql, "hr", emptyIndices);
 
         assertTrue(result.isSuccess());
         String normalized = result.getPostgresSql().trim().replaceAll("\\s+", " ");
@@ -90,7 +90,7 @@ class ViewTransformationServiceTest {
         String oracleSql = "SELECT empno, ename FROM employees e";
         String expectedPostgres = "SELECT empno , ename FROM hr.employees e";
 
-        TransformationResult result = transformationService.transformViewSql(oracleSql, "hr", emptyIndices);
+        TransformationResult result = transformationService.transformSql(oracleSql, "hr", emptyIndices);
 
         assertTrue(result.isSuccess());
         String normalized = result.getPostgresSql().trim().replaceAll("\\s+", " ");
@@ -102,7 +102,7 @@ class ViewTransformationServiceTest {
         String oracleSql = "SELECT   empno  ,  ename   FROM   employees";
         String expectedPostgres = "SELECT empno , ename FROM hr.employees";
 
-        TransformationResult result = transformationService.transformViewSql(oracleSql, "hr", emptyIndices);
+        TransformationResult result = transformationService.transformSql(oracleSql, "hr", emptyIndices);
 
         assertTrue(result.isSuccess());
         String normalized = result.getPostgresSql().trim().replaceAll("\\s+", " ");
@@ -118,7 +118,7 @@ class ViewTransformationServiceTest {
             FROM employees""";
         String expectedPostgres = "SELECT empno , ename , sal FROM hr.employees";
 
-        TransformationResult result = transformationService.transformViewSql(oracleSql, "hr", emptyIndices);
+        TransformationResult result = transformationService.transformSql(oracleSql, "hr", emptyIndices);
 
         assertTrue(result.isSuccess());
         String normalized = result.getPostgresSql().trim().replaceAll("\\s+", " ");
@@ -130,7 +130,7 @@ class ViewTransformationServiceTest {
         String oracleSql = "SELECT EMPNO, ENAME FROM EMPLOYEES";
         String expectedPostgres = "SELECT EMPNO , ENAME FROM hr.employees";  // Table name lowercased by qualification
 
-        TransformationResult result = transformationService.transformViewSql(oracleSql, "hr", emptyIndices);
+        TransformationResult result = transformationService.transformSql(oracleSql, "hr", emptyIndices);
 
         assertTrue(result.isSuccess());
         String normalized = result.getPostgresSql().trim().replaceAll("\\s+", " ");
@@ -142,7 +142,7 @@ class ViewTransformationServiceTest {
         String oracleSql = "select empno, ename from employees";
         String expectedPostgres = "SELECT empno , ename FROM hr.employees";
 
-        TransformationResult result = transformationService.transformViewSql(oracleSql, "hr", emptyIndices);
+        TransformationResult result = transformationService.transformSql(oracleSql, "hr", emptyIndices);
 
         assertTrue(result.isSuccess());
         String normalized = result.getPostgresSql().trim().replaceAll("\\s+", " ");
@@ -154,7 +154,7 @@ class ViewTransformationServiceTest {
         String oracleSql = "Select EmpNo, EName From Employees";
         String expectedPostgres = "SELECT EmpNo , EName FROM hr.employees";  // Table name lowercased by qualification
 
-        TransformationResult result = transformationService.transformViewSql(oracleSql, "hr", emptyIndices);
+        TransformationResult result = transformationService.transformSql(oracleSql, "hr", emptyIndices);
 
         assertTrue(result.isSuccess());
         String normalized = result.getPostgresSql().trim().replaceAll("\\s+", " ");
@@ -166,7 +166,7 @@ class ViewTransformationServiceTest {
         String oracleSql = "SELECT emp_no, emp_name, dept_id FROM employee_table";
         String expectedPostgres = "SELECT emp_no , emp_name , dept_id FROM hr.employee_table";
 
-        TransformationResult result = transformationService.transformViewSql(oracleSql, "hr", emptyIndices);
+        TransformationResult result = transformationService.transformSql(oracleSql, "hr", emptyIndices);
 
         assertTrue(result.isSuccess());
         String normalized = result.getPostgresSql().trim().replaceAll("\\s+", " ");
@@ -178,7 +178,7 @@ class ViewTransformationServiceTest {
         String oracleSql = "SELECT col1, col2, col3 FROM table1";
         String expectedPostgres = "SELECT col1 , col2 , col3 FROM hr.table1";
 
-        TransformationResult result = transformationService.transformViewSql(oracleSql, "hr", emptyIndices);
+        TransformationResult result = transformationService.transformSql(oracleSql, "hr", emptyIndices);
 
         assertTrue(result.isSuccess());
         String normalized = result.getPostgresSql().trim().replaceAll("\\s+", " ");
@@ -189,7 +189,7 @@ class ViewTransformationServiceTest {
 
     @Test
     void nullSqlReturnsFailure() {
-        TransformationResult result = transformationService.transformViewSql(null, "hr", emptyIndices);
+        TransformationResult result = transformationService.transformSql(null, "hr", emptyIndices);
 
         assertFalse(result.isSuccess());
         assertTrue(result.isFailure());
@@ -199,7 +199,7 @@ class ViewTransformationServiceTest {
 
     @Test
     void emptySqlReturnsFailure() {
-        TransformationResult result = transformationService.transformViewSql("", "hr", emptyIndices);
+        TransformationResult result = transformationService.transformSql("", "hr", emptyIndices);
 
         assertFalse(result.isSuccess());
         assertNotNull(result.getErrorMessage());
@@ -208,7 +208,7 @@ class ViewTransformationServiceTest {
 
     @Test
     void whitespaceOnlySqlReturnsFailure() {
-        TransformationResult result = transformationService.transformViewSql("   ", "hr", emptyIndices);
+        TransformationResult result = transformationService.transformSql("   ", "hr", emptyIndices);
 
         assertFalse(result.isSuccess());
         assertNotNull(result.getErrorMessage());
@@ -217,7 +217,7 @@ class ViewTransformationServiceTest {
     @Test
     void nullSchemaReturnsFailure() {
         String oracleSql = "SELECT empno FROM emp";
-        TransformationResult result = transformationService.transformViewSql(oracleSql, null, emptyIndices);
+        TransformationResult result = transformationService.transformSql(oracleSql, null, emptyIndices);
 
         assertFalse(result.isSuccess());
         assertNotNull(result.getErrorMessage());
@@ -227,7 +227,7 @@ class ViewTransformationServiceTest {
     @Test
     void emptySchemaReturnsFailure() {
         String oracleSql = "SELECT empno FROM emp";
-        TransformationResult result = transformationService.transformViewSql(oracleSql, "", emptyIndices);
+        TransformationResult result = transformationService.transformSql(oracleSql, "", emptyIndices);
 
         assertFalse(result.isSuccess());
         assertNotNull(result.getErrorMessage());
@@ -236,7 +236,7 @@ class ViewTransformationServiceTest {
     @Test
     void nullIndicesReturnsFailure() {
         String oracleSql = "SELECT empno FROM emp";
-        TransformationResult result = transformationService.transformViewSql(oracleSql, "hr", null);
+        TransformationResult result = transformationService.transformSql(oracleSql, "hr", null);
 
         assertFalse(result.isSuccess());
         assertNotNull(result.getErrorMessage());
@@ -247,7 +247,7 @@ class ViewTransformationServiceTest {
     void invalidSqlReturnsFailure() {
         String invalidSql = "THIS IS NOT SQL";
 
-        TransformationResult result = transformationService.transformViewSql(invalidSql, "hr", emptyIndices);
+        TransformationResult result = transformationService.transformSql(invalidSql, "hr", emptyIndices);
 
         assertFalse(result.isSuccess());
         assertNotNull(result.getErrorMessage());
@@ -258,7 +258,7 @@ class ViewTransformationServiceTest {
     void incompleteSqlReturnsFailure() {
         String incompleteSql = "SELECT empno FROM";
 
-        TransformationResult result = transformationService.transformViewSql(incompleteSql, "hr", emptyIndices);
+        TransformationResult result = transformationService.transformSql(incompleteSql, "hr", emptyIndices);
 
         assertFalse(result.isSuccess());
         assertNotNull(result.getErrorMessage());
@@ -270,7 +270,7 @@ class ViewTransformationServiceTest {
     void successResultHasCorrectState() {
         String oracleSql = "SELECT empno FROM emp";
 
-        TransformationResult result = transformationService.transformViewSql(oracleSql, "hr", emptyIndices);
+        TransformationResult result = transformationService.transformSql(oracleSql, "hr", emptyIndices);
 
         assertTrue(result.isSuccess());
         assertFalse(result.isFailure());
@@ -283,7 +283,7 @@ class ViewTransformationServiceTest {
     void failureResultHasCorrectState() {
         String invalidSql = "INVALID SQL";
 
-        TransformationResult result = transformationService.transformViewSql(invalidSql, "hr", emptyIndices);
+        TransformationResult result = transformationService.transformSql(invalidSql, "hr", emptyIndices);
 
         assertFalse(result.isSuccess());
         assertTrue(result.isFailure());
@@ -296,7 +296,7 @@ class ViewTransformationServiceTest {
     void resultToStringIsInformative() {
         String oracleSql = "SELECT empno FROM emp";
 
-        TransformationResult result = transformationService.transformViewSql(oracleSql, "hr", emptyIndices);
+        TransformationResult result = transformationService.transformSql(oracleSql, "hr", emptyIndices);
 
         String str = result.toString();
         assertNotNull(str);
@@ -307,7 +307,7 @@ class ViewTransformationServiceTest {
 
     @Test
     void serviceIsCreated() {
-        assertNotNull(transformationService, "ViewTransformationService should be created");
+        assertNotNull(transformationService, "SqlTransformationService should be created");
     }
 
     @Test
@@ -316,8 +316,8 @@ class ViewTransformationServiceTest {
         String sql1 = "SELECT empno FROM emp";
         String sql2 = "SELECT deptno, dname FROM dept";
 
-        TransformationResult result1 = transformationService.transformViewSql(sql1, "hr", emptyIndices);
-        TransformationResult result2 = transformationService.transformViewSql(sql2, "hr", emptyIndices);
+        TransformationResult result1 = transformationService.transformSql(sql1, "hr", emptyIndices);
+        TransformationResult result2 = transformationService.transformSql(sql2, "hr", emptyIndices);
 
         assertTrue(result1.isSuccess());
         assertTrue(result2.isSuccess());

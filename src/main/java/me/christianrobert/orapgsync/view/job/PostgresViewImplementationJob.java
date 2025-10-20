@@ -10,7 +10,7 @@ import me.christianrobert.orapgsync.database.service.PostgresConnectionService;
 import me.christianrobert.orapgsync.transformer.context.MetadataIndexBuilder;
 import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
 import me.christianrobert.orapgsync.transformer.context.TransformationResult;
-import me.christianrobert.orapgsync.transformer.service.ViewTransformationService;
+import me.christianrobert.orapgsync.transformer.service.SqlTransformationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -46,7 +46,7 @@ public class PostgresViewImplementationJob extends AbstractDatabaseWriteJob<View
     private PostgresConnectionService postgresConnectionService;
 
     @Inject
-    private ViewTransformationService transformationService;
+    private SqlTransformationService transformationService;
 
     @Override
     public String getTargetDatabase() {
@@ -182,7 +182,7 @@ public class PostgresViewImplementationJob extends AbstractDatabaseWriteJob<View
         log.trace("Oracle SQL: {}", oracleSql);
 
         // Transform Oracle SQL to PostgreSQL
-        TransformationResult transformationResult = transformationService.transformViewSql(
+        TransformationResult transformationResult = transformationService.transformSql(
                 oracleSql, schema, indices);
 
         if (transformationResult.isFailure()) {

@@ -11,63 +11,63 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * High-level service for transforming Oracle view SQL to PostgreSQL.
- * This is the main entry point for migration jobs.
+ * High-level service for transforming Oracle SQL to PostgreSQL.
+ * This is the main entry point for SQL transformation used by migration jobs and REST endpoints.
  *
  * <p>Architecture:
  * <pre>
- * Oracle SQL → ANTLR Parse → Semantic Tree → PostgreSQL SQL
- *                  ↓              ↓               ↓
- *             PlSqlParser    SemanticNode    toPostgres()
+ * Oracle SQL → ANTLR Parse → Direct AST Transformation → PostgreSQL SQL
+ *                  ↓              ↓                          ↓
+ *             PlSqlParser    PostgresCodeBuilder         String
  * </pre>
  *
  * <p>Usage:
  * <pre>
- * TransformationResult result = service.transformViewSql(oracleSql, schema);
+ * TransformationResult result = service.transformSql(oracleSql, schema, indices);
  * if (result.isSuccess()) {
  *     String postgresSql = result.getPostgresSql();
- *     // Create view with postgresSql
+ *     // Use transformed SQL (e.g., CREATE VIEW, dynamic SQL conversion)
  * } else {
  *     // Handle error: result.getErrorMessage()
  * }
  * </pre>
  *
  * <p>Current implementation status:
- * - Phase 1: Simple SELECT statements (column list, single table)
- * - Future: ALL select statement, with any oracle native features :-)
+ * - Phase 1-17: WHERE clause, SELECT *, table aliases, JOINs, aggregation, window functions, ROWNUM → LIMIT
+ * - Future: Oracle-specific functions (NVL, DECODE, SYSDATE), sequence syntax, DUAL handling
  */
 @ApplicationScoped
-public class ViewTransformationService {
+public class SqlTransformationService {
 
-    private static final Logger log = LoggerFactory.getLogger(ViewTransformationService.class);
+    private static final Logger log = LoggerFactory.getLogger(SqlTransformationService.class);
 
     @Inject
     AntlrParser parser;
 
     /**
-     * Transforms Oracle view SQL to PostgreSQL equivalent.
+     * Transforms Oracle SQL to PostgreSQL equivalent.
      *
-     * <p>This is the main entry point for transformation. It handles:
+     * <p>This is the main entry point for SQL transformation. It handles:
      * <ul>
      *   <li>Parsing Oracle SQL using ANTLR</li>
-     *   <li>Building semantic syntax tree</li>
+     *   <li>Direct AST transformation via PostgresCodeBuilder</li>
      *   <li>Transforming to PostgreSQL SQL using metadata indices</li>
      *   <li>Error handling and reporting</li>
      * </ul>
      *
-     * <p>Current limitations (will be addressed in future phases):
+     * <p>Use cases:
      * <ul>
-     *   <li>Only simple SELECT statements (no WHERE, ORDER BY, etc.)</li>
-     *   <li>No Oracle-specific function transformations yet</li>
-     *   <li>No type conversion yet</li>
+     *   <li>View creation (PostgresViewImplementationJob)</li>
+     *   <li>REST API for development testing</li>
+     *   <li>Future: Dynamic SQL conversion in PL/pgSQL</li>
      * </ul>
      *
-     * @param oracleSql Oracle SELECT statement from view definition
+     * @param oracleSql Oracle SELECT statement (any Oracle SQL syntax)
      * @param schema Schema context for synonym and name resolution
      * @param indices Pre-built metadata indices for lookups
      * @return TransformationResult containing either transformed SQL or error details
      */
-    public TransformationResult transformViewSql(String oracleSql, String schema, TransformationIndices indices) {
+    public TransformationResult transformSql(String oracleSql, String schema, TransformationIndices indices) {
         if (oracleSql == null || oracleSql.trim().isEmpty()) {
             return TransformationResult.failure(oracleSql, "Oracle SQL cannot be null or empty");
         }
@@ -80,7 +80,7 @@ public class ViewTransformationService {
             return TransformationResult.failure(oracleSql, "Transformation indices cannot be null");
         }
 
-        log.debug("Transforming view SQL for schema: {}", schema);
+        log.debug("Transforming SQL for schema: {}", schema);
         log.trace("Oracle SQL: {}", oracleSql);
 
         try {
@@ -106,7 +106,7 @@ public class ViewTransformationService {
                 new me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder(context);
             String postgresSql = builder.visit(parseResult.getTree());
 
-            log.info("Successfully transformed view SQL for schema: {}", schema);
+            log.info("Successfully transformed SQL for schema: {}", schema);
             log.debug("PostgreSQL SQL: {}", postgresSql);
 
             return TransformationResult.success(oracleSql, postgresSql);

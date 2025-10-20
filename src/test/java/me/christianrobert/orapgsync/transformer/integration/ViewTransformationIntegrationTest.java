@@ -10,7 +10,7 @@ import me.christianrobert.orapgsync.transformer.context.MetadataIndexBuilder;
 import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
 import me.christianrobert.orapgsync.transformer.context.TransformationResult;
 import me.christianrobert.orapgsync.transformer.parser.AntlrParser;
-import me.christianrobert.orapgsync.transformer.service.ViewTransformationService;
+import me.christianrobert.orapgsync.transformer.service.SqlTransformationService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -26,7 +26,7 @@ import static org.mockito.Mockito.when;
  * <p>These tests verify the complete workflow:
  * 1. StateService provides Oracle metadata (tables, synonyms, etc.)
  * 2. MetadataIndexBuilder builds transformation indices from StateService
- * 3. ViewTransformationService transforms Oracle SQL to PostgreSQL SQL
+ * 3. SqlTransformationService transforms Oracle SQL to PostgreSQL SQL
  * 4. Direct AST transformation (no intermediate semantic tree)
  *
  * <p>This mirrors how an actual job (e.g., PostgresViewImplementationJob)
@@ -35,12 +35,12 @@ import static org.mockito.Mockito.when;
 class ViewTransformationIntegrationTest {
 
     private StateService mockStateService;
-    private ViewTransformationService transformationService;
+    private SqlTransformationService transformationService;
 
     @BeforeEach
     void setUp() {
         mockStateService = Mockito.mock(StateService.class);
-        transformationService = new ViewTransformationService();
+        transformationService = new SqlTransformationService();
 
         // Set up default empty returns for all StateService methods
         when(mockStateService.getOracleTableMetadata()).thenReturn(new ArrayList<>());
@@ -50,7 +50,7 @@ class ViewTransformationIntegrationTest {
 
         // Manually inject parser using reflection (package-private field)
         try {
-            java.lang.reflect.Field parserField = ViewTransformationService.class.getDeclaredField("parser");
+            java.lang.reflect.Field parserField = SqlTransformationService.class.getDeclaredField("parser");
             parserField.setAccessible(true);
             parserField.set(transformationService, new AntlrParser());
         } catch (Exception e) {
@@ -77,7 +77,7 @@ class ViewTransformationIntegrationTest {
         TransformationIndices indices = MetadataIndexBuilder.build(mockStateService, schemas);
 
         String oracleSql = "SELECT empno, ename FROM emp";
-        TransformationResult result = transformationService.transformViewSql(oracleSql, "HR", indices);
+        TransformationResult result = transformationService.transformSql(oracleSql, "HR", indices);
 
         // Then: Transformation succeeds with schema qualification
         assertTrue(result.isSuccess(), "Transformation should succeed");
@@ -104,7 +104,7 @@ class ViewTransformationIntegrationTest {
         TransformationIndices indices = MetadataIndexBuilder.build(mockStateService, schemas);
 
         String oracleSql = "SELECT empno, ename FROM employees";
-        TransformationResult result = transformationService.transformViewSql(oracleSql, "HR", indices);
+        TransformationResult result = transformationService.transformSql(oracleSql, "HR", indices);
 
         // Then: Transformation succeeds with schema qualification
         assertTrue(result.isSuccess(), "Transformation should succeed");
@@ -137,10 +137,10 @@ class ViewTransformationIntegrationTest {
 
         // And: Can transform SQL in included schemas
         String oracleSql = "SELECT empno FROM employees";
-        TransformationResult hrResult = transformationService.transformViewSql(oracleSql, "HR", indices);
+        TransformationResult hrResult = transformationService.transformSql(oracleSql, "HR", indices);
         assertTrue(hrResult.isSuccess());
 
-        TransformationResult scottResult = transformationService.transformViewSql(oracleSql, "SCOTT", indices);
+        TransformationResult scottResult = transformationService.transformSql(oracleSql, "SCOTT", indices);
         assertTrue(scottResult.isSuccess());
     }
 
@@ -161,22 +161,22 @@ class ViewTransformationIntegrationTest {
 
         // Single column
         String sql1 = "SELECT empno FROM employees";
-        TransformationResult result1 = transformationService.transformViewSql(sql1, "HR", indices);
+        TransformationResult result1 = transformationService.transformSql(sql1, "HR", indices);
         assertTrue(result1.isSuccess());
 
         // Two columns
         String sql2 = "SELECT empno, ename FROM employees";
-        TransformationResult result2 = transformationService.transformViewSql(sql2, "HR", indices);
+        TransformationResult result2 = transformationService.transformSql(sql2, "HR", indices);
         assertTrue(result2.isSuccess());
 
         // Three columns
         String sql3 = "SELECT empno, ename, sal FROM employees";
-        TransformationResult result3 = transformationService.transformViewSql(sql3, "HR", indices);
+        TransformationResult result3 = transformationService.transformSql(sql3, "HR", indices);
         assertTrue(result3.isSuccess());
 
         // Four columns
         String sql4 = "SELECT empno, ename, sal, deptno FROM employees";
-        TransformationResult result4 = transformationService.transformViewSql(sql4, "HR", indices);
+        TransformationResult result4 = transformationService.transformSql(sql4, "HR", indices);
         assertTrue(result4.isSuccess());
     }
 
@@ -197,7 +197,7 @@ class ViewTransformationIntegrationTest {
 
         // When: Transform SQL with table alias
         String oracleSql = "SELECT empno FROM employees e";
-        TransformationResult result = transformationService.transformViewSql(oracleSql, "HR", indices);
+        TransformationResult result = transformationService.transformSql(oracleSql, "HR", indices);
 
         // Then: Transformation succeeds with alias preserved and schema qualification
         assertTrue(result.isSuccess());
@@ -219,9 +219,9 @@ class ViewTransformationIntegrationTest {
         String sql2 = "SELECT deptno, dname FROM dept";
         String sql3 = "SELECT job, sal FROM jobs";
 
-        TransformationResult result1 = transformationService.transformViewSql(sql1, "HR", indices);
-        TransformationResult result2 = transformationService.transformViewSql(sql2, "HR", indices);
-        TransformationResult result3 = transformationService.transformViewSql(sql3, "HR", indices);
+        TransformationResult result1 = transformationService.transformSql(sql1, "HR", indices);
+        TransformationResult result2 = transformationService.transformSql(sql2, "HR", indices);
+        TransformationResult result3 = transformationService.transformSql(sql3, "HR", indices);
 
         // Then: All transformations succeed independently with schema qualification
         assertTrue(result1.isSuccess());
@@ -248,7 +248,7 @@ class ViewTransformationIntegrationTest {
 
         // When: Transform invalid SQL
         String invalidSql = "SELECT FROM WHERE";
-        TransformationResult result = transformationService.transformViewSql(invalidSql, "HR", indices);
+        TransformationResult result = transformationService.transformSql(invalidSql, "HR", indices);
 
         // Then: Transformation fails with error message
         assertFalse(result.isSuccess());

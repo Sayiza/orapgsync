@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ora Pg Sync Tool - SQL Transformer Testing</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<div class="header">
+  <h1 style="padding: 1rem 0; margin: 0; font-size: 1.5rem; color: var(--mainblue);">SQL Transformation Tester</h1>
+</div>
+
+<div class="configuration-container">
+  <div class="config-section">
+    <h2 class="config-title">Transform Oracle SQL to PostgreSQL</h2>
+
+    <div class="config-form">
+      <!-- Schema Input -->
+      <div class="config-group" style="margin-bottom: 1rem;">
+        <label class="config-label" for="schema-input">
+          Schema (optional - defaults to first in state)
+        </label>
+        <input
+          type="text"
+          id="schema-input"
+          class="config-input"
+          placeholder="e.g., HR"
+          style="max-width: 300px;"
+        >
+      </div>
+
+      <!-- SQL Input -->
+      <div class="config-group" style="margin-bottom: 1rem;">
+        <label class="config-label" for="sql-input">
+          Oracle SQL Statement
+        </label>
+        <textarea
+          id="sql-input"
+          class="config-input"
+          rows="10"
+          placeholder="Paste your Oracle SQL here, e.g.:&#10;SELECT empno, ename FROM emp WHERE dept_id = 10"
+          style="font-family: 'Consolas', 'Monaco', monospace; font-size: 0.85rem; resize: vertical;"
+        ></textarea>
+      </div>
+
+      <!-- Transform Button -->
+      <div class="config-actions">
+        <button id="transform-btn" class="btn btn-primary">
+          Transform SQL
+        </button>
+        <button id="clear-btn" class="btn btn-secondary">
+          Clear
+        </button>
+        <span id="status-text" style="font-size: 0.85rem; color: #666;"></span>
+      </div>
+    </div>
+
+    <!-- Result Display -->
+    <div id="result-container" style="margin-top: 2rem; display: none;">
+      <h3 style="font-size: 1rem; color: #444; margin-bottom: 1rem; border-bottom: 2px solid #f0f0f0; padding-bottom: 0.5rem;">
+        Transformation Result
+      </h3>
+
+      <!-- Success Result -->
+      <div id="success-result" style="display: none;">
+        <div class="config-group" style="margin-bottom: 1rem;">
+          <label class="config-label">
+            PostgreSQL SQL
+          </label>
+          <div class="log-content" id="postgres-sql" style="height: auto; min-height: 60px; background: #1e1e1e; color: #4CAF50;"></div>
+        </div>
+
+        <div class="config-group">
+          <label class="config-label">
+            Original Oracle SQL
+          </label>
+          <div class="log-content" id="oracle-sql-display" style="height: auto; min-height: 60px;"></div>
+        </div>
+      </div>
+
+      <!-- Error Result -->
+      <div id="error-result" style="display: none;">
+        <div class="error-message">
+          <strong>Transformation Failed</strong>
+          <div id="error-message" style="margin-top: 0.5rem; font-family: monospace; font-size: 0.75rem;"></div>
+        </div>
+
+        <div class="config-group" style="margin-top: 1rem;">
+          <label class="config-label">
+            Original Oracle SQL
+          </label>
+          <div class="log-content" id="oracle-sql-error" style="height: auto; min-height: 60px;"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // DOM Elements
+  const schemaInput = document.getElementById('schema-input');
+  const sqlInput = document.getElementById('sql-input');
+  const transformBtn = document.getElementById('transform-btn');
+  const clearBtn = document.getElementById('clear-btn');
+  const statusText = document.getElementById('status-text');
+  const resultContainer = document.getElementById('result-container');
+  const successResult = document.getElementById('success-result');
+  const errorResult = document.getElementById('error-result');
+  const postgresSql = document.getElementById('postgres-sql');
+  const oracleSqlDisplay = document.getElementById('oracle-sql-display');
+  const oracleSqlError = document.getElementById('oracle-sql-error');
+  const errorMessage = document.getElementById('error-message');
+
+  // Transform SQL
+  transformBtn.addEventListener('click', async () => {
+    const oracleSql = sqlInput.value.trim();
+
+    if (!oracleSql) {
+      statusText.textContent = 'Please enter an Oracle SQL statement';
+      statusText.style.color = '#f44336';
+      return;
+    }
+
+    // Build URL with optional schema parameter
+    let url = '/api/transformation/sql';
+    const schema = schemaInput.value.trim();
+    if (schema) {
+      url += `?schema=${encodeURIComponent(schema)}`;
+    }
+
+    // Show loading state
+    transformBtn.disabled = true;
+    statusText.textContent = 'Transforming...';
+    statusText.style.color = '#666';
+    resultContainer.style.display = 'none';
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'text/plain'
+        },
+        body: oracleSql
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const result = await response.json();
+
+      // Show result container
+      resultContainer.style.display = 'block';
+
+      if (result.success) {
+        // Show success result
+        successResult.style.display = 'block';
+        errorResult.style.display = 'none';
+
+        postgresSql.textContent = result.postgresSql;
+        oracleSqlDisplay.textContent = result.oracleSql;
+
+        statusText.textContent = 'Transformation successful!';
+        statusText.style.color = '#4CAF50';
+      } else {
+        // Show error result
+        successResult.style.display = 'none';
+        errorResult.style.display = 'block';
+
+        errorMessage.textContent = result.errorMessage || 'Unknown error';
+        oracleSqlError.textContent = result.oracleSql;
+
+        statusText.textContent = 'Transformation failed';
+        statusText.style.color = '#f44336';
+      }
+    } catch (error) {
+      // Network or parsing error
+      resultContainer.style.display = 'block';
+      successResult.style.display = 'none';
+      errorResult.style.display = 'block';
+
+      errorMessage.textContent = `Network error: ${error.message}`;
+      oracleSqlError.textContent = oracleSql;
+
+      statusText.textContent = 'Request failed';
+      statusText.style.color = '#f44336';
+    } finally {
+      transformBtn.disabled = false;
+    }
+  });
+
+  // Clear form
+  clearBtn.addEventListener('click', () => {
+    schemaInput.value = '';
+    sqlInput.value = '';
+    statusText.textContent = '';
+    resultContainer.style.display = 'none';
+    sqlInput.focus();
+  });
+
+  // Allow Ctrl+Enter to transform
+  sqlInput.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.key === 'Enter') {
+      transformBtn.click();
+    }
+  });
+
+  // Focus SQL input on load
+  sqlInput.focus();
+</script>
+
+</body>
+</html>
