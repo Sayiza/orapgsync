@@ -67,10 +67,10 @@ public class VisitNumericFunction {
 
             result.append(")");
 
-            // Note: over_clause not yet supported (window functions - future work)
+            // Window functions (OVER clause)
             if (ctx.over_clause() != null) {
-                throw new TransformationException(
-                    "Window functions (OVER clause) not yet supported");
+                result.append(" ");
+                result.append(VisitOverClause.v(ctx.over_clause(), b));
             }
 
             return result.toString();

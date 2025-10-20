@@ -1,7 +1,7 @@
 # Oracle to PostgreSQL SQL Transformation
 
 **Last Updated:** 2025-10-20
-**Status:** Phase 2 COMPLETE, Phase 3 IN PROGRESS (FROM DUAL, SUBSTR, TO_DATE, TRIM, Subqueries, Set Operations, NVL, SYSDATE, DECODE, Column Aliases, CASE Expressions, TO_CHAR) - 440 tests passing ✅
+**Status:** Phase 2 COMPLETE, Phase 3 IN PROGRESS (FROM DUAL, SUBSTR, TO_DATE, TRIM, Window Functions, Subqueries, Set Operations, NVL, SYSDATE, DECODE, Column Aliases, CASE Expressions, TO_CHAR) - 473 tests passing ✅
 
 This document describes the ANTLR-based transformation module that converts Oracle SQL to PostgreSQL-compatible SQL using a direct AST-to-code approach.
 
@@ -264,6 +264,45 @@ This document describes the ANTLR-based transformation module that converts Orac
 - 19 new tests added (421 → 440 total)
 - **Achievement:** TRIM fully supported - one of the most common Oracle string functions!
 
+**Session 16: Window Functions (OVER Clause)** ✅
+- **Window function transformation** (newly implemented)
+  - Oracle and PostgreSQL have **nearly identical** window function syntax - pass-through strategy!
+  - Both support: PARTITION BY, ORDER BY, windowing frames (ROWS/RANGE)
+  - Oracle: `ROW_NUMBER() OVER (PARTITION BY dept ORDER BY sal DESC)`
+  - PostgreSQL: `ROW_NUMBER() OVER (PARTITION BY dept ORDER BY sal DESC NULLS FIRST)` -- identical except NULL ordering!
+  - **Implementation:**
+    - Created VisitOverClause.java for OVER clause transformation (173 lines)
+    - Created VisitExpressions.java for comma-separated expression lists (47 lines)
+    - Updated VisitOtherFunction.java to handle RANK, DENSE_RANK, LEAD, LAG, FIRST_VALUE, LAST_VALUE
+    - Updated VisitNumericFunction.java to support window functions (COUNT, SUM, AVG, MIN, MAX with OVER)
+    - Updated PostgresCodeBuilder.java with visit methods for over_clause and expressions_
+  - **Window functions supported:**
+    - **Ranking functions:** ROW_NUMBER, RANK, DENSE_RANK, PERCENT_RANK, CUME_DIST
+    - **Offset functions:** LEAD, LAG (with optional offset and default values)
+    - **Value functions:** FIRST_VALUE, LAST_VALUE (with RESPECT/IGNORE NULLS support)
+    - **Aggregate functions with OVER:** COUNT, SUM, AVG, MIN, MAX
+    - **NTILE** and other analytic functions via over_clause_keyword
+  - **OVER clause components:**
+    - PARTITION BY: Single/multiple columns, qualified columns, expressions
+    - ORDER BY: ASC/DESC with automatic NULLS FIRST for DESC
+    - Windowing frames: ROWS/RANGE UNBOUNDED PRECEDING, CURRENT ROW, N PRECEDING/FOLLOWING
+    - BETWEEN form: `ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW`
+    - Empty OVER clause: `OVER ()`
+  - **Pass-through strategy:** Syntax is nearly identical, leverages existing ORDER BY visitor for NULL ordering fix
+  - Comprehensive test coverage: 31 tests (WindowFunctionTransformationTest)
+    - Basic window functions (ROW_NUMBER, RANK, DENSE_RANK)
+    - PARTITION BY variations (single/multiple columns, qualified columns)
+    - Window frames (ROWS/RANGE UNBOUNDED PRECEDING, BETWEEN forms, numeric bounds)
+    - Aggregate functions with OVER (COUNT, SUM, AVG, MIN, MAX)
+    - Analytic functions (LEAD, LAG with offsets, FIRST_VALUE, LAST_VALUE with frames)
+    - Empty OVER clause
+    - Complex scenarios (multiple window functions, WITH WHERE clause, FROM DUAL integration)
+    - COUNT DISTINCT with OVER (pass-through)
+    - Full window specification (partition + order + frame)
+- 31 new tests added (440 → 471 total, plus 2 debug tests = 473 total)
+- **Achievement:** Window functions fully supported - critical for analytics and reporting queries!
+- **Real-world impact:** Enables transformation of complex analytics queries with ROW_NUMBER, RANK, running totals, moving averages, and offset analysis
+
 ---
 
 ## Table of Contents
@@ -383,7 +422,7 @@ Oracle SQL → ANTLR Parser → PostgresCodeBuilder → PostgreSQL SQL
 - ✅ Set operations (COMPLETE - UNION, UNION ALL, INTERSECT, MINUS → EXCEPT)
 - ✅ **TO_DATE → TO_TIMESTAMP** (Session 14 - COMPLETE) - Common date parsing
 - ✅ **TRIM function** (Session 15 - COMPLETE) - Common string operation
-- ⏳ **Window functions (OVER clause)** (Session 16 - NEXT) - ROW_NUMBER, RANK, LAG, LEAD for analytics
+- ✅ **Window functions (OVER clause)** (Session 16 - COMPLETE) - ROW_NUMBER, RANK, LAG, LEAD for analytics
 - ⏳ ROWNUM → row_number() OVER ()
 - ⏳ Sequence syntax (seq.NEXTVAL → nextval('schema.seq'))
 - ⏳ Unary operators (+, -) if needed

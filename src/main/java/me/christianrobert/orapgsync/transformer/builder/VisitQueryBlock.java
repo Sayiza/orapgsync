@@ -3,6 +3,8 @@ package me.christianrobert.orapgsync.transformer.builder;
 import me.christianrobert.orapgsync.antlr.PlSqlParser;
 import me.christianrobert.orapgsync.transformer.builder.outerjoin.OuterJoinAnalyzer;
 import me.christianrobert.orapgsync.transformer.builder.outerjoin.OuterJoinContext;
+import me.christianrobert.orapgsync.transformer.builder.rownum.RownumAnalyzer;
+import me.christianrobert.orapgsync.transformer.builder.rownum.RownumContext;
 import me.christianrobert.orapgsync.transformer.context.TransformationException;
 
 import java.util.List;
@@ -23,13 +25,19 @@ public class VisitQueryBlock {
       throw new TransformationException("Query block missing from_clause");
     }
 
-    // PHASE 1: ANALYSIS - Scan FROM and WHERE to detect outer joins
+    // PHASE 1: ANALYSIS - Scan FROM and WHERE to detect patterns
     // This must happen BEFORE visiting FROM/WHERE to prepare transformation context
+
+    // Analyze for outer joins (Oracle (+) syntax)
     OuterJoinContext outerJoinContext = OuterJoinAnalyzer.analyze(fromClauseCtx, whereCtx);
 
-    // Push the outer join context onto the stack for this query level
+    // Analyze for ROWNUM patterns (LIMIT optimization)
+    RownumContext rownumContext = RownumAnalyzer.analyze(whereCtx);
+
+    // Push contexts onto the stacks for this query level
     // This handles nested queries (subqueries) - each query gets its own context
     b.pushOuterJoinContext(outerJoinContext);
+    b.pushRownumContext(rownumContext);
 
     try {
       // PHASE 2: TRANSFORMATION - Visit clauses with prepared context
@@ -61,9 +69,13 @@ public class VisitQueryBlock {
       }
 
       // Extract WHERE clause (if present)
-      // The WHERE visitor will now use outerJoinContext to filter out (+) conditions
+      // The WHERE visitor will use:
+      //   - outerJoinContext to filter out (+) conditions
+      //   - rownumContext to filter out ROWNUM conditions
+      // VisitLogicalExpression checks rownumContext and skips ROWNUM conditions
       if (whereCtx != null) {
         String whereClause = b.visit(whereCtx);
+
         if (whereClause != null && !whereClause.trim().isEmpty()) {
           result.append(" ").append(whereClause);
         }
@@ -90,12 +102,20 @@ public class VisitQueryBlock {
         }
       }
 
+      // Add LIMIT clause if ROWNUM simple limit was detected
+      // This transforms: WHERE ROWNUM <= 10 → LIMIT 10
+      // LIMIT must come after ORDER BY in PostgreSQL
+      if (rownumContext.hasSimpleLimit()) {
+        result.append(" LIMIT ").append(rownumContext.getLimitValue());
+      }
+
       return result.toString();
 
     } finally {
-      // Always pop the context when leaving this query level (even if exception occurs)
+      // Always pop the contexts when leaving this query level (even if exception occurs)
       // This ensures nested subqueries don't corrupt parent query contexts
       b.popOuterJoinContext();
+      b.popRownumContext();
     }
   }
 

@@ -34,6 +34,12 @@ public class VisitWhereClause {
 
     // No outer joins - use original behavior
     String condition = b.visit(conditionCtx);
+
+    // Check if condition is null (all conditions were filtered - e.g., only ROWNUM)
+    if (condition == null || condition.trim().isEmpty()) {
+      return "";  // No WHERE clause needed
+    }
+
     return "WHERE " + condition;
   }
 }

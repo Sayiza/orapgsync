@@ -52,10 +52,10 @@ public class VisitOtherFunction {
 
             result.append(" )");
 
-            // Window functions (OVER clause) not yet supported
+            // Window functions (OVER clause)
             if (ctx.over_clause() != null) {
-                throw new TransformationException(
-                    "Window functions (OVER clause) not yet supported");
+                result.append(" ");
+                result.append(VisitOverClause.v(ctx.over_clause(), b));
             }
 
             return result.toString();
@@ -103,6 +103,106 @@ public class VisitOtherFunction {
             }
 
             result.append(" )");
+            return result.toString();
+        }
+
+        // within_or_over_clause_keyword function_argument within_or_over_part+
+        // This handles: RANK, DENSE_RANK, PERCENT_RANK, CUME_DIST, PERCENTILE_CONT, PERCENTILE_DISC
+        if (ctx.within_or_over_clause_keyword() != null) {
+            PlSqlParser.Within_or_over_clause_keywordContext keyword = ctx.within_or_over_clause_keyword();
+            String functionName = keyword.getText();
+
+            StringBuilder result = new StringBuilder(functionName);
+            result.append("( ");
+
+            // Get the function argument
+            PlSqlParser.Function_argumentContext argument = ctx.function_argument();
+            if (argument != null) {
+                result.append(b.visit(argument));
+            }
+
+            result.append(" )");
+
+            // Handle within_or_over_part (WITHIN GROUP or OVER clause)
+            // For now, we expect OVER clause for window functions
+            java.util.List<PlSqlParser.Within_or_over_partContext> withinOrOverParts = ctx.within_or_over_part();
+            if (withinOrOverParts != null && !withinOrOverParts.isEmpty()) {
+                for (PlSqlParser.Within_or_over_partContext part : withinOrOverParts) {
+                    if (part.over_clause() != null) {
+                        result.append(" ");
+                        result.append(VisitOverClause.v(part.over_clause(), b));
+                    } else if (part.order_by_clause() != null) {
+                        // WITHIN GROUP (ORDER BY ...)
+                        result.append(" WITHIN GROUP ( ");
+                        result.append(VisitOrderByClause.v(part.order_by_clause(), b));
+                        result.append(" )");
+                    }
+                }
+            }
+
+            return result.toString();
+        }
+
+        // (FIRST_VALUE | LAST_VALUE) function_argument_analytic respect_or_ignore_nulls? over_clause
+        if (ctx.FIRST_VALUE() != null || ctx.LAST_VALUE() != null) {
+            String functionName = ctx.FIRST_VALUE() != null ? "FIRST_VALUE" : "LAST_VALUE";
+
+            StringBuilder result = new StringBuilder(functionName);
+            result.append("( ");
+
+            // Get the function argument
+            PlSqlParser.Function_argument_analyticContext argument = ctx.function_argument_analytic();
+            if (argument != null) {
+                result.append(b.visit(argument));
+            }
+
+            result.append(" )");
+
+            // respect_or_ignore_nulls (optional) - e.g., RESPECT NULLS or IGNORE NULLS
+            // PostgreSQL also supports this, so pass through
+            PlSqlParser.Respect_or_ignore_nullsContext respectIgnore = ctx.respect_or_ignore_nulls();
+            if (respectIgnore != null) {
+                result.append(" ");
+                result.append(respectIgnore.getText());
+            }
+
+            // OVER clause (required for FIRST_VALUE/LAST_VALUE)
+            if (ctx.over_clause() != null) {
+                result.append(" ");
+                result.append(VisitOverClause.v(ctx.over_clause(), b));
+            }
+
+            return result.toString();
+        }
+
+        // (LEAD | LAG) function_argument_analytic respect_or_ignore_nulls? over_clause
+        if (ctx.LEAD() != null || ctx.LAG() != null) {
+            String functionName = ctx.LEAD() != null ? "LEAD" : "LAG";
+
+            StringBuilder result = new StringBuilder(functionName);
+            result.append("( ");
+
+            // Get the function argument (may include offset and default value)
+            PlSqlParser.Function_argument_analyticContext argument = ctx.function_argument_analytic();
+            if (argument != null) {
+                result.append(b.visit(argument));
+            }
+
+            result.append(" )");
+
+            // respect_or_ignore_nulls (optional)
+            PlSqlParser.Respect_or_ignore_nullsContext respectIgnore = ctx.respect_or_ignore_nulls();
+            if (respectIgnore != null) {
+                result.append(" ");
+                result.append(respectIgnore.getText());
+            }
+
+            // OVER clause (required for LEAD/LAG)
+            if (ctx.over_clause() != null) {
+                result.append(" ");
+                result.append(VisitOverClause.v(ctx.over_clause(), b));
+            }
+
             return result.toString();
         }
 

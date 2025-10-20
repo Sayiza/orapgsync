@@ -3,6 +3,7 @@ package me.christianrobert.orapgsync.transformer.builder;
 import me.christianrobert.orapgsync.antlr.PlSqlParser;
 import me.christianrobert.orapgsync.antlr.PlSqlParserBaseVisitor;
 import me.christianrobert.orapgsync.transformer.builder.outerjoin.OuterJoinContext;
+import me.christianrobert.orapgsync.transformer.builder.rownum.RownumContext;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
 
 import java.util.ArrayDeque;
@@ -19,6 +20,11 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
     // Each query_block pushes its context, pops when done
     private final Deque<OuterJoinContext> outerJoinContextStack;
 
+    // Query-local state for ROWNUM transformation
+    // Stack to handle nested queries (subqueries)
+    // Each query_block pushes its context, pops when done
+    private final Deque<RownumContext> rownumContextStack;
+
     /**
      * Creates a PostgresCodeBuilder with transformation context.
      * @param context Transformation context for metadata lookups (can be null for simple transformations)
@@ -26,6 +32,7 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
     public PostgresCodeBuilder(TransformationContext context) {
         this.context = context;
         this.outerJoinContextStack = new ArrayDeque<>();
+        this.rownumContextStack = new ArrayDeque<>();
     }
 
     /**
@@ -34,6 +41,7 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
     public PostgresCodeBuilder() {
         this.context = null;
         this.outerJoinContextStack = new ArrayDeque<>();
+        this.rownumContextStack = new ArrayDeque<>();
     }
 
     /**
@@ -70,6 +78,35 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
      */
     public OuterJoinContext getOuterJoinContext() {
         return outerJoinContextStack.peek();
+    }
+
+    /**
+     * Pushes a ROWNUM context onto the stack for the current query level.
+     * Used by VisitQueryBlock when entering a query (including subqueries).
+     *
+     * @param rownumContext ROWNUM context for this query level
+     */
+    public void pushRownumContext(RownumContext rownumContext) {
+        rownumContextStack.push(rownumContext);
+    }
+
+    /**
+     * Pops the ROWNUM context from the stack when exiting a query level.
+     * Used by VisitQueryBlock when leaving a query (including subqueries).
+     */
+    public void popRownumContext() {
+        if (!rownumContextStack.isEmpty()) {
+            rownumContextStack.pop();
+        }
+    }
+
+    /**
+     * Gets the ROWNUM context for the current query level.
+     *
+     * @return ROWNUM context or null if no context (empty stack)
+     */
+    public RownumContext getRownumContext() {
+        return rownumContextStack.peek();
     }
 
     // ========== SELECT STATEMENT ==========
@@ -269,5 +306,17 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
     @Override
     public String visitTable_ref(PlSqlParser.Table_refContext ctx) {
         return VisitTableReference.v(ctx, this);
+    }
+
+    // ========== WINDOW FUNCTIONS ==========
+
+    @Override
+    public String visitOver_clause(PlSqlParser.Over_clauseContext ctx) {
+        return VisitOverClause.v(ctx, this);
+    }
+
+    @Override
+    public String visitExpressions_(PlSqlParser.Expressions_Context ctx) {
+        return VisitExpressions.v(ctx, this);
     }
 }
