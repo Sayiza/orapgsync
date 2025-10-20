@@ -6,10 +6,19 @@ import me.christianrobert.orapgsync.transformer.context.TransformationException;
 public class VisitUnaryExpression {
   public static String v(PlSqlParser.Unary_expressionContext ctx, PostgresCodeBuilder b) {
 
-    // Check for unary operators (+, -)
+    // Handle unary operators (+, -)
+    // Oracle: -5, +10, -column_name
+    // PostgreSQL: -5, +10, -column_name (identical syntax)
     if (ctx.getChild(0).getText().equals("+") || ctx.getChild(0).getText().equals("-")) {
-      throw new TransformationException(
-          "Unary operators (+, -) not yet supported in minimal implementation");
+      String operator = ctx.getChild(0).getText();
+      // Recursively transform the operand (the unary_expression being negated/positivized)
+      PlSqlParser.Unary_expressionContext operandCtx = ctx.unary_expression();
+      if (operandCtx == null) {
+        throw new TransformationException(
+            "Unary operator " + operator + " missing operand expression");
+      }
+      String operand = b.visit(operandCtx);
+      return operator + operand;
     }
 
     // Check for PRIOR operator
