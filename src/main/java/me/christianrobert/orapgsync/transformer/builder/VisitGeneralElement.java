@@ -1,6 +1,7 @@
 package me.christianrobert.orapgsync.transformer.builder;
 
 import me.christianrobert.orapgsync.antlr.PlSqlParser;
+import me.christianrobert.orapgsync.transformer.builder.functions.DateFunctionTransformer;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
 import me.christianrobert.orapgsync.transformer.context.TransformationException;
 import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
@@ -415,6 +416,21 @@ public class VisitGeneralElement {
     if (partCtx.function_argument() != null && !partCtx.function_argument().isEmpty()) {
       // Simple function call: function(args)
       String functionName = getFunctionName(partCtx);
+      String upperFunctionName = functionName.toUpperCase();
+
+      // Check if this is a date/time function that needs transformation
+      switch (upperFunctionName) {
+        case "ADD_MONTHS":
+        case "MONTHS_BETWEEN":
+        case "LAST_DAY":
+        case "TRUNC":
+        case "ROUND":
+          return DateFunctionTransformer.transform(upperFunctionName, partCtx, b);
+        default:
+          // Not a special function - proceed with normal handling
+          break;
+      }
+
       String arguments = getFunctionArguments(partCtx, b);
 
       // Apply schema qualification if context available
@@ -444,6 +460,26 @@ public class VisitGeneralElement {
 
     // Simple identifier - use getText()
     return partCtx.getText();
+  }
+
+  /**
+   * Extracts arguments from a function_argument list.
+   */
+  private static List<PlSqlParser.ArgumentContext> extractFunctionArguments(
+      PlSqlParser.General_element_partContext partCtx) {
+
+    List<PlSqlParser.Function_argumentContext> funcArgCtxList = partCtx.function_argument();
+    if (funcArgCtxList == null || funcArgCtxList.isEmpty()) {
+      return new ArrayList<>();
+    }
+
+    PlSqlParser.Function_argumentContext funcArgCtx = funcArgCtxList.get(0);
+    List<PlSqlParser.ArgumentContext> arguments = funcArgCtx.argument();
+    if (arguments == null) {
+      return new ArrayList<>();
+    }
+
+    return arguments;
   }
 
   /**
