@@ -167,7 +167,8 @@ public class OuterJoinAnalyzer {
             } else if (ctx.OR() != null) {
                 // OR expressions are more complex - for now just treat the whole thing as regular
                 // (Outer joins with OR are rare and complex)
-                context.addRegularWhereCondition(ctx.getText());
+                // Store the AST node instead of text for proper transformation
+                context.addRegularWhereConditionNode(ctx);
                 return null;
             }
 
@@ -199,7 +200,8 @@ public class OuterJoinAnalyzer {
             // IMPORTANT: Don't drill into subqueries - they will be analyzed when their query_block is visited
             if (containsSubquery(ctx)) {
                 // This relational expression contains a subquery - treat whole thing as regular condition
-                context.addRegularWhereCondition(ctx.getText());
+                // Store the AST node instead of text for proper transformation
+                context.addRegularWhereConditionNode(ctx);
                 return null;
             }
 
@@ -213,7 +215,12 @@ public class OuterJoinAnalyzer {
             // Not an outer join - check if this is a simple comparison (leaf condition)
             // If it's a leaf condition (not containing other logical operators), add it as regular
             if (isLeafCondition(ctx)) {
-                context.addRegularWhereCondition(ctx.getText());
+                // Skip ROWNUM conditions - they're handled by RownumAnalyzer
+                if (containsRownum(ctx)) {
+                    return null;  // Don't store as regular condition
+                }
+                // Store the AST node instead of text for proper transformation
+                context.addRegularWhereConditionNode(ctx);
                 return null;
             }
 
@@ -237,11 +244,9 @@ public class OuterJoinAnalyzer {
                     );
                 }
                 // Add this as a regular WHERE condition
-                // NOTE: We use getText() here which captures the RAW text, but that's OK because:
-                // 1. This is just for the analysis phase to identify what's NOT an outer join
-                // 2. The actual transformation happens in the TRANSFORMATION phase via b.visit()
-                // 3. When b.visit() encounters the subquery, it will recursively transform it
-                context.addRegularWhereCondition(ctx.getText());
+                // Store the AST node instead of text for proper transformation
+                // When builder.visit() encounters the subquery, it will recursively transform it
+                context.addRegularWhereConditionNode(ctx);
                 // Don't traverse children - we've marked this for WHERE
                 return null;
             }
@@ -255,8 +260,8 @@ public class OuterJoinAnalyzer {
             }
 
             // This is a compound condition (IN, BETWEEN, LIKE, etc.) without (+) or subquery
-            // Add as regular WHERE condition
-            context.addRegularWhereCondition(ctx.getText());
+            // Add as regular WHERE condition - store node for proper transformation
+            context.addRegularWhereConditionNode(ctx);
             return null;
         }
 
@@ -336,13 +341,16 @@ public class OuterJoinAnalyzer {
 
         /**
          * Processes an outer join condition (e.g., a.field = b.field(+)).
+         *
+         * <p>Stores the AST node for the condition, which will be transformed during
+         * the transformation phase. The visitor will handle removing (+) operator.
          */
         private void processOuterJoinCondition(PlSqlParser.Relational_expressionContext ctx) {
             // Grammar: relational_expression relational_operator relational_expression
 
             if (ctx.relational_operator() == null || ctx.relational_expression().size() != 2) {
                 // Not a simple comparison - skip for now
-                context.addRegularWhereCondition(ctx.getText());
+                context.addRegularWhereConditionNode(ctx);
                 return;
             }
 
@@ -371,7 +379,7 @@ public class OuterJoinAnalyzer {
 
             if (!leftHasPlus && !rightHasPlus) {
                 // No (+) found - this shouldn't happen, but treat as regular condition
-                context.addRegularWhereCondition(ctx.getText());
+                context.addRegularWhereConditionNode(ctx);
                 return;
             }
 
@@ -381,7 +389,7 @@ public class OuterJoinAnalyzer {
 
             if (leftTable == null || rightTable == null) {
                 // Can't determine tables - treat as regular condition
-                context.addRegularWhereCondition(ctx.getText());
+                context.addRegularWhereConditionNode(ctx);
                 return;
             }
 
@@ -395,15 +403,10 @@ public class OuterJoinAnalyzer {
                 joinType = OuterJoinCondition.JoinType.RIGHT;
             }
 
-            // Build condition string without (+)
-            String leftText = getTextWithoutOuterJoinSign(leftExpr);
-            String rightText = getTextWithoutOuterJoinSign(rightExpr);
-            String condition = leftText + " = " + rightText;
+            // Register outer join with AST node (visitor will handle removing (+) during transformation)
+            context.registerOuterJoin(leftTable, rightTable, joinType, ctx);
 
-            // Register outer join
-            context.registerOuterJoin(leftTable, rightTable, joinType, condition);
-
-            // Mark original condition for removal from WHERE
+            // Mark original condition for removal from WHERE (using text for comparison)
             context.markConditionForRemoval(ctx.getText());
         }
 
@@ -428,10 +431,17 @@ public class OuterJoinAnalyzer {
         }
 
         /**
-         * Gets the text of an expression without the (+) operator.
+         * Checks if a parse tree contains ROWNUM pseudocolumn.
+         *
+         * <p>ROWNUM conditions are handled by RownumAnalyzer and should not be
+         * stored as regular WHERE conditions when outer joins are present.
+         *
+         * @param ctx Parse tree to check
+         * @return true if tree contains ROWNUM
          */
-        private String getTextWithoutOuterJoinSign(PlSqlParser.Relational_expressionContext ctx) {
-            return ctx.getText().replace("(+)", "");
+        private boolean containsRownum(org.antlr.v4.runtime.tree.ParseTree ctx) {
+            // Simple text-based check - ROWNUM is always uppercase in Oracle
+            return ctx.getText().toUpperCase().contains("ROWNUM");
         }
     }
 }

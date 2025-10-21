@@ -38,6 +38,16 @@ public class VisitLogicalExpression {
       }
       String left = b.visit(logicalExprs.get(0));
       String right = b.visit(logicalExprs.get(1));
+
+      // Both left and right could be null if they were ROWNUM conditions
+      if (left == null && right == null) {
+        return null;  // Both sides filtered out
+      } else if (left == null) {
+        return right;  // Left side filtered out
+      } else if (right == null) {
+        return left;  // Right side filtered out
+      }
+
       return left + " OR " + right;
     }
 

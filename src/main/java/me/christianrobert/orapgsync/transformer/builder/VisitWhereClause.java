@@ -24,7 +24,8 @@ public class VisitWhereClause {
     OuterJoinContext outerJoinCtx = b.getOuterJoinContext();
     if (outerJoinCtx != null && outerJoinCtx.hasOuterJoins()) {
       // We have outer joins - use the filtered WHERE clause from context
-      String filteredWhere = outerJoinCtx.buildWhereClause();
+      // Pass the builder to transform AST nodes (converts Oracle functions to PostgreSQL)
+      String filteredWhere = outerJoinCtx.buildWhereClause(b);
       if (filteredWhere != null && !filteredWhere.trim().isEmpty()) {
         return "WHERE " + filteredWhere;
       }

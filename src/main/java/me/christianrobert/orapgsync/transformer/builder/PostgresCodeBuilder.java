@@ -239,6 +239,15 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
         return VisitTableElement.v(ctx, this);
     }
 
+    @Override
+    public String visitOuter_join_sign(PlSqlParser.Outer_join_signContext ctx) {
+        // Oracle outer join operator: (+)
+        // PostgreSQL uses ANSI JOIN syntax instead
+        // Strip this operator - it's handled by OuterJoinAnalyzer and converted to ANSI JOIN
+        // Return empty string to remove it from the output
+        return "";
+    }
+
     // ========== STANDARD FUNCTIONS ==========
 
     @Override

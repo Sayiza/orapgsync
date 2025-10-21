@@ -1,5 +1,8 @@
 package me.christianrobert.orapgsync.transformer.builder.outerjoin;
 
+import me.christianrobert.orapgsync.antlr.PlSqlParser;
+import me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -14,17 +17,32 @@ import java.util.Objects;
  *   <li>All join conditions (multiple conditions for the same table pair are combined)</li>
  * </ul>
  *
+ * <p><b>ARCHITECTURE: AST Node Storage</b>
+ * <p>This class stores AST nodes ({@link PlSqlParser.Relational_expressionContext}) rather
+ * than pre-transformed strings. This allows join conditions to be transformed during the
+ * transformation phase, ensuring all Oracle functions (INSTR, TRUNC, etc.) are properly
+ * converted to PostgreSQL equivalents.
+ *
  * <p>Example:
  * <pre>
  * WHERE a.field1 = b.field1(+)
- *   AND a.field2 = b.field2(+)
+ *   AND TRUNC(a.field2) = TRUNC(b.field2(+))
  *
  * Creates one OuterJoinCondition:
  *   tableKey1: "a"
  *   tableKey2: "b"
  *   joinType: LEFT
- *   conditions: ["a.field1 = b.field1", "a.field2 = b.field2"]
+ *   conditionNodes: [AST for "a.field1 = b.field1", AST for "TRUNC(a.field2) = TRUNC(b.field2)"]
+ *
+ * During transformation:
+ *   → LEFT JOIN b ON a.field1 = b.field1 AND DATE_TRUNC('day', a.field2)::DATE = DATE_TRUNC('day', b.field2)::DATE
  * </pre>
+ *
+ * <p><b>COORDINATION WITH OTHER TRANSFORMATIONS:</b>
+ * <ul>
+ *   <li><b>ROWNUM:</b> No interference - both filter WHERE clause independently</li>
+ *   <li><b>CONNECT BY:</b> No interference - CONNECT BY rewrites entire query first</li>
+ * </ul>
  */
 public class OuterJoinCondition {
 
@@ -36,7 +54,9 @@ public class OuterJoinCondition {
     private final String tableKey1;  // First table (left side, non-nullable)
     private final String tableKey2;  // Second table (right side, nullable)
     private final JoinType joinType;
-    private final List<String> conditions;  // Join conditions without (+)
+
+    // Store AST nodes instead of strings to enable transformation during visit phase
+    private final List<PlSqlParser.Relational_expressionContext> conditionNodes;
 
     /**
      * Creates a new outer join condition.
@@ -49,17 +69,20 @@ public class OuterJoinCondition {
         this.tableKey1 = Objects.requireNonNull(tableKey1, "tableKey1 cannot be null");
         this.tableKey2 = Objects.requireNonNull(tableKey2, "tableKey2 cannot be null");
         this.joinType = Objects.requireNonNull(joinType, "joinType cannot be null");
-        this.conditions = new ArrayList<>();
+        this.conditionNodes = new ArrayList<>();
     }
 
     /**
-     * Adds a join condition (without the (+) operator).
+     * Adds a join condition AST node.
      *
-     * @param condition Join condition (e.g., "a.field1 = b.field1")
+     * <p>The node will be transformed during the transformation phase by visiting it
+     * with the PostgresCodeBuilder, ensuring all Oracle-specific functions are converted.
+     *
+     * @param conditionNode AST node for the join condition (without (+) operator)
      */
-    public void addCondition(String condition) {
-        if (condition != null && !condition.trim().isEmpty()) {
-            conditions.add(condition);
+    public void addConditionNode(PlSqlParser.Relational_expressionContext conditionNode) {
+        if (conditionNode != null) {
+            conditionNodes.add(conditionNode);
         }
     }
 
@@ -75,17 +98,45 @@ public class OuterJoinCondition {
         return joinType;
     }
 
-    public List<String> getConditions() {
-        return new ArrayList<>(conditions);  // Return defensive copy
+    /**
+     * Returns all condition AST nodes.
+     *
+     * @return List of AST nodes representing join conditions
+     */
+    public List<PlSqlParser.Relational_expressionContext> getConditionNodes() {
+        return new ArrayList<>(conditionNodes);  // Return defensive copy
     }
 
     /**
-     * Returns all conditions combined with AND.
+     * Transforms and combines all join conditions with AND.
      *
-     * @return Combined conditions string (e.g., "a.field1 = b.field1 AND a.field2 = b.field2")
+     * <p>This method visits each stored AST node using the provided builder,
+     * ensuring all Oracle-specific functions are transformed to PostgreSQL equivalents.
+     *
+     * <p>Example:
+     * <pre>
+     * Oracle: a.id = b.id(+) AND TRUNC(a.date) = TRUNC(b.date(+))
+     * PostgreSQL: a.id = b.id AND DATE_TRUNC('day', a.date)::DATE = DATE_TRUNC('day', b.date)::DATE
+     * </pre>
+     *
+     * @param builder PostgresCodeBuilder for transforming AST nodes
+     * @return Combined conditions string with all transformations applied
      */
-    public String getCombinedConditions() {
-        return String.join(" AND ", conditions);
+    public String getCombinedConditions(PostgresCodeBuilder builder) {
+        if (conditionNodes.isEmpty()) {
+            return "";
+        }
+
+        List<String> transformedConditions = new ArrayList<>();
+        for (PlSqlParser.Relational_expressionContext node : conditionNodes) {
+            // Visit the node to transform it (removes (+) and converts Oracle functions)
+            String transformed = builder.visit(node);
+            if (transformed != null && !transformed.trim().isEmpty()) {
+                transformedConditions.add(transformed);
+            }
+        }
+
+        return String.join(" AND ", transformedConditions);
     }
 
     /**
@@ -100,8 +151,8 @@ public class OuterJoinCondition {
 
     @Override
     public String toString() {
-        return String.format("OuterJoinCondition{%s %s JOIN %s ON %s}",
-            tableKey1, joinType, tableKey2, getCombinedConditions());
+        return String.format("OuterJoinCondition{%s %s JOIN %s ON [%d conditions]}",
+            tableKey1, joinType, tableKey2, conditionNodes.size());
     }
 
     @Override

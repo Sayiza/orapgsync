@@ -38,7 +38,7 @@ public class VisitFromClause {
     }
 
     // We have outer joins - generate ANSI JOIN syntax
-    return generateAnsiJoinSyntax(outerJoinCtx, tableRefs);
+    return generateAnsiJoinSyntax(outerJoinCtx, tableRefs, b);
   }
 
   /**
@@ -55,13 +55,20 @@ public class VisitFromClause {
    * <pre>
    * FROM a, b, c
    * WHERE a.field1 = b.field1(+)
-   *   AND b.field2 = c.field2(+)
+   *   AND TRUNC(b.field2) = TRUNC(c.field2(+))
    *
    * Becomes:
-   * FROM a LEFT JOIN b ON a.field1 = b.field1 LEFT JOIN c ON b.field2 = c.field2
+   * FROM a LEFT JOIN b ON a.field1 = b.field1
+   *          LEFT JOIN c ON DATE_TRUNC('day', b.field2)::DATE = DATE_TRUNC('day', c.field2)::DATE
    * </pre>
+   *
+   * @param ctx Outer join context with AST nodes
+   * @param tableRefs Table references
+   * @param builder PostgresCodeBuilder for transforming AST nodes
+   * @return ANSI JOIN syntax with all transformations applied
    */
-  private static String generateAnsiJoinSyntax(OuterJoinContext ctx, List<String> tableRefs) {
+  private static String generateAnsiJoinSyntax(OuterJoinContext ctx, List<String> tableRefs,
+                                                PostgresCodeBuilder builder) {
     List<TableInfo> allTables = ctx.getAllTables();
     List<OuterJoinCondition> outerJoins = ctx.getOuterJoins();
 
@@ -107,7 +114,8 @@ public class VisitFromClause {
         String joinType = join.getJoinType() == OuterJoinCondition.JoinType.LEFT ? "LEFT JOIN" : "RIGHT JOIN";
         result.append(" ").append(joinType).append(" ");
         result.append(tableToJoin.toSqlReference());
-        result.append(" ON ").append(join.getCombinedConditions());
+        // Transform join conditions (converts Oracle functions to PostgreSQL and removes (+))
+        result.append(" ON ").append(join.getCombinedConditions(builder));
 
         joinedTables.add(tableToJoin.getKey());
       }
