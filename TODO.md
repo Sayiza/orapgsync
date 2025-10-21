@@ -12,4 +12,4 @@
 [ ] Unmapped defaul values: strip comments, and brackets
 [ ] SQL Transform: subquery support in all phases, outer join support in all phases
 [ ] revisit outer join transformer once all subquery support is in place
-
+[ ] The AND handler (lines 17-30) correctly handles null (filtered ROWNUM), but OR doesn't. If ROWNUM appears in an OR condition, this will cause "null OR something".
