@@ -138,6 +138,23 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
         return VisitQueryBlock.v(ctx, this);
     }
 
+    // ========== WITH CLAUSE (CTEs) ==========
+
+    @Override
+    public String visitWith_clause(PlSqlParser.With_clauseContext ctx) {
+        return VisitWithClause.v(ctx, this);
+    }
+
+    @Override
+    public String visitWith_factoring_clause(PlSqlParser.With_factoring_clauseContext ctx) {
+        return VisitWithFactoringClause.v(ctx, this);
+    }
+
+    @Override
+    public String visitSubquery_factoring_clause(PlSqlParser.Subquery_factoring_clauseContext ctx) {
+        return VisitSubqueryFactoringClause.v(ctx, this);
+    }
+
     // ========== SELECTED LIST (SELECT columns) ==========
 
     @Override

@@ -5,10 +5,15 @@ import me.christianrobert.orapgsync.transformer.context.TransformationException;
 
 public class VisitSelectOnlyStatement {
   public static String v(PlSqlParser.Select_only_statementContext ctx, PostgresCodeBuilder b) {
-    // subquery for_update_clause?
+    // Grammar: with_clause? subquery
+    StringBuilder result = new StringBuilder();
 
-    // Note: FOR UPDATE detection would go here when implementing
-    // Current grammar doesn't expose for_update_clause() method in this context
+    // Handle WITH clause if present
+    PlSqlParser.With_clauseContext withClause = ctx.with_clause();
+    if (withClause != null) {
+      result.append(VisitWithClause.v(withClause, b));
+      result.append(" ");
+    }
 
     // Visit subquery
     PlSqlParser.SubqueryContext subqueryCtx = ctx.subquery();
@@ -16,6 +21,8 @@ public class VisitSelectOnlyStatement {
       throw new TransformationException("SELECT_ONLY statement missing subquery");
     }
 
-    return b.visit(subqueryCtx);
+    result.append(b.visit(subqueryCtx));
+
+    return result.toString();
   }
 }
