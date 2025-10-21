@@ -2,6 +2,7 @@ package me.christianrobert.orapgsync.transformer.builder;
 
 import me.christianrobert.orapgsync.antlr.PlSqlParser;
 import me.christianrobert.orapgsync.transformer.builder.functions.DateFunctionTransformer;
+import me.christianrobert.orapgsync.transformer.builder.functions.StringFunctionTransformer;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
 import me.christianrobert.orapgsync.transformer.context.TransformationException;
 import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
@@ -426,6 +427,11 @@ public class VisitGeneralElement {
         case "TRUNC":
         case "ROUND":
           return DateFunctionTransformer.transform(upperFunctionName, partCtx, b);
+        case "INSTR":
+        case "LPAD":
+        case "RPAD":
+        case "TRANSLATE":
+          return StringFunctionTransformer.transform(upperFunctionName, partCtx, b);
         default:
           // Not a special function - proceed with normal handling
           break;

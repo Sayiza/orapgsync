@@ -15,6 +15,7 @@ import me.christianrobert.orapgsync.transformer.context.TransformationException;
  *   <li>MIN (aggregate function - may appear here in addition to numeric_function)</li>
  *   <li>COALESCE (identical in Oracle and PostgreSQL)</li>
  *   <li>EXTRACT (identical in Oracle and PostgreSQL)</li>
+ *   <li>TRANSLATE (identical in Oracle and PostgreSQL)</li>
  * </ul>
  *
  * <p><b>Grammar rule excerpt:</b>
@@ -203,6 +204,27 @@ public class VisitOtherFunction {
                 result.append(VisitOverClause.v(ctx.over_clause(), b));
             }
 
+            return result.toString();
+        }
+
+        // TRANSLATE '(' expression (USING (CHAR_CS | NCHAR_CS))? (',' expression)* ')'
+        // TRANSLATE(str, from, to) - character-by-character replacement
+        // Identical syntax in Oracle and PostgreSQL (for basic form)
+        if (ctx.TRANSLATE() != null) {
+            StringBuilder result = new StringBuilder("TRANSLATE( ");
+
+            // Get expressions (should be: str, from, to)
+            java.util.List<PlSqlParser.ExpressionContext> expressions = ctx.expression();
+            if (expressions != null && !expressions.isEmpty()) {
+                for (int i = 0; i < expressions.size(); i++) {
+                    if (i > 0) {
+                        result.append(" , ");
+                    }
+                    result.append(b.visit(expressions.get(i)));
+                }
+            }
+
+            result.append(" )");
             return result.toString();
         }
 
