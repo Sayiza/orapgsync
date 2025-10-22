@@ -57,6 +57,13 @@ class AnsiJoinTransformationTest {
 
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
         String postgresSql = builder.visit(parseResult.getTree());
+        // Debug output
+        System.out.println("\n=== TEST: outerJoinWithDateAndStringFunctions ===");
+        System.out.println("ORACLE SQL:");
+        System.out.println(oracleSql);
+        System.out.println("\nPOSTGRESQL SQL:");
+        System.out.println(postgresSql);
+        System.out.println("==================================================\n");
 
         // Then: INNER JOIN preserved with schema-qualified tables
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");

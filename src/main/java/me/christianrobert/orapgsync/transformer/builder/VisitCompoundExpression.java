@@ -64,7 +64,7 @@ public class VisitCompoundExpression {
     if (ctx.subquery() != null) {
       // IN (subquery)
       String subquery = b.visit(ctx.subquery());
-      return "(" + subquery + ")";
+      return "( " + subquery + " )";
     }
 
     if (ctx.concatenation() != null && !ctx.concatenation().isEmpty()) {
@@ -73,7 +73,7 @@ public class VisitCompoundExpression {
       for (PlSqlParser.ConcatenationContext concat : ctx.concatenation()) {
         values.add(b.visit(concat));
       }
-      return "(" + String.join(", ", values) + ")";
+      return "( " + String.join(", ", values) + " )";
     }
 
     if (ctx.constant() != null) {

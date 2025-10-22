@@ -74,6 +74,14 @@ public class ComplexIntegrationTest {
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
         String postgresSql = builder.visit(parseResult.getTree());
 
+        // Debug output
+        System.out.println("\n=== TEST: outerJoinWithDateAndStringFunctions ===");
+        System.out.println("ORACLE SQL:");
+        System.out.println(oracleSql);
+        System.out.println("\nPOSTGRESQL SQL:");
+        System.out.println(postgresSql);
+        System.out.println("==================================================\n");
+
         // Then: All transformations should work together
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
 
@@ -134,11 +142,16 @@ public class ComplexIntegrationTest {
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
         String postgresSql = builder.visit(parseResult.getTree());
 
+        // Debug output
+        System.out.println("\n=== TEST: cteWithOuterJoinAndRownum ===");
+        System.out.println("ORACLE SQL:");
+        System.out.println(oracleSql);
+        System.out.println("\nPOSTGRESQL SQL:");
+        System.out.println(postgresSql);
+        System.out.println("==================================================\n");
+
         // Then: All transformations should work together
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
-
-        System.out.println(oracleSql);
-        System.out.println(normalized);
         // CTE transformation
         assertTrue(normalized.contains("WITH recent_hires AS ("),
             "CTE should be preserved, got: " + normalized);

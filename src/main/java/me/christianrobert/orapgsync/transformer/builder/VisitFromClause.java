@@ -7,8 +7,10 @@ import me.christianrobert.orapgsync.transformer.builder.outerjoin.TableInfo;
 import me.christianrobert.orapgsync.transformer.context.TransformationException;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 public class VisitFromClause {
@@ -76,13 +78,24 @@ public class VisitFromClause {
       throw new TransformationException("No tables found in outer join context");
     }
 
+    if (tableRefs.size() != allTables.size()) {
+      throw new TransformationException("Mismatch between table count in context and transformed refs");
+    }
+
+    // Build a map from table key to transformed table reference
+    // tableRefs are in the same order as allTables (both from table_ref_list)
+    Map<String, String> keyToTransformedRef = new java.util.HashMap<>();
+    for (int i = 0; i < allTables.size(); i++) {
+      keyToTransformedRef.put(allTables.get(i).getKey(), tableRefs.get(i));
+    }
+
     // Track which tables have been joined
     Set<String> joinedTables = new HashSet<>();
 
-    // Start with the first table
+    // Start with the first table (use transformed reference with schema qualification)
     TableInfo firstTable = allTables.get(0);
     StringBuilder result = new StringBuilder();
-    result.append(firstTable.toSqlReference());
+    result.append(keyToTransformedRef.get(firstTable.getKey()));
     joinedTables.add(firstTable.getKey());
 
     // Add outer joins in order
@@ -113,7 +126,8 @@ public class VisitFromClause {
         // Add the JOIN clause
         String joinType = join.getJoinType() == OuterJoinCondition.JoinType.LEFT ? "LEFT JOIN" : "RIGHT JOIN";
         result.append(" ").append(joinType).append(" ");
-        result.append(tableToJoin.toSqlReference());
+        // Use transformed table reference (with schema qualification)
+        result.append(keyToTransformedRef.get(tableToJoin.getKey()));
         // Transform join conditions (converts Oracle functions to PostgreSQL and removes (+))
         result.append(" ON ").append(join.getCombinedConditions(builder));
 
@@ -124,7 +138,8 @@ public class VisitFromClause {
     // Add any remaining tables as comma-separated (implicit joins)
     for (TableInfo table : allTables) {
       if (!joinedTables.contains(table.getKey())) {
-        result.append(", ").append(table.toSqlReference());
+        // Use transformed table reference (with schema qualification)
+        result.append(", ").append(keyToTransformedRef.get(table.getKey()));
         joinedTables.add(table.getKey());
       }
     }

@@ -215,6 +215,14 @@ public class VisitTableReference {
 
     // Apply name resolution logic (only if context is available)
     if (context != null) {
+      // STEP 0: Check if this is a CTE (Common Table Expression) name
+      // CTEs are temporary named result sets that don't belong to any schema
+      // Example: WITH my_cte AS (...) SELECT * FROM my_cte
+      if (context.isCTE(tableName)) {
+        // CTE name - do NOT schema-qualify
+        return tableName.toLowerCase();
+      }
+
       // STEP 1: Try to resolve as synonym first
       // Oracle synonyms don't exist in PostgreSQL, so we must resolve them during transformation
       String resolvedName = context.resolveSynonym(tableName);

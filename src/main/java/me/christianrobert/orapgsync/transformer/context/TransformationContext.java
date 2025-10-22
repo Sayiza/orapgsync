@@ -1,7 +1,9 @@
 package me.christianrobert.orapgsync.transformer.context;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Provides global context for transformation process.
@@ -10,7 +12,7 @@ import java.util.Map;
  * <ul>
  *   <li>Pre-built metadata indices for fast lookups</li>
  *   <li>Current schema context</li>
- *   <li>Query-local state (table aliases)</li>
+ *   <li>Query-local state (table aliases, CTE names)</li>
  * </ul>
  *
  * <p>This context is passed to every semantic node's {@code toPostgres()} method,
@@ -23,6 +25,7 @@ public class TransformationContext {
 
     // Query-local state (mutable, reset per query)
     private final Map<String, String> tableAliases;  // alias → table name
+    private final Set<String> cteNames;  // CTE names (from WITH clause)
 
     // Future: Query scope tracking for subqueries and correlated references
     // When implementing subqueries, add:
@@ -50,6 +53,7 @@ public class TransformationContext {
         this.currentSchema = currentSchema;
         this.indices = indices;
         this.tableAliases = new HashMap<>();
+        this.cteNames = new HashSet<>();
     }
 
     public String getCurrentSchema() {
@@ -139,6 +143,42 @@ public class TransformationContext {
      */
     public void clearAliases() {
         tableAliases.clear();
+    }
+
+    // ========== Query-Local State (CTE Names) ==========
+
+    /**
+     * Registers a CTE (Common Table Expression) name from WITH clause.
+     *
+     * <p>CTE names should NOT be schema-qualified since they are temporary
+     * named result sets that don't belong to any schema.
+     *
+     * @param cteName CTE name from WITH clause
+     */
+    public void registerCTE(String cteName) {
+        if (cteName != null) {
+            cteNames.add(cteName.toLowerCase());
+        }
+    }
+
+    /**
+     * Checks if a name is a registered CTE.
+     *
+     * @param name Name to check
+     * @return true if this is a CTE name
+     */
+    public boolean isCTE(String name) {
+        if (name == null) {
+            return false;
+        }
+        return cteNames.contains(name.toLowerCase());
+    }
+
+    /**
+     * Clears all registered CTEs (for starting a new query).
+     */
+    public void clearCTEs() {
+        cteNames.clear();
     }
 
     // ========== Type Conversion (Future) ==========
