@@ -431,6 +431,9 @@ public class VisitGeneralElement {
         case "LPAD":
         case "RPAD":
         case "TRANSLATE":
+        case "REGEXP_REPLACE":
+        case "REGEXP_SUBSTR":
+        case "REGEXP_INSTR":
           return StringFunctionTransformer.transform(upperFunctionName, partCtx, b);
         default:
           // Not a special function - proceed with normal handling

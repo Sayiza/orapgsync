@@ -292,9 +292,13 @@ SELECT TRANSLATE(phone, '()-', '   ') FROM contacts;
 - Parsed as `other_function` in ANTLR grammar
 - **Test Coverage:** 7 tests (basic, removal, nesting, mixed), all passing
 
-**4. REGEXP Functions (1-2 days)**
+**4. REGEXP Functions ✅ COMPLETED (October 2025)**
+- **Impact:** 5-10% of Oracle views use REGEXP functions for pattern matching
+- **Actual Effort:** ~2 hours
+- **Test Coverage:** 17/17 tests passing (646/646 total project tests)
+- **Implementation:** StringFunctionTransformer.java
 
-**REGEXP_REPLACE:**
+**REGEXP_REPLACE ✅ COMPLETED**
 ```sql
 -- Oracle
 SELECT REGEXP_REPLACE(text, '[0-9]', 'X') FROM data;
@@ -305,7 +309,15 @@ SELECT REGEXP_REPLACE(text, '[0-9]', 'X', 'g') FROM data;
 
 **Key Difference:** PostgreSQL requires 'g' flag for global replace
 
-**REGEXP_SUBSTR:**
+**Implementation Details:**
+- Adds 'g' flag by default for global replacement (Oracle's default behavior)
+- Supports case-insensitive flag: 'i' → 'gi'
+- occurrence=1: Removes 'g' flag (replace first match only)
+- occurrence>1: Throws clear error (not directly supported)
+- position!=1: Throws clear error (would need SUBSTRING workaround)
+- **Test Coverage:** 7 tests (basic, literals, WHERE, flags, unsupported cases)
+
+**REGEXP_SUBSTR ✅ COMPLETED**
 ```sql
 -- Oracle
 SELECT REGEXP_SUBSTR(email, '[^@]+') FROM employees;
@@ -314,26 +326,39 @@ SELECT REGEXP_SUBSTR(email, '[^@]+') FROM employees;
 SELECT (REGEXP_MATCH(email, '[^@]+'))[1] FROM employees;
 ```
 
-**Key Difference:** PostgreSQL returns array, need to extract first element
+**Key Difference:** PostgreSQL returns array, need to extract first element with [1]
 
-**REGEXP_INSTR:**
+**Implementation Details:**
+- Transforms to (REGEXP_MATCH())[1] for array element extraction
+- Supports flags parameter (e.g., 'i' for case-insensitive)
+- occurrence>1: Throws clear error (suggest REGEXP_MATCHES for multiple matches)
+- position!=1: Throws clear error (would need SUBSTRING workaround)
+- **Test Coverage:** 7 tests (basic, literals, WHERE, flags, nesting, unsupported cases)
+
+**REGEXP_INSTR ⏳ DOCUMENTED AS UNSUPPORTED**
 ```sql
 -- Oracle
 SELECT REGEXP_INSTR(text, '[0-9]') FROM data;
 
 -- PostgreSQL
--- No direct equivalent - need to use POSITION() with REGEXP_REPLACE() or substring
+-- No direct equivalent - requires complex custom function
 ```
 
-**Implementation:** VisitStringFunction.java
-- REGEXP_REPLACE: Add 'g' flag
-- REGEXP_SUBSTR: Transform to REGEXP_MATCH()[1]
-- REGEXP_INSTR: Complex transformation or throw unsupported (defer)
+**Implementation Details:**
+- Throws TransformationException with helpful guidance
+- Suggests three alternatives:
+  1. Create custom PostgreSQL function regexp_instr()
+  2. Rewrite query with REGEXP_MATCH + position calculations
+  3. Use POSITION() or STRPOS() for simple patterns
+- **Rationale:** Complex to implement (handle occurrence, return_option, etc.)
+- **Usage:** Very low in typical Oracle views (< 1%)
+- **Test Coverage:** 1 test (verifies clear error message)
 
-**Testing (1 day):**
-- Each function: basic, with NULL values, in WHERE clause
-- REGEXP functions: various patterns, flags
-- Target: 20-25 tests
+**Test Summary:**
+- 17 comprehensive tests covering all REGEXP function scenarios
+- Basic usage, literals, WHERE clauses, flags, nesting
+- Unsupported parameter combinations (helpful error messages)
+- Integration with other string functions (INSTR, UPPER, etc.)
 
 ---
 
@@ -426,19 +451,18 @@ ORDER BY emp_name; -- Note: ORDER SIBLINGS BY not directly supported
 | Baseline | - | ✅ | 0 | 50% | - |
 | **Phase 1** | **CTEs** | **✅ DONE** | **~0.1** | **75%** | **+25%** |
 | **Phase 2** | **Date/Time Functions** | **✅ DONE** | **~1** | **80%** | **+5%** |
-| **Phase 3** | **String Functions** | **🟡 IN PROGRESS** | **0.1/3-4** | **80%** | **+0-1%** |
-| Phase 4 | CONNECT BY | 🔲 TODO | 5-7 | 90% | +5% |
-| **Total** | - | - | **9-12** | **90%** | **+40%** |
+| **Phase 3** | **String Functions** | **✅ DONE** | **~0.2** | **82%** | **+2%** |
+| Phase 4 | CONNECT BY | 🔲 TODO | 5-7 | 90% | +8% |
+| **Total** | - | - | **6-8** | **90%** | **+40%** |
 
-**Critical Path:** ✅ CTEs → ✅ Date/Time Functions → 🟡 String Functions → CONNECT BY
+**Critical Path:** ✅ CTEs → ✅ Date/Time Functions → ✅ String Functions → CONNECT BY
 
 **Next Steps:**
 1. ✅ CTEs - COMPLETED (38/38 tests passing)
 2. ✅ Date/Time Functions - COMPLETED (27/27 tests passing, 5 core functions implemented)
-3. 🟡 String Functions - IN PROGRESS (INSTR completed: 14/14 tests passing)
-4. Continue String Functions (LPAD/RPAD, TRANSLATE, REGEXP functions)
-5. Assess real-world coverage with production database
-6. Implement CONNECT BY if needed for final push to 90%
+3. ✅ String Functions - COMPLETED (47/47 tests passing: INSTR 14, LPAD/RPAD/TRANSLATE 16, REGEXP 17)
+4. Assess real-world coverage with production database (likely at ~82-85%)
+5. Implement CONNECT BY if needed for final push to 90%
 
 ---
 
@@ -516,5 +540,5 @@ The CTE implementation was **12x faster** than estimated (2 hours vs 3-4 days). 
 
 ---
 
-**Last Review:** 2025-10-21
-**Next Review:** After String Functions implementation
+**Last Review:** 2025-10-22
+**Next Review:** After real-world coverage assessment

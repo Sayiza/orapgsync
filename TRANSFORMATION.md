@@ -1,7 +1,7 @@
 # Oracle to PostgreSQL SQL Transformation
 
-**Last Updated:** 2025-10-20
-**Status:** Phase 2 COMPLETE ✅, Phase 3 ~50% COMPLETE ⏳ - 507 tests passing
+**Last Updated:** 2025-10-22
+**Status:** Phase 2 COMPLETE ✅, Phase 3 ~50% COMPLETE ⏳ - 662 tests passing
 
 This document describes the ANTLR-based transformation module that converts Oracle SQL to PostgreSQL-compatible SQL using a direct AST-to-code approach.
 
@@ -9,7 +9,7 @@ This document describes the ANTLR-based transformation module that converts Orac
 
 **Architecture:** Direct AST transformation (no intermediate semantic tree)
 **Visitor Classes:** 37 static helpers organized by ANTLR grammar rules
-**Test Coverage:** 507/507 passing across 30 test classes
+**Test Coverage:** 662/662 passing across 42 test classes
 
 **Coverage Analysis (Realistic Assessment):**
 - **Simple Oracle views** (no CTEs, no CONNECT BY, basic functions): ~95% ✅
@@ -36,8 +36,9 @@ This document describes the ANTLR-based transformation module that converts Orac
 14. **TO_DATE** - VisitStringFunction, TO_TIMESTAMP transformation (17 tests)
 15. **TRIM** - VisitStringFunction, pass-through (19 tests)
 16. **Window Functions** - VisitOverClause, VisitExpressions (31 tests)
-17. **ROWNUM Phase 1** - RownumAnalyzer, RownumContext, simple LIMIT optimization (16 tests)
-18. **Sequences** - VisitGeneralElement, seq.NEXTVAL → nextval('schema.seq') (19 tests)
+17. **ROWNUM Phase 1** - RownumAnalyzer, RownumContext, simple LIMIT optimization (17 tests)
+18. **ROWNUM Phase 2** - VisitSelectListElement, pseudocolumn in SELECT list → row_number() OVER () (16 tests)
+19. **Sequences** - VisitGeneralElement, seq.NEXTVAL → nextval('schema.seq') (19 tests)
 
 ---
 
@@ -68,7 +69,7 @@ Oracle SQL → ANTLR Parser → PostgresCodeBuilder → PostgreSQL SQL
 1. **Direct Transformation**: No intermediate semantic tree - visitor returns PostgreSQL SQL strings directly
 2. **Static Helper Pattern**: Each ANTLR rule has a static helper class (26+ helpers), keeping the main visitor clean
 3. **Dependency Boundaries**: `TransformationContext` passed as parameter (not CDI-injected) for metadata access
-4. **Test-Driven**: 349 tests across 22 test classes, all passing
+4. **Test-Driven**: 662 tests across 42 test classes, all passing
 5. **Incremental**: Features added progressively with comprehensive test coverage
 
 ### Why Direct AST Works
@@ -88,7 +89,7 @@ Oracle SQL → ANTLR Parser → PostgresCodeBuilder → PostgreSQL SQL
 
 ## Current Status
 
-### ✅ Complete Features (507/507 tests passing)
+### ✅ Complete Features (662/662 tests passing)
 
 **Phase 1: Foundation**
 - AntlrParser, 37 visitor helpers, 11-level expression hierarchy, TransformationContext, MetadataIndexBuilder
@@ -115,7 +116,8 @@ Oracle SQL → ANTLR Parser → PostgresCodeBuilder → PostgreSQL SQL
 - TO_DATE → TO_TIMESTAMP - VisitStringFunction
 - TRIM (pass-through) - VisitStringFunction
 - Window functions (OVER clause: ROW_NUMBER, RANK, LEAD, LAG, aggregates) - VisitOverClause
-- ROWNUM → LIMIT (Phase 1: simple patterns WHERE ROWNUM <= N) - RownumAnalyzer, RownumContext
+- ROWNUM Phase 1: WHERE ROWNUM <= N → LIMIT - RownumAnalyzer, RownumContext
+- ROWNUM Phase 2: SELECT ROWNUM → SELECT row_number() OVER () AS rownum - VisitSelectListElement
 - Sequences (seq.NEXTVAL → nextval('schema.seq')) - VisitGeneralElement
 - Type member methods (emp.address.get_street() → address_type__get_street(emp.address)) - VisitGeneralElement
 - Package functions (pkg.func() → pkg__func()) - VisitGeneralElement
@@ -170,9 +172,11 @@ Oracle SQL → ANTLR Parser → PostgresCodeBuilder → PostgreSQL SQL
    - Fix: Pass-through (identical in Oracle and PostgreSQL)
    - Estimated effort: 5 minutes
 
-8. **ROWNUM advanced patterns** 🟢 **LOW EFFORT**
-   - Phase 2-4: ROWNUM in SELECT list, BETWEEN, complex expressions
-   - Estimated effort: 1-2 days
+8. **ROWNUM advanced patterns** 🟢 **PARTIALLY COMPLETE**
+   - ✅ Phase 2 COMPLETE: ROWNUM in SELECT list → row_number() OVER () (16 tests)
+   - ⏳ Phase 3-4: ROWNUM in expressions (arithmetic, unary operators), complex patterns
+   - Note: ROWNUM BETWEEN is NOT supported (invalid Oracle pattern)
+   - Estimated remaining effort: 0.5-1 day
 
 9. **CHR function** 🟢 **TRIVIAL**
    - Oracle: `CHR(65)` → PostgreSQL: `CHR(65)` (identical)
@@ -371,12 +375,13 @@ Oracle-specific transformations for functions, pseudo-columns, and special synta
 - TO_DATE → TO_TIMESTAMP - VisitStringFunction (17 tests)
 - TRIM - VisitStringFunction (19 tests)
 - Window functions (OVER clause) - VisitOverClause (31 tests)
-- ROWNUM → LIMIT (Phase 1: simple patterns) - RownumAnalyzer, RownumContext (16 tests)
+- ROWNUM Phase 1: WHERE ROWNUM → LIMIT - RownumAnalyzer, RownumContext (17 tests)
+- ROWNUM Phase 2: SELECT ROWNUM → row_number() OVER () - VisitSelectListElement (16 tests)
 - Sequences (seq.NEXTVAL → nextval()) - VisitGeneralElement (19 tests)
 
 **Remaining:**
-- ROWNUM Phase 2-4: SELECT list, BETWEEN, complex expressions
-- Unary operators (+, -)
+- ROWNUM Phase 3-4: Expressions (arithmetic, unary operators), complex patterns
+- Unary operators (+, -) in general expressions
 - CHR function
 
 ---
@@ -403,7 +408,7 @@ Extend PostgresCodeBuilder with new visitors for PL/SQL control flow: VisitFunct
 **Advanced Features:** PackageFunction (10), TypeMemberMethod (8), OuterJoin (17), SubqueryFromClause (13)
 **Operators:** Arithmetic (22), OrderBy (19), GroupBy (20), AnsiJoin (15)
 **Oracle Functions:** NVL/SYSDATE/DECODE (23), ColumnAlias (18), CaseExpression (17), TO_CHAR (21), SUBSTR (18), TO_DATE (17), TRIM (19)
-**Complex Features:** SubqueryComprehensive (9), SetOperations (12), FromDual (16), WindowFunctions (31), ROWNUM (16), Sequences (19)
+**Complex Features:** SubqueryComprehensive (9), SetOperations (12), FromDual (16), WindowFunctions (31), ROWNUM (33: Phase1 17 + Phase2 16), Sequences (19)
 
 ### Coverage Summary
 
@@ -501,7 +506,7 @@ Extend PostgresCodeBuilder with new visitors for PL/SQL control flow: VisitFunct
 - ✅ Direct AST approach (simple, fast, maintainable)
 - ✅ 37 static visitor helpers (scalable, testable)
 - ✅ Clean boundaries via TransformationContext
-- ✅ 507/507 tests passing across 30 test classes
+- ✅ 662/662 tests passing across 42 test classes
 - ✅ Solid foundation for incremental feature additions
 
 **What Works Well:**
