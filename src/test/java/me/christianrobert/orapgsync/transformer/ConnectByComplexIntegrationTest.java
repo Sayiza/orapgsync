@@ -217,6 +217,64 @@ class ConnectByComplexIntegrationTest {
         "CONNECT BY on subquery result should throw exception");
   }
 
+  @Test
+  void multipleIndependentConnectBySubqueries() {
+    // Multiple subqueries, each with their own CONNECT BY clause
+    // This tests whether independent hierarchies can coexist in the same query
+    String oracleSql =
+        "SELECT e.emp_id, d.dept_id " +
+        "FROM (" +
+        "  SELECT emp_id, dept_id " +
+        "  FROM employees " +
+        "  START WITH manager_id IS NULL " +
+        "  CONNECT BY PRIOR emp_id = manager_id" +
+        ") e, (" +
+        "  SELECT dept_id " +
+        "  FROM departments " +
+        "  START WITH parent_dept_id IS NULL " +
+        "  CONNECT BY PRIOR dept_id = parent_dept_id" +
+        ") d " +
+        "WHERE e.dept_id = d.dept_id";
+
+    String result = transform(oracleSql);
+    String normalized = result.trim().replaceAll("\\s+", " ");
+
+    // Debug output
+    System.out.println("\n=== TEST: multipleIndependentConnectBySubqueries ===");
+    System.out.println("ORACLE SQL:");
+    System.out.println(oracleSql);
+    System.out.println("\nPOSTGRESQL SQL:");
+    System.out.println(result);
+    System.out.println("==================================================\n");
+
+    // Should have two recursive CTEs - one for employees, one for departments
+    assertTrue(normalized.contains("WITH RECURSIVE employees_hierarchy AS ("),
+        "Should generate recursive CTE for employees hierarchy");
+
+    assertTrue(normalized.contains("WITH RECURSIVE departments_hierarchy AS ("),
+        "Should generate recursive CTE for departments hierarchy");
+
+    // Both CTEs should have base and recursive cases
+    int unionAllCount = countOccurrences(normalized, "UNION ALL");
+    assertTrue(unionAllCount >= 2,
+        "Should have at least two UNION ALL (one per recursive CTE), found: " + unionAllCount);
+
+    // The outer query should reference both hierarchies
+    assertTrue(normalized.contains("e.emp_id") || normalized.contains("emp_id"),
+        "Should reference employee hierarchy in SELECT");
+
+    assertTrue(normalized.contains("d.dept_id") || normalized.contains("dept_id"),
+        "Should reference department hierarchy in SELECT");
+
+    // Should have WHERE clause joining the two hierarchies
+    assertTrue(normalized.contains("WHERE") || normalized.contains("where"),
+        "Should preserve WHERE clause joining hierarchies");
+
+    // Verify query is not empty and appears valid
+    assertFalse(result.isEmpty(), "Should generate non-empty query");
+    assertTrue(result.length() > 100, "Should generate substantial query");
+  }
+
   // ========== CONNECT BY + CTEs ==========
 
   @Test

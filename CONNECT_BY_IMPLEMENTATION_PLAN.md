@@ -3,7 +3,7 @@
 **Last Updated:** 2025-10-22
 **Status:** ✅ **PHASE 1-2 COMPLETE** (Basic transformation working!)
 **Actual Effort:** ~4-5 hours (vs. estimated 5-7 days)
-**Test Coverage:** 24/24 tests passing
+**Test Coverage:** 28/28 tests passing
 **Coverage Impact:** +8-10 percentage points (82% → 90%)
 
 ---
@@ -152,9 +152,9 @@ HierarchicalQueryTransformer
 
 **Files Modified (2):**
 1. `VisitQueryBlock.java` - Added 8 lines for CONNECT BY detection
-2. Test files - 24 comprehensive tests (13 basic + 11 complex integration)
+2. Test files - 28 comprehensive tests (16 basic + 12 complex integration)
 
-**Total New Code:** ~1,280 lines of production code + ~700 lines of tests
+**Total New Code:** ~1,280 lines of production code + ~750 lines of tests
 
 ### Key Features Working
 
@@ -214,20 +214,22 @@ FROM employees_hierarchy
 - Existing CTEs + CONNECT BY (CTE merging)
 - WHERE clause + LEVEL + ORDER BY combined
 
-### Test Coverage: 24/24 Tests Passing 🎉
+### Test Coverage: 28/28 Tests Passing 🎉
 
-**Basic Tests (13):**
+**Basic Tests (16):**
 - Simple hierarchy (PRIOR on left/right)
-- Table aliases
+- Table aliases (explicit and implicit)
 - LEVEL in SELECT
 - WHERE clause distribution
 - SELECT *
 - ORDER BY
+- Schema qualification (explicit and implicit)
 - Error cases (NOCYCLE, missing PRIOR, multiple tables, etc.)
 
-**Complex Integration Tests (11):**
+**Complex Integration Tests (12):**
 - ✅ CONNECT BY + ROWNUM in outer query
 - ✅ CONNECT BY in subqueries (FROM and WHERE)
+- ✅ **Multiple independent CONNECT BY subqueries** (NEW!)
 - ✅ CONNECT BY with existing CTEs
 - ✅ CONNECT BY with recursive CTEs
 - ✅ WHERE + LEVEL + ORDER BY combined
