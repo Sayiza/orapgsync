@@ -131,9 +131,9 @@ public class PriorExpressionAnalyzer {
     // Check if this is a PRIOR expression - if so, unwrap it
     if (unaryExpr.PRIOR() != null) {
       // Grammar: PRIOR unary_expression
-      List<PlSqlParser.Unary_expressionContext> children = unaryExpr.unary_expression();
-      if (children != null && !children.isEmpty()) {
-        unaryExpr = children.get(0);  // Unwrap PRIOR
+      PlSqlParser.Unary_expressionContext child = unaryExpr.unary_expression();
+      if (child != null) {
+        unaryExpr = child;  // Unwrap PRIOR
       }
     }
 

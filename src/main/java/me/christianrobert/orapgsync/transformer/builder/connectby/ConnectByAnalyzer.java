@@ -255,10 +255,10 @@ public class ConnectByAnalyzer {
       }
 
       // Check for SYS_CONNECT_BY_PATH (function call)
-      if (tree instanceof PlSqlParser.Function_callContext) {
-        PlSqlParser.Function_callContext funcCtx = (PlSqlParser.Function_callContext) tree;
-        String funcName = funcCtx.getText().toUpperCase();
-        if (funcName.startsWith("SYS_CONNECT_BY_PATH")) {
+      // Functions appear as general_element nodes
+      if (tree instanceof PlSqlParser.General_elementContext) {
+        String text = tree.getText().toUpperCase();
+        if (text.contains("SYS_CONNECT_BY_PATH")) {
           usesConnectByPath = true;
         }
       }

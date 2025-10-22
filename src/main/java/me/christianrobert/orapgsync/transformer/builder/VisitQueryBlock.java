@@ -1,6 +1,7 @@
 package me.christianrobert.orapgsync.transformer.builder;
 
 import me.christianrobert.orapgsync.antlr.PlSqlParser;
+import me.christianrobert.orapgsync.transformer.builder.connectby.HierarchicalQueryTransformer;
 import me.christianrobert.orapgsync.transformer.builder.outerjoin.OuterJoinAnalyzer;
 import me.christianrobert.orapgsync.transformer.builder.outerjoin.OuterJoinContext;
 import me.christianrobert.orapgsync.transformer.builder.rownum.RownumAnalyzer;
@@ -11,6 +12,15 @@ import java.util.List;
 
 public class VisitQueryBlock {
   public static String v(PlSqlParser.Query_blockContext ctx, PostgresCodeBuilder b) {
+
+    // DETECT CONNECT BY: Transform to recursive CTE if hierarchical query present
+    // This must happen FIRST, before any other analysis, because CONNECT BY
+    // requires complete restructuring of the query (not just clause modifications)
+    List<PlSqlParser.Hierarchical_query_clauseContext> hierClauses =
+        ctx.hierarchical_query_clause();
+    if (hierClauses != null && !hierClauses.isEmpty()) {
+      return HierarchicalQueryTransformer.transform(ctx, b);
+    }
 
     // Get FROM and WHERE clauses
     PlSqlParser.From_clauseContext fromClauseCtx = ctx.from_clause();
