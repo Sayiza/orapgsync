@@ -6,6 +6,8 @@ import me.christianrobert.orapgsync.core.service.StateService;
 import me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder;
 import me.christianrobert.orapgsync.transformer.context.MetadataIndexBuilder;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
+import me.christianrobert.orapgsync.transformer.type.SimpleTypeEvaluator;
+import me.christianrobert.orapgsync.transformer.type.TypeEvaluator;
 import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
 import me.christianrobert.orapgsync.transformer.parser.AntlrParser;
 import me.christianrobert.orapgsync.transformer.parser.ParseResult;
@@ -56,7 +58,7 @@ class PackageFunctionTransformationTest {
         // Build indices for HR schema
         List<String> schemas = Collections.singletonList("HR");
         TransformationIndices indices = MetadataIndexBuilder.build(mockStateService, schemas);
-        TransformationContext context = new TransformationContext("HR", indices);
+        TransformationContext context = new TransformationContext("HR", indices, new SimpleTypeEvaluator("HR", indices));
 
         // When: Transform SQL with package function call
         String oracleSql = "SELECT nr, testpackage.testfunction(nr) FROM examples";
@@ -80,7 +82,7 @@ class PackageFunctionTransformationTest {
 
         List<String> schemas = Collections.singletonList("HR");
         TransformationIndices indices = MetadataIndexBuilder.build(mockStateService, schemas);
-        TransformationContext context = new TransformationContext("HR", indices);
+        TransformationContext context = new TransformationContext("HR", indices, new SimpleTypeEvaluator("HR", indices));
 
         // When: Transform SQL with mixed case
         String oracleSql = "SELECT nr, TestPackage.TestFunction(nr) FROM examples";
@@ -102,7 +104,7 @@ class PackageFunctionTransformationTest {
 
         List<String> schemas = Collections.singletonList("HR");
         TransformationIndices indices = MetadataIndexBuilder.build(mockStateService, schemas);
-        TransformationContext context = new TransformationContext("HR", indices);
+        TransformationContext context = new TransformationContext("HR", indices, new SimpleTypeEvaluator("HR", indices));
 
         // When: Transform SQL with multiple package function calls
         String oracleSql = "SELECT pkg1.func1(nr), pkg2.func2(text) FROM examples";
@@ -127,7 +129,7 @@ class PackageFunctionTransformationTest {
 
         List<String> schemas = Collections.singletonList("HR");
         TransformationIndices indices = MetadataIndexBuilder.build(mockStateService, schemas);
-        TransformationContext context = new TransformationContext("HR", indices);
+        TransformationContext context = new TransformationContext("HR", indices, new SimpleTypeEvaluator("HR", indices));
 
         // When: Transform SQL using synonym
         String oracleSql = "SELECT nr, synonym_pkg.testfunction(nr) FROM examples";
@@ -151,7 +153,7 @@ class PackageFunctionTransformationTest {
 
         List<String> schemas = Arrays.asList("HR", "SCOTT");
         TransformationIndices indices = MetadataIndexBuilder.build(mockStateService, schemas);
-        TransformationContext context = new TransformationContext("HR", indices);
+        TransformationContext context = new TransformationContext("HR", indices, new SimpleTypeEvaluator("HR", indices));
 
         // When: Transform SQL using synonym that crosses schemas
         String oracleSql = "SELECT nr, synonym_pkg.testfunction(nr) FROM examples";
@@ -175,7 +177,7 @@ class PackageFunctionTransformationTest {
 
         List<String> schemas = Arrays.asList("HR", "SCOTT", "PUBLIC");
         TransformationIndices indices = MetadataIndexBuilder.build(mockStateService, schemas);
-        TransformationContext context = new TransformationContext("HR", indices);
+        TransformationContext context = new TransformationContext("HR", indices, new SimpleTypeEvaluator("HR", indices));
 
         // When: Transform SQL - synonym will fall back to PUBLIC
         String oracleSql = "SELECT nr, synonym_pkg.testfunction(nr) FROM examples";
@@ -197,7 +199,7 @@ class PackageFunctionTransformationTest {
 
         List<String> schemas = Collections.singletonList("HR");
         TransformationIndices indices = MetadataIndexBuilder.build(mockStateService, schemas);
-        TransformationContext context = new TransformationContext("HR", indices);
+        TransformationContext context = new TransformationContext("HR", indices, new SimpleTypeEvaluator("HR", indices));
 
         // When: Transform SQL with multiple arguments (only columns for now, literals not yet supported)
         String oracleSql = "SELECT pkg.calc(nr, text) FROM examples";
@@ -219,7 +221,7 @@ class PackageFunctionTransformationTest {
 
         List<String> schemas = Collections.singletonList("HR");
         TransformationIndices indices = MetadataIndexBuilder.build(mockStateService, schemas);
-        TransformationContext context = new TransformationContext("HR", indices);
+        TransformationContext context = new TransformationContext("HR", indices, new SimpleTypeEvaluator("HR", indices));
 
         // When: Transform SQL with nested function calls
         String oracleSql = "SELECT pkg.outer(pkg.inner(nr)) FROM examples";
@@ -240,7 +242,7 @@ class PackageFunctionTransformationTest {
         // Given: No package functions, just regular column references
         List<String> schemas = Collections.singletonList("HR");
         TransformationIndices indices = MetadataIndexBuilder.build(mockStateService, schemas);
-        TransformationContext context = new TransformationContext("HR", indices);
+        TransformationContext context = new TransformationContext("HR", indices, new SimpleTypeEvaluator("HR", indices));
 
         // When: Transform SQL with qualified column references (table.column)
         String oracleSql = "SELECT e.empno, e.ename FROM employees e";
@@ -260,7 +262,7 @@ class PackageFunctionTransformationTest {
         // Given: Empty metadata (no package functions defined)
         List<String> schemas = Collections.singletonList("HR");
         TransformationIndices indices = MetadataIndexBuilder.build(mockStateService, schemas);
-        TransformationContext context = new TransformationContext("HR", indices);
+        TransformationContext context = new TransformationContext("HR", indices, new SimpleTypeEvaluator("HR", indices));
 
         // When: Transform SQL with unknown package.function
         String oracleSql = "SELECT unknown_pkg.unknown_func(nr) FROM examples";

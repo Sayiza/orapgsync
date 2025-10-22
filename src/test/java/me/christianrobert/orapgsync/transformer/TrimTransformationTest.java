@@ -3,6 +3,8 @@ package me.christianrobert.orapgsync.transformer;
 import me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder;
 import me.christianrobert.orapgsync.transformer.context.MetadataIndexBuilder;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
+import me.christianrobert.orapgsync.transformer.type.SimpleTypeEvaluator;
+import me.christianrobert.orapgsync.transformer.type.TypeEvaluator;
 import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
 import me.christianrobert.orapgsync.transformer.parser.AntlrParser;
 import me.christianrobert.orapgsync.transformer.parser.ParseResult;
@@ -53,7 +55,7 @@ class TrimTransformationTest {
     @Test
     void trimWithDefaultBehavior() {
         // Given: TRIM with just string (removes leading and trailing spaces)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT TRIM(name) FROM employees";
 
         // When: Parse and transform
@@ -72,7 +74,7 @@ class TrimTransformationTest {
     @Test
     void trimWithStringLiteral() {
         // Given: TRIM with string literal
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT TRIM('  Hello World  ') FROM employees";
 
         // When: Parse and transform
@@ -93,7 +95,7 @@ class TrimTransformationTest {
     @Test
     void trimLeadingSpaces() {
         // Given: TRIM LEADING (removes leading spaces only)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT TRIM(LEADING FROM name) FROM employees";
 
         // When: Parse and transform
@@ -112,7 +114,7 @@ class TrimTransformationTest {
     @Test
     void trimTrailingSpaces() {
         // Given: TRIM TRAILING (removes trailing spaces only)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT TRIM(TRAILING FROM name) FROM employees";
 
         // When: Parse and transform
@@ -131,7 +133,7 @@ class TrimTransformationTest {
     @Test
     void trimBothSpaces() {
         // Given: TRIM BOTH (removes both sides - explicit)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT TRIM(BOTH FROM name) FROM employees";
 
         // When: Parse and transform
@@ -152,7 +154,7 @@ class TrimTransformationTest {
     @Test
     void trimSpecificCharacter() {
         // Given: TRIM with specific character to remove
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT TRIM('x' FROM name) FROM employees";
 
         // When: Parse and transform
@@ -171,7 +173,7 @@ class TrimTransformationTest {
     @Test
     void trimLeadingSpecificCharacter() {
         // Given: TRIM LEADING with specific character
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT TRIM(LEADING '0' FROM account_number) FROM accounts";
 
         // When: Parse and transform
@@ -190,7 +192,7 @@ class TrimTransformationTest {
     @Test
     void trimTrailingSpecificCharacter() {
         // Given: TRIM TRAILING with specific character
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT TRIM(TRAILING '.' FROM name) FROM employees";
 
         // When: Parse and transform
@@ -209,7 +211,7 @@ class TrimTransformationTest {
     @Test
     void trimBothSpecificCharacter() {
         // Given: TRIM BOTH with specific character
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT TRIM(BOTH '*' FROM description) FROM products";
 
         // When: Parse and transform
@@ -230,7 +232,7 @@ class TrimTransformationTest {
     @Test
     void trimWithQualifiedColumn() {
         // Given: TRIM with qualified column reference
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT TRIM(e.name) FROM employees e";
 
         // When: Parse and transform
@@ -251,7 +253,7 @@ class TrimTransformationTest {
     @Test
     void trimInWhereClause() {
         // Given: TRIM in WHERE clause comparison
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT empno FROM employees WHERE TRIM(name) = 'John'";
 
         // When: Parse and transform
@@ -272,7 +274,7 @@ class TrimTransformationTest {
     @Test
     void trimWithColumnAlias() {
         // Given: TRIM with column alias
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT TRIM(name) AS clean_name FROM employees";
 
         // When: Parse and transform
@@ -293,7 +295,7 @@ class TrimTransformationTest {
     @Test
     void multipleTrimInSelectList() {
         // Given: Multiple TRIM calls in SELECT list
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT TRIM(first_name), TRIM(last_name) FROM employees";
 
         // When: Parse and transform
@@ -316,7 +318,7 @@ class TrimTransformationTest {
     @Test
     void trimLowercase() {
         // Given: lowercase trim
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT trim(name) FROM employees";
 
         // When: Parse and transform
@@ -335,7 +337,7 @@ class TrimTransformationTest {
     @Test
     void trimMixedCase() {
         // Given: mixed case Trim
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT Trim(name) FROM employees";
 
         // When: Parse and transform
@@ -356,7 +358,7 @@ class TrimTransformationTest {
     @Test
     void trimFromDual() {
         // Given: TRIM in scalar query (FROM DUAL)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT TRIM('  Hello  ') FROM DUAL";
 
         // When: Parse and transform
@@ -379,7 +381,7 @@ class TrimTransformationTest {
     @Test
     void trimInOrderBy() {
         // Given: TRIM in ORDER BY clause
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT empno FROM employees ORDER BY TRIM(name) ASC";
 
         // When: Parse and transform
@@ -400,7 +402,7 @@ class TrimTransformationTest {
     @Test
     void trimWithNestedFunction() {
         // Given: TRIM with nested UPPER function
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT TRIM(UPPER(name)) FROM employees";
 
         // When: Parse and transform
@@ -419,7 +421,7 @@ class TrimTransformationTest {
     @Test
     void upperWithNestedTrim() {
         // Given: UPPER with nested TRIM
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT UPPER(TRIM(name)) FROM employees";
 
         // When: Parse and transform

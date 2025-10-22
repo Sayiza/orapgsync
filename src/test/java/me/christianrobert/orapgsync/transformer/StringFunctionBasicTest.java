@@ -3,6 +3,8 @@ package me.christianrobert.orapgsync.transformer;
 import me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder;
 import me.christianrobert.orapgsync.transformer.context.MetadataIndexBuilder;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
+import me.christianrobert.orapgsync.transformer.type.SimpleTypeEvaluator;
+import me.christianrobert.orapgsync.transformer.type.TypeEvaluator;
 import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
 import me.christianrobert.orapgsync.transformer.parser.AntlrParser;
 import me.christianrobert.orapgsync.transformer.parser.ParseResult;
@@ -40,7 +42,7 @@ public class StringFunctionBasicTest {
     @Test
     void lpadTwoArgs() {
         // Given: LPAD with string and length only (default pad is space)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT LPAD(emp_name, 20) FROM employees";
 
@@ -61,7 +63,7 @@ public class StringFunctionBasicTest {
     @Test
     void lpadThreeArgs() {
         // Given: LPAD with string, length, and pad character
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT LPAD(emp_id, 10, '0') FROM employees";
 
@@ -82,7 +84,7 @@ public class StringFunctionBasicTest {
     @Test
     void lpadWithLiteral() {
         // Given: LPAD with string literal
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT LPAD('ABC', 5, '*') FROM DUAL";
 
@@ -103,7 +105,7 @@ public class StringFunctionBasicTest {
     @Test
     void lpadInWhereClause() {
         // Given: LPAD in WHERE clause
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees WHERE LPAD(emp_id, 5, '0') = '00123'";
 
@@ -124,7 +126,7 @@ public class StringFunctionBasicTest {
     @Test
     void lpadNested() {
         // Given: Nested LPAD calls
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT LPAD(LPAD(emp_id, 5, '0'), 10, '*') FROM employees";
 
@@ -148,7 +150,7 @@ public class StringFunctionBasicTest {
     @Test
     void rpadTwoArgs() {
         // Given: RPAD with string and length only (default pad is space)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT RPAD(emp_name, 20) FROM employees";
 
@@ -169,7 +171,7 @@ public class StringFunctionBasicTest {
     @Test
     void rpadThreeArgs() {
         // Given: RPAD with string, length, and pad character
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT RPAD(emp_name, 20, '.') FROM employees";
 
@@ -190,7 +192,7 @@ public class StringFunctionBasicTest {
     @Test
     void rpadWithLiteral() {
         // Given: RPAD with string literal
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT RPAD('XYZ', 8, '-') FROM DUAL";
 
@@ -211,7 +213,7 @@ public class StringFunctionBasicTest {
     @Test
     void lpadAndRpadTogether() {
         // Given: Both LPAD and RPAD in same query
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT LPAD(first_name, 10, ' '), RPAD(last_name, 15, ' ') FROM employees";
 
@@ -236,7 +238,7 @@ public class StringFunctionBasicTest {
     @Test
     void translateBasic() {
         // Given: TRANSLATE for character replacement
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT TRANSLATE(phone, '()-', '   ') FROM contacts";
 
@@ -257,7 +259,7 @@ public class StringFunctionBasicTest {
     @Test
     void translateRemoveCharacters() {
         // Given: TRANSLATE to remove characters (Oracle idiom)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         // Note: In Oracle, if 'to' is shorter than 'from', extra 'from' chars are removed
         String oracleSql = "SELECT TRANSLATE(phone, '0123456789()-. ', '0123456789') FROM contacts";
@@ -279,7 +281,7 @@ public class StringFunctionBasicTest {
     @Test
     void translateWithLiteral() {
         // Given: TRANSLATE with string literal
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT TRANSLATE('Hello World', 'aeiou', '12345') FROM DUAL";
 
@@ -300,7 +302,7 @@ public class StringFunctionBasicTest {
     @Test
     void translateInWhereClause() {
         // Given: TRANSLATE in WHERE clause
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees WHERE TRANSLATE(status, 'YN', '10') = '1'";
 
@@ -321,7 +323,7 @@ public class StringFunctionBasicTest {
     @Test
     void translateNested() {
         // Given: Nested TRANSLATE calls
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT TRANSLATE(TRANSLATE(code, 'ABC', 'XYZ'), '123', '890') FROM data";
 
@@ -345,7 +347,7 @@ public class StringFunctionBasicTest {
     @Test
     void mixedStringFunctions() {
         // Given: Multiple string functions in same query
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT LPAD(emp_id, 5, '0'), " +
                           "RPAD(emp_name, 20, ' '), " +
@@ -372,7 +374,7 @@ public class StringFunctionBasicTest {
     @Test
     void stringFunctionsWithInstr() {
         // Given: Mix of string functions including INSTR
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT LPAD(emp_id, INSTR(emp_id, '-') + 5, '0') FROM employees";
 

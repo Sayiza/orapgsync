@@ -3,6 +3,8 @@ package me.christianrobert.orapgsync.transformer;
 import me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder;
 import me.christianrobert.orapgsync.transformer.context.MetadataIndexBuilder;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
+import me.christianrobert.orapgsync.transformer.type.SimpleTypeEvaluator;
+import me.christianrobert.orapgsync.transformer.type.TypeEvaluator;
 import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
 import me.christianrobert.orapgsync.transformer.parser.AntlrParser;
 import me.christianrobert.orapgsync.transformer.parser.ParseResult;
@@ -53,7 +55,7 @@ class SubqueryFromClauseTransformationTest {
     @Test
     void simpleSubqueryWithAlias() {
         // Given: Query with subquery in FROM clause
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT d.dept_id FROM (SELECT dept_id FROM departments) d";
 
@@ -73,7 +75,7 @@ class SubqueryFromClauseTransformationTest {
     @Test
     void subqueryWithMultipleColumns() {
         // Given: Subquery selecting multiple columns
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT d.dept_id, d.dept_name FROM (SELECT dept_id, dept_name FROM departments) d";
 
@@ -92,7 +94,7 @@ class SubqueryFromClauseTransformationTest {
     @Test
     void subqueryWithWhereClause() {
         // Given: Subquery with WHERE filter
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT d.dept_id FROM (SELECT dept_id FROM departments WHERE active = 'Y') d";
 
@@ -112,7 +114,7 @@ class SubqueryFromClauseTransformationTest {
     @Test
     void subqueryWithComplexWhereCondition() {
         // Given: Subquery with complex WHERE (AND/OR)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT d.dept_id FROM (SELECT dept_id FROM departments WHERE active = 'Y' AND region = 'WEST') d";
 
@@ -134,7 +136,7 @@ class SubqueryFromClauseTransformationTest {
     @Test
     void regularTableWithSubquery() {
         // Given: Mix of regular table and subquery
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT e.empno, d.dept_name FROM employees e, (SELECT dept_id, dept_name FROM departments) d";
 
@@ -155,7 +157,7 @@ class SubqueryFromClauseTransformationTest {
     @Test
     void multipleSubqueries() {
         // Given: Multiple subqueries in FROM clause
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT d1.dept_id, d2.dept_name " +
                           "FROM (SELECT dept_id FROM departments) d1, " +
@@ -181,7 +183,7 @@ class SubqueryFromClauseTransformationTest {
     @Test
     void nestedSubquery() {
         // Given: Subquery containing another subquery (2 levels)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT outer_alias.dept_id " +
                           "FROM (SELECT d.dept_id FROM (SELECT dept_id FROM departments) d) outer_alias";
@@ -202,7 +204,7 @@ class SubqueryFromClauseTransformationTest {
     @Test
     void deeplyNestedSubquery() {
         // Given: 3-level nested subquery
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT level3.dept_id " +
                           "FROM (SELECT level2.dept_id " +
@@ -229,7 +231,7 @@ class SubqueryFromClauseTransformationTest {
     @Test
     void subqueryWithSelectStar() {
         // Given: Subquery using SELECT *
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT d.dept_id FROM (SELECT * FROM departments) d";
 
@@ -249,7 +251,7 @@ class SubqueryFromClauseTransformationTest {
     @Test
     void subqueryWithQualifiedSelectStar() {
         // Given: Subquery using qualified SELECT (e.*)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT d.dept_id FROM (SELECT dep.* FROM departments dep) d";
 
@@ -270,7 +272,7 @@ class SubqueryFromClauseTransformationTest {
     @Test
     void subqueryWithUppercaseAlias() {
         // Given: Subquery with uppercase alias
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT D.DEPT_ID FROM (SELECT DEPT_ID FROM DEPARTMENTS) D";
 
@@ -307,7 +309,7 @@ class SubqueryFromClauseTransformationTest {
     @Test
     void subqueryWithTableAlias() {
         // Given: Subquery with table alias inside the subquery
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT outer_d.dept_id FROM (SELECT d.dept_id FROM departments d) outer_d";
 

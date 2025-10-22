@@ -2,6 +2,8 @@ package me.christianrobert.orapgsync.transformer;
 
 import me.christianrobert.orapgsync.transformer.context.MetadataIndexBuilder;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
+import me.christianrobert.orapgsync.transformer.type.SimpleTypeEvaluator;
+import me.christianrobert.orapgsync.transformer.type.TypeEvaluator;
 import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
 import me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder;
 import me.christianrobert.orapgsync.transformer.parser.AntlrParser;
@@ -41,7 +43,7 @@ public class ColumnAliasTransformationTest {
     @Test
     void simpleColumnWithExplicitAs() {
         // Given: Column with explicit AS keyword
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno AS employee_number FROM employees";
 
@@ -63,7 +65,7 @@ public class ColumnAliasTransformationTest {
     @Test
     void simpleColumnWithImplicitAs() {
         // Given: Column with implicit alias (no AS keyword in Oracle)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno employee_number FROM employees";
 
@@ -83,7 +85,7 @@ public class ColumnAliasTransformationTest {
     @Test
     void quotedAlias() {
         // Given: Column with quoted alias
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno AS \"Employee Number\" FROM employees";
 
@@ -103,7 +105,7 @@ public class ColumnAliasTransformationTest {
     @Test
     void multipleColumnsWithAliases() {
         // Given: Multiple columns with aliases
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno AS id, ename AS name, sal AS salary FROM employees";
 
@@ -124,7 +126,7 @@ public class ColumnAliasTransformationTest {
     @Test
     void mixedAliasedAndNonAliasedColumns() {
         // Given: Mix of aliased and non-aliased columns
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno, ename AS name, sal FROM employees";
 
@@ -147,7 +149,7 @@ public class ColumnAliasTransformationTest {
     @Test
     void arithmeticExpressionWithAlias() {
         // Given: Arithmetic expression with alias
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT salary * 12 AS annual_salary FROM employees";
 
@@ -167,7 +169,7 @@ public class ColumnAliasTransformationTest {
     @Test
     void functionCallWithAlias() {
         // Given: Function call with alias (using NVL which transforms to COALESCE)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT NVL(commission, 0) AS comm FROM employees";
 
@@ -187,7 +189,7 @@ public class ColumnAliasTransformationTest {
     @Test
     void stringConcatenationWithAlias() {
         // Given: String concatenation with alias
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT first_name || ' ' || last_name AS full_name FROM employees";
 
@@ -209,7 +211,7 @@ public class ColumnAliasTransformationTest {
     @Test
     void caseExpressionWithAlias() {
         // Given: DECODE (transformed to CASE) with alias
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT DECODE(deptno, 10, 'Sales', 20, 'IT', 'Other') AS dept_name FROM employees";
 
@@ -231,7 +233,7 @@ public class ColumnAliasTransformationTest {
     @Test
     void aggregateFunctionWithAlias() {
         // Given: Aggregate function with alias
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT COUNT(*) AS emp_count FROM employees";
 
@@ -253,7 +255,7 @@ public class ColumnAliasTransformationTest {
     @Test
     void aliasInSelectWithWhere() {
         // Given: Alias in SELECT with WHERE clause
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno AS id, ename AS name FROM employees WHERE deptno = 10";
 
@@ -274,7 +276,7 @@ public class ColumnAliasTransformationTest {
     @Test
     void aliasInSelectWithGroupBy() {
         // Given: Alias in SELECT with GROUP BY
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT deptno AS dept, COUNT(*) AS emp_count FROM employees GROUP BY deptno";
 
@@ -295,7 +297,7 @@ public class ColumnAliasTransformationTest {
     @Test
     void aliasInSelectWithOrderBy() {
         // Given: Alias in SELECT with ORDER BY (referencing alias)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT salary * 12 AS annual_sal FROM employees ORDER BY annual_sal DESC";
 
@@ -319,7 +321,7 @@ public class ColumnAliasTransformationTest {
     @Test
     void selectStarWithoutAlias() {
         // Given: SELECT * has no alias
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT * FROM employees";
 
@@ -339,7 +341,7 @@ public class ColumnAliasTransformationTest {
     @Test
     void qualifiedSelectStarWithoutAlias() {
         // Given: SELECT e.* has no alias
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT e.* FROM employees e";
 
@@ -359,7 +361,7 @@ public class ColumnAliasTransformationTest {
     @Test
     void aliasWithReservedKeyword() {
         // Given: Alias using reserved keyword (should be quoted)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno AS \"SELECT\" FROM employees";
 
@@ -379,7 +381,7 @@ public class ColumnAliasTransformationTest {
     @Test
     void aliasWithSpecialCharacters() {
         // Given: Alias with special characters (requires quoting)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno AS \"Emp#\" FROM employees";
 
@@ -399,7 +401,7 @@ public class ColumnAliasTransformationTest {
     @Test
     void complexExpressionWithLongAlias() {
         // Given: Complex expression with descriptive alias
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT (salary * 12) + COALESCE(bonus, 0) AS total_annual_compensation FROM employees";
 

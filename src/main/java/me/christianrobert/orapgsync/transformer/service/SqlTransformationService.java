@@ -2,11 +2,14 @@ package me.christianrobert.orapgsync.transformer.service;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import me.christianrobert.orapgsync.transformer.context.TransformationContext;
 import me.christianrobert.orapgsync.transformer.context.TransformationException;
 import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
 import me.christianrobert.orapgsync.transformer.context.TransformationResult;
 import me.christianrobert.orapgsync.transformer.parser.AntlrParser;
 import me.christianrobert.orapgsync.transformer.parser.ParseResult;
+import me.christianrobert.orapgsync.transformer.type.SimpleTypeEvaluator;
+import me.christianrobert.orapgsync.transformer.type.TypeEvaluator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -95,10 +98,14 @@ public class SqlTransformationService {
                 return TransformationResult.failure(oracleSql, errorMsg);
             }
 
-            // STEP 2: Create TransformationContext with schema and indices
+            // STEP 2: Create TransformationContext with schema, indices, and type evaluator
             log.debug("Step 2: Creating transformation context with schema: {}", schema);
-            me.christianrobert.orapgsync.transformer.context.TransformationContext context =
-                new me.christianrobert.orapgsync.transformer.context.TransformationContext(schema, indices);
+
+            // Create type evaluator (simple implementation for SQL views)
+            TypeEvaluator typeEvaluator = new SimpleTypeEvaluator(schema, indices);
+
+            // Create context with type evaluator
+            TransformationContext context = new TransformationContext(schema, indices, typeEvaluator);
 
             // STEP 3: Transform ANTLR parse tree to PostgreSQL SQL with context
             log.debug("Step 3: Transforming to PostgreSQL");

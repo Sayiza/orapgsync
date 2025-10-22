@@ -2,6 +2,8 @@ package me.christianrobert.orapgsync.transformer;
 
 import me.christianrobert.orapgsync.transformer.context.MetadataIndexBuilder;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
+import me.christianrobert.orapgsync.transformer.type.SimpleTypeEvaluator;
+import me.christianrobert.orapgsync.transformer.type.TypeEvaluator;
 import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
 import me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder;
 import me.christianrobert.orapgsync.transformer.parser.AntlrParser;
@@ -42,7 +44,7 @@ public class CaseExpressionTransformationTest {
     @Test
     void searchedCaseSimpleTwoWhen() {
         // Given: Searched CASE with two WHEN clauses
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT CASE WHEN sal > 5000 THEN 'High' WHEN sal > 2000 THEN 'Medium' ELSE 'Low' END FROM employees";
 
@@ -68,7 +70,7 @@ public class CaseExpressionTransformationTest {
     @Test
     void searchedCaseWithoutElse() {
         // Given: Searched CASE without ELSE clause
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT CASE WHEN status = 'A' THEN 'Active' WHEN status = 'I' THEN 'Inactive' END FROM employees";
 
@@ -92,7 +94,7 @@ public class CaseExpressionTransformationTest {
     @Test
     void searchedCaseWithColumnAlias() {
         // Given: Searched CASE with column alias
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno, CASE WHEN sal > 5000 THEN 'High' ELSE 'Normal' END AS sal_category FROM employees";
 
@@ -112,7 +114,7 @@ public class CaseExpressionTransformationTest {
     @Test
     void searchedCaseInWhereClause() {
         // Given: Searched CASE in WHERE clause
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees WHERE CASE WHEN deptno = 10 THEN 1 ELSE 0 END = 1";
 
@@ -132,7 +134,7 @@ public class CaseExpressionTransformationTest {
     @Test
     void searchedCaseWithComplexConditions() {
         // Given: Searched CASE with complex AND/OR conditions
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT CASE WHEN sal > 5000 AND deptno = 10 THEN 'High Sales' " +
                           "WHEN sal > 3000 OR commission > 1000 THEN 'Good' ELSE 'Normal' END FROM employees";
@@ -155,7 +157,7 @@ public class CaseExpressionTransformationTest {
     @Test
     void searchedCaseNested() {
         // Given: Nested CASE expressions
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT CASE WHEN deptno = 10 THEN " +
                           "CASE WHEN sal > 5000 THEN 'High' ELSE 'Normal' END " +
@@ -179,7 +181,7 @@ public class CaseExpressionTransformationTest {
     @Test
     void searchedCaseWithNullCheck() {
         // Given: Searched CASE with IS NULL check
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT CASE WHEN commission IS NULL THEN 0 ELSE commission END FROM employees";
 
@@ -199,7 +201,7 @@ public class CaseExpressionTransformationTest {
     @Test
     void searchedCaseInOrderBy() {
         // Given: Searched CASE in ORDER BY
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees ORDER BY CASE WHEN deptno = 10 THEN 1 ELSE 2 END";
 
@@ -221,7 +223,7 @@ public class CaseExpressionTransformationTest {
     @Test
     void simpleCaseTwoWhen() {
         // Given: Simple CASE with two WHEN clauses
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT CASE deptno WHEN 10 THEN 'Sales' WHEN 20 THEN 'IT' ELSE 'Other' END FROM employees";
 
@@ -245,7 +247,7 @@ public class CaseExpressionTransformationTest {
     @Test
     void simpleCaseWithoutElse() {
         // Given: Simple CASE without ELSE
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT CASE status WHEN 'A' THEN 'Active' WHEN 'I' THEN 'Inactive' END FROM employees";
 
@@ -269,7 +271,7 @@ public class CaseExpressionTransformationTest {
     @Test
     void simpleCaseWithNumericValues() {
         // Given: Simple CASE with numeric selector and values
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT CASE deptno WHEN 10 THEN 100 WHEN 20 THEN 200 ELSE 0 END AS bonus FROM employees";
 
@@ -293,7 +295,7 @@ public class CaseExpressionTransformationTest {
     @Test
     void simpleCaseWithExpression() {
         // Given: Simple CASE with expression as selector
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT CASE salary * 12 WHEN 60000 THEN 'Target' ELSE 'Other' END FROM employees";
 
@@ -315,7 +317,7 @@ public class CaseExpressionTransformationTest {
     @Test
     void caseWithArithmetic() {
         // Given: CASE with arithmetic in THEN clause
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT CASE WHEN deptno = 10 THEN salary * 1.1 ELSE salary END FROM employees";
 
@@ -335,7 +337,7 @@ public class CaseExpressionTransformationTest {
     @Test
     void caseWithFunctionCall() {
         // Given: CASE with function call in condition and result
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT CASE WHEN NVL(commission, 0) > 1000 THEN 'High' ELSE 'Low' END FROM employees";
 
@@ -355,7 +357,7 @@ public class CaseExpressionTransformationTest {
     @Test
     void caseWithBetween() {
         // Given: CASE with BETWEEN in condition
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT CASE WHEN sal BETWEEN 2000 AND 5000 THEN 'Medium' ELSE 'Other' END FROM employees";
 
@@ -375,7 +377,7 @@ public class CaseExpressionTransformationTest {
     @Test
     void caseWithIn() {
         // Given: CASE with IN operator in condition
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT CASE WHEN deptno IN (10, 20, 30) THEN 'Core' ELSE 'Other' END FROM employees";
 
@@ -397,7 +399,7 @@ public class CaseExpressionTransformationTest {
     @Test
     void multipleCaseExpressionsInSelect() {
         // Given: Multiple CASE expressions in SELECT list
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT " +
                           "CASE WHEN sal > 5000 THEN 'High' ELSE 'Low' END AS sal_level, " +

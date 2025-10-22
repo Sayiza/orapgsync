@@ -2,6 +2,8 @@ package me.christianrobert.orapgsync.transformer;
 
 import me.christianrobert.orapgsync.transformer.context.MetadataIndexBuilder;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
+import me.christianrobert.orapgsync.transformer.type.SimpleTypeEvaluator;
+import me.christianrobert.orapgsync.transformer.type.TypeEvaluator;
 import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
 import me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder;
 import me.christianrobert.orapgsync.transformer.parser.AntlrParser;
@@ -39,7 +41,7 @@ public class SequenceTransformationTest {
     @Test
     void nextvalSimple() {
         // Given: Simple sequence NEXTVAL in SELECT list
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT emp_seq.NEXTVAL FROM employees";
 
@@ -61,7 +63,7 @@ public class SequenceTransformationTest {
     @Test
     void nextvalWithSchemaPrefix() {
         // Given: Sequence NEXTVAL with explicit schema prefix
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT sales.order_seq.NEXTVAL FROM orders";
 
@@ -81,7 +83,7 @@ public class SequenceTransformationTest {
     @Test
     void nextvalCaseInsensitive() {
         // Given: NEXTVAL in various cases (nextval, NextVal, etc.)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT emp_seq.nextval FROM employees";
 
@@ -103,7 +105,7 @@ public class SequenceTransformationTest {
     @Test
     void currvalSimple() {
         // Given: Simple sequence CURRVAL in SELECT list
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT emp_seq.CURRVAL FROM employees";
 
@@ -124,7 +126,7 @@ public class SequenceTransformationTest {
     @Test
     void currvalWithSchemaPrefix() {
         // Given: Sequence CURRVAL with explicit schema prefix
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT sales.order_seq.CURRVAL FROM orders";
 
@@ -144,7 +146,7 @@ public class SequenceTransformationTest {
     @Test
     void currvalCaseInsensitive() {
         // Given: CURRVAL in various cases
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT emp_seq.CurrVal FROM employees";
 
@@ -166,7 +168,7 @@ public class SequenceTransformationTest {
     @Test
     void nextvalInWhereClause() {
         // Given: NEXTVAL used in WHERE clause comparison
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees WHERE emp_id = emp_seq.NEXTVAL";
 
@@ -187,7 +189,7 @@ public class SequenceTransformationTest {
     @Test
     void nextvalWithColumnAlias() {
         // Given: NEXTVAL with column alias
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT emp_seq.NEXTVAL AS new_id FROM employees";
 
@@ -209,7 +211,7 @@ public class SequenceTransformationTest {
     @Test
     void multipleSequencesInSelectList() {
         // Given: Multiple sequence calls in SELECT list
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT emp_seq.NEXTVAL, dept_seq.NEXTVAL FROM employees";
 
@@ -231,7 +233,7 @@ public class SequenceTransformationTest {
     @Test
     void nextvalAndCurrvalMixed() {
         // Given: Mix of NEXTVAL and CURRVAL in same query
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT emp_seq.NEXTVAL, emp_seq.CURRVAL FROM employees";
 
@@ -253,7 +255,7 @@ public class SequenceTransformationTest {
     @Test
     void nextvalWithOtherColumns() {
         // Given: NEXTVAL mixed with regular columns
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno, emp_seq.NEXTVAL, ename FROM employees";
 
@@ -277,7 +279,7 @@ public class SequenceTransformationTest {
     @Test
     void nextvalFromDual() {
         // Given: NEXTVAL with FROM DUAL (common Oracle pattern)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT emp_seq.NEXTVAL FROM DUAL";
 
@@ -300,7 +302,7 @@ public class SequenceTransformationTest {
     @Test
     void currvalFromDual() {
         // Given: CURRVAL with FROM DUAL
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT emp_seq.CURRVAL FROM DUAL";
 
@@ -321,7 +323,7 @@ public class SequenceTransformationTest {
     @Test
     void nextvalFromDualWithSchemaPrefix() {
         // Given: Schema-qualified sequence with FROM DUAL
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT sales.order_seq.NEXTVAL FROM DUAL";
 
@@ -344,7 +346,7 @@ public class SequenceTransformationTest {
     @Test
     void nextvalInOrderByClause() {
         // Given: NEXTVAL in ORDER BY (unusual but valid)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees ORDER BY emp_seq.NEXTVAL DESC";
 
@@ -367,7 +369,7 @@ public class SequenceTransformationTest {
     @Test
     void currvalInGroupByClause() {
         // Given: CURRVAL in GROUP BY (unusual but valid)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT COUNT(*) FROM employees GROUP BY emp_seq.CURRVAL";
 
@@ -388,7 +390,7 @@ public class SequenceTransformationTest {
     @Test
     void nextvalWithArithmeticExpression() {
         // Given: NEXTVAL in arithmetic expression
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT emp_seq.NEXTVAL + 1000 FROM employees";
 
@@ -410,7 +412,7 @@ public class SequenceTransformationTest {
     @Test
     void sequenceNameWithUnderscores() {
         // Given: Sequence name with underscores (common naming pattern)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT employee_id_seq.NEXTVAL FROM employees";
 
@@ -430,7 +432,7 @@ public class SequenceTransformationTest {
     @Test
     void sequenceNameWithNumbers() {
         // Given: Sequence name with numbers
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT seq123.NEXTVAL FROM employees";
 

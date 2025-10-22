@@ -3,6 +3,8 @@ package me.christianrobert.orapgsync.transformer;
 import me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder;
 import me.christianrobert.orapgsync.transformer.context.MetadataIndexBuilder;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
+import me.christianrobert.orapgsync.transformer.type.SimpleTypeEvaluator;
+import me.christianrobert.orapgsync.transformer.type.TypeEvaluator;
 import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
 import me.christianrobert.orapgsync.transformer.parser.AntlrParser;
 import me.christianrobert.orapgsync.transformer.parser.ParseResult;
@@ -42,7 +44,7 @@ class SubstrTransformationTest {
     @Test
     void substrWithTwoArguments() {
         // Given: SUBSTR with string and position only
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT SUBSTR('Hello World', 7) FROM employees";
 
         // When: Parse and transform
@@ -61,7 +63,7 @@ class SubstrTransformationTest {
     @Test
     void substrWithThreeArguments() {
         // Given: SUBSTR with string, position, and length
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT SUBSTR('Hello World', 7, 5) FROM employees";
 
         // When: Parse and transform
@@ -82,7 +84,7 @@ class SubstrTransformationTest {
     @Test
     void substrWithColumnReference() {
         // Given: SUBSTR with column reference
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT SUBSTR(name, 1, 10) FROM employees";
 
         // When: Parse and transform
@@ -101,7 +103,7 @@ class SubstrTransformationTest {
     @Test
     void substrWithQualifiedColumnReference() {
         // Given: SUBSTR with qualified column reference
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT SUBSTR(e.name, 1, 10) FROM employees e";
 
         // When: Parse and transform
@@ -122,7 +124,7 @@ class SubstrTransformationTest {
     @Test
     void substrWithNumericLiterals() {
         // Given: SUBSTR with numeric literals
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT SUBSTR('ABCDEFGH', 3, 4) FROM employees";
 
         // When: Parse and transform
@@ -141,7 +143,7 @@ class SubstrTransformationTest {
     @Test
     void substrWithArithmeticExpressions() {
         // Given: SUBSTR with arithmetic expressions
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT SUBSTR(name, 1 + 1, 10 - 2) FROM employees";
 
         // When: Parse and transform
@@ -162,7 +164,7 @@ class SubstrTransformationTest {
     @Test
     void substrWithNestedSubstr() {
         // Given: Nested SUBSTR calls
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT SUBSTR(SUBSTR(name, 1, 10), 3, 5) FROM employees";
 
         // When: Parse and transform
@@ -181,7 +183,7 @@ class SubstrTransformationTest {
     @Test
     void substrWithOtherFunctions() {
         // Given: SUBSTR combined with other functions
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT SUBSTR(UPPER(name), 1, 5) FROM employees";
 
         // When: Parse and transform
@@ -203,7 +205,7 @@ class SubstrTransformationTest {
     @Test
     void substrLowercase() {
         // Given: lowercase substr
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT substr('Hello', 1, 3) FROM employees";
 
         // When: Parse and transform
@@ -222,7 +224,7 @@ class SubstrTransformationTest {
     @Test
     void substrMixedCase() {
         // Given: mixed case SubStr
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT SubStr('Hello', 1, 3) FROM employees";
 
         // When: Parse and transform
@@ -243,7 +245,7 @@ class SubstrTransformationTest {
     @Test
     void multipleSubstrInSelectList() {
         // Given: Multiple SUBSTR calls in SELECT list
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT SUBSTR(first_name, 1, 1), SUBSTR(last_name, 1, 5) FROM employees";
 
         // When: Parse and transform
@@ -264,7 +266,7 @@ class SubstrTransformationTest {
     @Test
     void substrInWhereClause() {
         // Given: SUBSTR in WHERE clause
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT name FROM employees WHERE SUBSTR(name, 1, 1) = 'A'";
 
         // When: Parse and transform
@@ -283,7 +285,7 @@ class SubstrTransformationTest {
     @Test
     void substrWithColumnAlias() {
         // Given: SUBSTR with column alias
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT SUBSTR(name, 1, 10) AS short_name FROM employees";
 
         // When: Parse and transform
@@ -304,7 +306,7 @@ class SubstrTransformationTest {
     @Test
     void substrWithZeroPosition() {
         // Given: SUBSTR with position 0 (Oracle treats as 1)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT SUBSTR('Hello', 0, 3) FROM employees";
 
         // When: Parse and transform
@@ -326,7 +328,7 @@ class SubstrTransformationTest {
     // @Test
     // void substrWithNegativePosition() {
     //     // Given: SUBSTR with negative position (Oracle counts from end)
-    //     TransformationContext context = new TransformationContext("HR", emptyIndices);
+    //     TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
     //     String oracleSql = "SELECT SUBSTR('Hello World', -5, 5) FROM employees";
     //
     //     // When: Parse and transform
@@ -349,7 +351,7 @@ class SubstrTransformationTest {
     @Test
     void substrFromDual() {
         // Given: SUBSTR in scalar query (FROM DUAL)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT SUBSTR('Hello World', 7, 5) FROM DUAL";
 
         // When: Parse and transform

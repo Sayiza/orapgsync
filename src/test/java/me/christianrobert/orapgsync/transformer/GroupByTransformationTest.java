@@ -3,6 +3,8 @@ package me.christianrobert.orapgsync.transformer;
 import me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder;
 import me.christianrobert.orapgsync.transformer.context.MetadataIndexBuilder;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
+import me.christianrobert.orapgsync.transformer.type.SimpleTypeEvaluator;
+import me.christianrobert.orapgsync.transformer.type.TypeEvaluator;
 import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
 import me.christianrobert.orapgsync.transformer.parser.AntlrParser;
 import me.christianrobert.orapgsync.transformer.parser.ParseResult;
@@ -45,7 +47,7 @@ class GroupByTransformationTest {
     @Test
     void groupBySingleColumn() {
         // Given: Basic GROUP BY single column
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT dept_id, COUNT(*) FROM employees GROUP BY dept_id";
 
@@ -65,7 +67,7 @@ class GroupByTransformationTest {
     @Test
     void groupByMultipleColumns() {
         // Given: GROUP BY multiple columns
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT dept_id, job_id, COUNT(*) FROM employees GROUP BY dept_id, job_id";
 
@@ -85,7 +87,7 @@ class GroupByTransformationTest {
     @Test
     void groupByThreeColumns() {
         // Given: GROUP BY three columns
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT dept_id, job_id, location_id, COUNT(*) FROM employees GROUP BY dept_id, job_id, location_id";
 
@@ -107,7 +109,7 @@ class GroupByTransformationTest {
     @Test
     void groupByPosition() {
         // Given: GROUP BY using column position
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT dept_id, COUNT(*) FROM employees GROUP BY 1";
 
@@ -127,7 +129,7 @@ class GroupByTransformationTest {
     @Test
     void groupByMultiplePositions() {
         // Given: GROUP BY multiple positions
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT dept_id, job_id, COUNT(*) FROM employees GROUP BY 1, 2";
 
@@ -149,7 +151,7 @@ class GroupByTransformationTest {
     @Test
     void groupByWithCount() {
         // Given: GROUP BY with COUNT(*)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT dept_id, COUNT(*) FROM employees GROUP BY dept_id";
 
@@ -168,7 +170,7 @@ class GroupByTransformationTest {
     @Test
     void groupByWithCountColumn() {
         // Given: GROUP BY with COUNT(column)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT dept_id, COUNT(empno) FROM employees GROUP BY dept_id";
 
@@ -187,7 +189,7 @@ class GroupByTransformationTest {
     @Test
     void groupByWithSum() {
         // Given: GROUP BY with SUM
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT dept_id, SUM(salary) FROM employees GROUP BY dept_id";
 
@@ -206,7 +208,7 @@ class GroupByTransformationTest {
     @Test
     void groupByWithAvg() {
         // Given: GROUP BY with AVG
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT dept_id, AVG(salary) FROM employees GROUP BY dept_id";
 
@@ -225,7 +227,7 @@ class GroupByTransformationTest {
     @Test
     void groupByWithMinMax() {
         // Given: GROUP BY with MIN and MAX
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT dept_id, MIN(salary), MAX(salary) FROM employees GROUP BY dept_id";
 
@@ -245,7 +247,7 @@ class GroupByTransformationTest {
     @Test
     void groupByWithMultipleAggregates() {
         // Given: GROUP BY with multiple aggregates
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT dept_id, COUNT(*), SUM(salary), AVG(salary), MIN(salary), MAX(salary) FROM employees GROUP BY dept_id";
 
@@ -270,7 +272,7 @@ class GroupByTransformationTest {
     @Test
     void groupByWithHaving() {
         // Given: GROUP BY with HAVING clause
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT dept_id, COUNT(*) FROM employees GROUP BY dept_id HAVING COUNT(*) > 5";
 
@@ -289,7 +291,7 @@ class GroupByTransformationTest {
     @Test
     void groupByWithHavingMultipleConditions() {
         // Given: HAVING with multiple conditions
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT dept_id, COUNT(*), AVG(salary) FROM employees GROUP BY dept_id HAVING COUNT(*) > 5 AND AVG(salary) > 50000";
 
@@ -309,7 +311,7 @@ class GroupByTransformationTest {
     @Test
     void groupByWithHavingOr() {
         // Given: HAVING with OR
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT dept_id, COUNT(*) FROM employees GROUP BY dept_id HAVING COUNT(*) > 10 OR COUNT(*) < 2";
 
@@ -331,7 +333,7 @@ class GroupByTransformationTest {
     @Test
     void groupByWithWhereClause() {
         // Given: GROUP BY with WHERE clause
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT dept_id, COUNT(*) FROM employees WHERE status = 'ACTIVE' GROUP BY dept_id";
 
@@ -351,7 +353,7 @@ class GroupByTransformationTest {
     @Test
     void groupByWithOrderBy() {
         // Given: GROUP BY with ORDER BY
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT dept_id, COUNT(*) FROM employees GROUP BY dept_id ORDER BY COUNT(*) DESC";
 
@@ -372,7 +374,7 @@ class GroupByTransformationTest {
     @Test
     void groupByWithWhereHavingOrderBy() {
         // Given: Complete query with WHERE, GROUP BY, HAVING, ORDER BY
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT dept_id, COUNT(*) " +
                           "FROM employees " +
@@ -431,7 +433,7 @@ class GroupByTransformationTest {
     @Test
     void groupByUppercase() {
         // Given: GROUP BY with uppercase
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT DEPT_ID, COUNT(*) FROM EMPLOYEES GROUP BY DEPT_ID";
 
@@ -452,7 +454,7 @@ class GroupByTransformationTest {
     @Test
     void groupByWithAlias() {
         // Given: GROUP BY with table alias
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT e.dept_id, COUNT(*) FROM employees e GROUP BY e.dept_id";
 

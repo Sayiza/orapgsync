@@ -104,8 +104,24 @@ public class VisitNumericFunction {
                 throw new TransformationException("ROUND function requires an expression");
             }
 
+            // Transform the expression first
+            String transformedExpr = b.visit(expression);
+
+            // Use type evaluator to determine if cast is needed
+            me.christianrobert.orapgsync.transformer.type.TypeInfo exprType =
+                b.getContext().getTypeEvaluator().getType(expression);
+
+            // If type is known and numeric, no cast needed
+            // If type is unknown or non-numeric, add defensive cast
+            String argWithCast;
+            if (exprType.isNumeric()) {
+                argWithCast = transformedExpr;  // No cast needed
+            } else {
+                argWithCast = transformedExpr + "::numeric";  // Defensive cast
+            }
+
             StringBuilder result = new StringBuilder("ROUND( ");
-            result.append(b.visit(expression));
+            result.append(argWithCast);
 
             // Optional precision parameter
             if (ctx.UNSIGNED_INTEGER() != null) {

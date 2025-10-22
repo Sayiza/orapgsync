@@ -2,6 +2,8 @@ package me.christianrobert.orapgsync.transformer;
 
 import me.christianrobert.orapgsync.transformer.context.MetadataIndexBuilder;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
+import me.christianrobert.orapgsync.transformer.type.SimpleTypeEvaluator;
+import me.christianrobert.orapgsync.transformer.type.TypeEvaluator;
 import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
 import me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder;
 import me.christianrobert.orapgsync.transformer.parser.AntlrParser;
@@ -37,7 +39,7 @@ public class OracleFunctionTransformationTest {
     @Test
     void nvlWithNumericLiteral() {
         // Given: NVL with numeric default value
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT NVL(commission, 0) FROM employees";
 
@@ -59,7 +61,7 @@ public class OracleFunctionTransformationTest {
     @Test
     void nvlWithColumnReference() {
         // Given: NVL with column as default value
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT NVL(middle_name, first_name) FROM employees";
 
@@ -80,7 +82,7 @@ public class OracleFunctionTransformationTest {
     @Test
     void nvlWithStringLiteral() {
         // Given: NVL with string literal default
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT NVL(department_name, 'Unknown') FROM departments";
 
@@ -101,7 +103,7 @@ public class OracleFunctionTransformationTest {
     @Test
     void nvlInWhereClause() {
         // Given: NVL used in WHERE clause
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees WHERE NVL(commission, 0) > 1000";
 
@@ -123,7 +125,7 @@ public class OracleFunctionTransformationTest {
     @Test
     void nestedNvl() {
         // Given: Nested NVL calls
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT NVL(NVL(middle_name, first_name), 'N/A') FROM employees";
 
@@ -149,7 +151,7 @@ public class OracleFunctionTransformationTest {
     @Test
     void nvlWithArithmeticExpression() {
         // Given: NVL with arithmetic expression
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT NVL(commission, salary * 0.1) FROM employees";
 
@@ -172,7 +174,7 @@ public class OracleFunctionTransformationTest {
     @Test
     void multipleNvlInSelectList() {
         // Given: Multiple NVL functions in SELECT list
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT NVL(commission, 0), NVL(bonus, 0) FROM employees";
 
@@ -197,7 +199,7 @@ public class OracleFunctionTransformationTest {
     @Test
     void nvlInOrderByClause() {
         // Given: NVL in ORDER BY clause
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees ORDER BY NVL(commission, 0) DESC";
 
@@ -221,7 +223,7 @@ public class OracleFunctionTransformationTest {
     @Test
     void sysdateInSelectList() {
         // Given: SYSDATE in SELECT list
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT SYSDATE FROM employees";
 
@@ -242,7 +244,7 @@ public class OracleFunctionTransformationTest {
     @Test
     void sysdateWithOtherColumns() {
         // Given: SYSDATE mixed with other columns
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno, SYSDATE, ename FROM employees";
 
@@ -264,7 +266,7 @@ public class OracleFunctionTransformationTest {
     @Test
     void sysdateInWhereClause() {
         // Given: SYSDATE in WHERE clause for date comparison
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees WHERE hire_date < SYSDATE";
 
@@ -286,7 +288,7 @@ public class OracleFunctionTransformationTest {
     @Test
     void sysdateCaseInsensitive() {
         // Given: SYSDATE in different cases (sysdate, SysDate, etc.)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT sysdate FROM employees";
 
@@ -306,7 +308,7 @@ public class OracleFunctionTransformationTest {
     @Test
     void sysdateInArithmeticExpression() {
         // Given: SYSDATE used in arithmetic (date arithmetic)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees WHERE hire_date > SYSDATE - 30";
 
@@ -328,7 +330,7 @@ public class OracleFunctionTransformationTest {
     @Test
     void sysdateInOrderByClause() {
         // Given: SYSDATE in ORDER BY clause
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees ORDER BY SYSDATE DESC";
 
@@ -350,7 +352,7 @@ public class OracleFunctionTransformationTest {
     @Test
     void decodeSimpleThreeArgs() {
         // Given: DECODE with 3 arguments (no default)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT DECODE(status, 'A', 'Active') FROM employees";
 
@@ -373,7 +375,7 @@ public class OracleFunctionTransformationTest {
     @Test
     void decodeWithDefault() {
         // Given: DECODE with 4 arguments (with default)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT DECODE(status, 'A', 'Active', 'Inactive') FROM employees";
 
@@ -396,7 +398,7 @@ public class OracleFunctionTransformationTest {
     @Test
     void decodeMultiplePairs() {
         // Given: DECODE with multiple search/result pairs and default
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT DECODE(deptno, 10, 'Sales', 20, 'Marketing', 30, 'IT', 'Other') FROM employees";
 
@@ -420,7 +422,7 @@ public class OracleFunctionTransformationTest {
     @Test
     void decodeMultiplePairsNoDefault() {
         // Given: DECODE with multiple search/result pairs but no default
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT DECODE(deptno, 10, 'Sales', 20, 'Marketing', 30, 'IT') FROM employees";
 
@@ -444,7 +446,7 @@ public class OracleFunctionTransformationTest {
     @Test
     void decodeInWhereClause() {
         // Given: DECODE in WHERE clause
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees WHERE DECODE(status, 'A', 1, 0) = 1";
 
@@ -466,7 +468,7 @@ public class OracleFunctionTransformationTest {
     @Test
     void decodeWithColumnReferences() {
         // Given: DECODE with column references
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT DECODE(commission, 0, salary, salary + commission) FROM employees";
 
@@ -488,7 +490,7 @@ public class OracleFunctionTransformationTest {
     @Test
     void nestedDecode() {
         // Given: Nested DECODE calls
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT DECODE(DECODE(status, 'A', 'X'), 'X', 'Yes', 'No') FROM employees";
 
@@ -517,7 +519,7 @@ public class OracleFunctionTransformationTest {
     @Test
     void decodeInOrderByClause() {
         // Given: DECODE in ORDER BY clause
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees ORDER BY DECODE(status, 'A', 1, 'B', 2, 3) DESC";
 
@@ -541,7 +543,7 @@ public class OracleFunctionTransformationTest {
     @Test
     void decodeWithNullValues() {
         // Given: DECODE with NULL values
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT DECODE(middle_name, NULL, 'No Middle Name', middle_name) FROM employees";
 

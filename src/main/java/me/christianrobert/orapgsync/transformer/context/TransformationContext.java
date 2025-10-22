@@ -1,5 +1,7 @@
 package me.christianrobert.orapgsync.transformer.context;
 
+import me.christianrobert.orapgsync.transformer.type.TypeEvaluator;
+
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -13,6 +15,7 @@ import java.util.Set;
  *   <li>Pre-built metadata indices for fast lookups</li>
  *   <li>Current schema context</li>
  *   <li>Query-local state (table aliases, CTE names)</li>
+ *   <li>Type evaluator for type-aware transformations</li>
  * </ul>
  *
  * <p>This context is passed to every semantic node's {@code toPostgres()} method,
@@ -22,6 +25,7 @@ public class TransformationContext {
 
     private final String currentSchema;
     private final TransformationIndices indices;
+    private final TypeEvaluator typeEvaluator;
 
     // Query-local state (mutable, reset per query)
     private final Map<String, String> tableAliases;  // alias → table name
@@ -37,21 +41,26 @@ public class TransformationContext {
     // across query nesting levels.
 
     /**
-     * Creates context with metadata indices.
+     * Creates context with metadata indices and type evaluator.
      *
      * @param currentSchema Schema context for resolution
      * @param indices Pre-built metadata indices
+     * @param typeEvaluator Type evaluator for type-aware transformations
      */
-    public TransformationContext(String currentSchema, TransformationIndices indices) {
+    public TransformationContext(String currentSchema, TransformationIndices indices, TypeEvaluator typeEvaluator) {
         if (currentSchema == null || currentSchema.trim().isEmpty()) {
             throw new IllegalArgumentException("Current schema cannot be null or empty");
         }
         if (indices == null) {
             throw new IllegalArgumentException("Indices cannot be null");
         }
+        if (typeEvaluator == null) {
+            throw new IllegalArgumentException("Type evaluator cannot be null");
+        }
 
         this.currentSchema = currentSchema;
         this.indices = indices;
+        this.typeEvaluator = typeEvaluator;
         this.tableAliases = new HashMap<>();
         this.cteNames = new HashSet<>();
     }
@@ -62,6 +71,10 @@ public class TransformationContext {
 
     public TransformationIndices getIndices() {
         return indices;
+    }
+
+    public TypeEvaluator getTypeEvaluator() {
+        return typeEvaluator;
     }
 
     // ========== Synonym Resolution ==========
@@ -122,6 +135,11 @@ public class TransformationContext {
     public void registerAlias(String alias, String tableName) {
         if (alias != null && tableName != null) {
             tableAliases.put(alias.toLowerCase(), tableName.toLowerCase());
+            // Update type evaluator with new aliases
+            if (typeEvaluator instanceof me.christianrobert.orapgsync.transformer.type.SimpleTypeEvaluator) {
+                ((me.christianrobert.orapgsync.transformer.type.SimpleTypeEvaluator) typeEvaluator)
+                    .setTableAliases(tableAliases);
+            }
         }
     }
 
@@ -143,6 +161,11 @@ public class TransformationContext {
      */
     public void clearAliases() {
         tableAliases.clear();
+        // Update type evaluator with cleared aliases
+        if (typeEvaluator instanceof me.christianrobert.orapgsync.transformer.type.SimpleTypeEvaluator) {
+            ((me.christianrobert.orapgsync.transformer.type.SimpleTypeEvaluator) typeEvaluator)
+                .setTableAliases(tableAliases);
+        }
     }
 
     // ========== Query-Local State (CTE Names) ==========

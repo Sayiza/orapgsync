@@ -3,6 +3,8 @@ package me.christianrobert.orapgsync.transformer;
 import me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder;
 import me.christianrobert.orapgsync.transformer.context.MetadataIndexBuilder;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
+import me.christianrobert.orapgsync.transformer.type.SimpleTypeEvaluator;
+import me.christianrobert.orapgsync.transformer.type.TypeEvaluator;
 import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
 import me.christianrobert.orapgsync.transformer.parser.AntlrParser;
 import me.christianrobert.orapgsync.transformer.parser.ParseResult;
@@ -41,7 +43,7 @@ class WindowFunctionTransformationTest {
     @Test
     void testRowNumber_withOrderBy() {
         // Given: ROW_NUMBER window function with ORDER BY
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT ROW_NUMBER() OVER (ORDER BY salary DESC) FROM employees";
 
         // When: Parse and transform
@@ -62,7 +64,7 @@ class WindowFunctionTransformationTest {
     @Test
     void testRowNumber_withPartitionAndOrder() {
         // Given: ROW_NUMBER with PARTITION BY and ORDER BY
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT ROW_NUMBER() OVER (PARTITION BY department_id ORDER BY salary DESC) FROM employees";
 
         // When: Parse and transform
@@ -83,7 +85,7 @@ class WindowFunctionTransformationTest {
     @Test
     void testRank_withPartitionAndOrder() {
         // Given: RANK window function
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT RANK() OVER (PARTITION BY department_id ORDER BY salary DESC) FROM employees";
 
         // When: Parse and transform
@@ -102,7 +104,7 @@ class WindowFunctionTransformationTest {
     @Test
     void testDenseRank_withPartitionAndOrder() {
         // Given: DENSE_RANK window function
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT DENSE_RANK() OVER (PARTITION BY department_id ORDER BY salary DESC) FROM employees";
 
         // When: Parse and transform
@@ -123,7 +125,7 @@ class WindowFunctionTransformationTest {
     @Test
     void testPartitionBy_singleColumn() {
         // Given: PARTITION BY with single column
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT COUNT(*) OVER (PARTITION BY department_id) FROM employees";
 
         // When: Parse and transform
@@ -142,7 +144,7 @@ class WindowFunctionTransformationTest {
     @Test
     void testPartitionBy_multipleColumns() {
         // Given: PARTITION BY with multiple columns
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT COUNT(*) OVER (PARTITION BY department_id, job_id) FROM employees";
 
         // When: Parse and transform
@@ -161,7 +163,7 @@ class WindowFunctionTransformationTest {
     @Test
     void testPartitionBy_withTableAlias() {
         // Given: PARTITION BY with qualified column
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT COUNT(*) OVER (PARTITION BY e.department_id) FROM employees e";
 
         // When: Parse and transform
@@ -182,7 +184,7 @@ class WindowFunctionTransformationTest {
     @Test
     void testWindowFrame_rowsUnboundedPreceding() {
         // Given: ROWS UNBOUNDED PRECEDING
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT SUM(salary) OVER (ORDER BY hire_date ROWS UNBOUNDED PRECEDING) FROM employees";
 
         // When: Parse and transform
@@ -201,7 +203,7 @@ class WindowFunctionTransformationTest {
     @Test
     void testWindowFrame_rowsBetweenUnboundedAndCurrent() {
         // Given: ROWS BETWEEN ... AND CURRENT ROW
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT SUM(salary) OVER (ORDER BY hire_date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) FROM employees";
 
         // When: Parse and transform
@@ -220,7 +222,7 @@ class WindowFunctionTransformationTest {
     @Test
     void testWindowFrame_rowsBetweenPrecedingAndFollowing() {
         // Given: ROWS BETWEEN N PRECEDING AND N FOLLOWING
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT AVG(salary) OVER (ORDER BY hire_date ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING) FROM employees";
 
         // When: Parse and transform
@@ -239,7 +241,7 @@ class WindowFunctionTransformationTest {
     @Test
     void testWindowFrame_rangeUnboundedPreceding() {
         // Given: RANGE UNBOUNDED PRECEDING
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT SUM(salary) OVER (ORDER BY hire_date RANGE UNBOUNDED PRECEDING) FROM employees";
 
         // When: Parse and transform
@@ -258,7 +260,7 @@ class WindowFunctionTransformationTest {
     @Test
     void testWindowFrame_rangeBetweenUnboundedAndCurrent() {
         // Given: RANGE BETWEEN
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT SUM(salary) OVER (ORDER BY hire_date RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) FROM employees";
 
         // When: Parse and transform
@@ -279,7 +281,7 @@ class WindowFunctionTransformationTest {
     @Test
     void testCount_withOver() {
         // Given: COUNT with OVER
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT COUNT(*) OVER (PARTITION BY department_id) FROM employees";
 
         // When: Parse and transform
@@ -298,7 +300,7 @@ class WindowFunctionTransformationTest {
     @Test
     void testSum_withOver() {
         // Given: SUM with OVER
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT SUM(salary) OVER (PARTITION BY department_id) FROM employees";
 
         // When: Parse and transform
@@ -317,7 +319,7 @@ class WindowFunctionTransformationTest {
     @Test
     void testAvg_withOver() {
         // Given: AVG with OVER
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT AVG(salary) OVER (PARTITION BY department_id) FROM employees";
 
         // When: Parse and transform
@@ -336,7 +338,7 @@ class WindowFunctionTransformationTest {
     @Test
     void testMin_withOver() {
         // Given: MIN with OVER
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT MIN(salary) OVER (PARTITION BY department_id) FROM employees";
 
         // When: Parse and transform
@@ -355,7 +357,7 @@ class WindowFunctionTransformationTest {
     @Test
     void testMax_withOver() {
         // Given: MAX with OVER
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT MAX(salary) OVER (PARTITION BY department_id) FROM employees";
 
         // When: Parse and transform
@@ -376,7 +378,7 @@ class WindowFunctionTransformationTest {
     @Test
     void testLead_basic() {
         // Given: LEAD function
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT LEAD(salary) OVER (ORDER BY hire_date) FROM employees";
 
         // When: Parse and transform
@@ -395,7 +397,7 @@ class WindowFunctionTransformationTest {
     @Test
     void testLead_withOffset() {
         // Given: LEAD with offset
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT LEAD(salary, 2) OVER (ORDER BY hire_date) FROM employees";
 
         // When: Parse and transform
@@ -414,7 +416,7 @@ class WindowFunctionTransformationTest {
     @Test
     void testLag_basic() {
         // Given: LAG function
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT LAG(salary) OVER (ORDER BY hire_date) FROM employees";
 
         // When: Parse and transform
@@ -433,7 +435,7 @@ class WindowFunctionTransformationTest {
     @Test
     void testLag_withOffset() {
         // Given: LAG with offset
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT LAG(salary, 1) OVER (ORDER BY hire_date) FROM employees";
 
         // When: Parse and transform
@@ -452,7 +454,7 @@ class WindowFunctionTransformationTest {
     @Test
     void testFirstValue_withFrame() {
         // Given: FIRST_VALUE function
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT FIRST_VALUE(salary) OVER (ORDER BY hire_date ROWS UNBOUNDED PRECEDING) FROM employees";
 
         // When: Parse and transform
@@ -471,7 +473,7 @@ class WindowFunctionTransformationTest {
     @Test
     void testLastValue_withFrame() {
         // Given: LAST_VALUE function (note: requires special frame to work as expected)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT LAST_VALUE(salary) OVER (ORDER BY hire_date ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING) FROM employees";
 
         // When: Parse and transform
@@ -492,7 +494,7 @@ class WindowFunctionTransformationTest {
     @Test
     void testEmptyOver_count() {
         // Given: COUNT with empty OVER clause
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT COUNT(*) OVER () FROM employees";
 
         // When: Parse and transform
@@ -511,7 +513,7 @@ class WindowFunctionTransformationTest {
     @Test
     void testEmptyOver_sum() {
         // Given: SUM with empty OVER clause
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT SUM(salary) OVER () FROM employees";
 
         // When: Parse and transform
@@ -532,7 +534,7 @@ class WindowFunctionTransformationTest {
     @Test
     void testMultipleWindowFunctions_sameQuery() {
         // Given: Multiple window functions in one query
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT ROW_NUMBER() OVER (ORDER BY salary DESC), RANK() OVER (ORDER BY salary DESC) FROM employees";
 
         // When: Parse and transform
@@ -553,7 +555,7 @@ class WindowFunctionTransformationTest {
     @Test
     void testWindowFunction_withWhereClause() {
         // Given: Window function with WHERE clause
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT ROW_NUMBER() OVER (ORDER BY salary DESC) FROM employees WHERE department_id = 10";
 
         // When: Parse and transform
@@ -572,7 +574,7 @@ class WindowFunctionTransformationTest {
     @Test
     void testWindowFunction_fromDual() {
         // Given: Window function with FROM DUAL
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT ROW_NUMBER() OVER (ORDER BY 1) FROM DUAL";
 
         // When: Parse and transform
@@ -593,7 +595,7 @@ class WindowFunctionTransformationTest {
     @Test
     void testCountDistinct_withOver() {
         // Given: COUNT DISTINCT with OVER
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT COUNT(DISTINCT job_id) OVER (PARTITION BY department_id) FROM employees";
 
         // When: Parse and transform
@@ -615,7 +617,7 @@ class WindowFunctionTransformationTest {
     @Test
     void testSumDistinct_withOver() {
         // Given: SUM DISTINCT with OVER
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT SUM(DISTINCT salary) OVER (PARTITION BY department_id) FROM employees";
 
         // When: Parse and transform
@@ -637,7 +639,7 @@ class WindowFunctionTransformationTest {
     @Test
     void testFullWindowSpec_partitionOrderFrame() {
         // Given: Full window spec with partition, order, and frame
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT SUM(salary) OVER (PARTITION BY department_id ORDER BY hire_date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) FROM employees";
 
         // When: Parse and transform
@@ -660,7 +662,7 @@ class WindowFunctionTransformationTest {
     @Test
     void testFullWindowSpec_multiplePartitionColumns() {
         // Given: Multiple partition columns with order and frame
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT AVG(salary) OVER (PARTITION BY department_id, job_id ORDER BY hire_date ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING) FROM employees";
 
         // When: Parse and transform

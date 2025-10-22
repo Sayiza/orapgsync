@@ -3,6 +3,8 @@ package me.christianrobert.orapgsync.transformer;
 import me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder;
 import me.christianrobert.orapgsync.transformer.context.MetadataIndexBuilder;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
+import me.christianrobert.orapgsync.transformer.type.SimpleTypeEvaluator;
+import me.christianrobert.orapgsync.transformer.type.TypeEvaluator;
 import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
 import me.christianrobert.orapgsync.transformer.parser.AntlrParser;
 import me.christianrobert.orapgsync.transformer.parser.ParseResult;
@@ -50,7 +52,7 @@ class OrderByTransformationTest {
     @Test
     void orderByColumnNoDirection() {
         // Given: ORDER BY without direction (defaults to ASC)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno, ename FROM employees ORDER BY empno";
 
@@ -70,7 +72,7 @@ class OrderByTransformationTest {
     @Test
     void orderByColumnAscending() {
         // Given: ORDER BY with explicit ASC
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno, ename FROM employees ORDER BY empno ASC";
 
@@ -90,7 +92,7 @@ class OrderByTransformationTest {
     @Test
     void orderByColumnDescending() {
         // Given: ORDER BY with DESC (no explicit NULLS clause)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno, ename FROM employees ORDER BY empno DESC";
 
@@ -112,7 +114,7 @@ class OrderByTransformationTest {
     @Test
     void orderByDescNullsFirst() {
         // Given: ORDER BY DESC with explicit NULLS FIRST
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees ORDER BY empno DESC NULLS FIRST";
 
@@ -132,7 +134,7 @@ class OrderByTransformationTest {
     @Test
     void orderByDescNullsLast() {
         // Given: ORDER BY DESC with explicit NULLS LAST
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees ORDER BY empno DESC NULLS LAST";
 
@@ -152,7 +154,7 @@ class OrderByTransformationTest {
     @Test
     void orderByAscNullsFirst() {
         // Given: ORDER BY ASC with explicit NULLS FIRST
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees ORDER BY empno ASC NULLS FIRST";
 
@@ -172,7 +174,7 @@ class OrderByTransformationTest {
     @Test
     void orderByAscNullsLast() {
         // Given: ORDER BY ASC with explicit NULLS LAST
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees ORDER BY empno ASC NULLS LAST";
 
@@ -194,7 +196,7 @@ class OrderByTransformationTest {
     @Test
     void orderByMultipleColumnsAscending() {
         // Given: ORDER BY multiple columns ASC
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno, ename FROM employees ORDER BY empno ASC, ename ASC";
 
@@ -213,7 +215,7 @@ class OrderByTransformationTest {
     @Test
     void orderByMultipleColumnsDescending() {
         // Given: ORDER BY multiple columns DESC
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno, ename FROM employees ORDER BY empno DESC, ename DESC";
 
@@ -233,7 +235,7 @@ class OrderByTransformationTest {
     @Test
     void orderByMixedAscDesc() {
         // Given: ORDER BY with mixed ASC and DESC
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno, ename FROM employees ORDER BY empno DESC, ename ASC";
 
@@ -253,7 +255,7 @@ class OrderByTransformationTest {
     @Test
     void orderByThreeColumns() {
         // Given: ORDER BY three columns with different directions
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno, ename, sal FROM employees ORDER BY empno DESC, ename ASC, sal DESC";
 
@@ -274,7 +276,7 @@ class OrderByTransformationTest {
     @Test
     void orderByPosition() {
         // Given: ORDER BY using column positions
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno, ename FROM employees ORDER BY 1, 2";
 
@@ -294,7 +296,7 @@ class OrderByTransformationTest {
     @Test
     void orderByPositionWithDirection() {
         // Given: ORDER BY positions with DESC
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno, ename FROM employees ORDER BY 1 DESC, 2 ASC";
 
@@ -316,7 +318,7 @@ class OrderByTransformationTest {
     @Test
     void orderByExpression() {
         // Given: ORDER BY with function expression
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno, ename FROM employees ORDER BY UPPER(ename)";
 
@@ -338,7 +340,7 @@ class OrderByTransformationTest {
     @Test
     void orderByExpressionDescending() {
         // Given: ORDER BY expression with DESC
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno, sal FROM employees ORDER BY sal * 12 DESC";
 
@@ -359,7 +361,7 @@ class OrderByTransformationTest {
     @Test
     void orderByAlias() {
         // Given: ORDER BY column alias
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT sal * 12 AS annual_sal FROM employees ORDER BY annual_sal DESC";
 
@@ -399,7 +401,7 @@ class OrderByTransformationTest {
     @Test
     void orderByUppercase() {
         // Given: ORDER BY with uppercase keywords
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT EMPNO FROM EMPLOYEES ORDER BY EMPNO DESC";
 
@@ -419,7 +421,7 @@ class OrderByTransformationTest {
     @Test
     void orderByWithWhereClause() {
         // Given: ORDER BY with WHERE clause
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno, ename FROM employees WHERE deptno = 10 ORDER BY empno DESC";
 

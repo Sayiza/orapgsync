@@ -3,6 +3,8 @@ package me.christianrobert.orapgsync.transformer;
 import me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder;
 import me.christianrobert.orapgsync.transformer.context.MetadataIndexBuilder;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
+import me.christianrobert.orapgsync.transformer.type.SimpleTypeEvaluator;
+import me.christianrobert.orapgsync.transformer.type.TypeEvaluator;
 import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
 import me.christianrobert.orapgsync.transformer.parser.AntlrParser;
 import me.christianrobert.orapgsync.transformer.parser.ParseResult;
@@ -38,7 +40,7 @@ class SetOperationsTransformationTest {
     @Test
     void simpleUnion() {
         // Given: UNION without ALL
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees WHERE deptno = 10 " +
                           "UNION " +
@@ -62,7 +64,7 @@ class SetOperationsTransformationTest {
     @Test
     void unionAll() {
         // Given: UNION ALL
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees WHERE deptno = 10 " +
                           "UNION ALL " +
@@ -84,7 +86,7 @@ class SetOperationsTransformationTest {
     @Test
     void multipleUnions() {
         // Given: Multiple UNION operations
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees WHERE deptno = 10 " +
                           "UNION " +
@@ -110,7 +112,7 @@ class SetOperationsTransformationTest {
     @Test
     void simpleIntersect() {
         // Given: INTERSECT operation
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees WHERE deptno = 10 " +
                           "INTERSECT " +
@@ -132,7 +134,7 @@ class SetOperationsTransformationTest {
     @Test
     void intersectWithWhereClause() {
         // Given: INTERSECT with WHERE clauses in both queries
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees WHERE salary > 50000 " +
                           "INTERSECT " +
@@ -160,7 +162,7 @@ class SetOperationsTransformationTest {
     @Test
     void minusTransformedToExcept() {
         // Given: MINUS operation (Oracle-specific)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees " +
                           "MINUS " +
@@ -184,7 +186,7 @@ class SetOperationsTransformationTest {
     @Test
     void minusWithWhereClause() {
         // Given: MINUS with WHERE clauses
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees WHERE deptno = 10 " +
                           "MINUS " +
@@ -214,7 +216,7 @@ class SetOperationsTransformationTest {
     @Test
     void mixedUnionAndIntersect() {
         // Given: Combination of UNION and INTERSECT
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees WHERE deptno = 10 " +
                           "UNION " +
@@ -240,7 +242,7 @@ class SetOperationsTransformationTest {
     @Test
     void mixedUnionAndMinus() {
         // Given: Combination of UNION and MINUS
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees WHERE deptno = 10 " +
                           "UNION " +
@@ -270,7 +272,7 @@ class SetOperationsTransformationTest {
     @Test
     void unionWithMultipleColumns() {
         // Given: UNION with multiple columns
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno, ename, deptno FROM employees WHERE deptno = 10 " +
                           "UNION " +
@@ -294,7 +296,7 @@ class SetOperationsTransformationTest {
     @Test
     void minusWithMultipleColumns() {
         // Given: MINUS with multiple columns
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno, ename FROM employees " +
                           "MINUS " +
@@ -320,7 +322,7 @@ class SetOperationsTransformationTest {
     @Test
     void unionWithOrderBy() {
         // Given: UNION with ORDER BY clause
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees WHERE deptno = 10 " +
                           "UNION " +

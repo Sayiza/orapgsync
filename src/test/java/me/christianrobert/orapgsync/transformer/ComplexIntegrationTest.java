@@ -3,6 +3,8 @@ package me.christianrobert.orapgsync.transformer;
 import me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder;
 import me.christianrobert.orapgsync.transformer.context.MetadataIndexBuilder;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
+import me.christianrobert.orapgsync.transformer.type.SimpleTypeEvaluator;
+import me.christianrobert.orapgsync.transformer.type.TypeEvaluator;
 import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
 import me.christianrobert.orapgsync.transformer.parser.AntlrParser;
 import me.christianrobert.orapgsync.transformer.parser.ParseResult;
@@ -52,7 +54,7 @@ public class ComplexIntegrationTest {
     @Test
     void outerJoinWithDateAndStringFunctions() {
         // Given: Complex query with (+) outer join, date functions, and string functions
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql =
             "SELECT " +
@@ -117,7 +119,7 @@ public class ComplexIntegrationTest {
     @Test
     void cteWithOuterJoinAndRownum() {
         // Given: CTE with outer join and ROWNUM limit
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql =
             "WITH recent_hires AS ( " +
@@ -186,7 +188,7 @@ public class ComplexIntegrationTest {
     @Test
     void nestedCTEsWithMultipleOuterJoinsAndComplexFunctions() {
         // Given: Very complex query with nested CTEs, chained outer joins, and multiple function types
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql =
             "WITH " +
@@ -272,7 +274,7 @@ public class ComplexIntegrationTest {
     @Test
     void subqueryWithOuterJoinAndStringFunctions() {
         // Given: Subquery in WHERE with outer join and string functions
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql =
             "SELECT " +
@@ -327,7 +329,7 @@ public class ComplexIntegrationTest {
     @Test
     void kitchenSinkQuery() {
         // Given: The most complex query combining ALL transformations
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql =
             "WITH " +
@@ -395,8 +397,8 @@ public class ComplexIntegrationTest {
         // Date functions (TRUNC x4, ROUND, MONTHS_BETWEEN, ADD_MONTHS x2, LAST_DAY, SYSDATE x4)
         assertTrue(normalized.contains("DATE_TRUNC( 'day' , MIN( e . hire_date ) )::DATE"),
             "TRUNC(MIN(...)) in CTE should be transformed, got: " + normalized);
-        assertTrue(normalized.contains("CASE WHEN EXTRACT( DAY FROM ds . first_hire ) >= 16"),
-            "ROUND(date, 'YYYY') should use CASE WHEN, got: " + normalized);
+        assertTrue(normalized.contains("CASE WHEN EXTRACT( MONTH FROM ds . first_hire ) >= 7"),
+            "ROUND(date, 'YYYY') should use CASE WHEN with MONTH >= 7, got: " + normalized);
         assertTrue(normalized.contains("EXTRACT( YEAR FROM AGE( CURRENT_TIMESTAMP , ds . first_hire ) ) * 12 + EXTRACT( MONTH FROM AGE( CURRENT_TIMESTAMP , ds . first_hire ) )"),
             "MONTHS_BETWEEN should be transformed, got: " + normalized);
 
@@ -415,8 +417,8 @@ public class ComplexIntegrationTest {
             "ROWNUM should be removed, got: " + normalized);
 
         // ORDER BY
-        assertTrue(normalized.contains("ORDER BY ds . emp_count DESC , ds . dept_name"),
-            "ORDER BY should be preserved, got: " + normalized);
+        assertTrue(normalized.contains("ORDER BY ds . emp_count DESC NULLS FIRST , ds . dept_name"),
+            "ORDER BY should be preserved with NULLS FIRST, got: " + normalized);
 
         // Schema qualification
         assertTrue(normalized.contains("FROM hr.departments d"),
@@ -436,7 +438,7 @@ public class ComplexIntegrationTest {
     @Test
     void outerJoinWithNestedStringFunctions() {
         // Given: Complex nested string functions with outer join
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql =
             "SELECT " +
@@ -480,7 +482,7 @@ public class ComplexIntegrationTest {
     @Test
     void recursiveCTEWithOuterJoinAndDateFunctions() {
         // Given: Recursive CTE with outer join and date functions
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql =
             "WITH employee_hierarchy AS ( " +

@@ -3,6 +3,8 @@ package me.christianrobert.orapgsync.transformer;
 import me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder;
 import me.christianrobert.orapgsync.transformer.context.MetadataIndexBuilder;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
+import me.christianrobert.orapgsync.transformer.type.SimpleTypeEvaluator;
+import me.christianrobert.orapgsync.transformer.type.TypeEvaluator;
 import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
 import me.christianrobert.orapgsync.transformer.parser.AntlrParser;
 import me.christianrobert.orapgsync.transformer.parser.ParseResult;
@@ -47,7 +49,7 @@ class ArithmeticOperatorTransformationTest {
     @Test
     void additionInSelectList() {
         // Given: Simple addition in SELECT list
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT salary + bonus FROM employees";
 
@@ -67,7 +69,7 @@ class ArithmeticOperatorTransformationTest {
     @Test
     void additionWithLiterals() {
         // Given: Addition with numeric literals
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno, salary + 1000 FROM employees";
 
@@ -88,7 +90,7 @@ class ArithmeticOperatorTransformationTest {
     @Test
     void subtractionInSelectList() {
         // Given: Simple subtraction in SELECT list
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT salary - tax FROM employees";
 
@@ -109,7 +111,7 @@ class ArithmeticOperatorTransformationTest {
     @Test
     void multiplicationInSelectList() {
         // Given: Simple multiplication (annual salary calculation)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT salary * 12 FROM employees";
 
@@ -129,7 +131,7 @@ class ArithmeticOperatorTransformationTest {
     @Test
     void multiplicationOfTwoColumns() {
         // Given: Multiplication of two columns
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT quantity * price FROM orders";
 
@@ -150,7 +152,7 @@ class ArithmeticOperatorTransformationTest {
     @Test
     void divisionInSelectList() {
         // Given: Simple division
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT total / count AS average FROM stats";
 
@@ -171,7 +173,7 @@ class ArithmeticOperatorTransformationTest {
     @Test
     void moduloOperator() {
         // Given: MOD operator
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno MOD 2 FROM employees";
 
@@ -194,7 +196,7 @@ class ArithmeticOperatorTransformationTest {
     @Test
     void powerOperator() {
         // Given: Power operator (Oracle **)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT base ** exponent AS power_result FROM calculations";
 
@@ -213,7 +215,7 @@ class ArithmeticOperatorTransformationTest {
     @Test
     void powerWithLiteral() {
         // Given: Power with literal (square calculation)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT radius ** 2 AS area_approx FROM circles";
 
@@ -234,7 +236,7 @@ class ArithmeticOperatorTransformationTest {
     @Test
     void stringConcatenation() {
         // Given: String concatenation with || operator
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT first_name || ' ' || last_name FROM employees";
 
@@ -259,7 +261,7 @@ class ArithmeticOperatorTransformationTest {
     void stringConcatenationWithNullLiteral() {
         // Given: String concatenation with explicit NULL
         // This is the CRITICAL difference between Oracle and PostgreSQL
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT 'Hello' || NULL || 'World' FROM employees";
 
@@ -284,7 +286,7 @@ class ArithmeticOperatorTransformationTest {
     @Test
     void stringConcatenationChained() {
         // Given: Multiple chained concatenations
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT a || b || c || d FROM test_table";
 
@@ -307,7 +309,7 @@ class ArithmeticOperatorTransformationTest {
     @Test
     void stringConcatenationInWhereClause() {
         // Given: String concatenation in WHERE clause
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees WHERE first_name || last_name = 'JohnSmith'";
 
@@ -327,7 +329,7 @@ class ArithmeticOperatorTransformationTest {
     @Test
     void stringConcatenationMixedWithArithmetic() {
         // Given: Mix of string concatenation and arithmetic
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT name || ' earns ' || (salary * 12) FROM employees";
 
@@ -349,7 +351,7 @@ class ArithmeticOperatorTransformationTest {
     @Test
     void complexArithmeticExpression() {
         // Given: Complex expression with multiple operators
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT (salary * 12) + bonus - tax FROM employees";
 
@@ -371,7 +373,7 @@ class ArithmeticOperatorTransformationTest {
     @Test
     void arithmeticWithParentheses() {
         // Given: Arithmetic with explicit parentheses for precedence
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT (salary + bonus) * 12 AS annual_total FROM employees";
 
@@ -392,7 +394,7 @@ class ArithmeticOperatorTransformationTest {
     @Test
     void nestedArithmeticExpressions() {
         // Given: Nested arithmetic expressions
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT ((base_salary + bonus) * 12) - (tax * 12) AS net_annual FROM employees";
 
@@ -416,7 +418,7 @@ class ArithmeticOperatorTransformationTest {
     @Test
     void arithmeticInWhereClause() {
         // Given: Arithmetic expression in WHERE clause
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees WHERE salary * 12 > 100000";
 
@@ -436,7 +438,7 @@ class ArithmeticOperatorTransformationTest {
     @Test
     void arithmeticInWhereWithMultipleOperators() {
         // Given: Complex arithmetic in WHERE clause
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees WHERE (salary + bonus) * 12 > 150000 AND tax < 50000";
 
@@ -460,7 +462,7 @@ class ArithmeticOperatorTransformationTest {
     @Test
     void arithmeticInOrderBy() {
         // Given: Arithmetic expression in ORDER BY
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees ORDER BY salary * 12 DESC";
 
@@ -484,7 +486,7 @@ class ArithmeticOperatorTransformationTest {
     @Test
     void allOperatorsTogether() {
         // Given: Expression using all arithmetic operators
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT (a + b) * (c - d) / e MOD f ** 2 FROM calculations";
 

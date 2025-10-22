@@ -3,6 +3,8 @@ package me.christianrobert.orapgsync.transformer;
 import me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder;
 import me.christianrobert.orapgsync.transformer.context.MetadataIndexBuilder;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
+import me.christianrobert.orapgsync.transformer.type.SimpleTypeEvaluator;
+import me.christianrobert.orapgsync.transformer.type.TypeEvaluator;
 import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
 import me.christianrobert.orapgsync.transformer.parser.AntlrParser;
 import me.christianrobert.orapgsync.transformer.parser.ParseResult;
@@ -52,7 +54,7 @@ public class InstrTransformationTest {
     @Test
     void instrSimpleTwoArgs() {
         // Given: INSTR with just string and substring
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT INSTR(email, '@') FROM employees";
 
@@ -73,7 +75,7 @@ public class InstrTransformationTest {
     @Test
     void instrWithStringLiterals() {
         // Given: INSTR with string literals
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT INSTR('Hello World', 'World') FROM DUAL";
 
@@ -94,7 +96,7 @@ public class InstrTransformationTest {
     @Test
     void instrWithColumnReferences() {
         // Given: INSTR with column references
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT INSTR(first_name, last_name) FROM employees";
 
@@ -115,7 +117,7 @@ public class InstrTransformationTest {
     @Test
     void instrInWhereClause() {
         // Given: INSTR in WHERE clause
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees WHERE INSTR(email, '@gmail.com') > 0";
 
@@ -136,7 +138,7 @@ public class InstrTransformationTest {
     @Test
     void instrWithAlias() {
         // Given: INSTR with column alias
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT INSTR(email, '@') AS at_position FROM employees";
 
@@ -159,7 +161,7 @@ public class InstrTransformationTest {
     @Test
     void instrWithStartingPosition() {
         // Given: INSTR with starting position
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT INSTR(email, '.', 5) FROM employees";
 
@@ -189,7 +191,7 @@ public class InstrTransformationTest {
     @Test
     void instrWithStartingPositionLiteral() {
         // Given: INSTR with starting position as literal
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT INSTR('Hello World', 'o', 6) FROM DUAL";
 
@@ -214,7 +216,7 @@ public class InstrTransformationTest {
     @Test
     void instrWithOccurrence() {
         // Given: INSTR with starting position and occurrence
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT INSTR(email, '.', 1, 2) FROM employees";
 
@@ -239,7 +241,7 @@ public class InstrTransformationTest {
     @Test
     void instrNotFound() {
         // Given: INSTR where substring doesn't exist (should return 0)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT INSTR(email, 'xyz') FROM employees WHERE INSTR(email, 'xyz') = 0";
 
@@ -260,7 +262,7 @@ public class InstrTransformationTest {
     @Test
     void instrCaseSensitive() {
         // Given: INSTR is case-sensitive (like POSITION)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT INSTR(email, 'GMAIL') FROM employees";
 
@@ -281,7 +283,7 @@ public class InstrTransformationTest {
     @Test
     void instrWithConcatenation() {
         // Given: INSTR with concatenated strings
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT INSTR(first_name || ' ' || last_name, ' ') FROM employees";
 
@@ -306,7 +308,7 @@ public class InstrTransformationTest {
     @Test
     void instrNested() {
         // Given: Nested INSTR calls
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT INSTR(email, '.', INSTR(email, '@') + 1) FROM employees";
 
@@ -329,7 +331,7 @@ public class InstrTransformationTest {
     @Test
     void instrInOrderBy() {
         // Given: INSTR in ORDER BY clause
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees ORDER BY INSTR(email, '@') DESC";
 
@@ -350,7 +352,7 @@ public class InstrTransformationTest {
     @Test
     void multipleInstrInSelect() {
         // Given: Multiple INSTR calls in SELECT list
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT INSTR(email, '@'), INSTR(email, '.') FROM employees";
 

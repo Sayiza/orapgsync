@@ -2,6 +2,8 @@ package me.christianrobert.orapgsync.transformer;
 
 import me.christianrobert.orapgsync.transformer.context.MetadataIndexBuilder;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
+import me.christianrobert.orapgsync.transformer.type.SimpleTypeEvaluator;
+import me.christianrobert.orapgsync.transformer.type.TypeEvaluator;
 import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
 import me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder;
 import me.christianrobert.orapgsync.transformer.parser.AntlrParser;
@@ -45,7 +47,7 @@ public class ToCharTransformationTest {
     @Test
     void toCharDateSimpleFormat() {
         // Given: TO_CHAR with simple date format
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT TO_CHAR(hire_date, 'YYYY-MM-DD') FROM employees";
 
@@ -65,7 +67,7 @@ public class ToCharTransformationTest {
     @Test
     void toCharDateWithTime() {
         // Given: TO_CHAR with date and time format
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT TO_CHAR(hire_date, 'YYYY-MM-DD HH24:MI:SS') FROM employees";
 
@@ -85,7 +87,7 @@ public class ToCharTransformationTest {
     @Test
     void toCharDateWithRR() {
         // Given: TO_CHAR with RR (Oracle 2-digit year)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT TO_CHAR(hire_date, 'RR-MM-DD') FROM employees";
 
@@ -107,7 +109,7 @@ public class ToCharTransformationTest {
     @Test
     void toCharDateWithRRRR() {
         // Given: TO_CHAR with RRRR (Oracle 4-digit year)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT TO_CHAR(hire_date, 'RRRR-MM-DD') FROM employees";
 
@@ -129,7 +131,7 @@ public class ToCharTransformationTest {
     @Test
     void toCharDateWithMonthNames() {
         // Given: TO_CHAR with month names
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT TO_CHAR(hire_date, 'DD-MON-YYYY') FROM employees";
 
@@ -149,7 +151,7 @@ public class ToCharTransformationTest {
     @Test
     void toCharDateWithDayNames() {
         // Given: TO_CHAR with day names
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT TO_CHAR(hire_date, 'DAY, DD MONTH YYYY') FROM employees";
 
@@ -171,7 +173,7 @@ public class ToCharTransformationTest {
     @Test
     void toCharNumberSimple() {
         // Given: TO_CHAR with simple number format
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT TO_CHAR(salary, '999,999.99') FROM employees";
 
@@ -191,7 +193,7 @@ public class ToCharTransformationTest {
     @Test
     void toCharNumberWithFM() {
         // Given: TO_CHAR with FM (fill mode - suppress padding)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT TO_CHAR(amount, 'FM999,999.00') FROM transactions";
 
@@ -211,7 +213,7 @@ public class ToCharTransformationTest {
     @Test
     void toCharNumberWithDollarSign() {
         // Given: TO_CHAR with dollar sign
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT TO_CHAR(price, '$999,999.99') FROM products";
 
@@ -231,7 +233,7 @@ public class ToCharTransformationTest {
     @Test
     void toCharNumberWithD() {
         // Given: TO_CHAR with D (decimal point, locale-aware in Oracle)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT TO_CHAR(amount, '999D99') FROM transactions";
 
@@ -253,7 +255,7 @@ public class ToCharTransformationTest {
     @Test
     void toCharNumberWithG() {
         // Given: TO_CHAR with G (grouping separator, locale-aware in Oracle)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT TO_CHAR(amount, '999G999G999') FROM transactions";
 
@@ -275,7 +277,7 @@ public class ToCharTransformationTest {
     @Test
     void toCharNumberWithDAndG() {
         // Given: TO_CHAR with both D and G
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT TO_CHAR(amount, '999G999D99') FROM transactions";
 
@@ -297,7 +299,7 @@ public class ToCharTransformationTest {
     @Test
     void toCharWithoutFormat() {
         // Given: TO_CHAR without format string (converts to default string representation)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT TO_CHAR(empno) FROM employees";
 
@@ -319,7 +321,7 @@ public class ToCharTransformationTest {
     @Test
     void toCharWithNLSParameter() {
         // Given: TO_CHAR with NLS parameter (3rd argument)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT TO_CHAR(hire_date, 'DD-MON-YYYY', 'NLS_DATE_LANGUAGE=FRENCH') FROM employees";
 
@@ -343,7 +345,7 @@ public class ToCharTransformationTest {
     @Test
     void toCharInWhereClause() {
         // Given: TO_CHAR in WHERE clause
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees WHERE TO_CHAR(hire_date, 'YYYY') = '2020'";
 
@@ -363,7 +365,7 @@ public class ToCharTransformationTest {
     @Test
     void toCharWithColumnAlias() {
         // Given: TO_CHAR with column alias
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT TO_CHAR(hire_date, 'YYYY-MM-DD') AS hire_date_str FROM employees";
 
@@ -383,7 +385,7 @@ public class ToCharTransformationTest {
     @Test
     void toCharInOrderBy() {
         // Given: TO_CHAR in ORDER BY clause
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees ORDER BY TO_CHAR(hire_date, 'YYYY-MM')";
 
@@ -403,7 +405,7 @@ public class ToCharTransformationTest {
     @Test
     void toCharNested() {
         // Given: TO_CHAR with function call as argument
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT TO_CHAR(NVL(hire_date, SYSDATE), 'YYYY-MM-DD') FROM employees";
 
@@ -427,7 +429,7 @@ public class ToCharTransformationTest {
     @Test
     void toCharWithComplexDateFormat() {
         // Given: TO_CHAR with complex date format
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT TO_CHAR(hire_date, 'Day, DD Month YYYY HH24:MI:SS') FROM employees";
 
@@ -447,7 +449,7 @@ public class ToCharTransformationTest {
     @Test
     void toCharDateWithDD() {
         // Given: TO_CHAR with DD (day of month) - should NOT be affected by D→. transformation
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT TO_CHAR(hire_date, 'DD-MM-YYYY') FROM employees";
 
@@ -469,7 +471,7 @@ public class ToCharTransformationTest {
     @Test
     void toCharMultipleInSelect() {
         // Given: Multiple TO_CHAR calls in SELECT
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT TO_CHAR(hire_date, 'YYYY'), TO_CHAR(salary, '999,999') FROM employees";
 

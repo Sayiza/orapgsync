@@ -106,11 +106,22 @@ public class StringFunctionTransformer {
     }
 
     // 4 arguments: With occurrence
-    // This is complex and requires either a custom function or complex regex
-    // For now, call a custom PostgreSQL function that should be created
     String positionExpr = transformArgument(args.get(2), b);
     String occurrenceExpr = transformArgument(args.get(3), b);
 
+    // Check for the common case: position=1, occurrence=1
+    // This is equivalent to the simple 2-arg form
+    String positionText = args.get(2).getText().trim();
+    String occurrenceText = args.get(3).getText().trim();
+
+    if ("1".equals(positionText) && "1".equals(occurrenceText)) {
+      // INSTR(str, substr, 1, 1) → POSITION(substr IN str)
+      return "POSITION( " + substringExpr + " IN " + stringExpr + " )";
+    }
+
+    // Complex case with non-default values
+    // This requires either a custom function or complex regex
+    // For now, call a custom PostgreSQL function that should be created
     return "instr_with_occurrence( " + stringExpr + " , " + substringExpr + " , " +
            positionExpr + " , " + occurrenceExpr + " )";
   }

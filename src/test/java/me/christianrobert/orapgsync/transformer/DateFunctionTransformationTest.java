@@ -2,6 +2,8 @@ package me.christianrobert.orapgsync.transformer;
 
 import me.christianrobert.orapgsync.transformer.context.MetadataIndexBuilder;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
+import me.christianrobert.orapgsync.transformer.type.SimpleTypeEvaluator;
+import me.christianrobert.orapgsync.transformer.type.TypeEvaluator;
 import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
 import me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder;
 import me.christianrobert.orapgsync.transformer.parser.AntlrParser;
@@ -48,7 +50,7 @@ public class DateFunctionTransformationTest {
     @Test
     void addMonthsSimple() {
         // Given: ADD_MONTHS with positive month count
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT ADD_MONTHS(hire_date, 6) FROM employees";
 
@@ -73,7 +75,7 @@ public class DateFunctionTransformationTest {
     @Test
     void addMonthsNegative() {
         // Given: ADD_MONTHS with negative month count (subtract months)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT ADD_MONTHS(hire_date, -3) FROM employees";
 
@@ -94,7 +96,7 @@ public class DateFunctionTransformationTest {
     @Test
     void addMonthsInWhereClause() {
         // Given: ADD_MONTHS in WHERE clause
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees WHERE hire_date > ADD_MONTHS(SYSDATE, -12)";
 
@@ -121,7 +123,7 @@ public class DateFunctionTransformationTest {
     @Test
     void monthsBetweenSimple() {
         // Given: MONTHS_BETWEEN with two dates
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT MONTHS_BETWEEN(end_date, start_date) FROM projects";
 
@@ -150,7 +152,7 @@ public class DateFunctionTransformationTest {
     @Test
     void lastDaySimple() {
         // Given: LAST_DAY with a date column
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT LAST_DAY(hire_date) FROM employees";
 
@@ -181,7 +183,7 @@ public class DateFunctionTransformationTest {
     @Test
     void truncDateNoFormat() {
         // Given: TRUNC with date but no format (truncate to day)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT TRUNC(hire_date) FROM employees";
 
@@ -202,7 +204,7 @@ public class DateFunctionTransformationTest {
     @Test
     void truncDateWithMonthFormat() {
         // Given: TRUNC with MONTH format
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT TRUNC(hire_date, 'MONTH') FROM employees";
 
@@ -223,7 +225,7 @@ public class DateFunctionTransformationTest {
     @Test
     void truncDateWithYearFormat() {
         // Given: TRUNC with YEAR format
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT TRUNC(hire_date, 'YEAR') FROM employees";
 
@@ -244,7 +246,7 @@ public class DateFunctionTransformationTest {
     @Test
     void truncDateWithMMFormat() {
         // Given: TRUNC with MM format (month)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT TRUNC(hire_date, 'MM') FROM employees";
 
@@ -267,7 +269,7 @@ public class DateFunctionTransformationTest {
     @Test
     void dateFunctionsInWhereClause() {
         // Given: Date functions in WHERE clause
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees WHERE TRUNC(hire_date) = TRUNC(SYSDATE)";
 
@@ -290,7 +292,7 @@ public class DateFunctionTransformationTest {
     @Test
     void dateFunctionsInOrderBy() {
         // Given: Date functions in ORDER BY
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees ORDER BY TRUNC(hire_date, 'MONTH') DESC";
 
@@ -313,7 +315,7 @@ public class DateFunctionTransformationTest {
     @Test
     void nestedDateFunctions() {
         // Given: Nested date functions
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT ADD_MONTHS(LAST_DAY(hire_date), 3) FROM employees";
 
@@ -340,7 +342,7 @@ public class DateFunctionTransformationTest {
     @Test
     void addMonthsWithColumnExpression() {
         // Given: ADD_MONTHS with column as month count
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT ADD_MONTHS(hire_date, months_employed) FROM employees";
 
@@ -361,7 +363,7 @@ public class DateFunctionTransformationTest {
     @Test
     void monthsBetweenInArithmetic() {
         // Given: MONTHS_BETWEEN in arithmetic expression
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT MONTHS_BETWEEN(end_date, start_date) / 12 AS years FROM projects";
 
@@ -384,7 +386,7 @@ public class DateFunctionTransformationTest {
     @Test
     void lastDayInComparison() {
         // Given: LAST_DAY in comparison
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees WHERE hire_date = LAST_DAY(hire_date)";
 
@@ -405,7 +407,7 @@ public class DateFunctionTransformationTest {
     @Test
     void truncWithQuarterFormat() {
         // Given: TRUNC with quarter format
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT TRUNC(hire_date, 'Q') FROM employees";
 
@@ -426,7 +428,7 @@ public class DateFunctionTransformationTest {
     @Test
     void multipleDateFunctionsInSelect() {
         // Given: Multiple different date functions in SELECT list
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT ADD_MONTHS(hire_date, 6), LAST_DAY(hire_date), TRUNC(hire_date) FROM employees";
 
@@ -453,7 +455,7 @@ public class DateFunctionTransformationTest {
     @Test
     void numericTruncWithPrecision() {
         // Given: TRUNC with numeric literal and precision
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT TRUNC(123.456, 2) FROM employees";
 
@@ -464,11 +466,11 @@ public class DateFunctionTransformationTest {
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
         String postgresSql = builder.visit(parseResult.getTree());
 
-        // Then: Numeric TRUNC should pass through unchanged
+        // Then: Numeric TRUNC with defensive cast (type evaluator returns UNKNOWN)
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
 
-        assertTrue(normalized.contains("TRUNC( 123.456 , 2 )"),
-            "Numeric TRUNC should pass through, got: " + normalized);
+        assertTrue(normalized.contains("TRUNC( 123.456::numeric , 2 )"),
+            "Numeric TRUNC should pass through with defensive cast, got: " + normalized);
         assertFalse(normalized.contains("DATE_TRUNC"),
             "Should not transform to DATE_TRUNC for numeric");
     }
@@ -476,7 +478,7 @@ public class DateFunctionTransformationTest {
     @Test
     void numericTruncNoFormat() {
         // Given: TRUNC with numeric column, no precision
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT TRUNC(salary) FROM employees";
 
@@ -487,11 +489,11 @@ public class DateFunctionTransformationTest {
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
         String postgresSql = builder.visit(parseResult.getTree());
 
-        // Then: Numeric TRUNC should pass through
+        // Then: Numeric TRUNC with defensive cast (type evaluator returns UNKNOWN)
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
 
-        assertTrue(normalized.contains("TRUNC( salary )"),
-            "Numeric TRUNC should pass through for column without date-like name, got: " + normalized);
+        assertTrue(normalized.contains("TRUNC( salary::numeric )"),
+            "Numeric TRUNC should pass through with defensive cast, got: " + normalized);
         assertFalse(normalized.contains("DATE_TRUNC"),
             "Should not transform to DATE_TRUNC");
     }
@@ -499,7 +501,7 @@ public class DateFunctionTransformationTest {
     @Test
     void numericTruncWithNegativePrecision() {
         // Given: TRUNC with negative precision (rounds to tens, hundreds, etc.)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT TRUNC(salary, -2) FROM employees";
 
@@ -510,11 +512,11 @@ public class DateFunctionTransformationTest {
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
         String postgresSql = builder.visit(parseResult.getTree());
 
-        // Then: Numeric TRUNC should pass through
+        // Then: Numeric TRUNC with defensive cast (type evaluator returns UNKNOWN)
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
 
-        assertTrue(normalized.contains("TRUNC( salary , -2 )"),
-            "Numeric TRUNC with negative precision should pass through, got: " + normalized);
+        assertTrue(normalized.contains("TRUNC( salary::numeric , -2 )"),
+            "Numeric TRUNC with negative precision should have defensive cast, got: " + normalized);
     }
 
     // ==================== NUMERIC ROUND Tests (Should Pass Through) ====================
@@ -522,7 +524,7 @@ public class DateFunctionTransformationTest {
     @Test
     void numericRoundWithPrecision() {
         // Given: ROUND with numeric literal and precision
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT ROUND(123.456, 2) FROM employees";
 
@@ -533,11 +535,11 @@ public class DateFunctionTransformationTest {
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
         String postgresSql = builder.visit(parseResult.getTree());
 
-        // Then: Numeric ROUND should pass through unchanged
+        // Then: Numeric ROUND with defensive cast (type evaluator returns UNKNOWN)
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
 
-        assertTrue(normalized.contains("ROUND( 123.456 , 2 )"),
-            "Numeric ROUND should pass through, got: " + normalized);
+        assertTrue(normalized.contains("ROUND( 123.456::numeric , 2 )"),
+            "Numeric ROUND should have defensive cast, got: " + normalized);
         assertFalse(normalized.contains("DATE_TRUNC"),
             "Should not transform to DATE_TRUNC for numeric");
         assertFalse(normalized.contains("CASE WHEN"),
@@ -547,7 +549,7 @@ public class DateFunctionTransformationTest {
     @Test
     void numericRoundNoFormat() {
         // Given: ROUND with numeric column, no precision
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT ROUND(salary) FROM employees";
 
@@ -558,11 +560,11 @@ public class DateFunctionTransformationTest {
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
         String postgresSql = builder.visit(parseResult.getTree());
 
-        // Then: Numeric ROUND should pass through
+        // Then: Numeric ROUND with defensive cast (type evaluator returns UNKNOWN)
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
 
-        assertTrue(normalized.contains("ROUND( salary )"),
-            "Numeric ROUND should pass through for column without date-like name, got: " + normalized);
+        assertTrue(normalized.contains("ROUND( salary::numeric )"),
+            "Numeric ROUND should have defensive cast, got: " + normalized);
         assertFalse(normalized.contains("CASE WHEN"),
             "Should not use CASE WHEN for numeric");
     }
@@ -572,7 +574,7 @@ public class DateFunctionTransformationTest {
     @Test
     void roundDateToMonth() {
         // Given: ROUND with date column and MONTH format
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT ROUND(hire_date, 'MM') FROM employees";
 
@@ -599,7 +601,7 @@ public class DateFunctionTransformationTest {
     @Test
     void roundDateToYear() {
         // Given: ROUND with date column and YEAR format
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT ROUND(hire_date, 'YYYY') FROM employees";
 
@@ -624,7 +626,7 @@ public class DateFunctionTransformationTest {
     @Test
     void roundDateToDay() {
         // Given: ROUND with date column and DD format (or no format)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT ROUND(hire_date, 'DD') FROM employees";
 
@@ -649,7 +651,7 @@ public class DateFunctionTransformationTest {
     @Test
     void roundDateWithSysdate() {
         // Given: ROUND with SYSDATE (should detect as date expression)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT ROUND(SYSDATE, 'MM') FROM employees";
 
@@ -674,7 +676,7 @@ public class DateFunctionTransformationTest {
     @Test
     void roundDateInWhereClause() {
         // Given: ROUND in WHERE clause
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees WHERE ROUND(hire_date, 'YYYY') = TO_DATE('2020-01-01', 'YYYY-MM-DD')";
 

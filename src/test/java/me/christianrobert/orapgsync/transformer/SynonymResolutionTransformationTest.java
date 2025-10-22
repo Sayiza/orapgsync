@@ -2,6 +2,8 @@ package me.christianrobert.orapgsync.transformer;
 
 import me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
+import me.christianrobert.orapgsync.transformer.type.SimpleTypeEvaluator;
+import me.christianrobert.orapgsync.transformer.type.TypeEvaluator;
 import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
 import me.christianrobert.orapgsync.transformer.parser.AntlrParser;
 import me.christianrobert.orapgsync.transformer.parser.ParseResult;
@@ -44,7 +46,7 @@ class SynonymResolutionTransformationTest {
         synonymMap.put("hr", hrSynonyms);
 
         TransformationIndices indices = createIndicesWithSynonyms(synonymMap);
-        TransformationContext context = new TransformationContext("hr", indices);
+        TransformationContext context = new TransformationContext("hr", indices, new SimpleTypeEvaluator("hr", indices));
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
 
         // When: Oracle SQL uses synonym
@@ -70,7 +72,7 @@ class SynonymResolutionTransformationTest {
         synonymMap.put("public", publicSynonyms);
 
         TransformationIndices indices = createIndicesWithSynonyms(synonymMap);
-        TransformationContext context = new TransformationContext("sales", indices);  // Different schema
+        TransformationContext context = new TransformationContext("sales", indices, new SimpleTypeEvaluator("sales", indices));  // Different schema
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
 
         // When: Oracle SQL uses public synonym
@@ -101,7 +103,7 @@ class SynonymResolutionTransformationTest {
         synonymMap.put("public", publicSynonyms);
 
         TransformationIndices indices = createIndicesWithSynonyms(synonymMap);
-        TransformationContext context = new TransformationContext("hr", indices);
+        TransformationContext context = new TransformationContext("hr", indices, new SimpleTypeEvaluator("hr", indices));
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
 
         // When: Oracle SQL uses synonym
@@ -124,7 +126,7 @@ class SynonymResolutionTransformationTest {
         synonymMap.put("hr", new HashMap<>());  // No synonyms
 
         TransformationIndices indices = createIndicesWithSynonyms(synonymMap);
-        TransformationContext context = new TransformationContext("hr", indices);
+        TransformationContext context = new TransformationContext("hr", indices, new SimpleTypeEvaluator("hr", indices));
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
 
         // When: Oracle SQL uses actual table name (unqualified)
@@ -150,7 +152,7 @@ class SynonymResolutionTransformationTest {
         synonymMap.put("hr", hrSynonyms);
 
         TransformationIndices indices = createIndicesWithSynonyms(synonymMap);
-        TransformationContext context = new TransformationContext("hr", indices);
+        TransformationContext context = new TransformationContext("hr", indices, new SimpleTypeEvaluator("hr", indices));
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
 
         // When: Oracle SQL uses synonym with alias
@@ -194,7 +196,7 @@ class SynonymResolutionTransformationTest {
         synonymMap.put("hr", hrSynonyms);
 
         TransformationIndices indices = createIndicesWithSynonyms(synonymMap);
-        TransformationContext context = new TransformationContext("hr", indices);
+        TransformationContext context = new TransformationContext("hr", indices, new SimpleTypeEvaluator("hr", indices));
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
 
         // When: Parenthesized Oracle SQL uses synonym

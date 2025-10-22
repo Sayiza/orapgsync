@@ -3,6 +3,8 @@ package me.christianrobert.orapgsync.transformer;
 import me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder;
 import me.christianrobert.orapgsync.transformer.context.MetadataIndexBuilder;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
+import me.christianrobert.orapgsync.transformer.type.SimpleTypeEvaluator;
+import me.christianrobert.orapgsync.transformer.type.TypeEvaluator;
 import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
 import me.christianrobert.orapgsync.transformer.parser.AntlrParser;
 import me.christianrobert.orapgsync.transformer.parser.ParseResult;
@@ -41,7 +43,7 @@ class SubqueryComprehensiveTest {
     @Test
     void fromClauseSubquery() {
         // Given: Subquery in FROM clause
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT d.dept_id FROM (SELECT dept_id FROM departments) d";
 
@@ -65,7 +67,7 @@ class SubqueryComprehensiveTest {
     @Test
     void scalarSubqueryInSelectList() {
         // Given: Scalar subquery in SELECT list
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno, (SELECT dname FROM departments WHERE deptno = emp.deptno) AS dept_name FROM employees emp";
 
@@ -90,7 +92,7 @@ class SubqueryComprehensiveTest {
     @Test
     void whereClauseInSubquery() {
         // Given: IN subquery in WHERE clause
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees WHERE deptno IN (SELECT deptno FROM departments WHERE location = 'NY')";
 
@@ -113,7 +115,7 @@ class SubqueryComprehensiveTest {
     @Test
     void whereClauseNotInSubquery() {
         // Given: NOT IN subquery
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees WHERE deptno NOT IN (SELECT deptno FROM departments WHERE active = 'N')";
 
@@ -138,7 +140,7 @@ class SubqueryComprehensiveTest {
     @Test
     void whereClauseExistsSubquery() {
         // Given: EXISTS subquery
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees e WHERE EXISTS (SELECT 1 FROM departments d WHERE d.deptno = e.deptno)";
 
@@ -161,7 +163,7 @@ class SubqueryComprehensiveTest {
     @Test
     void whereClauseNotExistsSubquery() {
         // Given: NOT EXISTS subquery
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees e WHERE NOT EXISTS (SELECT 1 FROM salaries s WHERE s.empno = e.empno)";
 
@@ -186,7 +188,7 @@ class SubqueryComprehensiveTest {
     @Test
     void whereClauseScalarSubquery() {
         // Given: Scalar subquery in comparison
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees WHERE salary > (SELECT AVG(salary) FROM employees)";
 
@@ -211,7 +213,7 @@ class SubqueryComprehensiveTest {
     @Test
     void whereClauseAnySubquery() {
         // Given: ANY subquery
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees WHERE salary > ANY (SELECT salary FROM employees WHERE deptno = 10)";
 
@@ -234,7 +236,7 @@ class SubqueryComprehensiveTest {
     @Test
     void whereClauseAllSubquery() {
         // Given: ALL subquery
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno FROM employees WHERE salary > ALL (SELECT salary FROM employees WHERE deptno = 10)";
 

@@ -3,6 +3,8 @@ package me.christianrobert.orapgsync.transformer;
 import me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder;
 import me.christianrobert.orapgsync.transformer.context.MetadataIndexBuilder;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
+import me.christianrobert.orapgsync.transformer.type.SimpleTypeEvaluator;
+import me.christianrobert.orapgsync.transformer.type.TypeEvaluator;
 import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
 import me.christianrobert.orapgsync.transformer.parser.AntlrParser;
 import me.christianrobert.orapgsync.transformer.parser.ParseResult;
@@ -25,7 +27,7 @@ class SubstrTransformationDebugTest {
 
     @Test
     void debugQualifiedColumn() {
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT SUBSTR(e.name, 1, 10) FROM employees e";
 
         ParseResult parseResult = parser.parseSelectStatement(oracleSql);
@@ -39,7 +41,7 @@ class SubstrTransformationDebugTest {
 
     @Test
     void debugUpperFunction() {
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT SUBSTR(UPPER(name), 1, 5) FROM employees";
 
         ParseResult parseResult = parser.parseSelectStatement(oracleSql);
@@ -53,7 +55,7 @@ class SubstrTransformationDebugTest {
 
     @Test
     void debugFromDual() {
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT SUBSTR('Hello World', 7, 5) FROM DUAL";
 
         ParseResult parseResult = parser.parseSelectStatement(oracleSql);

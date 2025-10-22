@@ -195,8 +195,43 @@ public class DateFunctionTransformer {
     }
 
     if (!isDateTrunc) {
-      // Numeric TRUNC: pass through unchanged
-      return "TRUNC" + getFunctionArguments(partCtx, b);
+      // Numeric TRUNC: transform with type-aware cast
+      // Get the first argument (the expression to truncate)
+      PlSqlParser.ArgumentContext firstArgCtx = args.get(0);
+      PlSqlParser.ExpressionContext firstArgExpr = firstArgCtx.expression();
+
+      if (firstArgExpr == null) {
+        // No expression found, pass through unchanged
+        return "TRUNC" + getFunctionArguments(partCtx, b);
+      }
+
+      String transformedExpr = b.visit(firstArgExpr);
+
+      // Use type evaluator to determine if cast is needed
+      me.christianrobert.orapgsync.transformer.type.TypeInfo exprType =
+          b.getContext().getTypeEvaluator().getType(firstArgExpr);
+
+      // If type is known and numeric, no cast needed
+      // If type is unknown or non-numeric, add defensive cast
+      String argWithCast;
+      if (exprType.isNumeric()) {
+        argWithCast = transformedExpr;  // No cast needed
+      } else {
+        argWithCast = transformedExpr + "::numeric";  // Defensive cast
+      }
+
+      // Build TRUNC function with optional precision
+      StringBuilder result = new StringBuilder("TRUNC( ");
+      result.append(argWithCast);
+
+      // Add second argument (precision) if present
+      if (args.size() > 1) {
+        result.append(" , ");
+        result.append(b.visit(args.get(1)));
+      }
+
+      result.append(" )");
+      return result.toString();
     }
 
     // Date TRUNC: transform to DATE_TRUNC

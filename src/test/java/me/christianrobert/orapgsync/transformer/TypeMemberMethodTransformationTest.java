@@ -7,6 +7,8 @@ import me.christianrobert.orapgsync.core.service.StateService;
 import me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder;
 import me.christianrobert.orapgsync.transformer.context.MetadataIndexBuilder;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
+import me.christianrobert.orapgsync.transformer.type.SimpleTypeEvaluator;
+import me.christianrobert.orapgsync.transformer.type.TypeEvaluator;
 import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
 import me.christianrobert.orapgsync.transformer.parser.AntlrParser;
 import me.christianrobert.orapgsync.transformer.parser.ParseResult;
@@ -60,7 +62,7 @@ class TypeMemberMethodTransformationTest {
 
         List<String> schemas = Collections.singletonList("HR");
         TransformationIndices indices = MetadataIndexBuilder.build(mockStateService, schemas);
-        TransformationContext context = new TransformationContext("HR", indices);
+        TransformationContext context = new TransformationContext("HR", indices, new SimpleTypeEvaluator("HR", indices));
 
         // When: Transform SQL with type member method
         String oracleSql = "SELECT emp.address.get_street() FROM employees emp";
@@ -86,7 +88,7 @@ class TypeMemberMethodTransformationTest {
 
         List<String> schemas = Collections.singletonList("HR");
         TransformationIndices indices = MetadataIndexBuilder.build(mockStateService, schemas);
-        TransformationContext context = new TransformationContext("HR", indices);
+        TransformationContext context = new TransformationContext("HR", indices, new SimpleTypeEvaluator("HR", indices));
 
         // When: Transform SQL with type member method with arguments
         String oracleSql = "SELECT emp.address.get_part(empno) FROM employees emp";
@@ -114,7 +116,7 @@ class TypeMemberMethodTransformationTest {
 
         List<String> schemas = Collections.singletonList("HR");
         TransformationIndices indices = MetadataIndexBuilder.build(mockStateService, schemas);
-        TransformationContext context = new TransformationContext("HR", indices);
+        TransformationContext context = new TransformationContext("HR", indices, new SimpleTypeEvaluator("HR", indices));
 
         // When: Transform SQL with multiple type member methods
         String oracleSql = "SELECT emp.address.get_street(), emp.contact.get_email() FROM employees emp";
@@ -147,7 +149,7 @@ class TypeMemberMethodTransformationTest {
 
         List<String> schemas = Collections.singletonList("HR");
         TransformationIndices indices = MetadataIndexBuilder.build(mockStateService, schemas);
-        TransformationContext context = new TransformationContext("HR", indices);
+        TransformationContext context = new TransformationContext("HR", indices, new SimpleTypeEvaluator("HR", indices));
 
         // When: Transform SQL with chained method calls
         String oracleSql = "SELECT emp.address.get_full().upper() FROM employees emp";
@@ -175,7 +177,7 @@ class TypeMemberMethodTransformationTest {
 
         List<String> schemas = Collections.singletonList("HR");
         TransformationIndices indices = MetadataIndexBuilder.build(mockStateService, schemas);
-        TransformationContext context = new TransformationContext("HR", indices);
+        TransformationContext context = new TransformationContext("HR", indices, new SimpleTypeEvaluator("HR", indices));
 
         // When: Transform SQL with triple chain
         String oracleSql = "SELECT emp.data.method1().method2().method3() FROM employees emp";
@@ -203,7 +205,7 @@ class TypeMemberMethodTransformationTest {
 
         List<String> schemas = Collections.singletonList("HR");
         TransformationIndices indices = MetadataIndexBuilder.build(mockStateService, schemas);
-        TransformationContext context = new TransformationContext("HR", indices);
+        TransformationContext context = new TransformationContext("HR", indices, new SimpleTypeEvaluator("HR", indices));
 
         // When: Use both in same query
         // Type method: emp.address.get_street() (3 parts, alias.column.method)
@@ -233,7 +235,7 @@ class TypeMemberMethodTransformationTest {
 
         List<String> schemas = Collections.singletonList("HR");
         TransformationIndices indices = MetadataIndexBuilder.build(mockStateService, schemas);
-        TransformationContext context = new TransformationContext("HR", indices);
+        TransformationContext context = new TransformationContext("HR", indices, new SimpleTypeEvaluator("HR", indices));
 
         // When: Reference column without method call
         String oracleSql = "SELECT emp.address FROM employees emp";
@@ -264,7 +266,7 @@ class TypeMemberMethodTransformationTest {
 
         List<String> schemas = Collections.singletonList("HR");
         TransformationIndices indices = MetadataIndexBuilder.build(mockStateService, schemas);
-        TransformationContext context = new TransformationContext("HR", indices);
+        TransformationContext context = new TransformationContext("HR", indices, new SimpleTypeEvaluator("HR", indices));
 
         // When: Mix type methods and regular columns
         String oracleSql = "SELECT emp.empno, emp.address.get_street(), emp.ename FROM employees emp";

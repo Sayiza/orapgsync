@@ -3,6 +3,8 @@ package me.christianrobert.orapgsync.transformer;
 import me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder;
 import me.christianrobert.orapgsync.transformer.context.MetadataIndexBuilder;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
+import me.christianrobert.orapgsync.transformer.type.SimpleTypeEvaluator;
+import me.christianrobert.orapgsync.transformer.type.TypeEvaluator;
 import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
 import me.christianrobert.orapgsync.transformer.parser.AntlrParser;
 import me.christianrobert.orapgsync.transformer.parser.ParseResult;
@@ -58,7 +60,7 @@ class RownumLimitTransformationTest {
     @Test
     void rownumLessThanOrEqual() {
         // Given: Simple ROWNUM <= N
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT empno FROM employees WHERE ROWNUM <= 10";
 
         // When: Parse and transform
@@ -80,7 +82,7 @@ class RownumLimitTransformationTest {
     @Test
     void rownumLessThan() {
         // Given: ROWNUM < N (means first N-1 rows)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT empno FROM employees WHERE ROWNUM < 10";
 
         // When: Parse and transform
@@ -98,7 +100,7 @@ class RownumLimitTransformationTest {
     @Test
     void rownumWithLargerValue() {
         // Given: ROWNUM with larger value
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT empno FROM employees WHERE ROWNUM <= 100";
 
         // When: Parse and transform
@@ -118,7 +120,7 @@ class RownumLimitTransformationTest {
     @Test
     void rownumWithAndCondition() {
         // Given: ROWNUM with AND condition (dept = 10 AND ROWNUM <= 5)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT empno FROM employees WHERE dept_id = 10 AND ROWNUM <= 5";
 
         // When: Parse and transform
@@ -140,7 +142,7 @@ class RownumLimitTransformationTest {
     @Test
     void rownumBeforeAndCondition() {
         // Given: ROWNUM before other condition (ROWNUM <= 5 AND dept = 10)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT empno FROM employees WHERE ROWNUM <= 5 AND dept_id = 10";
 
         // When: Parse and transform
@@ -160,7 +162,7 @@ class RownumLimitTransformationTest {
     @Test
     void rownumBetweenMultipleConditions() {
         // Given: ROWNUM between multiple conditions
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT empno FROM employees WHERE status = 'ACTIVE' AND ROWNUM <= 10 AND dept_id = 20";
 
         // When: Parse and transform
@@ -184,7 +186,7 @@ class RownumLimitTransformationTest {
     @Test
     void rownumWithOrderBy() {
         // Given: ROWNUM with ORDER BY (Oracle top-N pattern)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT empno FROM employees WHERE ROWNUM <= 10 ORDER BY salary DESC";
 
         // When: Parse and transform
@@ -206,7 +208,7 @@ class RownumLimitTransformationTest {
     @Test
     void rownumWithAndOrderBy() {
         // Given: ROWNUM with WHERE condition and ORDER BY
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT empno FROM employees WHERE dept_id = 10 AND ROWNUM <= 5 ORDER BY hire_date";
 
         // When: Parse and transform
@@ -230,7 +232,7 @@ class RownumLimitTransformationTest {
     @Test
     void reversedComparison_greaterThanOrEqual() {
         // Given: Reversed comparison (10 >= ROWNUM, same as ROWNUM <= 10)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT empno FROM employees WHERE 10 >= ROWNUM";
 
         // When: Parse and transform
@@ -248,7 +250,7 @@ class RownumLimitTransformationTest {
     @Test
     void reversedComparison_greaterThan() {
         // Given: Reversed comparison (10 > ROWNUM, same as ROWNUM < 10)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT empno FROM employees WHERE 10 > ROWNUM";
 
         // When: Parse and transform
@@ -268,7 +270,7 @@ class RownumLimitTransformationTest {
     @Test
     void rownumLowercase() {
         // Given: lowercase rownum
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT empno FROM employees WHERE rownum <= 10";
 
         // When: Parse and transform
@@ -286,7 +288,7 @@ class RownumLimitTransformationTest {
     @Test
     void rownumMixedCase() {
         // Given: mixed case RowNum
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT empno FROM employees WHERE RowNum <= 10";
 
         // When: Parse and transform
@@ -306,7 +308,7 @@ class RownumLimitTransformationTest {
     @Test
     void rownumWithFromDual() {
         // Given: ROWNUM with FROM DUAL (rare but possible)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT 1 + 1 FROM DUAL WHERE ROWNUM <= 1";
 
         // When: Parse and transform
@@ -328,7 +330,7 @@ class RownumLimitTransformationTest {
     @Test
     void rownumWithSelectStar() {
         // Given: ROWNUM with SELECT *
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT * FROM employees WHERE ROWNUM <= 10";
 
         // When: Parse and transform
@@ -349,7 +351,7 @@ class RownumLimitTransformationTest {
     @Test
     void rownumWithComplexWhereCondition() {
         // Given: ROWNUM with complex WHERE (multiple ANDs and comparisons)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT empno FROM employees WHERE salary > 50000 AND dept_id IN (10, 20) AND ROWNUM <= 10 AND status = 'ACTIVE'";
 
         // When: Parse and transform
@@ -365,7 +367,7 @@ class RownumLimitTransformationTest {
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
         //System.out.println("DEBUG: " + normalized);  // TODO: Investigate why IN clause missing
         assertTrue(normalized.contains("salary > 50000"), "salary condition should remain");
-        assertTrue(normalized.contains("dept_id IN (10, 20)"), "dept_id IN condition should remain");
+        assertTrue(normalized.matches(".*dept_id IN \\( 10.* 20 \\).*"), "dept_id IN condition should remain");
         assertTrue(normalized.contains("status = 'ACTIVE'"), "status condition should remain");
         assertFalse(normalized.contains("ROWNUM"), "ROWNUM should be removed from WHERE");
         assertTrue(normalized.contains("LIMIT 10"), "Should add LIMIT 10");
@@ -377,7 +379,7 @@ class RownumLimitTransformationTest {
     @Test
     void noRownumShouldNotAddLimit() {
         // Given: Query without ROWNUM
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT empno FROM employees WHERE dept_id = 10";
 
         // When: Parse and transform
@@ -396,7 +398,7 @@ class RownumLimitTransformationTest {
     @Test
     void noWhereClauseShouldNotAddLimit() {
         // Given: Query without WHERE clause
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT empno FROM employees";
 
         // When: Parse and transform

@@ -35,7 +35,7 @@ class OuterJoinTransformationTest {
 
         assertNotNull(result);
         assertTrue(result.contains("LEFT JOIN"), "Should contain LEFT JOIN");
-        assertTrue(result.contains("ON a.field1 = b.field1"), "Should have ON clause without (+)");
+        assertTrue(result.contains("ON a . field1 = b . field1"), "Should have ON clause without (+)");
         assertFalse(result.contains("(+)"), "Should not contain (+) in result");
         assertFalse(result.contains("WHERE"), "Should not have WHERE clause (all conditions moved to JOIN)");
     }
@@ -54,7 +54,7 @@ class OuterJoinTransformationTest {
 
         assertNotNull(result);
         assertTrue(result.contains("RIGHT JOIN"), "Should contain RIGHT JOIN");
-        assertTrue(result.contains("ON a.field1 = b.field1"), "Should have ON clause without (+)");
+        assertTrue(result.contains("ON a . field1 = b . field1"), "Should have ON clause without (+)");
         assertFalse(result.contains("(+)"), "Should not contain (+) in result");
     }
 
@@ -74,8 +74,8 @@ class OuterJoinTransformationTest {
         assertNotNull(result);
         assertTrue(result.contains("LEFT JOIN b"), "Should contain LEFT JOIN b");
         assertTrue(result.contains("LEFT JOIN c"), "Should contain LEFT JOIN c");
-        assertTrue(result.contains("ON a.field1 = b.field1"), "Should have first ON clause");
-        assertTrue(result.contains("ON b.field2 = c.field2"), "Should have second ON clause");
+        assertTrue(result.contains("ON a . field1 = b . field1"), "Should have first ON clause");
+        assertTrue(result.contains("ON b . field2 = c . field2"), "Should have second ON clause");
         assertFalse(result.contains("(+)"), "Should not contain (+) in result");
     }
 
@@ -94,7 +94,7 @@ class OuterJoinTransformationTest {
 
         assertNotNull(result);
         assertTrue(result.contains("LEFT JOIN"), "Should contain LEFT JOIN");
-        assertTrue(result.contains("ON a.field1 = b.field1 AND a.field2 = b.field2"),
+        assertTrue(result.contains("ON a . field1 = b . field1 AND a . field2 = b . field2"),
             "Should combine multiple conditions with AND");
         assertFalse(result.contains("(+)"), "Should not contain (+) in result");
     }
@@ -114,8 +114,8 @@ class OuterJoinTransformationTest {
 
         assertNotNull(result);
         assertTrue(result.contains("LEFT JOIN"), "Should contain LEFT JOIN");
-        assertTrue(result.contains("ON a.field1 = b.field1"), "Should have ON clause");
-        assertTrue(result.contains("WHERE a.col1>10"), "Should preserve regular WHERE condition");
+        assertTrue(result.contains("ON a . field1 = b . field1"), "Should have ON clause");
+        assertTrue(result.contains("WHERE a . col1 > 10"), "Should preserve regular WHERE condition");
         assertFalse(result.contains("(+)"), "Should not contain (+) in result");
     }
 
@@ -134,7 +134,7 @@ class OuterJoinTransformationTest {
         assertNotNull(result);
         assertTrue(result.contains("employees e"), "Should preserve table alias e");
         assertTrue(result.contains("LEFT JOIN departments d"), "Should preserve alias d in JOIN");
-        assertTrue(result.contains("ON e.dept_id = d.id"), "Should use aliases in ON clause");
+        assertTrue(result.contains("ON e . dept_id = d . id"), "Should use aliases in ON clause");
         assertFalse(result.contains("(+)"), "Should not contain (+) in result");
     }
 
@@ -156,9 +156,9 @@ class OuterJoinTransformationTest {
         assertNotNull(result);
         assertTrue(result.contains("LEFT JOIN b"), "Should contain LEFT JOIN b");
         assertTrue(result.contains("LEFT JOIN c"), "Should contain LEFT JOIN c");
-        assertTrue(result.contains("ON a.f1 = b.f1"), "Should have first ON clause");
-        assertTrue(result.contains("ON b.f2 = c.f2"), "Should have second ON clause");
-        assertTrue(result.contains("WHERE a.col1>10"), "Should preserve regular WHERE condition");
+        assertTrue(result.contains("ON a . f1 = b . f1"), "Should have first ON clause");
+        assertTrue(result.contains("ON b . f2 = c . f2"), "Should have second ON clause");
+        assertTrue(result.contains("WHERE a . col1 > 10"), "Should preserve regular WHERE condition");
         assertFalse(result.contains("(+)"), "Should not contain (+) in result");
     }
 
@@ -223,11 +223,11 @@ class OuterJoinTransformationTest {
         assertNotNull(result);
         // Should have ANSI JOIN for the outer join
         assertTrue(result.contains("LEFT JOIN b"), "Should have LEFT JOIN for outer join");
-        assertTrue(result.contains("ON a.field1 = b.field1"), "Should have ON clause for outer join");
+        assertTrue(result.contains("ON a . field1 = b . field1"), "Should have ON clause for outer join");
         // Should keep c as implicit join
         assertTrue(result.contains(", c"), "Should have comma-separated c for implicit join");
         // WHERE should only have the implicit join condition
-        assertTrue(result.contains("WHERE a.field2=c.field2"), "Should preserve implicit join condition in WHERE");
+        assertTrue(result.contains("WHERE a . field2 = c . field2"), "Should preserve implicit join condition in WHERE");
         assertFalse(result.contains("(+)"), "Should not contain (+) in result");
     }
 
@@ -251,7 +251,7 @@ class OuterJoinTransformationTest {
         // Should keep d as implicit join
         assertTrue(result.contains(", d"), "Should have comma-separated d for implicit join");
         // WHERE should only have the implicit join condition
-        assertTrue(result.contains("WHERE a.f3=d.f3"), "Should preserve implicit join condition in WHERE");
+        assertTrue(result.contains("WHERE a . f3 = d . f3"), "Should preserve implicit join condition in WHERE");
         assertFalse(result.contains("(+)"), "Should not contain (+) in result");
     }
 
@@ -303,8 +303,8 @@ class OuterJoinTransformationTest {
 
         assertNotNull(result);
         assertTrue(result.contains("LEFT JOIN d"), "Should have LEFT JOIN");
-        assertTrue(result.contains("ON a.id = d.id"), "Should have ON clause");
-        assertTrue(result.contains("WHERE a.col1IN(SELECT"), "Should preserve IN subquery in WHERE");
+        assertTrue(result.contains("ON a . id = d . id"), "Should have ON clause");
+        assertTrue(result.contains("WHERE a . col1 IN"), "Should preserve IN subquery in WHERE");
         assertFalse(result.contains("(+)"), "Should not contain (+) in result");
     }
 
@@ -325,8 +325,8 @@ class OuterJoinTransformationTest {
         assertNotNull(result);
         // Outer query transformation should work
         assertTrue(result.contains("FROM a LEFT JOIN d"), "Outer query should have LEFT JOIN");
-        assertTrue(result.contains("ON a.id = d.id"), "Should have ON clause for outer query");
-        assertTrue(result.contains("WHERE a.col1IN"), "Should preserve IN subquery in WHERE");
+        assertTrue(result.contains("ON a . id = d . id"), "Should have ON clause for outer query");
+        assertTrue(result.contains("WHERE a . col1 IN"), "Should preserve IN subquery in WHERE");
 
         // Known limitation: The subquery's (+) will not be transformed in this case
         // because the entire IN expression is captured as raw text during analysis
@@ -353,7 +353,7 @@ class OuterJoinTransformationTest {
         assertNotNull(result);
         // Verify outer query transformation
         assertTrue(result.contains("FROM a LEFT JOIN d"), "Outer query should have LEFT JOIN");
-        assertTrue(result.contains("ON a.id = d.id"), "Should have ON clause for outer query");
+        assertTrue(result.contains("ON a . id = d . id"), "Should have ON clause for outer query");
 
         // Note: The subquery's (+) will NOT be transformed because we're capturing
         // the raw text during analysis. This is a known limitation of the current
@@ -377,9 +377,9 @@ class OuterJoinTransformationTest {
 
         assertNotNull(result);
         assertTrue(result.contains("LEFT JOIN d"), "Should have LEFT JOIN");
-        assertTrue(result.contains("ON a.id = d.id"), "Should have ON clause");
+        assertTrue(result.contains("ON a . id = d . id"), "Should have ON clause");
         assertTrue(result.contains("EXISTS"), "Should preserve EXISTS subquery");
-        assertTrue(result.contains("b.a_id=a.id"), "Should preserve correlated reference");
+        assertTrue(result.contains("b . a_id = a . id"), "Should preserve correlated reference");
         assertFalse(result.contains("(+)"), "Should not contain (+) in result");
     }
 

@@ -3,6 +3,8 @@ package me.christianrobert.orapgsync.transformer;
 import me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder;
 import me.christianrobert.orapgsync.transformer.context.MetadataIndexBuilder;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
+import me.christianrobert.orapgsync.transformer.type.SimpleTypeEvaluator;
+import me.christianrobert.orapgsync.transformer.type.TypeEvaluator;
 import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
 import me.christianrobert.orapgsync.transformer.parser.AntlrParser;
 import me.christianrobert.orapgsync.transformer.parser.ParseResult;
@@ -47,7 +49,7 @@ class AnsiJoinTransformationTest {
     @Test
     void innerJoinWithOnClause() {
         // Given: Simple INNER JOIN with ON condition
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT e.empno, d.dname FROM employees e INNER JOIN departments d ON e.deptno = d.deptno";
 
@@ -75,7 +77,7 @@ class AnsiJoinTransformationTest {
     @Test
     void innerJoinWithoutInnerKeyword() {
         // Given: JOIN without INNER keyword (INNER is default)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT e.empno, d.dname FROM employees e JOIN departments d ON e.deptno = d.deptno";
 
@@ -95,7 +97,7 @@ class AnsiJoinTransformationTest {
     @Test
     void innerJoinWithComplexCondition() {
         // Given: INNER JOIN with complex ON condition (multiple columns, AND)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT e.empno, d.dname FROM employees e " +
                           "INNER JOIN departments d ON e.deptno = d.deptno AND e.location = d.location";
@@ -118,7 +120,7 @@ class AnsiJoinTransformationTest {
     @Test
     void leftOuterJoin() {
         // Given: LEFT OUTER JOIN
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT e.empno, d.dname FROM employees e LEFT OUTER JOIN departments d ON e.deptno = d.deptno";
 
@@ -138,7 +140,7 @@ class AnsiJoinTransformationTest {
     @Test
     void leftJoinWithoutOuterKeyword() {
         // Given: LEFT JOIN without OUTER keyword (OUTER is optional)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT e.empno, d.dname FROM employees e LEFT JOIN departments d ON e.deptno = d.deptno";
 
@@ -160,7 +162,7 @@ class AnsiJoinTransformationTest {
     @Test
     void rightOuterJoin() {
         // Given: RIGHT OUTER JOIN
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT e.empno, d.dname FROM employees e RIGHT OUTER JOIN departments d ON e.deptno = d.deptno";
 
@@ -180,7 +182,7 @@ class AnsiJoinTransformationTest {
     @Test
     void rightJoinWithoutOuterKeyword() {
         // Given: RIGHT JOIN without OUTER keyword
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT e.empno, d.dname FROM employees e RIGHT JOIN departments d ON e.deptno = d.deptno";
 
@@ -202,7 +204,7 @@ class AnsiJoinTransformationTest {
     @Test
     void fullOuterJoin() {
         // Given: FULL OUTER JOIN
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT e.empno, d.dname FROM employees e FULL OUTER JOIN departments d ON e.deptno = d.deptno";
 
@@ -224,7 +226,7 @@ class AnsiJoinTransformationTest {
     @Test
     void crossJoin() {
         // Given: CROSS JOIN (Cartesian product)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT e.empno, d.dname FROM employees e CROSS JOIN departments d";
 
@@ -246,7 +248,7 @@ class AnsiJoinTransformationTest {
     @Test
     void multipleInnerJoins() {
         // Given: Multiple INNER JOINs chained
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT e.empno, d.dname, l.city " +
                           "FROM employees e " +
@@ -271,7 +273,7 @@ class AnsiJoinTransformationTest {
     @Test
     void mixedJoinTypes() {
         // Given: Mix of INNER and LEFT JOIN
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT e.empno, d.dname, m.ename " +
                           "FROM employees e " +
@@ -298,7 +300,7 @@ class AnsiJoinTransformationTest {
     @Test
     void joinWithWhereClause() {
         // Given: ANSI JOIN with additional WHERE clause
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT e.empno, d.dname " +
                           "FROM employees e " +
@@ -325,7 +327,7 @@ class AnsiJoinTransformationTest {
     @Test
     void innerJoinWithUsingClause() {
         // Given: INNER JOIN with USING clause (implicit equality join)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT e.empno, d.dname FROM employees e INNER JOIN departments d USING (deptno)";
 
@@ -369,7 +371,7 @@ class AnsiJoinTransformationTest {
     @Test
     void joinWithUppercaseTableNames() {
         // Given: ANSI JOIN with uppercase table names
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT E.EMPNO, D.DNAME FROM EMPLOYEES E INNER JOIN DEPARTMENTS D ON E.DEPTNO = D.DEPTNO";
 

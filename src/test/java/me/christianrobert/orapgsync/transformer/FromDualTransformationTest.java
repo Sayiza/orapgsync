@@ -3,6 +3,8 @@ package me.christianrobert.orapgsync.transformer;
 import me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder;
 import me.christianrobert.orapgsync.transformer.context.MetadataIndexBuilder;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
+import me.christianrobert.orapgsync.transformer.type.SimpleTypeEvaluator;
+import me.christianrobert.orapgsync.transformer.type.TypeEvaluator;
 import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
 import me.christianrobert.orapgsync.transformer.parser.AntlrParser;
 import me.christianrobert.orapgsync.transformer.parser.ParseResult;
@@ -42,7 +44,7 @@ class FromDualTransformationTest {
     @Test
     void simpleNumericExpression() {
         // Given: Simple numeric constant
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT 1 FROM DUAL";
 
         // When: Parse and transform
@@ -61,7 +63,7 @@ class FromDualTransformationTest {
     @Test
     void sysdateFromDual() {
         // Given: SYSDATE pseudo-column
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT SYSDATE FROM DUAL";
 
         // When: Parse and transform
@@ -80,7 +82,7 @@ class FromDualTransformationTest {
     @Test
     void stringLiteralFromDual() {
         // Given: String literal
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT 'Hello World' FROM DUAL";
 
         // When: Parse and transform
@@ -98,7 +100,7 @@ class FromDualTransformationTest {
     @Test
     void arithmeticExpressionFromDual() {
         // Given: Arithmetic expression
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT 1 + 1 FROM DUAL";
 
         // When: Parse and transform
@@ -118,7 +120,7 @@ class FromDualTransformationTest {
     @Test
     void dualLowercase() {
         // Given: lowercase dual
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT 1 FROM dual";
 
         // When: Parse and transform
@@ -136,7 +138,7 @@ class FromDualTransformationTest {
     @Test
     void dualMixedCase() {
         // Given: Mixed case Dual
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT 1 FROM Dual";
 
         // When: Parse and transform
@@ -154,7 +156,7 @@ class FromDualTransformationTest {
     @Test
     void sysDualQualified() {
         // Given: Qualified SYS.DUAL
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT 1 FROM SYS.DUAL";
 
         // When: Parse and transform
@@ -174,7 +176,7 @@ class FromDualTransformationTest {
     @Test
     void multipleExpressionsFromDual() {
         // Given: Multiple SELECT list expressions
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT 1, 2, 3 FROM DUAL";
 
         // When: Parse and transform
@@ -192,7 +194,7 @@ class FromDualTransformationTest {
     @Test
     void functionCallFromDual() {
         // Given: Function call (NVL)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT NVL(NULL, 0) FROM DUAL";
 
         // When: Parse and transform
@@ -213,7 +215,7 @@ class FromDualTransformationTest {
     @Test
     void dualWithColumnAlias() {
         // Given: Column alias on scalar expression
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT 1 AS num FROM DUAL";
 
         // When: Parse and transform
@@ -234,7 +236,7 @@ class FromDualTransformationTest {
     @Test
     void complexExpressionFromDual() {
         // Given: Complex expression with CASE
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT CASE WHEN 1 = 1 THEN 'YES' ELSE 'NO' END FROM DUAL";
 
         // When: Parse and transform
@@ -255,7 +257,7 @@ class FromDualTransformationTest {
     @Test
     void concatenationFromDual() {
         // Given: String concatenation
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT 'Hello' || ' ' || 'World' FROM DUAL";
 
         // When: Parse and transform
@@ -278,7 +280,7 @@ class FromDualTransformationTest {
     @Test
     void regularTableShouldKeepFromClause() {
         // Given: Regular table (not DUAL)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT empno FROM employees";
 
         // When: Parse and transform
@@ -298,7 +300,7 @@ class FromDualTransformationTest {
     void multipleTablesShouldKeepFromClause() {
         // Given: Multiple tables including DUAL
         // Note: This is unusual but theoretically possible
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT empno FROM employees, DUAL";
 
         // When: Parse and transform
@@ -318,7 +320,7 @@ class FromDualTransformationTest {
     @Test
     void dualWithWhereClause() {
         // Given: DUAL with WHERE clause (unusual but valid)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT 1 FROM DUAL WHERE 1 = 1";
 
         // When: Parse and transform
@@ -337,7 +339,7 @@ class FromDualTransformationTest {
     @Test
     void dualWithOrderBy() {
         // Given: DUAL with ORDER BY (unusual but valid)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT 1 FROM DUAL ORDER BY 1";
 
         // When: Parse and transform

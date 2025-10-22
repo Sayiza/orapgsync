@@ -3,6 +3,8 @@ package me.christianrobert.orapgsync.transformer;
 import me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder;
 import me.christianrobert.orapgsync.transformer.context.MetadataIndexBuilder;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
+import me.christianrobert.orapgsync.transformer.type.SimpleTypeEvaluator;
+import me.christianrobert.orapgsync.transformer.type.TypeEvaluator;
 import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
 import me.christianrobert.orapgsync.transformer.parser.AntlrParser;
 import me.christianrobert.orapgsync.transformer.parser.ParseResult;
@@ -42,7 +44,7 @@ class ToDateTransformationTest {
     @Test
     void toDateWithStringLiteral() {
         // Given: TO_DATE with string literal and format
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT TO_DATE('2025-01-15', 'YYYY-MM-DD') FROM employees";
 
         // When: Parse and transform
@@ -61,7 +63,7 @@ class ToDateTransformationTest {
     @Test
     void toDateWithoutFormat() {
         // Given: TO_DATE with only string (uses default format)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT TO_DATE('15-JAN-25') FROM employees";
 
         // When: Parse and transform
@@ -82,7 +84,7 @@ class ToDateTransformationTest {
     @Test
     void toDateWithColumnReference() {
         // Given: TO_DATE with column reference
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT TO_DATE(hire_date_str, 'YYYY-MM-DD') FROM employees";
 
         // When: Parse and transform
@@ -101,7 +103,7 @@ class ToDateTransformationTest {
     @Test
     void toDateWithQualifiedColumn() {
         // Given: TO_DATE with qualified column reference
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT TO_DATE(e.hire_date_str, 'YYYY-MM-DD') FROM employees e";
 
         // When: Parse and transform
@@ -122,7 +124,7 @@ class ToDateTransformationTest {
     @Test
     void toDateWithOracleRRFormat() {
         // Given: TO_DATE with RR format (2-digit year)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT TO_DATE('25-01-15', 'RR-MM-DD') FROM employees";
 
         // When: Parse and transform
@@ -141,7 +143,7 @@ class ToDateTransformationTest {
     @Test
     void toDateWithOracleRRRRFormat() {
         // Given: TO_DATE with RRRR format (4-digit year)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT TO_DATE('2025-01-15', 'RRRR-MM-DD') FROM employees";
 
         // When: Parse and transform
@@ -160,7 +162,7 @@ class ToDateTransformationTest {
     @Test
     void toDateWithStandardFormat() {
         // Given: TO_DATE with standard format (YYYY-MM-DD HH24:MI:SS)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT TO_DATE('2025-01-15 14:30:45', 'YYYY-MM-DD HH24:MI:SS') FROM employees";
 
         // When: Parse and transform
@@ -181,7 +183,7 @@ class ToDateTransformationTest {
     @Test
     void toDateWithNlsParameters() {
         // Given: TO_DATE with NLS parameters (third argument)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT TO_DATE('15-JAN-2025', 'DD-MON-YYYY', 'NLS_DATE_LANGUAGE=AMERICAN') FROM employees";
 
         // When: Parse and transform
@@ -204,7 +206,7 @@ class ToDateTransformationTest {
     @Test
     void toDateWithSubstr() {
         // Given: TO_DATE with SUBSTR function
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT TO_DATE(SUBSTR(date_str, 1, 10), 'YYYY-MM-DD') FROM employees";
 
         // When: Parse and transform
@@ -225,7 +227,7 @@ class ToDateTransformationTest {
     @Test
     void toDateInWhereClause() {
         // Given: TO_DATE in WHERE clause comparison
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT empno FROM employees WHERE hire_date > TO_DATE('2020-01-01', 'YYYY-MM-DD')";
 
         // When: Parse and transform
@@ -246,7 +248,7 @@ class ToDateTransformationTest {
     @Test
     void toDateWithColumnAlias() {
         // Given: TO_DATE with column alias
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT TO_DATE('2025-01-15', 'YYYY-MM-DD') AS parsed_date FROM employees";
 
         // When: Parse and transform
@@ -267,7 +269,7 @@ class ToDateTransformationTest {
     @Test
     void multipleToDateInSelectList() {
         // Given: Multiple TO_DATE calls in SELECT list
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT TO_DATE(start_date, 'YYYY-MM-DD'), TO_DATE(end_date, 'YYYY-MM-DD') FROM employees";
 
         // When: Parse and transform
@@ -290,7 +292,7 @@ class ToDateTransformationTest {
     @Test
     void toDateLowercase() {
         // Given: lowercase to_date
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT to_date('2025-01-15', 'YYYY-MM-DD') FROM employees";
 
         // When: Parse and transform
@@ -309,7 +311,7 @@ class ToDateTransformationTest {
     @Test
     void toDateMixedCase() {
         // Given: mixed case To_Date
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT To_Date('2025-01-15', 'YYYY-MM-DD') FROM employees";
 
         // When: Parse and transform
@@ -330,7 +332,7 @@ class ToDateTransformationTest {
     @Test
     void toDateFromDual() {
         // Given: TO_DATE in scalar query (FROM DUAL)
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT TO_DATE('2025-01-15', 'YYYY-MM-DD') FROM DUAL";
 
         // When: Parse and transform
@@ -353,7 +355,7 @@ class ToDateTransformationTest {
     @Test
     void toDateWithComplexFormat() {
         // Given: TO_DATE with complex format string
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT TO_DATE('2025-01-15 14:30:45.123', 'YYYY-MM-DD HH24:MI:SS.FF3') FROM employees";
 
         // When: Parse and transform
@@ -374,7 +376,7 @@ class ToDateTransformationTest {
     @Test
     void toDateInOrderBy() {
         // Given: TO_DATE in ORDER BY clause
-        TransformationContext context = new TransformationContext("HR", emptyIndices);
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
         String oracleSql = "SELECT empno FROM employees ORDER BY TO_DATE(hire_date_str, 'YYYY-MM-DD') DESC";
 
         // When: Parse and transform
