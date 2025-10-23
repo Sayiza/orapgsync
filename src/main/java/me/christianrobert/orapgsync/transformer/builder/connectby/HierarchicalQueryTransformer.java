@@ -201,6 +201,11 @@ public class HierarchicalQueryTransformer {
           originalWhere = originalWhere.substring(6).trim();
         }
 
+        // Replace LEVEL with 1 in base case (base case is always level 1)
+        // This handles conditions like WHERE LEVEL <= 3 (always true in base case)
+        // Use case-insensitive regex to handle all variations in one pass
+        originalWhere = originalWhere.replaceAll("(?i)\\bLEVEL\\b", "1");
+
         if (!originalWhere.isEmpty()) {
           where.append(" AND ").append(originalWhere);
         }
@@ -251,7 +256,8 @@ public class HierarchicalQueryTransformer {
     result.append(" ").append(joinClause);
 
     // WHERE clause (original WHERE, if present)
-    String whereClause = buildRecursiveCaseWhere(ctx, childAlias, b);
+    // Pass cteAlias for LEVEL replacement (LEVEL → h.level + 1)
+    String whereClause = buildRecursiveCaseWhere(ctx, childAlias, cteAlias, b);
     if (whereClause != null && !whereClause.trim().isEmpty()) {
       result.append(" WHERE ").append(whereClause);
     }
@@ -306,10 +312,13 @@ public class HierarchicalQueryTransformer {
    * Builds WHERE clause for recursive case.
    *
    * <p>Uses original WHERE condition (if present).</p>
+   * <p>Special handling for LEVEL: LEVEL references are replaced with "h.level + 1"
+   * to represent the depth of the next level being added.</p>
    */
   private static String buildRecursiveCaseWhere(
       PlSqlParser.Query_blockContext ctx,
       String childAlias,
+      String cteAlias,
       PostgresCodeBuilder b) {
 
     PlSqlParser.Where_clauseContext whereCtx = ctx.where_clause();
@@ -327,6 +336,11 @@ public class HierarchicalQueryTransformer {
     if (whereClause.toUpperCase().startsWith("WHERE ")) {
       whereClause = whereClause.substring(6).trim();
     }
+
+    // Replace LEVEL references with h.level + 1 (representing the next level being added)
+    // This handles depth limiting: WHERE LEVEL <= 3 becomes WHERE h.level + 1 <= 3
+    // Use case-insensitive regex to handle all variations in one pass (avoids double replacement)
+    whereClause = whereClause.replaceAll("(?i)\\bLEVEL\\b", cteAlias + ".level + 1");
 
     // Qualify column references with child alias
     // TODO: More robust column qualification
@@ -363,7 +377,8 @@ public class HierarchicalQueryTransformer {
     // Note: ORDER SIBLINGS BY is not supported, only regular ORDER BY
     PlSqlParser.Order_by_clauseContext orderByCtx = ctx.order_by_clause();
     if (orderByCtx != null) {
-      String orderByClause = b.visit(orderByCtx);
+      // Replace LEVEL references in ORDER BY
+      String orderByClause = LevelReferenceReplacer.replaceInOrderBy(orderByCtx, b);
       if (orderByClause != null && !orderByClause.trim().isEmpty()) {
         result.append(" ").append(orderByClause);
       }
@@ -407,14 +422,8 @@ public class HierarchicalQueryTransformer {
       throw new TransformationException("Query missing SELECT list");
     }
 
-    String selectList = b.visit(selectedListCtx);
-
-    // Replace LEVEL with level (case-insensitive)
-    // TODO: More robust replacement using AST visitor
-    selectList = selectList.replaceAll("\\bLEVEL\\b", "level");
-    selectList = selectList.replaceAll("\\blevel\\b", "level");  // Normalize
-
-    return selectList;
+    // Use AST-based LEVEL replacement (more robust than regex)
+    return LevelReferenceReplacer.replaceInSelectList(selectedListCtx, b);
   }
 
   /**

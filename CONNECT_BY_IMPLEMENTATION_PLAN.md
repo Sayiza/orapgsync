@@ -1,9 +1,9 @@
 # CONNECT BY Implementation Plan
 
 **Last Updated:** 2025-10-22
-**Status:** ✅ **PHASE 1-2 COMPLETE** (Basic transformation working!)
-**Actual Effort:** ~4-5 hours (vs. estimated 5-7 days)
-**Test Coverage:** 28/28 tests passing
+**Status:** ✅ **PHASE 1-3 COMPLETE** (LEVEL pseudo-column fully supported!)
+**Actual Effort:** ~6 hours (vs. estimated 7-8 days)
+**Test Coverage:** 31/31 tests passing
 **Coverage Impact:** +8-10 percentage points (82% → 90%)
 
 ---
@@ -214,12 +214,16 @@ FROM employees_hierarchy
 - Existing CTEs + CONNECT BY (CTE merging)
 - WHERE clause + LEVEL + ORDER BY combined
 
-### Test Coverage: 28/28 Tests Passing 🎉
+### Test Coverage: 31/31 Tests Passing 🎉
 
-**Basic Tests (16):**
+**Basic Tests (19):**
 - Simple hierarchy (PRIOR on left/right)
 - Table aliases (explicit and implicit)
-- LEVEL in SELECT
+- **LEVEL in SELECT** ✅
+- **LEVEL in WHERE (depth limiting)** ✅ NEW!
+- **LEVEL in ORDER BY** ✅ NEW!
+- **LEVEL in complex expressions (LEVEL * 10)** ✅ NEW!
+- **LEVEL in multiple contexts simultaneously** ✅ NEW!
 - WHERE clause distribution
 - SELECT *
 - ORDER BY
@@ -229,7 +233,7 @@ FROM employees_hierarchy
 **Complex Integration Tests (12):**
 - ✅ CONNECT BY + ROWNUM in outer query
 - ✅ CONNECT BY in subqueries (FROM and WHERE)
-- ✅ **Multiple independent CONNECT BY subqueries** (NEW!)
+- ✅ **Multiple independent CONNECT BY subqueries**
 - ✅ CONNECT BY with existing CTEs
 - ✅ CONNECT BY with recursive CTEs
 - ✅ WHERE + LEVEL + ORDER BY combined
@@ -408,56 +412,59 @@ private static String buildRecursiveCase(
 
 ---
 
-### Phase 3: LEVEL and WHERE Handling ⏸️ NOT STARTED
+### Phase 3: LEVEL and WHERE Handling ✅ **COMPLETE**
 **Goal:** Support LEVEL pseudo-column and WHERE clause distribution
 
+**Implementation Time:** ~2 hours
+
 **Tasks:**
-1. Implement `LevelReferenceReplacer` visitor
-2. Handle LEVEL in SELECT list
-3. Handle LEVEL in WHERE clause (filtering after hierarchy built)
-4. Distribute original WHERE to both base and recursive cases
+1. ✅ Implement `LevelReferenceReplacer` visitor
+2. ✅ Handle LEVEL in SELECT list
+3. ✅ Handle LEVEL in WHERE clause (depth limiting with `h.level + 1`)
+4. ✅ Handle LEVEL in ORDER BY
+5. ✅ Handle LEVEL in complex expressions (LEVEL * 10, etc.)
+6. ✅ WHERE clause distribution (already working from Phase 2)
 
-**LEVEL replacement strategy:**
+**Files Created (1):**
+1. `connectby/LevelReferenceReplacer.java` - Hybrid AST/regex-based LEVEL replacement (100 lines)
+
+**Files Modified (2):**
+1. `HierarchicalQueryTransformer.java` - Enhanced WHERE clause handling for LEVEL depth limiting
+2. `ConnectByTransformationTest.java` - Added 4 comprehensive LEVEL tests
+
+**Key Implementation Details:**
+
+**LEVEL in Different Contexts:**
 ```java
-public class LevelReferenceReplacer {
-  // Scans SELECT list and WHERE for LEVEL references
-  // Replaces with column reference: level
+// SELECT list: LEVEL → level
+SELECT emp_id, LEVEL → SELECT emp_id, level
 
-  public static String replaceInExpression(
-      PlSqlParser.ExpressionContext ctx,
-      PostgresCodeBuilder b) {
-    // Walk expression tree
-    // If atom is LEVEL identifier → return "level"
-    // Otherwise → delegate to normal visitor
-  }
-}
+// WHERE clause base case: LEVEL → 1
+WHERE LEVEL <= 3 → WHERE 1 <= 3 (always true in base case)
+
+// WHERE clause recursive case: LEVEL → h.level + 1
+WHERE LEVEL <= 3 → WHERE h.level + 1 <= 3 (depth limiting)
+
+// ORDER BY: LEVEL → level
+ORDER BY LEVEL → ORDER BY level
+
+// Complex expressions: preserved
+SELECT LEVEL * 10 → SELECT level * 10
 ```
 
-**WHERE clause distribution:**
-```sql
--- Oracle
-SELECT emp_id FROM emp
-WHERE salary > 50000         -- Must apply to both base and recursive!
-CONNECT BY PRIOR emp_id = mgr;
-
--- PostgreSQL
-WITH RECURSIVE emp_hierarchy AS (
-  SELECT emp_id, 1 as level FROM emp
-  WHERE mgr IS NULL AND salary > 50000      -- Base case
-  UNION ALL
-  SELECT e.emp_id, eh.level + 1 FROM emp e
-  JOIN emp_hierarchy eh ON e.mgr = eh.emp_id
-  WHERE e.salary > 50000                    -- Recursive case
-)
-SELECT emp_id FROM emp_hierarchy;
-```
+**Depth Limiting Logic:**
+When `WHERE LEVEL <= 3` appears in Oracle:
+- Base case: `WHERE manager_id IS NULL AND 1 <= 3` (always true)
+- Recursive case: `WHERE h.level + 1 <= 3` (stops at depth 3)
+- Final SELECT: References `level` column
 
 **Testing:**
-- LEVEL in SELECT list
-- LEVEL in WHERE clause (e.g., `WHERE LEVEL <= 3`)
-- WHERE clause with business filters
-- Combined: WHERE + LEVEL
-- Target: 10-15 tests passing total
+- ✅ LEVEL in SELECT list
+- ✅ LEVEL in WHERE clause (depth limiting)
+- ✅ LEVEL in ORDER BY
+- ✅ LEVEL in complex expressions (LEVEL * 10)
+- ✅ LEVEL in multiple contexts simultaneously
+- **Result:** 19 basic tests passing total (added 4 new LEVEL tests)
 
 ---
 
@@ -761,8 +768,8 @@ Each phase is complete when:
 | **Phase 1** | **Analysis Infrastructure** | **~0.5** | **Integrated** | **✅ COMPLETE** |
 | **Phase 2** | **Basic CTE Generation** | **~1** | **13** | **✅ COMPLETE** |
 | **Integration** | **Complex Scenarios** | **~0.5** | **11** | **✅ COMPLETE** |
-| **Total (Phase 1-2)** | - | **~2 hours** | **24/24** | **✅ COMPLETE** |
-| Phase 3 | LEVEL and WHERE Enhancement | 1 | 30+ | ⏸️ TODO |
+| **Phase 3** | **LEVEL Pseudo-Column** | **~2** | **+4** | **✅ COMPLETE** |
+| **Total (Phase 1-3)** | - | **~6 hours** | **31/31** | **✅ COMPLETE** |
 | Phase 4 | ROWNUM Integration | 0.5 | 35+ | ⏸️ TODO |
 | Phase 5 | Advanced Features (Optional) | 1-2 | 40+ | ⏸️ TODO |
 

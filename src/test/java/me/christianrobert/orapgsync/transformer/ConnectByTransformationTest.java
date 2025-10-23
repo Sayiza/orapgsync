@@ -177,10 +177,101 @@ class ConnectByTransformationTest {
 
   @Test
   void withLevelInWhere() {
-    // TODO: Phase 3 - LEVEL in WHERE clause
-    // This requires more complex transformation:
-    // Oracle: WHERE LEVEL <= 3
-    // PostgreSQL: Add to final SELECT WHERE clause, not CTE WHERE
+    // LEVEL in WHERE acts as depth limiter
+    String oracleSql =
+        "SELECT emp_id, manager_id, LEVEL " +
+        "FROM employees " +
+        "WHERE LEVEL <= 3 " +
+        "START WITH manager_id IS NULL " +
+        "CONNECT BY PRIOR emp_id = manager_id";
+
+    String result = transform(oracleSql);
+    String normalized = result.trim().replaceAll("\\s+", " ");
+
+    // Debug output
+    System.out.println("\n=== TEST: withLevelInWhere ===");
+    System.out.println("ORACLE SQL:");
+    System.out.println(oracleSql);
+    System.out.println("\nPOSTGRESQL SQL:");
+    System.out.println(result);
+    System.out.println("\nNORMALIZED:");
+    System.out.println(normalized);
+    System.out.println("==================================================\n");
+
+    // Base case should have LEVEL replaced with 1 (base case is always level 1)
+    assertTrue(normalized.contains("WHERE manager_id IS NULL AND 1 <= 3"),
+        "Base case should replace LEVEL with 1");
+
+    // Recursive case should have LEVEL replaced with h.level + 1 (depth limiting)
+    assertTrue(normalized.contains("WHERE h.level + 1 <= 3") ||
+               normalized.contains("WHERE h . level + 1 <= 3"),
+        "Recursive case should use h.level + 1 for depth limiting. Got: " + normalized);
+
+    // Final SELECT should replace LEVEL with level column
+    assertTrue(normalized.contains("SELECT emp_id , manager_id , level FROM"),
+        "Final SELECT should use level column");
+  }
+
+  @Test
+  void withLevelInOrderBy() {
+    // LEVEL in ORDER BY should be replaced with level column
+    String oracleSql =
+        "SELECT emp_id, manager_id " +
+        "FROM employees " +
+        "START WITH manager_id IS NULL " +
+        "CONNECT BY PRIOR emp_id = manager_id " +
+        "ORDER BY LEVEL";
+
+    String result = transform(oracleSql);
+    String normalized = result.trim().replaceAll("\\s+", " ");
+
+    // ORDER BY should reference level column
+    assertTrue(normalized.contains("ORDER BY level"),
+        "ORDER BY should use level column reference");
+  }
+
+  @Test
+  void withLevelInComplexExpression() {
+    // LEVEL in complex expressions (LEVEL * 2, LEVEL + 1, etc.)
+    String oracleSql =
+        "SELECT emp_id, LEVEL * 10 as depth_score " +
+        "FROM employees " +
+        "START WITH manager_id IS NULL " +
+        "CONNECT BY PRIOR emp_id = manager_id";
+
+    String result = transform(oracleSql);
+    String normalized = result.trim().replaceAll("\\s+", " ");
+
+    // Final SELECT should replace LEVEL in expression
+    assertTrue(normalized.contains("level * 10") || normalized.contains("level * 10"),
+        "Complex expression should use level column");
+  }
+
+  @Test
+  void withLevelInMultipleContexts() {
+    // LEVEL used in SELECT, WHERE, and ORDER BY simultaneously
+    String oracleSql =
+        "SELECT emp_id, LEVEL as hierarchy_depth " +
+        "FROM employees " +
+        "WHERE LEVEL <= 5 " +
+        "START WITH manager_id IS NULL " +
+        "CONNECT BY PRIOR emp_id = manager_id " +
+        "ORDER BY LEVEL DESC";
+
+    String result = transform(oracleSql);
+    String normalized = result.trim().replaceAll("\\s+", " ");
+
+    // Verify all contexts handle LEVEL correctly
+    assertTrue(normalized.contains("level as hierarchy_depth") ||
+               normalized.contains("level AS hierarchy_depth"),
+        "SELECT should use level column");
+
+    assertTrue(normalized.contains("h.level + 1 <= 5") ||
+               normalized.contains("h . level + 1 <= 5"),
+        "WHERE should use h.level + 1 for depth limiting");
+
+    assertTrue(normalized.contains("ORDER BY level DESC"),
+        "ORDER BY should use level column");
   }
 
   // ========== WHERE Clause Distribution Tests ==========
