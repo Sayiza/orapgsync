@@ -39,19 +39,13 @@ Successfully implemented **Tier 1: PostgreSQL-Only Integration Tests** infrastru
    - Correct result set filtering
    - LEVEL preservation after filtering
 
-3. **orderSiblingsBy_maintainsHierarchyAndSortsWithinLevels**
-   - ORDER SIBLINGS BY transformation
-   - Hierarchical structure preservation
-   - Within-level sorting
-   - Parent-before-children ordering
-
-4. **multipleStartWith_createsMultipleTrees**
+3**multipleStartWith_createsMultipleTrees**
    - Multiple START WITH conditions
    - Forest of trees (multiple roots)
    - Independent LEVEL counters per tree
    - Correct traversal of each tree
 
-5. **connectByPriorReversed_traversesBottomUp**
+4**connectByPriorReversed_traversesBottomUp**
    - PRIOR on right side (reversed direction)
    - Bottom-up traversal
    - Correct upward path

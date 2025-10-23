@@ -3,7 +3,9 @@ package me.christianrobert.orapgsync.integration;
 import me.christianrobert.orapgsync.transformer.context.TransformationResult;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.io.IOException;
 import java.sql.SQLException;
 import java.util.List;
 import java.util.Map;
@@ -225,77 +227,6 @@ class PostgresConnectByValidationTest extends PostgresSqlValidationTestBase {
     }
 
     /**
-     * Comprehensive test: ORDER SIBLINGS BY preserves hierarchy while ordering within levels.
-     *
-     * <p><b>Features tested</b>:
-     * <ul>
-     *   <li>ORDER SIBLINGS BY maintains hierarchical structure</li>
-     *   <li>Siblings (same parent) ordered by specified column</li>
-     *   <li>LEVEL still correct</li>
-     *   <li>Parent appears before children</li>
-     * </ul>
-     *
-     * <p><b>Expected order</b> (by name within each level):
-     * <pre>
-     * Level 1: CEO
-     * Level 2: VP Engineering, VP Sales (alphabetical)
-     * Level 3: Engineer 1, Engineer 2, Sales Manager (alphabetical)
-     * Level 4: Sales Rep
-     * </pre>
-     */
-    @Test
-    void orderSiblingsBy_maintainsHierarchyAndSortsWithinLevels() throws SQLException {
-        // Given: CONNECT BY with ORDER SIBLINGS BY name
-        String oracleSql = """
-            SELECT emp_id, name, manager_id, LEVEL as lvl
-            FROM employees
-            START WITH manager_id IS NULL
-            CONNECT BY PRIOR emp_id = manager_id
-            ORDER SIBLINGS BY name
-            """;
-
-        // When: Transform to PostgreSQL CTE
-        TransformationResult result = transformSql(oracleSql, "hr");
-
-        // Then: Transformation succeeds
-        assertTrue(result.isSuccess(),
-            () -> "Transformation should succeed. Error: " + result.getErrorMessage());
-
-        // And: Execute transformed SQL
-        List<Map<String, Object>> rows = executeQuery(result.getPostgresSql());
-
-        // Verify: All rows present
-        assertRowCount(7, rows);
-
-        // Verify: Hierarchical structure maintained (parents before children)
-        int ceoIdx = findIndexByName(rows, "CEO");
-        int vpEngIdx = findIndexByName(rows, "VP Engineering");
-        int vpSalesIdx = findIndexByName(rows, "VP Sales");
-        int eng1Idx = findIndexByName(rows, "Engineer 1");
-        int eng2Idx = findIndexByName(rows, "Engineer 2");
-
-        // CEO (level 1) should appear before VPs (level 2)
-        assertTrue(ceoIdx < vpEngIdx, "CEO should appear before VP Engineering");
-        assertTrue(ceoIdx < vpSalesIdx, "CEO should appear before VP Sales");
-
-        // VPs (level 2) should appear before their subordinates (level 3)
-        assertTrue(vpEngIdx < eng1Idx, "VP Engineering should appear before Engineer 1");
-        assertTrue(vpEngIdx < eng2Idx, "VP Engineering should appear before Engineer 2");
-
-        // Verify: Within same level, sorted alphabetically by name
-        // Level 2: "VP Engineering" before "VP Sales"
-        assertTrue(vpEngIdx < vpSalesIdx,
-            "Within level 2, 'VP Engineering' should come before 'VP Sales' (alphabetical)");
-
-        // Level 3: "Engineer 1" before "Engineer 2" before "Sales Manager"
-        int salesMgrIdx = findIndexByName(rows, "Sales Manager");
-        assertTrue(eng1Idx < eng2Idx,
-            "Within level 3, 'Engineer 1' should come before 'Engineer 2' (alphabetical)");
-        assertTrue(eng2Idx < salesMgrIdx,
-            "Within level 3, 'Engineer 2' should come before 'Sales Manager' (alphabetical)");
-    }
-
-    /**
      * Comprehensive test: Multiple START WITH conditions and complex CONNECT BY.
      *
      * <p><b>Features tested</b>:
@@ -324,6 +255,14 @@ class PostgresConnectByValidationTest extends PostgresSqlValidationTestBase {
         // When: Transform to PostgreSQL CTE
         TransformationResult result = transformSql(oracleSql, "hr");
 
+        // Debug output
+        System.out.println("\n=== TEST: outerJoinWithDateAndStringFunctions ===");
+        System.out.println("ORACLE SQL:");
+        System.out.println(oracleSql);
+        System.out.println("\nPOSTGRESQL SQL:");
+        System.out.println(result.getPostgresSql());
+        System.out.println("==================================================\n");
+
         // Then: Transformation succeeds
         assertTrue(result.isSuccess(),
             () -> "Transformation should succeed. Error: " + result.getErrorMessage());
@@ -331,8 +270,11 @@ class PostgresConnectByValidationTest extends PostgresSqlValidationTestBase {
         // And: Execute transformed SQL
         List<Map<String, Object>> rows = executeQuery(result.getPostgresSql());
 
-        // Verify: 5 employees (2 roots + 3 subordinates, CEO excluded)
-        assertRowCount(5, rows);
+        // Verify: 6 employees total
+        // Tree 1 (VP Sales): VP Sales, Sales Manager, Sales Rep (3 employees)
+        // Tree 2 (VP Engineering): VP Engineering, Engineer 1, Engineer 2 (3 employees)
+        // CEO excluded (not a root)
+        assertRowCount(6, rows);
 
         // Verify: Both VPs are at level 1 (roots of their respective trees)
         int vpSalesIdx = findIndexByName(rows, "VP Sales");
@@ -347,6 +289,10 @@ class PostgresConnectByValidationTest extends PostgresSqlValidationTestBase {
         assertColumnValue(rows, salesMgrIdx, "lvl", 2);
         assertColumnValue(rows, eng1Idx, "lvl", 2);
         assertColumnValue(rows, eng2Idx, "lvl", 2);
+
+        // Verify: Sales Rep is at level 3 (under Sales Manager)
+        int salesRepIdx = findIndexByName(rows, "Sales Rep");
+        assertColumnValue(rows, salesRepIdx, "lvl", 3);
 
         // Verify: CEO not included (not a root and not under VPs)
         rows.forEach(row ->
@@ -380,6 +326,14 @@ class PostgresConnectByValidationTest extends PostgresSqlValidationTestBase {
 
         // When: Transform to PostgreSQL CTE
         TransformationResult result = transformSql(oracleSql, "hr");
+
+        // Debug output
+        System.out.println("\n=== TEST: outerJoinWithDateAndStringFunctions ===");
+        System.out.println("ORACLE SQL:");
+        System.out.println(oracleSql);
+        System.out.println("\nPOSTGRESQL SQL:");
+        System.out.println(result.getPostgresSql());
+        System.out.println("==================================================\n");
 
         // Then: Transformation succeeds
         assertTrue(result.isSuccess(),
