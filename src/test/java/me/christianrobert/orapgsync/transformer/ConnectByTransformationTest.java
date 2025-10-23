@@ -162,9 +162,33 @@ class ConnectByTransformationTest {
     String result = transform(oracleSql);
     String normalized = result.trim().replaceAll("\\s+", " ");
 
-    // LEVEL should be replaced with "level" column reference in final SELECT
+    // Debug output
+    System.out.println("\n=== TEST: withLevelInSelect ===");
+    System.out.println("ORACLE SQL:");
+    System.out.println(oracleSql);
+    System.out.println("\nPOSTGRESQL SQL:");
+    System.out.println(result);
+    System.out.println("\nNORMALIZED:");
+    System.out.println(normalized);
+    System.out.println("==================================================\n");
+
+    // CRITICAL: CTE definition should NOT include Oracle LEVEL pseudo-column
+    assertFalse(normalized.matches(".*SELECT[^)]*\\bLEVEL\\b[^)]*FROM hr\\.employees.*"),
+        "CTE definition should NOT include Oracle LEVEL pseudo-column in SELECT list. Got: " + normalized);
+
+    // Base case: columns can be unqualified (no JOIN ambiguity yet)
+    assertTrue(normalized.matches(".*SELECT emp_id, 1 as level FROM hr\\.employees WHERE.*"),
+        "Base case should select emp_id and '1 as level'. Got: " + normalized);
+
+    // CRITICAL: Recursive case MUST qualify columns with table alias to avoid ambiguity
+    // When we have: FROM hr.employees t JOIN employees_hierarchy h
+    // Columns from the table must be qualified: t.emp_id (not emp_id)
+    assertTrue(normalized.matches(".*SELECT t\\.emp_id, h\\.level \\+ 1 as level FROM hr\\.employees t JOIN.*"),
+        "Recursive case MUST qualify columns with alias 't.' to avoid ambiguity. Got: " + normalized);
+
+    // Final SELECT should use the level column from CTE
     assertTrue(normalized.contains("SELECT emp_id , level FROM employees_hierarchy"),
-        "LEVEL should be replaced with level column in final SELECT");
+        "Final SELECT should use level column from CTE. Got: " + normalized);
 
     // Base case should add level = 1
     assertTrue(normalized.contains("1 as level"),
@@ -288,15 +312,44 @@ class ConnectByTransformationTest {
     String result = transform(oracleSql);
     String normalized = result.trim().replaceAll("\\s+", " ");
 
+    // Debug output
+    System.out.println("\n=== TEST: withWhereClause ===");
+    System.out.println("ORACLE SQL:");
+    System.out.println(oracleSql);
+    System.out.println("\nPOSTGRESQL SQL:");
+    System.out.println(result);
+    System.out.println("\nNORMALIZED:");
+    System.out.println(normalized);
+    System.out.println("==================================================\n");
+
     // WHERE should appear in both base and recursive cases
     // Base case: START WITH AND original WHERE
     assertTrue(normalized.matches(".*WHERE.*manager_id IS NULL.*AND.*salary > 50000.*"),
         "Base case should combine START WITH and WHERE");
 
-    // Recursive case: original WHERE only
-    // Note: Exact pattern depends on implementation details
-    assertTrue(normalized.contains("salary > 50000"),
-        "WHERE clause should be distributed to both cases");
+    // CRITICAL: Recursive case WHERE clause MUST qualify columns with table alias
+    // After UNION ALL, the WHERE clause should have "t.salary" not just "salary"
+    // Pattern: ... UNION ALL ... WHERE t.salary > 50000
+    String recursivePart = extractRecursivePart(normalized);
+    assertTrue(recursivePart.matches(".*WHERE.*\\bt\\.salary\\b.*"),
+        "Recursive case WHERE clause MUST qualify 'salary' with alias 't.' to avoid ambiguity. Got: " + recursivePart);
+  }
+
+  /**
+   * Extracts the recursive part (after UNION ALL) from the CTE.
+   */
+  private String extractRecursivePart(String sql) {
+    int unionAllIndex = sql.indexOf("UNION ALL");
+    if (unionAllIndex == -1) {
+      return "";
+    }
+    // Get everything after "UNION ALL" up to the closing parenthesis of the CTE
+    String afterUnion = sql.substring(unionAllIndex + "UNION ALL".length());
+    int closingParen = afterUnion.indexOf(") SELECT");
+    if (closingParen != -1) {
+      return afterUnion.substring(0, closingParen);
+    }
+    return afterUnion;
   }
 
   // ========== Error Cases - Unsupported Features ==========
