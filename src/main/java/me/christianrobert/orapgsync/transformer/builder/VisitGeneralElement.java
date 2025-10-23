@@ -472,26 +472,6 @@ public class VisitGeneralElement {
   }
 
   /**
-   * Extracts arguments from a function_argument list.
-   */
-  private static List<PlSqlParser.ArgumentContext> extractFunctionArguments(
-      PlSqlParser.General_element_partContext partCtx) {
-
-    List<PlSqlParser.Function_argumentContext> funcArgCtxList = partCtx.function_argument();
-    if (funcArgCtxList == null || funcArgCtxList.isEmpty()) {
-      return new ArrayList<>();
-    }
-
-    PlSqlParser.Function_argumentContext funcArgCtx = funcArgCtxList.get(0);
-    List<PlSqlParser.ArgumentContext> arguments = funcArgCtx.argument();
-    if (arguments == null) {
-      return new ArrayList<>();
-    }
-
-    return arguments;
-  }
-
-  /**
    * Extracts function name from a general_element_part.
    */
   private static String getFunctionName(PlSqlParser.General_element_partContext partCtx) {

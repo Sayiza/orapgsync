@@ -2,6 +2,7 @@ package me.christianrobert.orapgsync.transformer.service;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import me.christianrobert.orapgsync.transformation.util.AstTreeFormatter;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
 import me.christianrobert.orapgsync.transformer.context.TransformationException;
 import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
@@ -71,6 +72,22 @@ public class SqlTransformationService {
      * @return TransformationResult containing either transformed SQL or error details
      */
     public TransformationResult transformSql(String oracleSql, String schema, TransformationIndices indices) {
+        return transformSql(oracleSql, schema, indices, false);
+    }
+
+    /**
+     * Transforms Oracle SQL to PostgreSQL equivalent with optional AST tree output.
+     *
+     * <p>Same as {@link #transformSql(String, String, TransformationIndices)} but optionally
+     * includes AST tree representation for debugging.</p>
+     *
+     * @param oracleSql Oracle SELECT statement (any Oracle SQL syntax)
+     * @param schema Schema context for synonym and name resolution
+     * @param indices Pre-built metadata indices for lookups
+     * @param includeAst Whether to include AST tree in result (for debugging)
+     * @return TransformationResult containing transformed SQL and optionally AST tree
+     */
+    public TransformationResult transformSql(String oracleSql, String schema, TransformationIndices indices, boolean includeAst) {
         if (oracleSql == null || oracleSql.trim().isEmpty()) {
             return TransformationResult.failure(oracleSql, "Oracle SQL cannot be null or empty");
         }
@@ -91,10 +108,20 @@ public class SqlTransformationService {
             log.debug("Step 1: Parsing Oracle SQL");
             ParseResult parseResult = parser.parseSelectStatement(oracleSql);
 
+            // Generate AST tree representation if requested
+            String astTree = null;
+            if (includeAst && parseResult.getTree() != null) {
+                log.debug("Generating AST tree representation");
+                astTree = AstTreeFormatter.format(parseResult.getTree());
+            }
+
             // Check for parse errors
             if (parseResult.hasErrors()) {
                 String errorMsg = "Parse errors: " + parseResult.getErrorMessage();
                 log.warn("Parse failed: {}", errorMsg);
+                if (includeAst && astTree != null) {
+                    return TransformationResult.failureWithAst(oracleSql, errorMsg, astTree);
+                }
                 return TransformationResult.failure(oracleSql, errorMsg);
             }
 
@@ -116,6 +143,9 @@ public class SqlTransformationService {
             log.info("Successfully transformed SQL for schema: {}", schema);
             log.debug("PostgreSQL SQL: {}", postgresSql);
 
+            if (includeAst && astTree != null) {
+                return TransformationResult.successWithAst(oracleSql, postgresSql, astTree);
+            }
             return TransformationResult.success(oracleSql, postgresSql);
 
         } catch (TransformationException e) {

@@ -576,6 +576,48 @@ class ConnectByTransformationTest {
     System.out.println("==================================================\n");
   }
 
+  @Test
+  void withSysConnectByPath() {
+    String oracleSql =
+        "SELECT emp_id, SYS_CONNECT_BY_PATH(emp_name, '/') as path " +
+        "FROM employees " +
+        "START WITH manager_id IS NULL " +
+        "CONNECT BY PRIOR emp_id = manager_id";
+
+    String result = transform(oracleSql);
+    String normalized = result.trim().replaceAll("\\s+", " ");
+
+    // Debug output
+    System.out.println("\n=== TEST: withSysConnectByPath ===");
+    System.out.println("ORACLE SQL:");
+    System.out.println(oracleSql);
+    System.out.println("\nPOSTGRESQL SQL:");
+    System.out.println(result);
+    System.out.println("\nNORMALIZED:");
+    System.out.println(normalized);
+    System.out.println("==================================================\n");
+
+    // Should be a recursive CTE
+    assertTrue(normalized.contains("WITH RECURSIVE"),
+        "Should generate recursive CTE");
+
+    // Path column should be generated in base case
+    assertTrue(normalized.matches(".*'/'\\s*\\|\\|\\s*emp_name\\s+AS\\s+path_1.*"),
+        "Base case should have path column: '/' || emp_name AS path_1");
+
+    // Path column should be generated in recursive case
+    assertTrue(normalized.matches(".*h\\.path_1\\s*\\|\\|\\s*'/'\\s*\\|\\|\\s*.*emp_name.*AS\\s+path_1.*"),
+        "Recursive case should concatenate path: h.path_1 || '/' || emp_name AS path_1");
+
+    // Function call should be replaced with column reference in final SELECT
+    assertTrue(normalized.matches(".*SELECT.*\\bpath_1\\b.*FROM.*employees_hierarchy.*"),
+        "Final SELECT should use path_1 column, not SYS_CONNECT_BY_PATH function");
+
+    // Original function call should NOT appear in final SELECT
+    assertFalse(normalized.toUpperCase().matches(".*SELECT.*SYS_CONNECT_BY_PATH.*FROM.*EMPLOYEES_HIERARCHY.*"),
+        "SYS_CONNECT_BY_PATH should be replaced in final SELECT");
+  }
+
   // ========== Helper Methods ==========
 
   private String extractFromClauses(String sql) {

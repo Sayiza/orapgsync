@@ -4,8 +4,11 @@ import me.christianrobert.orapgsync.antlr.PlSqlParser;
 import me.christianrobert.orapgsync.transformer.context.TransformationException;
 import org.antlr.v4.runtime.tree.ParseTree;
 
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -72,6 +75,9 @@ public class ConnectByAnalyzer {
     // Scan for pseudo-column usage
     PseudoColumnUsage pseudoColumnUsage = scanPseudoColumnUsage(ctx);
 
+    // Detect SYS_CONNECT_BY_PATH columns
+    List<PathColumnInfo> pathColumns = detectPathColumns(ctx);
+
     // Build and return components
     return ConnectByComponents.builder()
         .queryBlockContext(ctx)
@@ -84,6 +90,7 @@ public class ConnectByAnalyzer {
         .usesLevelInSelect(pseudoColumnUsage.usesLevelInSelect)
         .usesLevelInWhere(pseudoColumnUsage.usesLevelInWhere)
         .levelReferencePaths(pseudoColumnUsage.levelReferencePaths)
+        .pathColumns(pathColumns)
         .usesConnectByRoot(pseudoColumnUsage.usesConnectByRoot)
         .usesConnectByPath(pseudoColumnUsage.usesConnectByPath)
         .usesConnectByIsLeaf(pseudoColumnUsage.usesConnectByIsLeaf)
@@ -192,6 +199,46 @@ public class ConnectByAnalyzer {
     }
 
     return scanner.getUsage();
+  }
+
+  /**
+   * Detects and extracts SYS_CONNECT_BY_PATH function calls.
+   *
+   * <p>Scans SELECT list, WHERE clause, and ORDER BY for SYS_CONNECT_BY_PATH calls.
+   * Creates unique PathColumnInfo for each unique (expression, separator) pair.</p>
+   *
+   * <p>Example:
+   * <pre>
+   * SELECT SYS_CONNECT_BY_PATH(emp_name, '/') as path1,
+   *        SYS_CONNECT_BY_PATH(dept, '>') as path2
+   * </pre>
+   * Generates 2 PathColumnInfo objects with column names "path_1" and "path_2".</p>
+   *
+   * @param ctx Query block context
+   * @return List of PathColumnInfo (empty if no SYS_CONNECT_BY_PATH found)
+   */
+  private static List<PathColumnInfo> detectPathColumns(PlSqlParser.Query_blockContext ctx) {
+    PathColumnDetector detector = new PathColumnDetector();
+
+    // Scan SELECT list
+    PlSqlParser.Selected_listContext selectedList = ctx.selected_list();
+    if (selectedList != null) {
+      detector.scan(selectedList);
+    }
+
+    // Scan WHERE clause
+    PlSqlParser.Where_clauseContext whereClause = ctx.where_clause();
+    if (whereClause != null) {
+      detector.scan(whereClause);
+    }
+
+    // Scan ORDER BY
+    PlSqlParser.Order_by_clauseContext orderBy = ctx.order_by_clause();
+    if (orderBy != null) {
+      detector.scan(orderBy);
+    }
+
+    return detector.getPathColumns();
   }
 
   /**
@@ -329,6 +376,166 @@ public class ConnectByAnalyzer {
       this.usesConnectByRoot = usesConnectByRoot;
       this.usesConnectByPath = usesConnectByPath;
       this.usesConnectByIsLeaf = usesConnectByIsLeaf;
+    }
+  }
+
+  /**
+   * Scans AST for SYS_CONNECT_BY_PATH function calls and extracts column info.
+   *
+   * <p>Uses the proven pattern from DateFunctionTransformer - scanning for
+   * general_element_part contexts and extracting function arguments.</p>
+   */
+  private static class PathColumnDetector {
+    // Deduplication map: key = (expressionText + separator), value = PathColumnInfo
+    private final Map<String, PathColumnInfo> pathColumnMap = new HashMap<>();
+    private int pathColumnCounter = 1;  // For generating unique column names
+
+    public List<PathColumnInfo> getPathColumns() {
+      return new ArrayList<>(pathColumnMap.values());
+    }
+
+    public void scan(ParseTree tree) {
+      if (tree == null) {
+        return;
+      }
+
+      // Look for general_element_part nodes (where function calls appear)
+      if (tree instanceof PlSqlParser.General_element_partContext) {
+        PlSqlParser.General_element_partContext partCtx =
+            (PlSqlParser.General_element_partContext) tree;
+        checkForSysConnectByPath(partCtx);
+      }
+
+      // Recursively scan children
+      for (int i = 0; i < tree.getChildCount(); i++) {
+        scan(tree.getChild(i));
+      }
+    }
+
+    /**
+     * Checks if this general_element_part is a SYS_CONNECT_BY_PATH call.
+     */
+    private void checkForSysConnectByPath(PlSqlParser.General_element_partContext partCtx) {
+      // Get function name from id_expression
+      PlSqlParser.Id_expressionContext idExpr = partCtx.id_expression();
+      if (idExpr == null) {
+        return;  // Not a function call
+      }
+
+      String functionName = idExpr.getText();
+      if (!functionName.toUpperCase().equals("SYS_CONNECT_BY_PATH")) {
+        return;  // Different function
+      }
+
+      // Extract function arguments using proven pattern
+      List<PlSqlParser.ArgumentContext> args = extractFunctionArguments(partCtx);
+      if (args.size() != 2) {
+        throw new TransformationException(
+            "SYS_CONNECT_BY_PATH requires exactly 2 arguments (column, separator), found: " +
+            args.size());
+      }
+
+      // First argument: column expression (keep as AST node)
+      PlSqlParser.ArgumentContext columnArg = args.get(0);
+      PlSqlParser.ExpressionContext columnExpr = columnArg.expression();
+      if (columnExpr == null) {
+        throw new TransformationException(
+            "SYS_CONNECT_BY_PATH first argument must be an expression");
+      }
+
+      // Second argument: separator string literal
+      PlSqlParser.ArgumentContext separatorArg = args.get(1);
+      PlSqlParser.ExpressionContext separatorExpr = separatorArg.expression();
+      if (separatorExpr == null) {
+        throw new TransformationException(
+            "SYS_CONNECT_BY_PATH second argument must be an expression");
+      }
+
+      // Extract separator string literal
+      String separator = extractStringLiteral(separatorExpr);
+      if (separator == null) {
+        throw new TransformationException(
+            "SYS_CONNECT_BY_PATH separator must be a string literal. Found: " +
+            separatorExpr.getText());
+      }
+
+      // Create PathColumnInfo with deduplication
+      String expressionText = columnExpr.getText();
+      String deduplicationKey = expressionText + "|" + separator;
+
+      if (!pathColumnMap.containsKey(deduplicationKey)) {
+        String generatedColumnName = "path_" + pathColumnCounter++;
+        PathColumnInfo pathInfo = new PathColumnInfo(
+            columnExpr,
+            separator,
+            generatedColumnName,
+            expressionText
+        );
+        pathColumnMap.put(deduplicationKey, pathInfo);
+      }
+    }
+
+    /**
+     * Extracts function arguments from general_element_part.
+     * Pattern copied from DateFunctionTransformer.
+     */
+    private List<PlSqlParser.ArgumentContext> extractFunctionArguments(
+        PlSqlParser.General_element_partContext partCtx) {
+
+      List<PlSqlParser.Function_argumentContext> funcArgCtxList = partCtx.function_argument();
+      if (funcArgCtxList == null || funcArgCtxList.isEmpty()) {
+        return new ArrayList<>();
+      }
+
+      PlSqlParser.Function_argumentContext funcArgCtx = funcArgCtxList.get(0);
+      List<PlSqlParser.ArgumentContext> arguments = funcArgCtx.argument();
+      if (arguments == null) {
+        return new ArrayList<>();
+      }
+
+      return arguments;
+    }
+
+    /**
+     * Extracts string literal value from expression.
+     * Returns the literal with quotes (e.g., "'/'").
+     */
+    private String extractStringLiteral(PlSqlParser.ExpressionContext expr) {
+      if (expr == null) {
+        return null;
+      }
+
+      // Try direct text match for simple literals
+      String text = expr.getText();
+      if (text.startsWith("'") && text.endsWith("'")) {
+        return text;
+      }
+
+      // Search for quoted_string in tree
+      PlSqlParser.Quoted_stringContext quotedString = findQuotedString(expr);
+      if (quotedString != null) {
+        return quotedString.getText();
+      }
+
+      return null;
+    }
+
+    /**
+     * Recursively searches for quoted_string context.
+     */
+    private PlSqlParser.Quoted_stringContext findQuotedString(ParseTree tree) {
+      if (tree instanceof PlSqlParser.Quoted_stringContext) {
+        return (PlSqlParser.Quoted_stringContext) tree;
+      }
+
+      for (int i = 0; i < tree.getChildCount(); i++) {
+        PlSqlParser.Quoted_stringContext result = findQuotedString(tree.getChild(i));
+        if (result != null) {
+          return result;
+        }
+      }
+
+      return null;
     }
   }
 }

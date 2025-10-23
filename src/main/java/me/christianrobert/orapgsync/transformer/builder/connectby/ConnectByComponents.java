@@ -2,6 +2,7 @@ package me.christianrobert.orapgsync.transformer.builder.connectby;
 
 import me.christianrobert.orapgsync.antlr.PlSqlParser;
 
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -42,6 +43,9 @@ public class ConnectByComponents {
   private final boolean usesLevelInWhere;
   private final Set<String> levelReferencePaths;  // AST paths for LEVEL references
 
+  // SYS_CONNECT_BY_PATH columns
+  private final List<PathColumnInfo> pathColumns;  // 0 to N path columns
+
   // Advanced features (Phase 5)
   private final boolean usesConnectByRoot;
   private final boolean usesConnectByPath;
@@ -58,6 +62,7 @@ public class ConnectByComponents {
     this.usesLevelInSelect = builder.usesLevelInSelect;
     this.usesLevelInWhere = builder.usesLevelInWhere;
     this.levelReferencePaths = builder.levelReferencePaths;
+    this.pathColumns = builder.pathColumns != null ? builder.pathColumns : List.of();
     this.usesConnectByRoot = builder.usesConnectByRoot;
     this.usesConnectByPath = builder.usesConnectByPath;
     this.usesConnectByIsLeaf = builder.usesConnectByIsLeaf;
@@ -117,6 +122,14 @@ public class ConnectByComponents {
     return levelReferencePaths;
   }
 
+  public List<PathColumnInfo> getPathColumns() {
+    return pathColumns;
+  }
+
+  public boolean hasPathColumns() {
+    return pathColumns != null && !pathColumns.isEmpty();
+  }
+
   public boolean usesConnectByRoot() {
     return usesConnectByRoot;
   }
@@ -150,6 +163,7 @@ public class ConnectByComponents {
     private boolean usesLevelInSelect;
     private boolean usesLevelInWhere;
     private Set<String> levelReferencePaths;
+    private List<PathColumnInfo> pathColumns;
     private boolean usesConnectByRoot;
     private boolean usesConnectByPath;
     private boolean usesConnectByIsLeaf;
@@ -201,6 +215,11 @@ public class ConnectByComponents {
 
     public Builder levelReferencePaths(Set<String> paths) {
       this.levelReferencePaths = paths;
+      return this;
+    }
+
+    public Builder pathColumns(List<PathColumnInfo> pathColumns) {
+      this.pathColumns = pathColumns;
       return this;
     }
 

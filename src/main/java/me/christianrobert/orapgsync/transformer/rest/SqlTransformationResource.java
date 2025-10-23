@@ -70,6 +70,7 @@ public class SqlTransformationResource {
      * Transforms Oracle SQL to PostgreSQL SQL.
      *
      * @param schema Optional schema for metadata context (defaults to first schema in state)
+     * @param showAst Optional flag to include AST tree in response (for debugging)
      * @param oracleSql Oracle SQL statement (text/plain body)
      * @return TransformationResult as JSON (always HTTP 200, check "success" field)
      */
@@ -78,6 +79,7 @@ public class SqlTransformationResource {
     @Consumes(MediaType.TEXT_PLAIN)
     public TransformationResult transformSql(
             @QueryParam("schema") String schema,
+            @QueryParam("showAst") @DefaultValue("false") boolean showAst,
             String oracleSql
     ) {
         log.info("SQL transformation request received via REST API");
@@ -120,14 +122,17 @@ public class SqlTransformationResource {
         }
 
         // Transform SQL
-        log.debug("Transforming SQL for schema: {}", targetSchema);
+        log.debug("Transforming SQL for schema: {} (showAst={})", targetSchema, showAst);
         TransformationResult result = sqlTransformationService.transformSql(
-                oracleSql, targetSchema, indices
+                oracleSql, targetSchema, indices, showAst
         );
 
         if (result.isSuccess()) {
             log.info("SQL transformation succeeded");
             log.debug("PostgreSQL SQL: {}", result.getPostgresSql());
+            if (result.hasAstTree()) {
+                log.debug("AST tree included in response");
+            }
         } else {
             log.warn("SQL transformation failed: {}", result.getErrorMessage());
         }

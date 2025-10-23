@@ -1,9 +1,10 @@
 # CONNECT BY Implementation Plan
 
-**Last Updated:** 2025-10-22
-**Status:** ✅ **PHASE 1-3 COMPLETE** (LEVEL pseudo-column fully supported!)
-**Actual Effort:** ~6 hours (vs. estimated 7-8 days)
-**Test Coverage:** 31/31 tests passing
+**Last Updated:** 2025-10-23
+**Status:** ✅ **PHASE 1-3 + SYS_CONNECT_BY_PATH COMPLETE**
+**Actual Effort:** ~8 hours (vs. estimated 8-10 days)
+**Test Coverage:** 20/20 tests passing
+**Latest Addition:** SYS_CONNECT_BY_PATH function support (~2 hours)
 **Coverage Impact:** +8-10 percentage points (82% → 90%)
 
 ---
@@ -510,15 +511,15 @@ SELECT * FROM emp_hierarchy;
 
 ---
 
-### Phase 5: Advanced Features (Optional) ⏸️ NOT STARTED
+### Phase 5: Advanced Features (Partial) 🔄 IN PROGRESS
 **Goal:** Support advanced Oracle hierarchical query features
 
-**Tasks:**
-1. CONNECT_BY_ROOT pseudo-column
-2. SYS_CONNECT_BY_PATH function
-3. CONNECT_BY_ISLEAF pseudo-column
-4. NOCYCLE handling (best-effort warning)
-5. ORDER SIBLINGS BY (document limitation or best-effort)
+**Status:**
+- ✅ **SYS_CONNECT_BY_PATH function** - COMPLETE (2025-10-23)
+- ⏸️ CONNECT_BY_ROOT pseudo-column - NOT STARTED
+- ⏸️ CONNECT_BY_ISLEAF pseudo-column - NOT STARTED
+- ⏸️ NOCYCLE handling (best-effort warning) - NOT STARTED
+- ⏸️ ORDER SIBLINGS BY (document limitation or best-effort) - NOT STARTED
 
 **CONNECT_BY_ROOT implementation:**
 ```sql

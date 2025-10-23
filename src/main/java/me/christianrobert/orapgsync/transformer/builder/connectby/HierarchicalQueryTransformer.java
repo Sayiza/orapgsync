@@ -4,6 +4,8 @@ import me.christianrobert.orapgsync.antlr.PlSqlParser;
 import me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder;
 import me.christianrobert.orapgsync.transformer.context.TransformationException;
 
+import java.util.List;
+
 /**
  * Transforms Oracle CONNECT BY hierarchical queries to PostgreSQL recursive CTEs.
  *
@@ -92,12 +94,13 @@ public class HierarchicalQueryTransformer {
       );
     }
 
-    if (components.usesAdvancedPseudoColumns()) {
-      // Advanced pseudo-columns are Phase 5 (future work)
+    // SYS_CONNECT_BY_PATH is now supported via pathColumns
+    // Only check for truly unsupported advanced features
+    if (components.usesConnectByRoot() || components.usesConnectByIsLeaf()) {
+      // Advanced pseudo-columns other than PATH are Phase 5 (future work)
       throw new TransformationException(
           "Advanced hierarchical query pseudo-columns not yet supported:\n" +
           (components.usesConnectByRoot() ? "- CONNECT_BY_ROOT\n" : "") +
-          (components.usesConnectByPath() ? "- SYS_CONNECT_BY_PATH\n" : "") +
           (components.usesConnectByIsLeaf() ? "- CONNECT_BY_ISLEAF\n" : "") +
           "These features are planned for future implementation."
       );
@@ -139,9 +142,9 @@ public class HierarchicalQueryTransformer {
 
     StringBuilder result = new StringBuilder();
 
-    // SELECT list with level column
+    // SELECT list with level column and path columns
     result.append("SELECT ");
-    String selectList = buildSelectListWithLevel(ctx, "1", b);
+    String selectList = buildSelectListWithLevel(components, ctx, "1", null, b);
     result.append(selectList);
 
     // FROM clause (delegate to existing visitor)
@@ -240,9 +243,9 @@ public class HierarchicalQueryTransformer {
         ? components.getBaseTableAlias()
         : "t";  // Default alias if none specified
 
-    // SELECT list with level increment
+    // SELECT list with level increment and path columns
     result.append("SELECT ");
-    String selectList = buildSelectListWithLevel(ctx, cteAlias + ".level + 1", b);
+    String selectList = buildSelectListWithLevel(components, ctx, cteAlias + ".level + 1", cteAlias, b);
     // Qualify columns with child alias
     selectList = qualifySelectListColumns(selectList, childAlias, components);
     result.append(selectList);
@@ -367,9 +370,18 @@ public class HierarchicalQueryTransformer {
 
     StringBuilder result = new StringBuilder();
 
-    // SELECT list (replace LEVEL references)
+    // SELECT list (replace LEVEL and SYS_CONNECT_BY_PATH references)
     result.append("SELECT ");
     String selectList = buildSelectListReplacingLevel(ctx, b);
+
+    // Replace SYS_CONNECT_BY_PATH calls with generated column names
+    if (components.hasPathColumns()) {
+      selectList = replaceSysConnectByPathInString(
+          selectList,
+          components.getPathColumns()
+      );
+    }
+
     result.append(selectList);
 
     // FROM CTE
@@ -381,6 +393,15 @@ public class HierarchicalQueryTransformer {
     if (orderByCtx != null) {
       // Replace LEVEL references in ORDER BY
       String orderByClause = LevelReferenceReplacer.replaceInOrderBy(orderByCtx, b);
+
+      // Replace SYS_CONNECT_BY_PATH calls
+      if (components.hasPathColumns()) {
+        orderByClause = replaceSysConnectByPathInString(
+            orderByClause,
+            components.getPathColumns()
+        );
+      }
+
       if (orderByClause != null && !orderByClause.trim().isEmpty()) {
         result.append(" ").append(orderByClause);
       }
@@ -390,17 +411,26 @@ public class HierarchicalQueryTransformer {
   }
 
   /**
-   * Builds SELECT list with level column added.
+   * Builds SELECT list with level column and path columns added.
    *
    * <p>Removes any LEVEL pseudo-column references from original SELECT list,
-   * then adds ", {levelExpression} as level".</p>
+   * then adds ", {levelExpression} as level" and path columns.</p>
    *
    * <p>This is necessary because Oracle's LEVEL is a pseudo-column that doesn't
    * exist in the base table. In PostgreSQL CTEs, we explicitly add it as a column.</p>
+   *
+   * @param components Analyzed CONNECT BY components (contains path columns)
+   * @param ctx Query block context
+   * @param levelExpression Level expression (e.g., "1" for base case, "h.level + 1" for recursive)
+   * @param cteAlias CTE alias (e.g., "h") - null for base case
+   * @param b PostgresCodeBuilder for transformations
+   * @return SELECT list with level and path columns
    */
   private static String buildSelectListWithLevel(
+      ConnectByComponents components,
       PlSqlParser.Query_blockContext ctx,
       String levelExpression,
+      String cteAlias,  // null for base case
       PostgresCodeBuilder b) {
 
     PlSqlParser.Selected_listContext selectedListCtx = ctx.selected_list();
@@ -416,8 +446,32 @@ public class HierarchicalQueryTransformer {
     // We'll add it explicitly as a calculated column
     selectList = removeLevelFromSelectList(selectList);
 
+    // CRITICAL: Remove any SYS_CONNECT_BY_PATH function calls from SELECT list
+    // Oracle allows "SELECT emp_id, SYS_CONNECT_BY_PATH(...) FROM ..." but we generate explicit path columns
+    // We'll add them explicitly as calculated columns (path_1, path_2, etc.)
+    if (components.hasPathColumns()) {
+      selectList = removeSysConnectByPathFromSelectList(selectList, components.getPathColumns());
+    }
+
     // Add level column as calculated value
-    return selectList + ", " + levelExpression + " as level";
+    StringBuilder result = new StringBuilder(selectList);
+    result.append(", ").append(levelExpression).append(" as level");
+
+    // Add path columns (if any)
+    if (components.hasPathColumns()) {
+      for (PathColumnInfo pathCol : components.getPathColumns()) {
+        result.append(", ");
+        if (cteAlias == null) {
+          // Base case: separator || column as path_N
+          result.append(pathCol.buildBaseCase(b));
+        } else {
+          // Recursive case: cte.path_N || separator || column as path_N
+          result.append(pathCol.buildRecursiveCase(b, cteAlias));
+        }
+      }
+    }
+
+    return result.toString();
   }
 
   /**
@@ -714,5 +768,120 @@ public class HierarchicalQueryTransformer {
     }
 
     return result.toString();
+  }
+
+  /**
+   * Removes SYS_CONNECT_BY_PATH function calls from SELECT list.
+   *
+   * <p>Similar to removeLevelFromSelectList, but handles function calls which can span
+   * multiple lines and contain complex expressions.</p>
+   *
+   * <p>Handles patterns like:</p>
+   * <ul>
+   *   <li>"emp_id, SYS_CONNECT_BY_PATH(name, '/') AS path" → "emp_id"</li>
+   *   <li>"SYS_CONNECT_BY_PATH(name, '/'), emp_id" → "emp_id"</li>
+   *   <li>"emp_id, hr.sys_connect_by_path(name, '/') as p" → "emp_id"</li>
+   * </ul>
+   *
+   * @param selectList Original SELECT list string
+   * @param pathColumns List of path columns to remove
+   * @return SELECT list with SYS_CONNECT_BY_PATH calls removed
+   */
+  private static String removeSysConnectByPathFromSelectList(
+      String selectList,
+      List<PathColumnInfo> pathColumns) {
+
+    if (selectList == null || selectList.trim().isEmpty() || pathColumns == null || pathColumns.isEmpty()) {
+      return selectList;
+    }
+
+    String result = selectList;
+
+    // Remove each SYS_CONNECT_BY_PATH function call
+    for (PathColumnInfo pathCol : pathColumns) {
+      // Build regex pattern: SYS_CONNECT_BY_PATH(expression, 'separator')
+      // With optional schema qualification and alias
+      String expressionPattern = escapeRegex(pathCol.getExpressionText());
+      String separatorPattern = escapeRegex(pathCol.getSeparator());
+
+      // Pattern matches the entire SELECT item including:
+      // - Optional schema: schema.
+      // - Function name: SYS_CONNECT_BY_PATH
+      // - Arguments: (expr, 'sep')
+      // - Optional alias: AS alias_name or just alias_name
+      // - Handles commas before or after
+      String pattern = "(?i)" +
+                       ",?\\s*" +                                    // Optional leading comma and whitespace
+                       "(?:\\w+\\.)?" +                              // Optional schema qualification
+                       "SYS_CONNECT_BY_PATH\\s*\\(\\s*" +
+                       expressionPattern +
+                       "\\s*,\\s*" +
+                       separatorPattern +
+                       "\\s*\\)" +
+                       "(?:\\s+(?:AS\\s+)?\\w+)?" +                  // Optional alias (AS name or just name)
+                       "\\s*,?";                                     // Optional trailing comma
+
+      result = result.replaceAll(pattern, "");
+    }
+
+    // Clean up any resulting double commas or leading/trailing commas
+    result = result.replaceAll(",\\s*,", ",");       // Double commas → single comma
+    result = result.replaceAll("^\\s*,\\s*", "");    // Leading comma
+    result = result.replaceAll("\\s*,\\s*$", "");    // Trailing comma
+
+    return result.trim();
+  }
+
+  /**
+   * Replaces SYS_CONNECT_BY_PATH function calls with generated column names.
+   *
+   * <p>This is a string-based replacement using regex to handle the function call syntax.</p>
+   *
+   * @param sql SQL string that may contain SYS_CONNECT_BY_PATH calls
+   * @param pathColumns List of path column info for matching
+   * @return SQL with SYS_CONNECT_BY_PATH replaced by column names
+   */
+  private static String replaceSysConnectByPathInString(
+      String sql,
+      List<PathColumnInfo> pathColumns) {
+
+    if (sql == null || pathColumns == null || pathColumns.isEmpty()) {
+      return sql;
+    }
+
+    String result = sql;
+
+    // Replace each path column's function call with its generated name
+    for (PathColumnInfo pathCol : pathColumns) {
+      // Build regex pattern: SYS_CONNECT_BY_PATH(expression, 'separator')
+      // Need to escape regex special characters in both expression and separator
+      String expressionPattern = escapeRegex(pathCol.getExpressionText());
+      String separatorPattern = escapeRegex(pathCol.getSeparator());
+
+      // Pattern matches: SYS_CONNECT_BY_PATH ( expr , 'sep' )
+      // OR: schema.SYS_CONNECT_BY_PATH ( expr , 'sep' )
+      // with optional whitespace
+      // Note: PostgresCodeBuilder may add schema qualification
+      String pattern = "(?i)(?:\\w+\\.)?SYS_CONNECT_BY_PATH\\s*\\(\\s*" +
+                       expressionPattern +
+                       "\\s*,\\s*" +
+                       separatorPattern +
+                       "\\s*\\)";
+
+      result = result.replaceAll(pattern, pathCol.getGeneratedColumnName());
+    }
+
+    return result;
+  }
+
+  /**
+   * Escapes special regex characters in a string.
+   */
+  private static String escapeRegex(String str) {
+    if (str == null) {
+      return "";
+    }
+    // Escape all regex special characters
+    return str.replaceAll("([\\\\\\[\\](){}+*?^$|.])", "\\\\$1");
   }
 }
