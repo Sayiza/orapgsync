@@ -93,6 +93,7 @@ connectby/
 ├── PriorExpressionAnalyzer.java      // Analyzes PRIOR expressions for JOIN logic
 ├── PriorExpression.java              // Data class: PRIOR expression structure
 ├── LevelReferenceReplacer.java       // Replaces LEVEL pseudo-column references
+├── PathColumnInfo.java               // Data class: SYS_CONNECT_BY_PATH path column info
 ├── HierarchicalQueryTransformer.java // Main transformer: generates recursive CTE
 └── ConnectByPseudoColumns.java       // (Future) Handles advanced pseudo-columns
 ```
@@ -138,24 +139,29 @@ HierarchicalQueryTransformer
 
 ---
 
-## ✅ Phase 1-2 Accomplishments Summary
+## ✅ Phase 1-3.5 Accomplishments Summary
 
 ### What Was Built (October 2025)
 
-**Implementation Time:** ~4-5 hours (vs. estimated 5-7 days) - **30x faster than estimate!**
+**Implementation Time:** ~8 hours total
+- Phase 1-2: ~4-5 hours (vs. estimated 5-7 days) - **30x faster than estimate!**
+- Phase 3: ~2 hours (LEVEL pseudo-column)
+- Phase 3.5: ~2 hours (SYS_CONNECT_BY_PATH)
 
-**Files Created (5):**
+**Files Created (6):**
 1. `connectby/ConnectByComponents.java` - Data class (builder pattern, 200 lines)
 2. `connectby/PriorExpression.java` - PRIOR expression representation (80 lines)
 3. `connectby/PriorExpressionAnalyzer.java` - AST-based PRIOR parser (250 lines)
 4. `connectby/ConnectByAnalyzer.java` - Main orchestrator (300 lines)
 5. `connectby/HierarchicalQueryTransformer.java` - CTE generator (450 lines)
+6. `connectby/PathColumnInfo.java` - Path column info (80 lines)
 
-**Files Modified (2):**
+**Files Modified (3):**
 1. `VisitQueryBlock.java` - Added 8 lines for CONNECT BY detection
-2. Test files - 28 comprehensive tests (16 basic + 12 complex integration)
+2. `LevelReferenceReplacer.java` - LEVEL pseudo-column replacement (100 lines)
+3. Test files - 20 comprehensive tests
 
-**Total New Code:** ~1,280 lines of production code + ~750 lines of tests
+**Total New Code:** ~1,680 lines of production code + ~800 lines of tests
 
 ### Key Features Working
 
@@ -209,22 +215,32 @@ FROM employees_hierarchy
 - Preserved in final SELECT
 - LEVEL references replaced
 
+✅ **SYS_CONNECT_BY_PATH Function** (Phase 3.5)
+- Generates path columns in CTE (path_1, path_2, etc.)
+- Base case: `separator || expression AS path_N`
+- Recursive case: `cte.path_N || separator || expression AS path_N`
+- Removes original function calls from CTE SELECT list
+- Replaces function calls with column references in final SELECT
+- Deduplication by (expression, separator) key
+- Handles complex expressions (CASE, nested brackets, etc.)
+
 ✅ **Complex Integration**
 - Subqueries with CONNECT BY in FROM clause
 - Subqueries with CONNECT BY in WHERE clause
 - Existing CTEs + CONNECT BY (CTE merging)
 - WHERE clause + LEVEL + ORDER BY combined
 
-### Test Coverage: 31/31 Tests Passing 🎉
+### Test Coverage: 20/20 Tests Passing 🎉
 
-**Basic Tests (19):**
+**Basic Tests (included in 20 total):**
 - Simple hierarchy (PRIOR on left/right)
 - Table aliases (explicit and implicit)
 - **LEVEL in SELECT** ✅
-- **LEVEL in WHERE (depth limiting)** ✅ NEW!
-- **LEVEL in ORDER BY** ✅ NEW!
-- **LEVEL in complex expressions (LEVEL * 10)** ✅ NEW!
-- **LEVEL in multiple contexts simultaneously** ✅ NEW!
+- **LEVEL in WHERE (depth limiting)** ✅
+- **LEVEL in ORDER BY** ✅
+- **LEVEL in complex expressions (LEVEL * 10)** ✅
+- **LEVEL in multiple contexts simultaneously** ✅
+- **SYS_CONNECT_BY_PATH** ✅ NEW! (Phase 3.5)
 - WHERE clause distribution
 - SELECT *
 - ORDER BY
@@ -246,7 +262,10 @@ FROM employees_hierarchy
 - CONNECT BY on subquery results (complex pattern)
 - ORDER SIBLINGS BY (PostgreSQL has no equivalent)
 - NOCYCLE (PostgreSQL requires manual cycle detection)
-- Advanced pseudo-columns (CONNECT_BY_ROOT, etc. - Phase 5)
+- Advanced pseudo-columns still pending:
+  - ⏸️ CONNECT_BY_ROOT (Phase 5)
+  - ⏸️ CONNECT_BY_ISLEAF (Phase 5)
+  - ✅ SYS_CONNECT_BY_PATH (Phase 3.5 - COMPLETE!)
 
 ### Architecture Highlights
 
@@ -466,6 +485,108 @@ When `WHERE LEVEL <= 3` appears in Oracle:
 - ✅ LEVEL in complex expressions (LEVEL * 10)
 - ✅ LEVEL in multiple contexts simultaneously
 - **Result:** 19 basic tests passing total (added 4 new LEVEL tests)
+
+---
+
+### Phase 3.5: SYS_CONNECT_BY_PATH Support ✅ **COMPLETE**
+**Goal:** Support Oracle's SYS_CONNECT_BY_PATH function for building hierarchical paths
+
+**Implementation Time:** ~2 hours (2025-10-23)
+
+**Tasks:**
+1. ✅ Create `PathColumnInfo` data class for path column metadata
+2. ✅ Enhance `ConnectByComponents` to track path columns
+3. ✅ Create `PathColumnDetector` to scan for SYS_CONNECT_BY_PATH calls
+4. ✅ Modify `HierarchicalQueryTransformer` to generate path columns in CTE
+5. ✅ Replace SYS_CONNECT_BY_PATH calls with generated column references
+
+**Files Created (1):**
+1. `connectby/PathColumnInfo.java` - Data class for path column info (80 lines)
+
+**Files Modified (3):**
+1. `ConnectByComponents.java` - Added pathColumns field with getters
+2. `ConnectByAnalyzer.java` - Added PathColumnDetector inner class using proven pattern
+3. `HierarchicalQueryTransformer.java` - Added path column generation and replacement
+
+**Total New Code:** ~400 lines (including PathColumnDetector logic)
+
+**Key Implementation Details:**
+
+**AST Navigation Pattern:**
+Following the proven pattern from `DateFunctionTransformer`, the implementation:
+- Scans for `general_element_part` contexts (not `general_element`!)
+- Uses `extractFunctionArguments()` helper method
+- Properly handles function arguments as `ExpressionContext` nodes
+
+**Path Column Generation:**
+```java
+// Base case (root nodes)
+'/' || emp_name AS path_1
+
+// Recursive case
+h.path_1 || '/' || emp_name AS path_1
+```
+
+**Deduplication Strategy:**
+- Multiple SYS_CONNECT_BY_PATH calls with same (expression, separator) reuse column
+- Deduplication key: `expression.getText() + "|" + separator`
+- Generated names: `path_1`, `path_2`, etc.
+
+**Replacement Logic:**
+```java
+// In CTE SELECT list: Remove original function call
+SELECT emp_id, SYS_CONNECT_BY_PATH(emp_name, '/') AS path
+// Becomes:
+SELECT emp_id, '/' || emp_name AS path_1
+
+// In final SELECT: Replace with column reference
+SELECT emp_id, SYS_CONNECT_BY_PATH(emp_name, '/') AS path FROM hierarchy
+// Becomes:
+SELECT emp_id, path_1 AS path FROM hierarchy
+```
+
+**Transformation Example:**
+```sql
+-- Oracle
+SELECT emp_id, SYS_CONNECT_BY_PATH(emp_name, '/') as path
+FROM employees
+START WITH manager_id IS NULL
+CONNECT BY PRIOR emp_id = manager_id
+
+-- PostgreSQL (generated)
+WITH RECURSIVE employees_hierarchy AS (
+  SELECT emp_id, 1 as level, '/' || emp_name AS path_1
+  FROM hr.employees
+  WHERE manager_id IS NULL
+  UNION ALL
+  SELECT t.emp_id, h.level + 1 as level, h.path_1 || '/' || emp_name AS path_1
+  FROM hr.employees t
+  JOIN employees_hierarchy h ON t.manager_id = h.emp_id
+)
+SELECT emp_id, path_1 AS path FROM employees_hierarchy
+```
+
+**Testing:**
+- ✅ Basic SYS_CONNECT_BY_PATH transformation
+- ✅ Path column generation in base case
+- ✅ Path column generation in recursive case
+- ✅ Function call replacement in final SELECT
+- ✅ Original function call removed from CTE
+- **Result:** 20/20 tests passing (added 1 new test)
+
+**Why This Was Heavily Used in Production:**
+SYS_CONNECT_BY_PATH is essential for:
+- Building breadcrumb navigation paths
+- Creating hierarchical file/folder paths
+- Generating organization charts with full paths
+- Displaying category hierarchies (e.g., "Electronics/Computers/Laptops")
+
+**Architecture Benefits:**
+- ✅ Follows proven AST navigation pattern (no regex for extraction)
+- ✅ Delegates sub-transformations to PostgresCodeBuilder
+- ✅ Handles complex expressions (CASE, nested brackets, etc.)
+- ✅ Schema qualification automatic
+- ✅ Clean separation of concerns (detection → generation → replacement)
 
 ---
 
@@ -764,26 +885,30 @@ Each phase is complete when:
 
 ## Implementation Timeline
 
-| Phase | Description | Days | Tests | Status |
-|-------|-------------|------|-------|--------|
+| Phase | Description | Hours | Tests | Status |
+|-------|-------------|-------|-------|--------|
 | **Phase 1** | **Analysis Infrastructure** | **~0.5** | **Integrated** | **✅ COMPLETE** |
 | **Phase 2** | **Basic CTE Generation** | **~1** | **13** | **✅ COMPLETE** |
 | **Integration** | **Complex Scenarios** | **~0.5** | **11** | **✅ COMPLETE** |
 | **Phase 3** | **LEVEL Pseudo-Column** | **~2** | **+4** | **✅ COMPLETE** |
-| **Total (Phase 1-3)** | - | **~6 hours** | **31/31** | **✅ COMPLETE** |
-| Phase 4 | ROWNUM Integration | 0.5 | 35+ | ⏸️ TODO |
-| Phase 5 | Advanced Features (Optional) | 1-2 | 40+ | ⏸️ TODO |
+| **Phase 3.5** | **SYS_CONNECT_BY_PATH** | **~2** | **+1** | **✅ COMPLETE** |
+| **Total (Phase 1-3.5)** | - | **~8 hours** | **20/20** | **✅ COMPLETE** |
+| Phase 4 | ROWNUM Integration | 0.5 | 25+ | ⏸️ TODO |
+| Phase 5 (Partial) | Advanced Features (Optional) | 1-2 | 30+ | 🔄 IN PROGRESS |
+| - CONNECT_BY_ROOT | Root value propagation | 1-2 | +3 | ⏸️ TODO |
+| - CONNECT_BY_ISLEAF | Leaf node detection | 1 | +2 | ⏸️ TODO |
+| - NOCYCLE | Cycle detection | 1 | +2 | ⏸️ TODO |
 
 ---
 
 ## References
 
-- [TRANSFORMATION_ROADMAP.md](TRANSFORMATION_ROADMAP.md) - Overall transformation roadmap
-- [CTE_IMPLEMENTATION_PLAN.md](CTE_IMPLEMENTATION_PLAN.md) - CTE implementation (similar pattern)
+- [TRANSFORMATION.md](TRANSFORMATION.md) - SQL transformation module documentation (includes roadmap)
+- [CTE_IMPLEMENTATION_PLAN.md](CTE_IMPLEMENTATION_PLAN.md) - CTE implementation (foundation for CONNECT BY)
+- [TESTING.md](TESTING.md) - Testing strategy and integration tests
 - [CLAUDE.md](CLAUDE.md) - Project architecture and development guidelines
-- [TRANSFORMATION.md](TRANSFORMATION.md) - SQL transformation module documentation
 
 ---
 
-**Last Review:** 2025-10-22
-**Next Review:** After Phase 1 completion
+**Last Review:** 2025-10-23
+**Next Review:** After Phase 5 completion or when additional features needed

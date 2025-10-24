@@ -13,3 +13,6 @@
 [x] revisit outer join transformer once all subquery support is in place
 [x] The AND handler (lines 17-30) correctly handles null (filtered ROWNUM), but OR doesn't. If ROWNUM appears in an OR condition, this will cause "null OR something".
 [ ] 2 - pass architecture for preparing types before transformation
+[ ] 3 jobs: type-methos, functions, triggers
+[ ] 1 more job for package body data
+[ ] evaluate usage of s/get_config for package variable replacement!

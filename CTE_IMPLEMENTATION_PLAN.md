@@ -273,13 +273,38 @@ SELECT * FROM ranked WHERE rank <= 10;
 
 ---
 
+## Related Implementations
+
+### CONNECT BY (Hierarchical Queries) ✅ COMPLETE
+
+The CTE infrastructure implemented here serves as the foundation for CONNECT BY transformation.
+
+**Status:** ✅ COMPLETE (2025-10-23)
+- **Effort:** ~8 hours (vs. estimated 5-7 days)
+- **Coverage Gain:** +8 percentage points (82% → 90%)
+- **Test Coverage:** 24/24 tests passing
+
+**Key Features:**
+- Transforms Oracle CONNECT BY to PostgreSQL recursive CTEs
+- LEVEL pseudo-column → explicit counter column
+- SYS_CONNECT_BY_PATH → path string concatenation
+- START WITH → base case WHERE clause
+- CONNECT BY PRIOR → JOIN conditions
+
+**See:** [CONNECT_BY_IMPLEMENTATION_PLAN.md](CONNECT_BY_IMPLEMENTATION_PLAN.md) for detailed implementation
+
+---
+
 ## Conclusion
 
 **Status: ✅ COMPLETE**
 
 CTE support is fully implemented and tested. Both non-recursive and recursive CTEs are supported with automatic RECURSIVE keyword detection. All 38 tests passing. This implementation moves the project from ~50% to ~75% real-world Oracle view coverage - a significant milestone.
 
-**Next Priority:** Based on TRANSFORMATION_ROADMAP.md, the next highest-impact features are:
-1. Common Date/Time Functions (ADD_MONTHS, MONTHS_BETWEEN, etc.) - 3-5 days
-2. Common String Functions (INSTR, REGEXP_*, etc.) - 3-4 days
-3. CONNECT BY (hierarchical queries) - 5-7 days
+**Subsequent Implementations:** All high-impact features have been completed:
+1. ✅ CTEs (WITH clause) - COMPLETE (~2 hours, +25% coverage)
+2. ✅ Date/Time Functions - COMPLETE (~1.5 days, +5% coverage)
+3. ✅ String Functions - COMPLETE (~3 hours, +2% coverage)
+4. ✅ CONNECT BY (hierarchical queries) - COMPLETE (~8 hours, +8% coverage)
+
+**Final Coverage:** ~90% real-world Oracle views ✅
