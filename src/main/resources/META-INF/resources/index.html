@@ -494,6 +494,37 @@
             </div>
           </td>
         </tr>
+        <tr class="oracle-compat-row">
+          <td class="source-cell">
+            <div class="component-info" id="oracle-compat-source">
+              <span class="component-text">N/A - fixed supported feature set</span>
+            </div>
+          </td>
+          <td class="target-cell">
+            <div class="component-info" id="postgres-oracle-compat">
+              <span class="count-badge">-</span>
+              <span class="component-text">Compatibility functions installed</span>
+              <button class="refresh-btn" onclick="verifyOracleCompat()" title="Verify Oracle compatibility layer installation">⚙</button>
+              <button class="action-btn" onclick="installOracleCompat()" title="Install Oracle built-in replacements">Install Compatibility Layer</button>
+              <div class="table-creation-results" id="postgres-oracle-compat-installation-results" style="display: none;">
+                <div class="table-creation-header" onclick="toggleOracleCompatInstallationResults()">
+                  <span class="toggle-indicator">▼</span> Installation Results
+                </div>
+                <div class="table-creation-details" id="postgres-oracle-compat-installation-details">
+                  <!-- Oracle compatibility installation results will be populated here -->
+                </div>
+              </div>
+              <div class="table-creation-results" id="postgres-oracle-compat-verification-results" style="display: none;">
+                <div class="table-creation-header" onclick="toggleOracleCompatVerificationResults()">
+                  <span class="toggle-indicator">▼</span> Verification Results
+                </div>
+                <div class="table-creation-details" id="postgres-oracle-compat-verification-details">
+                  <!-- Oracle compatibility verification results will be populated here -->
+                </div>
+              </div>
+            </div>
+          </td>
+        </tr>
       </tbody>
     </table>
   </div>
@@ -611,6 +642,7 @@
 <script src="view-service.js"></script>
 <script src="function-service.js"></script>
 <script src="type-method-service.js"></script>
+<script src="oracle-compat-service.js"></script>
 
 <!-- Orchestration Script -->
 <script src="orchestration-service.js"></script>

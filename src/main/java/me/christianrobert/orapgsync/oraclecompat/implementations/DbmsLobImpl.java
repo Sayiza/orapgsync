@@ -1,0 +1,96 @@
+package me.christianrobert.orapgsync.oraclecompat.implementations;
+
+/**
+ * PostgreSQL implementations for DBMS_LOB package.
+ * <p>
+ * Provides LOB (Large Object) manipulation functions.
+ */
+public class DbmsLobImpl {
+
+    public static String getGetLength() {
+        return """
+            CREATE OR REPLACE FUNCTION oracle_compat.dbms_lob__getlength(lob_loc TEXT)
+            RETURNS INTEGER
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                RETURN LENGTH(lob_loc);
+            END;
+            $$;
+
+            -- Overload for bytea (BLOB)
+            CREATE OR REPLACE FUNCTION oracle_compat.dbms_lob__getlength(lob_loc BYTEA)
+            RETURNS INTEGER
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                RETURN LENGTH(lob_loc);
+            END;
+            $$;
+
+            COMMENT ON FUNCTION oracle_compat.dbms_lob__getlength(TEXT) IS
+            'Oracle DBMS_LOB.GETLENGTH equivalent - returns length of CLOB (text)';
+
+            COMMENT ON FUNCTION oracle_compat.dbms_lob__getlength(BYTEA) IS
+            'Oracle DBMS_LOB.GETLENGTH equivalent - returns length of BLOB (bytea)';
+            """;
+    }
+
+    public static String getSubstr() {
+        return """
+            CREATE OR REPLACE FUNCTION oracle_compat.dbms_lob__substr(
+                lob_loc TEXT,
+                amount INTEGER DEFAULT 32767,
+                offset INTEGER DEFAULT 1
+            )
+            RETURNS TEXT
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                -- Oracle LOB positions are 1-based
+                RETURN SUBSTRING(lob_loc FROM offset FOR amount);
+            END;
+            $$;
+
+            COMMENT ON FUNCTION oracle_compat.dbms_lob__substr(TEXT, INTEGER, INTEGER) IS
+            'Oracle DBMS_LOB.SUBSTR equivalent - extracts substring from CLOB';
+            """;
+    }
+
+    public static String getAppend() {
+        return """
+            CREATE OR REPLACE FUNCTION oracle_compat.dbms_lob__append(
+                dest_lob INOUT TEXT,
+                src_lob TEXT
+            )
+            RETURNS TEXT
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                dest_lob := dest_lob || src_lob;
+                RETURN dest_lob;
+            END;
+            $$;
+
+            -- Overload for bytea (BLOB)
+            CREATE OR REPLACE FUNCTION oracle_compat.dbms_lob__append(
+                dest_lob INOUT BYTEA,
+                src_lob BYTEA
+            )
+            RETURNS BYTEA
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                dest_lob := dest_lob || src_lob;
+                RETURN dest_lob;
+            END;
+            $$;
+
+            COMMENT ON FUNCTION oracle_compat.dbms_lob__append(TEXT, TEXT) IS
+            'Oracle DBMS_LOB.APPEND equivalent - appends to CLOB (text)';
+
+            COMMENT ON FUNCTION oracle_compat.dbms_lob__append(BYTEA, BYTEA) IS
+            'Oracle DBMS_LOB.APPEND equivalent - appends to BLOB (bytea)';
+            """;
+    }
+}

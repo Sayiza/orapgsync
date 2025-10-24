@@ -12,7 +12,9 @@
 [x] SQL Transform: subquery support in all phases, outer join support in all phases
 [x] revisit outer join transformer once all subquery support is in place
 [x] The AND handler (lines 17-30) correctly handles null (filtered ROWNUM), but OR doesn't. If ROWNUM appears in an OR condition, this will cause "null OR something".
+[ ] Frontend: - vs ?, no check for fks
 [ ] 2 - pass architecture for preparing types before transformation
 [ ] 3 jobs: type-methos, functions, triggers
 [ ] 1 more job for package body data
+[ ] 1 more job for oracle build ins
 [ ] evaluate usage of s/get_config for package variable replacement!

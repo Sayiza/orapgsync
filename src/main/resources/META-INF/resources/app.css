@@ -1411,3 +1411,8 @@ td {
 .execution-time {
     font-size: 0.7rem;
 }
+
+.table-creation-summary p {
+    font-size: 0.75rem;
+    color: #495057;
+}

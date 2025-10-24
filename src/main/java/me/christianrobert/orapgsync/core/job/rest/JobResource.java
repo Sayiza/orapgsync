@@ -30,6 +30,8 @@ import me.christianrobert.orapgsync.core.job.model.function.FunctionMetadata;
 import me.christianrobert.orapgsync.core.job.model.function.FunctionStubCreationResult;
 import me.christianrobert.orapgsync.core.job.model.typemethod.TypeMethodMetadata;
 import me.christianrobert.orapgsync.core.job.model.typemethod.TypeMethodStubCreationResult;
+import me.christianrobert.orapgsync.oraclecompat.model.OracleCompatInstallationResult;
+import me.christianrobert.orapgsync.oraclecompat.model.OracleCompatVerificationResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -365,6 +367,33 @@ public class JobResource {
                 response.put("warningCount", viewImplVerifyResult.getWarningCount());
                 response.put("isSuccessful", viewImplVerifyResult.isSuccessful());
                 response.put("result", result); // Include raw result for frontend compatibility
+            } else if (result instanceof OracleCompatInstallationResult) {
+                // Handle Oracle compatibility installation results
+                OracleCompatInstallationResult oracleCompatInstallResult = (OracleCompatInstallationResult) result;
+
+                response.put("totalFunctions", oracleCompatInstallResult.getTotalFunctions());
+                response.put("installedFull", oracleCompatInstallResult.getInstalledFull());
+                response.put("installedPartial", oracleCompatInstallResult.getInstalledPartial());
+                response.put("installedStubs", oracleCompatInstallResult.getInstalledStubs());
+                response.put("failed", oracleCompatInstallResult.getFailed());
+                response.put("errorMessages", oracleCompatInstallResult.getErrorMessages());
+                response.put("executionTimeMs", oracleCompatInstallResult.getExecutionTimeMs());
+                response.put("result", result); // Include raw result for frontend compatibility
+            } else if (result instanceof List<?> && jobType.contains("ORACLE_COMPAT_VERIFICATION")) {
+                // Handle Oracle compatibility verification results (returned as List)
+                @SuppressWarnings("unchecked")
+                List<OracleCompatVerificationResult> oracleCompatVerifyResults = (List<OracleCompatVerificationResult>) result;
+
+                if (!oracleCompatVerifyResults.isEmpty()) {
+                    OracleCompatVerificationResult oracleCompatVerifyResult = oracleCompatVerifyResults.get(0);
+
+                    response.put("totalExpected", oracleCompatVerifyResult.getTotalExpected());
+                    response.put("verified", oracleCompatVerifyResult.getVerified());
+                    response.put("missing", oracleCompatVerifyResult.getMissing());
+                    response.put("errors", oracleCompatVerifyResult.getErrors());
+                    response.put("executionTimeMs", oracleCompatVerifyResult.getExecutionTimeMs());
+                    response.put("result", oracleCompatVerifyResult); // Include first result for frontend compatibility
+                }
             } else if (result instanceof List<?>) {
                 // Handle List results based on jobType
                 if (jobType.contains("SCHEMA") && !jobType.contains("SCHEMA_CREATION")) {
@@ -917,6 +946,18 @@ public class JobResource {
     @Path("/postgres/view-implementation-verification/verify")
     public Response startPostgresViewImplementationVerification() {
         return startExtractionJob("POSTGRES", "VIEW_IMPLEMENTATION_VERIFICATION", "PostgreSQL view implementation verification");
+    }
+
+    @POST
+    @Path("/postgres/oracle-compat-installation/extract")
+    public Response startPostgresOracleCompatInstallation() {
+        return startJob("POSTGRES", "ORACLE_COMPAT_INSTALLATION", "PostgreSQL Oracle compatibility installation");
+    }
+
+    @POST
+    @Path("/postgres/oracle-compat-verification/verify")
+    public Response startPostgresOracleCompatVerification() {
+        return startExtractionJob("POSTGRES", "ORACLE_COMPAT_VERIFICATION", "PostgreSQL Oracle compatibility verification");
     }
 
     private Map<String, Object> generateDataTransferSummary(DataTransferResult transferResult) {

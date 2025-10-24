@@ -20,6 +20,8 @@ import me.christianrobert.orapgsync.core.job.model.function.FunctionMetadata;
 import me.christianrobert.orapgsync.core.job.model.function.FunctionStubCreationResult;
 import me.christianrobert.orapgsync.core.job.model.typemethod.TypeMethodMetadata;
 import me.christianrobert.orapgsync.core.job.model.typemethod.TypeMethodStubCreationResult;
+import me.christianrobert.orapgsync.oraclecompat.model.OracleCompatInstallationResult;
+import me.christianrobert.orapgsync.oraclecompat.model.OracleCompatVerificationResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -76,6 +78,10 @@ public class StateService {
     List<TypeMethodMetadata> oracleTypeMethodMetadata = new ArrayList<>();
     List<TypeMethodMetadata> postgresTypeMethodMetadata = new ArrayList<>();
     TypeMethodStubCreationResult typeMethodStubCreationResult;
+
+    // Oracle Compatibility Layer
+    OracleCompatInstallationResult oracleCompatInstallationResult;
+    OracleCompatVerificationResult oracleCompatVerificationResult;
 
     ConstraintCreationResult constraintCreationResult;
 
@@ -333,6 +339,22 @@ public class StateService {
         this.typeMethodStubCreationResult = typeMethodStubCreationResult;
     }
 
+    public OracleCompatInstallationResult getOracleCompatInstallationResult() {
+        return oracleCompatInstallationResult;
+    }
+
+    public void setOracleCompatInstallationResult(OracleCompatInstallationResult oracleCompatInstallationResult) {
+        this.oracleCompatInstallationResult = oracleCompatInstallationResult;
+    }
+
+    public OracleCompatVerificationResult getOracleCompatVerificationResult() {
+        return oracleCompatVerificationResult;
+    }
+
+    public void setOracleCompatVerificationResult(OracleCompatVerificationResult oracleCompatVerificationResult) {
+        this.oracleCompatVerificationResult = oracleCompatVerificationResult;
+    }
+
     public ConstraintCreationResult getConstraintCreationResult() {
         return constraintCreationResult;
     }
@@ -376,6 +398,8 @@ public class StateService {
         this.oracleTypeMethodMetadata = new ArrayList<>();
         this.postgresTypeMethodMetadata = new ArrayList<>();
         this.typeMethodStubCreationResult = null;
+        this.oracleCompatInstallationResult = null;
+        this.oracleCompatVerificationResult = null;
         this.constraintCreationResult = null;
         this.fkIndexCreationResult = null;
         this.dataTransferResult = null;
