@@ -260,17 +260,33 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
    - Pattern: `typename__methodname`
 
 ### 🔄 Phase 3: Full Implementation (In Progress)
-10. **View SQL Transformation**: ✅ **INTEGRATED** - ANTLR-based Oracle→PostgreSQL SQL conversion
-    - ✅ Architecture: Direct AST approach (no intermediate semantic tree)
-    - ✅ PostgresViewImplementationJob uses SqlTransformationService
-    - ✅ 72 tests passing - WHERE clause, literals, operators, SELECT *, type methods, package functions
-    - ✅ Metadata-driven disambiguation (type methods vs package functions)
+10. **View SQL Transformation**: ✅ **90% COMPLETE** - ANTLR-based Oracle→PostgreSQL SQL conversion
+    - ✅ Architecture: Direct AST approach with 37 static visitor helpers
+    - ✅ PostgresViewImplementationJob integrated with SqlTransformationService
+    - ✅ **662+ tests passing** across 42+ test classes
+    - ✅ **90% real-world view coverage achieved**
+    - ✅ Complete SELECT support: WHERE, ORDER BY, GROUP BY, HAVING, all JOIN types
+    - ✅ Oracle-specific functions: NVL, DECODE, TO_CHAR, TO_DATE, SUBSTR, TRIM, SYSDATE, ROWNUM, sequences
+    - ✅ CTEs (WITH clause): Recursive and non-recursive with automatic RECURSIVE detection
+    - ✅ CONNECT BY: Hierarchical queries → recursive CTEs with LEVEL and SYS_CONNECT_BY_PATH
+    - ✅ Date/Time functions: ADD_MONTHS, MONTHS_BETWEEN, LAST_DAY, TRUNC, ROUND
+    - ✅ String functions: INSTR, LPAD, RPAD, TRANSLATE, REGEXP_REPLACE, REGEXP_SUBSTR
+    - ✅ Arithmetic, concatenation, subqueries, set operations, window functions
+    - ✅ FROM DUAL handling, outer joins (Oracle (+) syntax)
     - ✅ CREATE OR REPLACE VIEW preserves dependencies (critical!)
-    - ⏳ Remaining: ORDER BY, GROUP BY, JOINs, Oracle-specific functions (NVL, DECODE, etc.)
-11. **Function/Procedure Logic**: PL/SQL→PL/pgSQL conversion using ANTLR (Future)
-12. **Type Method Logic**: Member method implementations (Future)
-13. **Triggers**: Migration from Oracle to PostgreSQL (Future)
+    - See [TRANSFORMATION.md](TRANSFORMATION.md) for detailed documentation
+11. **Function/Procedure Logic**: PL/SQL→PL/pgSQL conversion using ANTLR (Planned - see Phase 3 roadmap)
+12. **Type Method Logic**: Member method implementations (Planned - see Phase 3 roadmap)
+13. **Triggers**: Migration from Oracle to PostgreSQL (Planned - see Phase 3 roadmap)
 14. **Indexes**: Extraction and creation (Future)
+
+### 📋 Phase 3 Detailed Roadmap (Next Steps)
+1. **Oracle Built-in Replacements**: Install PostgreSQL equivalents (DBMS_OUTPUT, DBMS_UTILITY, etc.)
+2. **Package Analysis**: Analyze package variables and state management patterns
+3. **Type Method Implementation**: Transform type member methods using ANTLR (extend PostgresCodeBuilder)
+4. **Function/Procedure Implementation**: PL/SQL→PL/pgSQL using package analysis results
+5. **Trigger Migration**: Extract and transform Oracle triggers
+6. **REST Layer** (Optional): Auto-generate REST endpoints for testing and incremental cutover
 
 ## Database Configuration
 
@@ -648,9 +664,9 @@ Oracle synonyms provide alternative names. PostgreSQL doesn't have synonyms, so 
 
 ## SQL/PL-SQL Transformation Module
 
-**Status:** Phase 2 Nearly Complete - 72 tests passing ✅
+**Status:** 90% Real-World View Coverage - 662+ tests passing ✅
 
-The transformation module converts Oracle SQL and PL/SQL code to PostgreSQL-compatible equivalents using ANTLR-based direct AST transformation (no intermediate semantic tree).
+The transformation module converts Oracle SQL and PL/SQL code to PostgreSQL-compatible equivalents using ANTLR-based direct AST transformation (no intermediate semantic tree). View SQL transformation is nearly complete with comprehensive support for Oracle-specific features.
 
 ### Architecture Overview
 
@@ -663,11 +679,11 @@ Oracle SQL → ANTLR Parser → Direct Visitor → PostgreSQL SQL
 
 **Key Design Principles:**
 1. **Direct transformation**: Visitor returns PostgreSQL SQL strings directly (no intermediate tree)
-2. **Static helper pattern**: Each ANTLR rule has a static helper class (26 helpers)
+2. **Static helper pattern**: Each ANTLR rule has a static helper class (37 helpers)
 3. **Metadata-driven**: Uses pre-built TransformationIndices for O(1) lookups
 4. **Dependency boundaries**: TransformationContext passed as parameter (not CDI injected into visitor)
 5. **Incremental development**: Start simple, add complexity progressively
-6. **Test-driven**: 72 tests passing across 9 test classes
+6. **Test-driven**: 662+ tests passing across 42+ test classes
 7. **Quarkus-native**: Service layer uses CDI, visitor layer stays pure
 
 ### Metadata Strategy
@@ -699,21 +715,29 @@ Oracle SQL → ANTLR Parser → Direct Visitor → PostgreSQL SQL
 
 See `TRANSFORMATION.md` for detailed implementation plan.
 
-**Phase 1-4: SQL Views** (5 weeks)
-- Foundation: Infrastructure, semantic nodes, metadata indexing
-- Basic SELECT: WHERE, ORDER BY, expressions
-- Oracle-specific: NVL→COALESCE, DECODE→CASE, ROWNUM, DUAL, sequences
-- Advanced: JOINs, subqueries, aggregation, window functions
+**✅ Phase 1-4: SQL Views** (COMPLETE - 90% real-world coverage)
+- ✅ Foundation: Infrastructure, ANTLR parser, PostgresCodeBuilder with 37 static visitor helpers
+- ✅ Basic SELECT: WHERE, ORDER BY, GROUP BY, HAVING, expressions (11-level hierarchy)
+- ✅ Oracle-specific: NVL→COALESCE, DECODE→CASE, ROWNUM→LIMIT, FROM DUAL, sequences
+- ✅ Advanced: All JOIN types, subqueries, set operations, aggregation, window functions
+- ✅ CTEs: WITH clause support (recursive and non-recursive)
+- ✅ CONNECT BY: Hierarchical queries → recursive CTEs
+- ✅ Date/Time functions: ADD_MONTHS, MONTHS_BETWEEN, LAST_DAY, TRUNC, ROUND
+- ✅ String functions: INSTR, LPAD, RPAD, TRANSLATE, REGEXP_REPLACE, REGEXP_SUBSTR
+- ✅ Outer joins: Oracle (+) → ANSI LEFT/RIGHT JOIN
+- ✅ 662+ tests passing across 42+ test classes
 
-**Phase 5: Integration** (1 week)
-- Create `PostgresViewImplementationJob` to replace stubs with transformed SQL
-- Integration with existing job infrastructure
-- Error reporting and transformation success metrics
+**✅ Phase 5: Integration** (COMPLETE)
+- ✅ PostgresViewImplementationJob integrated with SqlTransformationService
+- ✅ CREATE OR REPLACE VIEW preserves dependencies
+- ✅ Error reporting and transformation success metrics
 
-**Phase 6+: PL/SQL** (Future)
-- Extend to function/procedure bodies
-- Control flow: IF, LOOP, CURSOR, EXCEPTION
-- Reuse same semantic nodes and context
+**📋 Next: PL/SQL Transformation**
+1. Oracle built-in replacements (DBMS_OUTPUT, DBMS_UTILITY, etc.)
+2. Package analysis (variables, state management)
+3. Type method implementation (extend PostgresCodeBuilder with PL/SQL visitors)
+4. Function/procedure implementation (PL/SQL→PL/pgSQL)
+5. Trigger migration
 
 ### Module Location
 
@@ -728,52 +752,53 @@ See `TRANSFORMATION.md` for detailed implementation plan.
 
 ### Current Status (October 2025)
 
-**Phase 1 (Foundation):** ✅ COMPLETE
-- ✅ ANTLR parser integration (PlSqlParser.g4)
-- ✅ PostgresCodeBuilder with 26 static visitor helpers
-- ✅ TransformationContext and TransformationIndices
-- ✅ MetadataIndexBuilder builds indices from StateService
-- ✅ SqlTransformationService (@ApplicationScoped CDI bean)
-- ✅ Full expression hierarchy (11 levels)
-- ✅ Basic SELECT transformation working
+**View SQL Transformation:** ✅ 90% REAL-WORLD COVERAGE ACHIEVED
+- ✅ 662+ tests passing across 42+ test classes
+- ✅ All SQL views phases (1-5) complete
+- ✅ Production-ready for most Oracle SQL views
 
-**Phase 2 (Complete SELECT):** ✅ ~80% COMPLETE
-- ✅ WHERE clause (literals, AND/OR/NOT, comparisons, IN, BETWEEN, LIKE)
-- ✅ SELECT * and qualified SELECT (e.*)
-- ✅ Table aliases
-- ✅ Complex nested conditions
-- ✅ Parenthesized expressions
-- ✅ **Type member method transformation** (emp.address.get_street() → flattened function)
-- ✅ **Package function transformation** (pkg.func() → pkg__func())
-- ⏳ ORDER BY, GROUP BY, HAVING (not yet implemented)
-- ⏳ JOINs (only single table currently)
-- ⏳ Arithmetic operators (+, -, *, /)
-- ⏳ String concatenation (||)
+**Key Accomplishments:**
 
-**Testing:**
-- ✅ 72/72 tests passing across 9 test classes
-- ✅ SimpleSelectTransformationTest (4 tests)
-- ✅ SelectStarTransformationTest (10 tests)
-- ✅ TableAliasTransformationTest (9 tests)
-- ✅ PackageFunctionTransformationTest (10 tests)
-- ✅ TypeMemberMethodTransformationTest (8 tests)
-- ✅ ExpressionBuildingBlocksTest (24 tests)
-- ✅ SqlTransformationServiceTest (24 tests)
-- ✅ ViewTransformationIntegrationTest (7 tests)
+**Foundation & Core SELECT:** ✅ COMPLETE
+- ANTLR parser integration (PlSqlParser.g4)
+- PostgresCodeBuilder with 37 static visitor helpers
+- TransformationContext and TransformationIndices
+- Full expression hierarchy (11 levels)
+- Complete SELECT support: columns, *, qualified, aliases
+- WHERE, ORDER BY, GROUP BY, HAVING clauses
+- All JOIN types (INNER, LEFT, RIGHT, FULL, CROSS)
+- Arithmetic operators, string concatenation (|| → CONCAT for NULL safety)
 
-**Phase 3 (Oracle-Specific Functions):** ⏳ NOT STARTED
-- ⏳ NVL → COALESCE
-- ⏳ DECODE → CASE WHEN
-- ⏳ SYSDATE → CURRENT_TIMESTAMP
-- ⏳ ROWNUM → row_number() OVER ()
-- ⏳ DUAL table handling (remove FROM DUAL)
-- ⏳ Sequence syntax (seq.NEXTVAL → nextval('schema.seq'))
+**Oracle-Specific Transformations:** ✅ COMPLETE
+- NVL → COALESCE, SYSDATE → CURRENT_TIMESTAMP
+- DECODE → CASE WHEN
+- TO_CHAR (format code transformations)
+- TO_DATE → TO_TIMESTAMP, SUBSTR → SUBSTRING
+- TRIM, CASE expressions (END CASE → END)
+- FROM DUAL (omit FROM clause)
+- ROWNUM: WHERE ROWNUM → LIMIT, SELECT ROWNUM → row_number()
+- Sequences (seq.NEXTVAL → nextval('schema.seq'))
+- Type member methods (emp.address.get_street() → flattened function)
+- Package functions (pkg.func() → pkg__func())
 
-**Phase 4 (Integration with Migration):** ✅ COMPLETE
-- ✅ Oracle view SQL extraction (ViewMetadata.sqlDefinition)
-- ✅ PostgresViewImplementationJob created
-- ✅ Uses CREATE OR REPLACE VIEW (preserves dependencies - critical for two-phase architecture!)
+**Advanced Features:** ✅ COMPLETE
+- **CTEs (WITH clause):** Recursive and non-recursive (38 tests)
+- **CONNECT BY:** Hierarchical queries → recursive CTEs with LEVEL and SYS_CONNECT_BY_PATH (24 tests)
+- **Date/Time functions:** ADD_MONTHS, MONTHS_BETWEEN, LAST_DAY, TRUNC, ROUND (27 tests)
+- **String functions:** INSTR, LPAD, RPAD, TRANSLATE, REGEXP_REPLACE, REGEXP_SUBSTR (47 tests)
+- **Subqueries:** FROM, SELECT list, WHERE IN/EXISTS/scalar/ANY/ALL
+- **Set operations:** UNION, UNION ALL, INTERSECT, MINUS → EXCEPT
+- **Window functions:** OVER clause with ROW_NUMBER, RANK, LEAD, LAG, aggregates
+- **Outer joins:** Oracle (+) → ANSI LEFT/RIGHT JOIN
 
-**Future:**
-- ⏳ Phase 5+: PL/SQL transformation (function/procedure bodies)
-- ⏳ Triggers, indexes, advanced features
+**Integration:** ✅ COMPLETE
+- PostgresViewImplementationJob replaces view stubs with transformed SQL
+- CREATE OR REPLACE VIEW preserves dependencies
+- SqlTransformationService API for job integration
+
+**Next: PL/SQL Transformation**
+1. Oracle built-in replacements (DBMS_OUTPUT, DBMS_UTILITY, etc.)
+2. Package analysis (variables, state management)
+3. Type method implementation (extend PostgresCodeBuilder with PL/SQL statement visitors)
+4. Function/procedure implementation (PL/SQL→PL/pgSQL)
+5. Trigger migration

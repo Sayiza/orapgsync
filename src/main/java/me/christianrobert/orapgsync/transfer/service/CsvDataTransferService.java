@@ -52,9 +52,6 @@ public class CsvDataTransferService {
     @Inject
     private OracleComplexTypeSerializer complexTypeSerializer;
 
-    @Inject
-    private me.christianrobert.orapgsync.config.service.ConfigService configService;
-
     /**
      * Transfers data for a single table from Oracle to PostgreSQL.
      *
@@ -288,37 +285,15 @@ public class CsvDataTransferService {
                         try {
                             String lobValue = null;
 
-                            // Check if LOB data should be excluded (config flag)
-                            Boolean excludeLobData = configService.getConfigValueAsBoolean("exclude.lob-data");
-                            if (excludeLobData != null && excludeLobData) {
-                                // Skip LOB serialization - insert minimal dummy value to satisfy NOT NULL constraints
-                                if (dataType.matches("BLOB|BFILE|LONG RAW")) {
-                                    // Binary LOB - use empty bytea in PostgreSQL hex format
-                                    // Format: \x (PostgreSQL's representation of empty bytea in CSV)
-                                    lobValue = "\\x";
-                                    log.trace("Using empty bytea dummy value for BLOB column {} (exclude.lob-data=true)",
-                                             column.getColumnName());
-                                } else if (dataType.matches("CLOB|NCLOB|LONG")) {
-                                    // Character LOB - use empty string
-                                    lobValue = "";
-                                    log.trace("Using empty string dummy value for CLOB column {} (exclude.lob-data=true)",
-                                             column.getColumnName());
-                                } else {
-                                    log.warn("Unknown LOB type {} for column {}, using empty string",
-                                            dataType, column.getColumnName());
-                                    lobValue = "";
-                                }
+                            // Serialize LOB data
+                            if (dataType.matches("BLOB|BFILE|LONG RAW")) {
+                                // Binary LOB - serialize to hex format
+                                lobValue = complexTypeSerializer.serializeBlobToHex(rs, rsColumnIndex, column);
+                            } else if (dataType.matches("CLOB|NCLOB|LONG")) {
+                                // Character LOB - serialize to text
+                                lobValue = complexTypeSerializer.serializeClobToText(rs, rsColumnIndex, column);
                             } else {
-                                // Normal LOB serialization
-                                if (dataType.matches("BLOB|BFILE|LONG RAW")) {
-                                    // Binary LOB - serialize to hex format
-                                    lobValue = complexTypeSerializer.serializeBlobToHex(rs, rsColumnIndex, column);
-                                } else if (dataType.matches("CLOB|NCLOB|LONG")) {
-                                    // Character LOB - serialize to text
-                                    lobValue = complexTypeSerializer.serializeClobToText(rs, rsColumnIndex, column);
-                                } else {
-                                    log.warn("Unknown LOB type {} for column {}", dataType, column.getColumnName());
-                                }
+                                log.warn("Unknown LOB type {} for column {}", dataType, column.getColumnName());
                             }
 
                             csvPrinter.print(lobValue);

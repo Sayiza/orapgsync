@@ -246,11 +246,6 @@ function collectConfigurationData() {
         config['do.all-schemas'] = allSchemasCheckbox.checked;
     }
 
-    const excludeLobDataCheckbox = document.getElementById('exclude-lob-data');
-    if (excludeLobDataCheckbox) {
-        config['exclude.lob-data'] = excludeLobDataCheckbox.checked;
-    }
-
     // Text fields mapping
     const fieldMappings = {
         'do-only-test-schema': 'do.only-test-schema',
@@ -293,11 +288,6 @@ function populateConfigurationForm(config) {
     const allSchemasCheckbox = document.getElementById('do-all-schemas');
     if (allSchemasCheckbox) {
         allSchemasCheckbox.checked = config['do.all-schemas'] === true;
-    }
-
-    const excludeLobDataCheckbox = document.getElementById('exclude-lob-data');
-    if (excludeLobDataCheckbox) {
-        excludeLobDataCheckbox.checked = config['exclude.lob-data'] === true;
     }
 
     // Text fields mapping

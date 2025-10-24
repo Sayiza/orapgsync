@@ -616,6 +616,43 @@ Detailed implementation documentation:
 
 ## Next Steps
 
+### Planned Implementation Sequence
+
+**1. Oracle Built-in Replacements** (Foundation for PL/SQL)
+- Install PostgreSQL equivalents for Oracle built-in packages
+- Priority packages: DBMS_OUTPUT, DBMS_UTILITY, UTL_FILE, DBMS_LOB
+- Three support levels: Full, Partial, Stub (with documentation)
+- Creates foundation for PL/SQL code that depends on these packages
+
+**2. Package Analysis** (Before Function Implementation)
+- Analyze Oracle package structure and state management
+- Classify package variables: constants, simple variables, complex state
+- Assess migration feasibility per package
+- Generate reports on supported vs. manual migration patterns
+- Informs function implementation strategy
+
+**3. Type Method Implementation** (Simpler than Functions)
+- Transform Oracle type member methods to PostgreSQL functions
+- Extend PostgresCodeBuilder with PL/SQL statement visitors
+- Handle SELF parameter transformation
+- Replace type method stubs with actual implementations
+
+**4. Function/Procedure Implementation** (Uses Package Analysis)
+- Transform standalone and package functions/procedures
+- PL/SQL → PL/pgSQL conversion using ANTLR
+- Implement strategies from package analysis (constants, session config, etc.)
+- Replace function/procedure stubs with actual implementations
+
+**5. Trigger Migration**
+- Extract Oracle trigger definitions
+- Transform to PostgreSQL trigger functions
+- Handle :NEW/:OLD, timing, events, row/statement level
+
+**6. REST Layer Generation (Optional Future)**
+- Auto-generate REST endpoints for migrated functions
+- Enable incremental cutover and testing
+- OpenAPI documentation
+
 ### Potential Future Enhancements
 
 **Low Priority (Rare Usage):**
@@ -627,11 +664,6 @@ Detailed implementation documentation:
 - PIVOT/UNPIVOT operations
 - MODEL clause
 - Unary operators in edge cases
-
-**Phase 5: PL/SQL Transformation (Future):**
-- Function/procedure body transformation
-- Control flow: IF, LOOP, CURSOR, EXCEPTION
-- Reuse same infrastructure and patterns
 
 ---
 
