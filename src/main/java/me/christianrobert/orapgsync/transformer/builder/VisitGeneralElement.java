@@ -343,26 +343,23 @@ public class VisitGeneralElement {
       // Not a synonym - check if it's a package function in current schema
       String qualifiedName = currentSchema + "." + packageName.toLowerCase() + "." + functionName.toLowerCase();
       if (context.isPackageFunction(qualifiedName)) {
-        // It's a package function in current schema - no schema prefix needed
-        return packageName + "__" + functionName + arguments;
+        // It's a package function in current schema - add schema prefix
+        // (PostgreSQL search_path may not include the migration schema)
+        return currentSchema + "." + packageName + "__" + functionName + arguments;
       }
 
       // Unknown - pass through with transformation (best guess)
-      return packageName + "__" + functionName + arguments;
+      // Add schema prefix for consistency
+      return currentSchema + "." + packageName + "__" + functionName + arguments;
 
     } else if (packagePath.size() == 2) {
       // Two-part path: schema.package.function
       String schemaName = packagePath.get(0).toLowerCase();
       String packageName = packagePath.get(1);
 
-      // Check if schema is different from current schema
-      if (!schemaName.equals(currentSchema)) {
-        // Cross-schema: keep schema prefix
-        return schemaName + "." + packageName + "__" + functionName + arguments;
-      } else {
-        // Same schema: drop schema prefix
-        return packageName + "__" + functionName + arguments;
-      }
+      // Always keep schema prefix for consistency
+      // (PostgreSQL search_path may not include the migration schema)
+      return schemaName + "." + packageName + "__" + functionName + arguments;
 
     } else {
       throw new TransformationException(

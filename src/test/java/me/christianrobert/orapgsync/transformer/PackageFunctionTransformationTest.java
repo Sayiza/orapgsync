@@ -69,10 +69,10 @@ class PackageFunctionTransformationTest {
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
         String postgresSql = builder.visit(parseResult.getTree());
 
-        // Then: Package.function becomes package__function, table name qualified with schema
+        // Then: Package.function becomes schema.package__function, table name qualified with schema
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
-        assertEquals("SELECT nr , testpackage__testfunction( nr ) FROM hr.examples", normalized,
-                "Package function should be flattened with double underscore");
+        assertEquals("SELECT nr , hr.testpackage__testfunction( nr ) FROM hr.examples", normalized,
+                "Package function should be flattened with double underscore and schema qualification");
     }
 
     @Test
@@ -91,9 +91,9 @@ class PackageFunctionTransformationTest {
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
         String postgresSql = builder.visit(parseResult.getTree());
 
-        // Then: Case preserved, flattened with __, table name qualified with schema
+        // Then: Case preserved, flattened with __, schema qualified, table name qualified with schema
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
-        assertEquals("SELECT nr , TestPackage__TestFunction( nr ) FROM hr.examples", normalized);
+        assertEquals("SELECT nr , hr.TestPackage__TestFunction( nr ) FROM hr.examples", normalized);
     }
 
     @Test
@@ -113,9 +113,9 @@ class PackageFunctionTransformationTest {
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
         String postgresSql = builder.visit(parseResult.getTree());
 
-        // Then: Both functions flattened, table name qualified with schema
+        // Then: Both functions flattened with schema qualification, table name qualified with schema
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
-        assertEquals("SELECT pkg1__func1( nr ) , pkg2__func2( text ) FROM hr.examples", normalized);
+        assertEquals("SELECT hr.pkg1__func1( nr ) , hr.pkg2__func2( text ) FROM hr.examples", normalized);
     }
 
     // ========== SCENARIO B: Package function via synonym ==========
@@ -208,9 +208,9 @@ class PackageFunctionTransformationTest {
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
         String postgresSql = builder.visit(parseResult.getTree());
 
-        // Then: Function flattened with all arguments preserved, table name qualified with schema
+        // Then: Function flattened with schema qualification and all arguments preserved, table name qualified with schema
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
-        assertEquals("SELECT pkg__calc( nr , text ) FROM hr.examples", normalized);
+        assertEquals("SELECT hr.pkg__calc( nr , text ) FROM hr.examples", normalized);
     }
 
     @Test
@@ -230,9 +230,9 @@ class PackageFunctionTransformationTest {
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
         String postgresSql = builder.visit(parseResult.getTree());
 
-        // Then: Both functions flattened, table name qualified with schema
+        // Then: Both functions flattened with schema qualification, table name qualified with schema
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
-        assertEquals("SELECT pkg__outer( pkg__inner( nr ) ) FROM hr.examples", normalized);
+        assertEquals("SELECT hr.pkg__outer( hr.pkg__inner( nr ) ) FROM hr.examples", normalized);
     }
 
     // ========== EDGE CASES ==========
