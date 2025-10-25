@@ -136,6 +136,19 @@ Each database element type is completely independent:
 - Naming convention: Type members use `typename__methodname` (double underscore)
 - Method stubs return NULL for functions, empty body for procedures
 
+**Oracle Compatibility Layer** (`oraclecompat/`):
+- `OracleBuiltinCatalog`: Central registry of Oracle built-in package equivalents
+- `OracleBuiltinFunction`: Data model for package function metadata
+- `SupportLevel`: Enum (FULL, PARTIAL, STUB, NONE) indicating implementation completeness
+- `PostgresOracleCompatInstallationJob`: Installs compatibility layer into `oracle_compat` schema
+- `PostgresOracleCompatVerificationJob`: Verifies installed functions
+- `OracleCompatInstallationResult`: Tracks installed/failed functions by support level
+- Implementation classes: `DbmsOutputImpl`, `DbmsUtilityImpl`, `UtlFileImpl`, `DbmsLobImpl`
+- Priority packages: DBMS_OUTPUT, DBMS_UTILITY, UTL_FILE, DBMS_LOB
+- Flattened naming convention: `oracle_compat.dbms_output__put_line` (double underscore)
+- Extensible catalog system for adding more packages/functions
+- Foundation for PL/SQL function/procedure migration
+
 #### 4. **Cross-Cutting Concerns** (`core/`)
 - `TypeConverter`: Oracle-to-PostgreSQL data type mapping
 - `OracleTypeClassifier`: Identifies complex Oracle system types requiring jsonb
@@ -260,7 +273,15 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
    - Pattern: `typename__methodname`
 
 ### 🔄 Phase 3: Full Implementation (In Progress)
-10. **View SQL Transformation**: ✅ **90% COMPLETE** - ANTLR-based Oracle→PostgreSQL SQL conversion
+10. **Oracle Compatibility Layer**: ✅ **COMPLETE** - PostgreSQL equivalents for Oracle built-in packages
+    - ✅ Priority packages: DBMS_OUTPUT, DBMS_UTILITY, UTL_FILE, DBMS_LOB
+    - ✅ Three-tier support system: FULL, PARTIAL, STUB
+    - ✅ Installed into `oracle_compat` schema with flattened naming (e.g., `dbms_output__put_line`)
+    - ✅ Extensible catalog system for future additions
+    - ✅ Integrated as Step 23/24 in orchestration workflow
+    - See `oraclecompat/` module and [TRANSFORMATION.md](TRANSFORMATION.md) Phase 4.5
+
+11. **View SQL Transformation**: ✅ **90% COMPLETE** - ANTLR-based Oracle→PostgreSQL SQL conversion
     - ✅ Architecture: Direct AST approach with 37 static visitor helpers
     - ✅ PostgresViewImplementationJob integrated with SqlTransformationService
     - ✅ **662+ tests passing** across 42+ test classes
@@ -275,13 +296,14 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
     - ✅ FROM DUAL handling, outer joins (Oracle (+) syntax)
     - ✅ CREATE OR REPLACE VIEW preserves dependencies (critical!)
     - See [TRANSFORMATION.md](TRANSFORMATION.md) for detailed documentation
-11. **Function/Procedure Logic**: PL/SQL→PL/pgSQL conversion using ANTLR (Planned - see Phase 3 roadmap)
-12. **Type Method Logic**: Member method implementations (Planned - see Phase 3 roadmap)
-13. **Triggers**: Migration from Oracle to PostgreSQL (Planned - see Phase 3 roadmap)
-14. **Indexes**: Extraction and creation (Future)
+
+12. **Function/Procedure Logic**: PL/SQL→PL/pgSQL conversion using ANTLR (Planned - see Phase 3 roadmap)
+13. **Type Method Logic**: Member method implementations (Planned - see Phase 3 roadmap)
+14. **Triggers**: Migration from Oracle to PostgreSQL (Planned - see Phase 3 roadmap)
+15. **Indexes**: Extraction and creation (Future)
 
 ### 📋 Phase 3 Detailed Roadmap (Next Steps)
-1. **Oracle Built-in Replacements**: Install PostgreSQL equivalents (DBMS_OUTPUT, DBMS_UTILITY, etc.)
+1. ~~**Oracle Built-in Replacements**~~ ✅ **COMPLETE** - See item #10 above
 2. **Package Analysis**: Analyze package variables and state management patterns
 3. **Type Method Implementation**: Transform type member methods using ANTLR (extend PostgresCodeBuilder)
 4. **Function/Procedure Implementation**: PL/SQL→PL/pgSQL using package analysis results
@@ -302,11 +324,38 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
 
 ## API Documentation
 
+### REST API Design Pattern
+
+The application uses a **two-tier REST API architecture**:
+
+1. **Generic Job API** (`/api/jobs/*`) - For standard extraction/creation/verification jobs
+   - Pattern: `/api/jobs/{database}/{feature}-{phase}/{action}`
+   - Examples:
+     - `POST /api/jobs/oracle/view/extract`
+     - `POST /api/jobs/postgres/view-stub/create`
+     - `POST /api/jobs/postgres/constraint/create`
+   - All jobs follow the plugin pattern and are auto-discovered by JobRegistry
+
+2. **Specialized Resource APIs** - For complex operations requiring custom logic
+   - Pattern: `/api/{resource}/{database}/{operation}`
+   - Examples:
+     - `POST /api/oracle-compat/postgres/install` - Install Oracle compatibility layer
+     - `POST /api/oracle-compat/postgres/verify` - Verify compatibility layer
+     - `POST /api/transformation/sql` - Transform Oracle SQL to PostgreSQL
+   - Used when operations don't fit the standard job pattern (e.g., ad-hoc transformations)
+
+**When to Use Each:**
+- **Generic Job API**: Standard extraction, creation, verification workflows
+- **Specialized API**: Complex orchestration, development tools, or operations requiring special parameters
+
+### API Endpoints
+
 - **Swagger UI**: Available at `/q/swagger-ui` when running
 - **Job Management**: `/api/jobs/*` - Generic endpoints for any job type
 - **Configuration**: `/api/config/*` - Database connection configuration
 - **Status**: Various status endpoints for monitoring extraction progress
 - **SQL Transformation**: `/api/transformation/sql` - Transform Oracle SQL to PostgreSQL (development/testing)
+- **Oracle Compatibility**: `/api/oracle-compat/*` - Install and verify Oracle compatibility layer
 
 ### SQL Transformation REST Endpoint
 
@@ -558,6 +607,45 @@ Each step is unambiguous and the progression from stub to implementation is clea
 - **CDI annotations**: Use `@ApplicationScoped` for services, `@Dependent` for jobs
 - **State management**: Jobs update StateService directly via injected dependency
 - **Naming**: Follow the two-phase naming conventions documented above
+
+### Documentation Policy
+
+**CRITICAL: Always update documentation when completing implementation steps**
+
+To prevent divergence between code and documentation:
+
+1. **After completing ANY implementation step:**
+   - Update CLAUDE.md with a summary of what was implemented
+   - Update TRANSFORMATION.md if it's a SQL/PL-SQL transformation feature
+   - Update relevant implementation plan files (e.g., CTE_IMPLEMENTATION_PLAN.md, CONNECT_BY_IMPLEMENTATION_PLAN.md)
+
+2. **Document these aspects:**
+   - What was implemented (module, classes, key features)
+   - REST API endpoints (if any)
+   - Integration points (orchestration workflow step number, dependencies)
+   - Support levels or limitations (if applicable)
+   - Test coverage summary
+
+3. **Keep documentation synchronized:**
+   - Mark completed phases with ✅ in both CLAUDE.md and TRANSFORMATION.md
+   - Update migration status sections
+   - Update "Next Steps" or roadmap sections
+   - Cross-reference between documentation files
+
+4. **Documentation is part of "done":**
+   - An implementation is not complete until documentation is updated
+   - Documentation updates should happen in the same session as code completion
+   - Review both code and docs together before considering task complete
+
+**Example workflow:**
+```
+1. Implement Oracle compatibility layer
+2. Test the implementation
+3. Update CLAUDE.md Phase 3 section ✅
+4. Update TRANSFORMATION.md with Phase 4.5 ✅
+5. Update "Next Steps" roadmap ✅
+6. NOW the task is complete
+```
 
 ### Testing Strategy
 - **Framework**: JUnit 5 with Mockito
