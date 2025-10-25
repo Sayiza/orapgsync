@@ -63,7 +63,7 @@
             <div class="component-info" id="oracle-schemas">
               <span class="count-badge">-</span>
               <span class="component-text">Schemas found</span>
-              <button class="refresh-btn" onclick="loadOracleSchemas()" title="Refresh Oracle schemas">↻</button>
+              <button class="refresh-btn" onclick="loadOracleSchemas()" title="Refresh Oracle schemas">⟳</button>
               <div class="schema-list" id="oracle-schema-list" style="display: none;">
                 <div class="schema-list-header" onclick="toggleSchemaList('oracle')">
                   <span class="toggle-indicator">▼</span> Schema Names
@@ -78,7 +78,7 @@
             <div class="component-info" id="postgres-schemas">
               <span class="count-badge">-</span>
               <span class="component-text">Schemas available</span>
-              <button class="refresh-btn" onclick="loadPostgresSchemas()" title="Refresh PostgreSQL schemas">↻</button>
+              <button class="refresh-btn" onclick="loadPostgresSchemas()" title="Refresh PostgreSQL schemas">⟳</button>
               <button class="action-btn" onclick="createPostgresSchemas()" title="Create missing Oracle schemas in PostgreSQL">Create Schemas</button>
               <div class="schema-list" id="postgres-schema-list" style="display: none;">
                 <div class="schema-list-header" onclick="toggleSchemaList('postgres')">
@@ -104,7 +104,7 @@
             <div class="component-info" id="oracle-synonyms">
               <span class="count-badge">-</span>
               <span class="component-text">Synonyms discovered</span>
-              <button class="refresh-btn" onclick="loadOracleSynonyms()" title="Refresh Oracle synonyms">↻</button>
+              <button class="refresh-btn" onclick="loadOracleSynonyms()" title="Refresh Oracle synonyms">⟳</button>
               <div class="synonym-list" id="oracle-synonym-list" style="display: none;">
                 <div class="synonym-list-header" onclick="toggleSynonymList('oracle')">
                   <span class="toggle-indicator">▼</span> Synonyms by Schema
@@ -117,6 +117,7 @@
           </td>
           <td class="target-cell">
             <div class="component-info" id="postgres-synonyms">
+              <span class="count-badge">-</span>
               <span class="component-text">N/A - Resolved during migration</span>
             </div>
           </td>
@@ -126,7 +127,7 @@
             <div class="component-info" id="oracle-objects">
               <span class="count-badge">-</span>
               <span class="component-text">Object data types discovered</span>
-              <button class="refresh-btn" onclick="loadOracleObjectTypes()" title="Refresh Oracle object data types">↻</button>
+              <button class="refresh-btn" onclick="loadOracleObjectTypes()" title="Refresh Oracle object data types">⟳</button>
               <div class="object-list" id="oracle-object-list" style="display: none;">
                 <div class="object-list-header" onclick="toggleObjectList('oracle')">
                   <span class="toggle-indicator">▼</span> Object Data Types by Schema
@@ -141,7 +142,7 @@
             <div class="component-info" id="postgres-objects">
               <span class="count-badge">-</span>
               <span class="component-text">Data types created</span>
-              <button class="refresh-btn" onclick="loadPostgresObjectTypes()" title="Refresh PostgreSQL object data types">↻</button>
+              <button class="refresh-btn" onclick="loadPostgresObjectTypes()" title="Refresh PostgreSQL object data types">⟳</button>
               <button class="action-btn" onclick="createPostgresObjectTypes()" title="Create missing Oracle object types in PostgreSQL">Create Types</button>
               <div class="object-list" id="postgres-object-list" style="display: none;">
                 <div class="object-list-header" onclick="toggleObjectList('postgres')">
@@ -167,7 +168,7 @@
             <div class="component-info" id="oracle-sequences">
               <span class="count-badge">-</span>
               <span class="component-text">Sequences found</span>
-              <button class="refresh-btn" onclick="extractOracleSequences()" title="Extract Oracle sequences">⚙</button>
+              <button class="refresh-btn" onclick="extractOracleSequences()" title="Extract Oracle sequences">⟳</button>
               <div class="table-list" id="oracle-sequence-list" style="display: none;">
                 <div class="table-list-header" onclick="toggleSequenceList('oracle')">
                   <span class="toggle-indicator">▼</span> Sequences by Schema
@@ -182,7 +183,7 @@
             <div class="component-info" id="postgres-sequences">
               <span class="count-badge">-</span>
               <span class="component-text">Sequences created</span>
-              <button class="refresh-btn" onclick="extractPostgresSequences()" title="Extract PostgreSQL sequences">⚙</button>
+              <button class="refresh-btn" onclick="extractPostgresSequences()" title="Extract PostgreSQL sequences">⟳</button>
               <button class="action-btn" onclick="createPostgresSequences()" title="Create Oracle sequences in PostgreSQL">Create Sequences</button>
               <div class="table-list" id="postgres-sequence-list" style="display: none;">
                 <div class="table-list-header" onclick="toggleSequenceList('postgres')">
@@ -208,7 +209,7 @@
             <div class="component-info" id="oracle-tables">
               <span class="count-badge">-</span>
               <span class="component-text">Tables found</span>
-              <button class="refresh-btn" onclick="extractTableMetadata()" title="Extract Oracle table metadata">⚙</button>
+              <button class="refresh-btn" onclick="extractTableMetadata()" title="Extract Oracle table metadata">⟳</button>
               <div class="table-list" id="oracle-table-list" style="display: none;">
                 <div class="table-list-header" onclick="toggleTableList('oracle')">
                   <span class="toggle-indicator">▼</span> Tables by Schema
@@ -223,7 +224,7 @@
             <div class="component-info" id="postgres-tables">
               <span class="count-badge">-</span>
               <span class="component-text">Tables found</span>
-              <button class="refresh-btn" onclick="extractPostgresTableMetadata()" title="Extract PostgreSQL table metadata">⚙</button>
+              <button class="refresh-btn" onclick="extractPostgresTableMetadata()" title="Extract PostgreSQL table metadata">⟳</button>
               <button class="action-btn" onclick="createPostgresTables()" title="Create missing Oracle tables in PostgreSQL">Create Tables</button>
               <div class="table-list" id="postgres-table-list" style="display: none;">
                 <div class="table-list-header" onclick="toggleTableList('postgres')">
@@ -249,7 +250,7 @@
             <div class="component-info" id="oracle-data">
               <span class="count-badge">-</span>
               <span class="component-text">Records available</span>
-              <button class="refresh-btn" onclick="extractOracleRowCounts()" title="Extract Oracle row counts">⚙</button>
+              <button class="refresh-btn" onclick="extractOracleRowCounts()" title="Extract Oracle row counts">⟳</button>
               <div class="table-list" id="oracle-rowcount-list" style="display: none;">
                 <div class="table-list-header" onclick="toggleRowCountList('oracle')">
                   <span class="toggle-indicator">▼</span> Row Counts by Schema
@@ -264,7 +265,7 @@
             <div class="component-info" id="postgres-data">
               <span class="count-badge">-</span>
               <span class="component-text">Records migrated</span>
-              <button class="refresh-btn" onclick="extractPostgresRowCounts()" title="Extract PostgreSQL row counts">⚙</button>
+              <button class="refresh-btn" onclick="extractPostgresRowCounts()" title="Extract PostgreSQL row counts">⟳</button>
               <button class="action-btn" onclick="transferData()" title="Transfer data from Oracle to PostgreSQL">Transfer Data</button>
               <div class="table-list" id="postgres-rowcount-list" style="display: none;">
                 <div class="table-list-header" onclick="toggleRowCountList('postgres')">
@@ -290,7 +291,7 @@
             <div class="component-info" id="oracle-constraints">
               <span class="count-badge">-</span>
               <span class="component-text">Constraints found</span>
-              <button class="refresh-btn" onclick="extractOracleConstraints()" title="Extract Oracle constraints">⚙</button>
+              <button class="refresh-btn" onclick="extractOracleConstraints()" title="Extract Oracle constraints">⟳</button>
               <div class="table-list" id="oracle-constraint-list" style="display: none;">
                 <div class="table-list-header" onclick="toggleConstraintList('oracle')">
                   <span class="toggle-indicator">▼</span> Constraints by Type
@@ -305,7 +306,7 @@
             <div class="component-info" id="postgres-constraints">
               <span class="count-badge">-</span>
               <span class="component-text">Constraints created</span>
-              <button class="refresh-btn" onclick="verifyPostgresConstraints()" title="Verify PostgreSQL constraints">⚙</button>
+              <button class="refresh-btn" onclick="verifyPostgresConstraints()" title="Verify PostgreSQL constraints">⟳</button>
               <button class="action-btn" onclick="createPostgresConstraints()" title="Create Oracle constraints in PostgreSQL">Create Constraints</button>
               <div class="table-list" id="postgres-constraint-list" style="display: none;">
                 <div class="table-list-header" onclick="toggleConstraintList('postgres')">
@@ -329,6 +330,7 @@
         <tr class="fk-indexes-row">
           <td class="source-cell">
             <div class="component-info" id="oracle-fk-indexes">
+              <span class="count-badge">-</span>
               <span class="component-text">N/A - Derived from FK Constraints</span>
             </div>
           </td>
@@ -353,7 +355,7 @@
             <div class="component-info" id="oracle-views">
               <span class="count-badge">-</span>
               <span class="component-text">Views found</span>
-              <button class="refresh-btn" onclick="extractOracleViews()" title="Extract Oracle view definitions">⚙</button>
+              <button class="refresh-btn" onclick="extractOracleViews()" title="Extract Oracle view definitions">⟳</button>
               <div class="table-list" id="oracle-view-list" style="display: none;">
                 <div class="table-list-header" onclick="toggleViewList('oracle')">
                   <span class="toggle-indicator">▼</span> Views by Schema
@@ -368,7 +370,7 @@
             <div class="component-info" id="postgres-views">
               <span class="count-badge">-</span>
               <span class="component-text">View stubs created</span>
-              <button class="refresh-btn" onclick="extractPostgresViews()" title="Extract PostgreSQL view definitions">⚙</button>
+              <button class="refresh-btn" onclick="extractPostgresViews()" title="Extract PostgreSQL view definitions">⟳</button>
               <button class="action-btn" onclick="createPostgresViewStubs()" title="Create PostgreSQL view stubs">Create View Stubs</button>
               <div class="table-list" id="postgres-view-list" style="display: none;">
                 <div class="table-list-header" onclick="toggleViewList('postgres')">
@@ -394,7 +396,7 @@
             <div class="component-info" id="oracle-functions">
               <span class="count-badge">-</span>
               <span class="component-text">Functions/Procedures found</span>
-              <button class="refresh-btn" onclick="extractOracleFunctions()" title="Extract Oracle functions and procedures">⚙</button>
+              <button class="refresh-btn" onclick="extractOracleFunctions()" title="Extract Oracle functions and procedures">⟳</button>
               <div class="table-list" id="oracle-function-list" style="display: none;">
                 <div class="table-list-header" onclick="toggleFunctionList('oracle')">
                   <span class="toggle-indicator">▼</span> Functions/Procedures by Schema
@@ -409,7 +411,7 @@
             <div class="component-info" id="postgres-functions">
               <span class="count-badge">-</span>
               <span class="component-text">Function stubs created</span>
-              <button class="refresh-btn" onclick="extractPostgresFunctions()" title="Extract PostgreSQL functions and procedures">⚙</button>
+              <button class="refresh-btn" onclick="extractPostgresFunctions()" title="Extract PostgreSQL functions and procedures">⟳</button>
               <button class="action-btn" onclick="createPostgresFunctionStubs()" title="Create PostgreSQL function stubs">Create Function Stubs</button>
               <div class="table-list" id="postgres-function-list" style="display: none;">
                 <div class="table-list-header" onclick="toggleFunctionList('postgres')">
@@ -435,7 +437,7 @@
             <div class="component-info" id="oracle-type-methods">
               <span class="count-badge">-</span>
               <span class="component-text">Type Methods found</span>
-              <button class="refresh-btn" onclick="extractOracleTypeMethods()" title="Extract Oracle type methods">⚙</button>
+              <button class="refresh-btn" onclick="extractOracleTypeMethods()" title="Extract Oracle type methods">⟳</button>
               <div class="table-list" id="oracle-type-method-list" style="display: none;">
                 <div class="table-list-header" onclick="toggleTypeMethodList('oracle')">
                   <span class="toggle-indicator">▼</span> Type Methods by Schema
@@ -450,7 +452,7 @@
             <div class="component-info" id="postgres-type-methods">
               <span class="count-badge">-</span>
               <span class="component-text">Type method stubs created</span>
-              <button class="refresh-btn" onclick="extractPostgresTypeMethods()" title="Extract PostgreSQL type methods">⚙</button>
+              <button class="refresh-btn" onclick="extractPostgresTypeMethods()" title="Extract PostgreSQL type methods">⟳</button>
               <button class="action-btn" onclick="createPostgresTypeMethodStubs()" title="Create PostgreSQL type method stubs">Create Type Method Stubs</button>
               <div class="table-list" id="postgres-type-method-list" style="display: none;">
                 <div class="table-list-header" onclick="toggleTypeMethodList('postgres')">
@@ -474,6 +476,7 @@
         <tr class="oracle-compat-row">
           <td class="source-cell">
             <div class="component-info" id="oracle-compat-source">
+              <span class="count-badge">-</span>
               <span class="component-text">N/A - fixed supported feature set</span>
             </div>
           </td>
@@ -481,7 +484,7 @@
             <div class="component-info" id="postgres-oracle-compat">
               <span class="count-badge">-</span>
               <span class="component-text">Compatibility functions installed</span>
-              <button class="refresh-btn" onclick="verifyOracleCompat()" title="Verify Oracle compatibility layer installation">⚙</button>
+              <button class="refresh-btn" onclick="verifyOracleCompat()" title="Verify Oracle compatibility layer installation">⟳</button>
               <button class="action-btn" onclick="installOracleCompat()" title="Install Oracle built-in replacements">Install Compatibility Layer</button>
               <div class="table-creation-results" id="postgres-oracle-compat-installation-results" style="display: none;">
                 <div class="table-creation-header" onclick="toggleOracleCompatInstallationResults()">
@@ -505,6 +508,7 @@
         <tr class="view-implementation-row">
           <td class="source-cell">
             <div class="component-info" id="oracle-view-implementation">
+              <span class="count-badge">-</span>
               <span class="component-text">N/A - see Views above</span>
             </div>
           </td>
@@ -512,7 +516,7 @@
             <div class="component-info" id="postgres-view-implementation">
               <span class="count-badge">-</span>
               <span class="component-text">Views created</span>
-              <button class="refresh-btn" onclick="verifyPostgresViewImplementation()" title="Verify PostgreSQL view implementations">⚙</button>
+              <button class="refresh-btn" onclick="verifyPostgresViewImplementation()" title="Verify PostgreSQL view implementations">⟳</button>
               <button class="action-btn" onclick="createPostgresViewImplementation()" title="Create PostgreSQL views with actual SQL">Create Views</button>
               <div class="table-creation-results" id="postgres-view-implementation-results" style="display: none;">
                 <div class="table-creation-header" onclick="toggleViewImplementationResults('postgres')">

@@ -65,7 +65,7 @@ async function extractOracleConstraints() {
         // Re-enable button
         if (button) {
             button.disabled = false;
-            button.innerHTML = '⚙';
+            button.innerHTML = '⟳';
         }
     }
 }
@@ -108,7 +108,7 @@ async function verifyPostgresConstraints() {
         // Re-enable button
         if (button) {
             button.disabled = false;
-            button.innerHTML = '⚙';
+            button.innerHTML = '⟳';
         }
     }
 }
@@ -184,7 +184,7 @@ async function pollConstraintJobStatus(jobId, database) {
                     const button = document.querySelector(`#${database}-constraints .refresh-btn`);
                     if (button) {
                         button.disabled = false;
-                        button.innerHTML = '⚙';
+                        button.innerHTML = '⟳';
                     }
 
                     resolve(status);
@@ -197,7 +197,7 @@ async function pollConstraintJobStatus(jobId, database) {
                     const button = document.querySelector(`#${database}-constraints .refresh-btn`);
                     if (button) {
                         button.disabled = false;
-                        button.innerHTML = '⚙';
+                        button.innerHTML = '⟳';
                     }
 
                     reject(new Error(status.error || 'Constraint extraction/verification failed'));
@@ -311,7 +311,7 @@ async function getConstraintJobResults(jobId, database) {
     } catch (error) {
         console.error('Error getting constraint job results:', error);
         updateMessage('Error getting constraint results: ' + error.message);
-        updateComponentCount(`${database}-constraints`, '?', 'error');
+        updateComponentCount(`${database}-constraints`, '-', 'error');
     }
 }
 

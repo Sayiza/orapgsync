@@ -63,7 +63,7 @@ async function extractOracleTypeMethods() {
         // Re-enable button
         if (button) {
             button.disabled = false;
-            button.innerHTML = '⚙';
+            button.innerHTML = '⟳';
         }
     }
 }
@@ -106,7 +106,7 @@ async function extractPostgresTypeMethods() {
         // Re-enable button
         if (button) {
             button.disabled = false;
-            button.innerHTML = '⚙';
+            button.innerHTML = '⟳';
         }
     }
 }
@@ -181,7 +181,7 @@ async function pollTypeMethodJobStatus(jobId, database) {
                     const button = document.querySelector(`#${database}-type-methods .refresh-btn`);
                     if (button) {
                         button.disabled = false;
-                        button.innerHTML = '⚙';
+                        button.innerHTML = '⟳';
                     }
 
                     resolve(status);
@@ -193,7 +193,7 @@ async function pollTypeMethodJobStatus(jobId, database) {
                     const button = document.querySelector(`#${database}-type-methods .refresh-btn`);
                     if (button) {
                         button.disabled = false;
-                        button.innerHTML = '⚙';
+                        button.innerHTML = '⟳';
                     }
 
                     reject(new Error(status.error || 'Type method extraction failed'));
@@ -305,7 +305,7 @@ async function getTypeMethodJobResults(jobId, database) {
     } catch (error) {
         console.error('Error getting type method job results:', error);
         updateMessage('Error getting type method results: ' + error.message);
-        updateComponentCount(`${database}-type-methods`, '?', 'error');
+        updateComponentCount(`${database}-type-methods`, '-', 'error');
     }
 }
 

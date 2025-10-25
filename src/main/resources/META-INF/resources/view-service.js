@@ -66,7 +66,7 @@ async function extractOracleViews() {
         // Re-enable button
         if (button) {
             button.disabled = false;
-            button.innerHTML = '⚙';
+            button.innerHTML = '⟳';
         }
     }
 }
@@ -112,7 +112,7 @@ async function extractPostgresViews() {
         // Re-enable button
         if (button) {
             button.disabled = false;
-            button.innerHTML = '⚙';
+            button.innerHTML = '⟳';
         }
     }
 }
@@ -162,7 +162,7 @@ async function pollViewJobStatus(jobId, database = 'oracle') {
             const button = document.querySelector(`#${database}-views .refresh-btn`);
             if (button) {
                 button.disabled = false;
-                button.innerHTML = '⚙';
+                button.innerHTML = '⟳';
             }
         } else {
             // Continue polling
@@ -178,7 +178,7 @@ async function pollViewJobStatus(jobId, database = 'oracle') {
         const button = document.querySelector(`#${database}-views .refresh-btn`);
         if (button) {
             button.disabled = false;
-            button.innerHTML = '⚙';
+            button.innerHTML = '⟳';
         }
     }
 }
@@ -810,7 +810,7 @@ async function verifyPostgresViewImplementation() {
         // Re-enable button
         if (button) {
             button.disabled = false;
-            button.innerHTML = '⚙';
+            button.innerHTML = '⟳';
         }
     }
 }
@@ -859,7 +859,7 @@ async function pollViewImplementationVerificationJobStatus(jobId) {
             const button = document.querySelector('#postgres-view-implementation .refresh-btn');
             if (button) {
                 button.disabled = false;
-                button.innerHTML = '⚙';
+                button.innerHTML = '⟳';
             }
         } else {
             // Continue polling
@@ -875,7 +875,7 @@ async function pollViewImplementationVerificationJobStatus(jobId) {
         const button = document.querySelector('#postgres-view-implementation .refresh-btn');
         if (button) {
             button.disabled = false;
-            button.innerHTML = '⚙';
+            button.innerHTML = '⟳';
         }
     }
 }

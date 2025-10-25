@@ -675,15 +675,22 @@ td {
     border-radius: 3px;
     color: #666;
     cursor: pointer;
-    font-size: 0.8rem;
+    font-size: 1rem;
     margin-left: 0.5rem;
     padding: 4px 8px;
     transition: all 0.2s;
+    font-weight: normal;
+    line-height: 1;
 }
 
 .refresh-btn:hover {
     background: #e0e0e0;
     color: #333;
+    transform: rotate(180deg);
+}
+
+.refresh-btn:active {
+    transform: rotate(180deg) scale(0.95);
 }
 
 /* Base collapsible list - Level 0 (schemas) */

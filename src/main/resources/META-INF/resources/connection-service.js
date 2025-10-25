@@ -22,11 +22,11 @@ async function testOracleConnection() {
 
             // TODO: Call actual API to get schema information
             setTimeout(() => {
-                updateComponentCount('oracle-schemas', '?');
-                updateComponentCount('oracle-objects', '?');
-                updateComponentCount('oracle-tables', '?');
-                updateComponentCount('oracle-data', '?');
-                updateComponentCount('oracle-views', '?');
+                updateComponentCount('oracle-schemas', '-');
+                updateComponentCount('oracle-objects', '-');
+                updateComponentCount('oracle-tables', '-');
+                updateComponentCount('oracle-data', '-');
+                updateComponentCount('oracle-views', '-');
             }, 500);
         } else {
             updateConnectionStatus('oracle', 'disconnected', 'Connection failed');
@@ -57,11 +57,11 @@ async function testPostgresConnection() {
 
             // TODO: Call actual API to get schema information
             setTimeout(() => {
-                updateComponentCount('postgres-schemas', '?');
-                updateComponentCount('postgres-objects', '?');
-                updateComponentCount('postgres-tables', '?');
-                updateComponentCount('postgres-data', '?');
-                updateComponentCount('postgres-views', '?');
+                updateComponentCount('postgres-schemas', '-');
+                updateComponentCount('postgres-objects', '-');
+                updateComponentCount('postgres-tables', '-');
+                updateComponentCount('postgres-data', '-');
+                updateComponentCount('postgres-views', '-');
             }, 500);
         } else {
             updateConnectionStatus('postgres', 'disconnected', 'Connection failed');

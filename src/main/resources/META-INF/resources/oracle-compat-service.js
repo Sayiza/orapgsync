@@ -108,7 +108,7 @@ async function verifyOracleCompat() {
         // Re-enable button
         if (button) {
             button.disabled = false;
-            button.innerHTML = '⚙';
+            button.innerHTML = '⟳';
         }
     }
 }
@@ -121,7 +121,7 @@ async function pollOracleCompatJobStatus(jobId, jobType) {
 
     const poll = async () => {
         try {
-            const response = await fetch(`/api/jobs/status/${jobId}`);
+            const response = await fetch(`/api/jobs/${jobId}/status`);
             const status = await response.json();
 
             console.log(`Job ${jobId} status:`, status.status, `(attempt ${attempts}/${maxAttempts})`);
@@ -226,7 +226,7 @@ async function pollOracleCompatJobStatus(jobId, jobType) {
 // Get Oracle compatibility job results
 async function getOracleCompatJobResults(jobId, jobType) {
     try {
-        const response = await fetch(`/api/jobs/results/${jobId}`);
+        const response = await fetch(`/api/jobs/${jobId}/result`);
         const results = await response.json();
 
         console.log(`Oracle compatibility ${jobType} results:`, results);

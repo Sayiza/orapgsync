@@ -41,14 +41,14 @@ public class DbmsLobImpl {
             CREATE OR REPLACE FUNCTION oracle_compat.dbms_lob__substr(
                 lob_loc TEXT,
                 amount INTEGER DEFAULT 32767,
-                offset INTEGER DEFAULT 1
+                start_pos INTEGER DEFAULT 1
             )
             RETURNS TEXT
             LANGUAGE plpgsql
             AS $$
             BEGIN
                 -- Oracle LOB positions are 1-based
-                RETURN SUBSTRING(lob_loc FROM offset FOR amount);
+                RETURN SUBSTRING(lob_loc FROM start_pos FOR amount);
             END;
             $$;
 
@@ -59,37 +59,33 @@ public class DbmsLobImpl {
 
     public static String getAppend() {
         return """
-            CREATE OR REPLACE FUNCTION oracle_compat.dbms_lob__append(
-                dest_lob INOUT TEXT,
-                src_lob TEXT
+            CREATE OR REPLACE PROCEDURE oracle_compat.dbms_lob__append(
+                INOUT dest_lob TEXT,
+                IN src_lob TEXT
             )
-            RETURNS TEXT
             LANGUAGE plpgsql
             AS $$
             BEGIN
                 dest_lob := dest_lob || src_lob;
-                RETURN dest_lob;
             END;
             $$;
 
             -- Overload for bytea (BLOB)
-            CREATE OR REPLACE FUNCTION oracle_compat.dbms_lob__append(
-                dest_lob INOUT BYTEA,
-                src_lob BYTEA
+            CREATE OR REPLACE PROCEDURE oracle_compat.dbms_lob__append(
+                INOUT dest_lob BYTEA,
+                IN src_lob BYTEA
             )
-            RETURNS BYTEA
             LANGUAGE plpgsql
             AS $$
             BEGIN
                 dest_lob := dest_lob || src_lob;
-                RETURN dest_lob;
             END;
             $$;
 
-            COMMENT ON FUNCTION oracle_compat.dbms_lob__append(TEXT, TEXT) IS
+            COMMENT ON PROCEDURE oracle_compat.dbms_lob__append(TEXT, TEXT) IS
             'Oracle DBMS_LOB.APPEND equivalent - appends to CLOB (text)';
 
-            COMMENT ON FUNCTION oracle_compat.dbms_lob__append(BYTEA, BYTEA) IS
+            COMMENT ON PROCEDURE oracle_compat.dbms_lob__append(BYTEA, BYTEA) IS
             'Oracle DBMS_LOB.APPEND equivalent - appends to BLOB (bytea)';
             """;
     }

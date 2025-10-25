@@ -76,7 +76,7 @@ async function extractTableMetadata() {
         // Re-enable button
         if (button) {
             button.disabled = false;
-            button.innerHTML = '⚙';
+            button.innerHTML = '⟳';
         }
     }
 }
@@ -122,7 +122,7 @@ async function extractPostgresTableMetadata() {
         // Re-enable button
         if (button) {
             button.disabled = false;
-            button.innerHTML = '⚙';
+            button.innerHTML = '⟳';
         }
     }
 }
@@ -172,7 +172,7 @@ async function pollJobStatus(jobId, database = 'oracle') {
             const button = document.querySelector(`#${database}-tables .refresh-btn`);
             if (button) {
                 button.disabled = false;
-                button.innerHTML = '⚙';
+                button.innerHTML = '⟳';
             }
         } else {
             // Continue polling
@@ -188,7 +188,7 @@ async function pollJobStatus(jobId, database = 'oracle') {
         const button = document.querySelector(`#${database}-tables .refresh-btn`);
         if (button) {
             button.disabled = false;
-            button.innerHTML = '⚙';
+            button.innerHTML = '⟳';
         }
     }
 }
@@ -373,7 +373,7 @@ async function extractOracleRowCounts() {
         // Re-enable button
         if (button) {
             button.disabled = false;
-            button.innerHTML = '⚙';
+            button.innerHTML = '⟳';
         }
     }
 }
@@ -423,7 +423,7 @@ async function pollRowCountJobStatus(jobId, database = 'oracle') {
             const button = document.querySelector(`#${database}-data .refresh-btn`);
             if (button) {
                 button.disabled = false;
-                button.innerHTML = '⚙';
+                button.innerHTML = '⟳';
             }
         } else {
             // Continue polling
@@ -439,7 +439,7 @@ async function pollRowCountJobStatus(jobId, database = 'oracle') {
         const button = document.querySelector(`#${database}-data .refresh-btn`);
         if (button) {
             button.disabled = false;
-            button.innerHTML = '⚙';
+            button.innerHTML = '⟳';
         }
     }
 }
@@ -640,7 +640,7 @@ async function extractPostgresRowCounts() {
         // Re-enable button
         if (button) {
             button.disabled = false;
-            button.innerHTML = '⚙';
+            button.innerHTML = '⟳';
         }
     }
 }

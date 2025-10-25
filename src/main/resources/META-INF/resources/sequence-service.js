@@ -64,7 +64,7 @@ async function extractOracleSequences() {
         // Re-enable button
         if (button) {
             button.disabled = false;
-            button.innerHTML = '⚙';
+            button.innerHTML = '⟳';
         }
     }
 }
@@ -107,7 +107,7 @@ async function extractPostgresSequences() {
         // Re-enable button
         if (button) {
             button.disabled = false;
-            button.innerHTML = '⚙';
+            button.innerHTML = '⟳';
         }
     }
 }
@@ -182,7 +182,7 @@ async function pollSequenceJobStatus(jobId, database) {
                     const button = document.querySelector(`#${database}-sequences .refresh-btn`);
                     if (button) {
                         button.disabled = false;
-                        button.innerHTML = '⚙';
+                        button.innerHTML = '⟳';
                     }
 
                     resolve(status);
@@ -194,7 +194,7 @@ async function pollSequenceJobStatus(jobId, database) {
                     const button = document.querySelector(`#${database}-sequences .refresh-btn`);
                     if (button) {
                         button.disabled = false;
-                        button.innerHTML = '⚙';
+                        button.innerHTML = '⟳';
                     }
 
                     reject(new Error(status.error || 'Sequence extraction failed'));
@@ -306,7 +306,7 @@ async function getSequenceJobResults(jobId, database) {
     } catch (error) {
         console.error('Error getting sequence job results:', error);
         updateMessage('Error getting sequence results: ' + error.message);
-        updateComponentCount(`${database}-sequences`, '?', 'error');
+        updateComponentCount(`${database}-sequences`, '-', 'error');
     }
 }
 

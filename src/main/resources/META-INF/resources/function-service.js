@@ -64,7 +64,7 @@ async function extractOracleFunctions() {
         // Re-enable button
         if (button) {
             button.disabled = false;
-            button.innerHTML = '⚙';
+            button.innerHTML = '⟳';
         }
     }
 }
@@ -107,7 +107,7 @@ async function extractPostgresFunctions() {
         // Re-enable button
         if (button) {
             button.disabled = false;
-            button.innerHTML = '⚙';
+            button.innerHTML = '⟳';
         }
     }
 }
@@ -182,7 +182,7 @@ async function pollFunctionJobStatus(jobId, database) {
                     const button = document.querySelector(`#${database}-functions .refresh-btn`);
                     if (button) {
                         button.disabled = false;
-                        button.innerHTML = '⚙';
+                        button.innerHTML = '⟳';
                     }
 
                     resolve(status);
@@ -194,7 +194,7 @@ async function pollFunctionJobStatus(jobId, database) {
                     const button = document.querySelector(`#${database}-functions .refresh-btn`);
                     if (button) {
                         button.disabled = false;
-                        button.innerHTML = '⚙';
+                        button.innerHTML = '⟳';
                     }
 
                     reject(new Error(status.error || 'Function extraction failed'));
@@ -306,7 +306,7 @@ async function getFunctionJobResults(jobId, database) {
     } catch (error) {
         console.error('Error getting function job results:', error);
         updateMessage('Error getting function results: ' + error.message);
-        updateComponentCount(`${database}-functions`, '?', 'error');
+        updateComponentCount(`${database}-functions`, '-', 'error');
     }
 }
 

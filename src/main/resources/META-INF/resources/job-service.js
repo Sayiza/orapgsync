@@ -62,7 +62,7 @@ async function pollJobStatus(jobId, database = 'oracle') {
             const button = document.querySelector(`#${database}-tables .refresh-btn`);
             if (button) {
                 button.disabled = false;
-                button.innerHTML = '⚙';
+                button.innerHTML = '⟳';
             }
         } else {
             // Continue polling
@@ -78,7 +78,7 @@ async function pollJobStatus(jobId, database = 'oracle') {
         const button = document.querySelector(`#${database}-tables .refresh-btn`);
         if (button) {
             button.disabled = false;
-            button.innerHTML = '⚙';
+            button.innerHTML = '⟳';
         }
     }
 }
@@ -141,7 +141,7 @@ async function pollJobUntilComplete(jobId, database, jobType) {
                     const button = document.querySelector(buttonSelector);
                     if (button) {
                         button.disabled = false;
-                        button.innerHTML = jobType === 'schemas' ? '↻' : '↻';
+                        button.innerHTML = '⟳';
                     }
 
                     // Resolve the promise to signal completion
@@ -163,7 +163,7 @@ async function pollJobUntilComplete(jobId, database, jobType) {
                 const button = document.querySelector(buttonSelector);
                 if (button) {
                     button.disabled = false;
-                    button.innerHTML = '↻';
+                    button.innerHTML = '⟳';
                 }
 
                 // Reject the promise to signal error
