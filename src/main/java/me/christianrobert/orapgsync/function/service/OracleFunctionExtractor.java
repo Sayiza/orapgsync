@@ -62,6 +62,8 @@ public class OracleFunctionExtractor {
         Map<String, FunctionMetadata> functionsMap = new HashMap<>();
 
         // Query ALL_PROCEDURES for standalone functions/procedures and package members
+        // Note: For standalone functions/procedures, procedure_name can be NULL
+        // For package members, object_type='PACKAGE' and procedure_name contains the subprogram name
         String procSql = """
             SELECT
                 owner,
@@ -72,7 +74,6 @@ public class OracleFunctionExtractor {
             FROM all_procedures
             WHERE owner = ?
               AND object_type IN ('FUNCTION', 'PROCEDURE', 'PACKAGE')
-              AND procedure_name IS NOT NULL
             ORDER BY object_name, procedure_name, overload
             """;
 
@@ -91,6 +92,11 @@ public class OracleFunctionExtractor {
                     boolean isPackageMember = "PACKAGE".equalsIgnoreCase(objectType);
                     String functionName = isPackageMember ? procedureName : objectName;
                     String packageName = isPackageMember ? objectName : null;
+
+                    // Skip if function name is null (can happen for package specs without implementations)
+                    if (functionName == null || functionName.trim().isEmpty()) {
+                        continue;
+                    }
 
                     // Create unique key for this function (schema.package.function.overload)
                     String key = schema.toLowerCase() + "." +

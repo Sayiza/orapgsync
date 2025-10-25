@@ -528,4 +528,274 @@ function toggleFunctionCreationResults() {
     }
 }
 
+// ===== STANDALONE FUNCTION IMPLEMENTATION FUNCTIONS (Phase 2) =====
+
+// Create PostgreSQL standalone function implementations (replaces stubs with actual PL/pgSQL logic)
+async function createPostgresStandaloneFunctionImplementation() {
+    console.log('Starting PostgreSQL standalone function implementation job...');
+
+    updateComponentCount("postgres-standalone-function-implementation", "-");
+
+    const button = document.querySelector('#postgres-standalone-function-implementation .action-btn');
+    if (button) {
+        button.disabled = true;
+        button.innerHTML = '⏳';
+    }
+
+    updateMessage('Starting PostgreSQL standalone function implementation...');
+    updateProgress(0, 'Starting PostgreSQL standalone function implementation');
+
+    try {
+        const response = await fetch('/api/functions/postgres/standalone-implementation/create', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+
+        const result = await response.json();
+
+        if (result.status === 'success') {
+            console.log('PostgreSQL standalone function implementation job started:', result.jobId);
+            updateMessage('PostgreSQL standalone function implementation job started successfully');
+
+            // Start polling for progress and AWAIT completion
+            await pollStandaloneFunctionImplementationJobStatus(result.jobId, 'postgres');
+        } else {
+            throw new Error(result.message || 'Failed to start PostgreSQL standalone function implementation job');
+        }
+
+    } catch (error) {
+        console.error('Error starting PostgreSQL standalone function implementation job:', error);
+        updateMessage('Failed to start PostgreSQL standalone function implementation: ' + error.message);
+        updateProgress(0, 'Failed to start PostgreSQL standalone function implementation');
+
+        // Re-enable button
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = 'Implement Standalone Functions';
+        }
+    }
+}
+
+async function pollStandaloneFunctionImplementationJobStatus(jobId, database) {
+    console.log(`Polling standalone function implementation job status for ${database}:`, jobId);
+
+    return new Promise((resolve, reject) => {
+        const pollOnce = async () => {
+            try {
+                const response = await fetch(`/api/jobs/${jobId}/status`);
+                const status = await response.json();
+
+                if (status.status === 'error') {
+                    throw new Error(status.message || 'Job status check failed');
+                }
+
+                console.log(`Standalone function implementation job status for ${database}:`, status);
+
+                if (status.progress) {
+                    updateProgress(status.progress.percentage, status.progress.currentTask);
+                    updateMessage(`${status.progress.currentTask}: ${status.progress.details}`);
+                }
+
+                if (status.isComplete) {
+                    console.log(`Standalone function implementation job completed for ${database}`);
+                    // Get final results
+                    const resultResponse = await fetch(`/api/jobs/${jobId}/result`);
+                    const result = await resultResponse.json();
+
+                    if (result.status === 'success') {
+                        handleStandaloneFunctionImplementationJobComplete(result, database);
+                    } else {
+                        throw new Error(result.message || 'Job completed with errors');
+                    }
+
+                    // Re-enable button
+                    const button = document.querySelector(`#${database}-standalone-function-implementation .action-btn`);
+                    if (button) {
+                        button.disabled = false;
+                        button.innerHTML = 'Implement Standalone Functions';
+                    }
+
+                    // Resolve the promise to signal completion
+                    resolve();
+                } else {
+                    // Continue polling
+                    setTimeout(pollOnce, 1000);
+                }
+            } catch (error) {
+                console.error('Error polling standalone function implementation job status:', error);
+                updateMessage('Error checking standalone function implementation progress: ' + error.message);
+                updateProgress(0, 'Error checking progress');
+                // Re-enable button
+                const button = document.querySelector(`#${database}-standalone-function-implementation .action-btn`);
+                if (button) {
+                    button.disabled = false;
+                    button.innerHTML = 'Implement Standalone Functions';
+                }
+                // Reject the promise to signal error
+                reject(error);
+            }
+        };
+
+        // Start polling
+        pollOnce();
+    });
+}
+
+function handleStandaloneFunctionImplementationJobComplete(result, database) {
+    console.log(`Standalone function implementation job results for ${database}:`, result);
+
+    // Access counts from top-level result (these are provided by JobResource)
+    const implementedCount = result.implementedCount || 0;
+    const skippedCount = result.skippedCount || 0;
+    const errorCount = result.errorCount || 0;
+
+    updateProgress(100, `Standalone function implementation completed: ${implementedCount} implemented, ${skippedCount} skipped, ${errorCount} errors`);
+
+    if (result.isSuccessful) {
+        updateMessage(`Standalone function implementation completed successfully: ${implementedCount} functions/procedures implemented, ${skippedCount} skipped`);
+    } else {
+        updateMessage(`Standalone function implementation completed with errors: ${implementedCount} implemented, ${skippedCount} skipped, ${errorCount} errors`);
+    }
+
+    // Update standalone function implementation results section
+    displayStandaloneFunctionImplementationResults(result, database);
+}
+
+function displayStandaloneFunctionImplementationResults(result, database) {
+    const resultsDiv = document.getElementById(`${database}-standalone-function-implementation-results`);
+    const detailsDiv = document.getElementById(`${database}-standalone-function-implementation-details`);
+
+    if (!resultsDiv || !detailsDiv) {
+        console.error('Standalone function implementation results container not found');
+        return;
+    }
+
+    let html = '';
+
+    // Access result properties from summary object
+    if (result.summary) {
+        const summary = result.summary;
+
+        updateComponentCount("postgres-standalone-function-implementation", summary.implementedCount + summary.skippedCount + summary.errorCount);
+
+        html += '<div class="table-creation-summary">';
+        html += `<div class="summary-stats">`;
+        html += `<span class="stat-item created">Implemented: ${summary.implementedCount}</span>`;
+        html += `<span class="stat-item skipped">Skipped: ${summary.skippedCount}</span>`;
+        html += `<span class="stat-item errors">Errors: ${summary.errorCount}</span>`;
+        html += `</div>`;
+        html += '</div>';
+
+        // Show implemented functions - convert Map to Array using Object.values()
+        if (summary.implementedCount > 0 && summary.implementedFunctions) {
+            html += '<div class="created-tables-section">';
+            html += '<h4>Implemented Standalone Functions/Procedures:</h4>';
+            html += '<div class="table-items">';
+            Object.values(summary.implementedFunctions).forEach(func => {
+                html += `<div class="table-item created">${func.functionName} ✓</div>`;
+            });
+            html += '</div>';
+            html += '</div>';
+        }
+
+        // Show skipped functions - convert Map to Array using Object.values()
+        if (summary.skippedCount > 0 && summary.skippedFunctions) {
+            html += '<div class="skipped-tables-section">';
+            html += '<h4>Skipped Functions/Procedures:</h4>';
+            html += '<div class="table-items">';
+            Object.values(summary.skippedFunctions).forEach(func => {
+                html += `<div class="table-item skipped">${func.functionName}</div>`;
+            });
+            html += '</div>';
+            html += '</div>';
+        }
+
+        // Show errors - convert Map to Array using Object.values()
+        if (summary.errorCount > 0 && summary.errors) {
+            html += '<div class="error-tables-section">';
+            html += '<h4>Failed Functions/Procedures:</h4>';
+            html += '<div class="table-items">';
+            Object.values(summary.errors).forEach(error => {
+                html += `<div class="table-item error">`;
+                html += `<strong>${error.functionName}</strong>: ${error.error}`;
+                if (error.sql) {
+                    html += `<div class="sql-statement"><pre>${error.sql}</pre></div>`;
+                }
+                html += `</div>`;
+            });
+            html += '</div>';
+            html += '</div>';
+        }
+    }
+
+    detailsDiv.innerHTML = html;
+
+    // Show the results section
+    resultsDiv.style.display = 'block';
+}
+
+function toggleStandaloneFunctionImplementationResults(database) {
+    const resultsDiv = document.getElementById(`${database}-standalone-function-implementation-results`);
+    const detailsDiv = document.getElementById(`${database}-standalone-function-implementation-details`);
+    const toggleIndicator = resultsDiv.querySelector('.toggle-indicator');
+
+    if (detailsDiv.style.display === 'none' || !detailsDiv.style.display) {
+        detailsDiv.style.display = 'block';
+        toggleIndicator.textContent = '▲';
+    } else {
+        detailsDiv.style.display = 'none';
+        toggleIndicator.textContent = '▼';
+    }
+}
+
+// Verify PostgreSQL standalone function implementations
+async function verifyPostgresStandaloneFunctionImplementation() {
+    console.log('Starting PostgreSQL standalone function implementation verification job...');
+
+    const button = document.querySelector('#postgres-standalone-function-implementation .refresh-btn');
+    if (button) {
+        button.disabled = true;
+        button.innerHTML = '⏳';
+    }
+
+    updateMessage('Starting PostgreSQL standalone function implementation verification...');
+    updateProgress(0, 'Starting PostgreSQL standalone function implementation verification');
+
+    try {
+        const response = await fetch('/api/functions/postgres/standalone-implementation/verify', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+
+        const result = await response.json();
+
+        if (result.status === 'success') {
+            console.log('PostgreSQL standalone function implementation verification job started:', result.jobId);
+            updateMessage('PostgreSQL standalone function implementation verification job started successfully');
+
+            // Start polling for progress
+            await pollStandaloneFunctionImplementationJobStatus(result.jobId, 'postgres');
+        } else {
+            throw new Error(result.message || 'Failed to start PostgreSQL standalone function implementation verification job');
+        }
+
+    } catch (error) {
+        console.error('Error starting PostgreSQL standalone function implementation verification job:', error);
+        updateMessage('Failed to start PostgreSQL standalone function implementation verification: ' + error.message);
+        updateProgress(0, 'Failed to start PostgreSQL standalone function implementation verification');
+
+        // Re-enable button
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = '⟳';
+        }
+    }
+}
+
+// ===== END STANDALONE FUNCTION IMPLEMENTATION FUNCTIONS =====
+
 // ===== END FUNCTION FUNCTIONS =====

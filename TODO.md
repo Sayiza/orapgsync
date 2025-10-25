@@ -18,3 +18,7 @@
 [ ] 1 more job for package body data
 [ ] 1 more job for oracle build ins
 [ ] evaluate usage of s/get_config for package variable replacement!
+I want to prepare the next open step in @TRANSFORMATION.md (nr 25), even though the sql step is not fully completed, it is already very
+usefull... I like a frontend driven approach, so let's start by adding a new row to the main table in
+@src/main/resources/META-INF/resources/index.html and following the established pattern. Compare it with the conceptually very
+similar "view implementation step" (24) : We will be dealing with standalone functions and procedure only in this step.
