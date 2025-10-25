@@ -38,7 +38,7 @@ async function extractOracleTypeMethods() {
     updateProgress(0, 'Starting Oracle type method extraction');
 
     try {
-        const response = await fetch('/api/jobs/oracle/type-method/extract', {
+        const response = await fetch('/api/type-methods/oracle/extract', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -81,7 +81,7 @@ async function extractPostgresTypeMethods() {
     updateProgress(0, 'Starting PostgreSQL type method extraction');
 
     try {
-        const response = await fetch('/api/jobs/postgres/type-method-stub-verification/verify', {
+        const response = await fetch('/api/type-methods/postgres/stubs/verify', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -126,7 +126,7 @@ async function createPostgresTypeMethodStubs() {
     updateProgress(0, 'Starting PostgreSQL type method stub creation');
 
     try {
-        const response = await fetch('/api/jobs/postgres/type-method-stub/create', {
+        const response = await fetch('/api/type-methods/postgres/stubs/create', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

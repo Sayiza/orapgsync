@@ -39,7 +39,7 @@ async function extractOracleViews() {
     updateProgress(0, 'Starting Oracle view definition extraction');
 
     try {
-        const response = await fetch('/api/jobs/oracle/view/extract', {
+        const response = await fetch('/api/views/oracle/extract', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -85,7 +85,7 @@ async function extractPostgresViews() {
     updateProgress(0, 'Starting PostgreSQL view definition extraction');
 
     try {
-        const response = await fetch('/api/jobs/postgres/view-stub-verification/verify', {
+        const response = await fetch('/api/views/postgres/stubs/verify', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -343,7 +343,7 @@ async function createPostgresViewStubs() {
     updateProgress(0, 'Starting PostgreSQL view stub creation');
 
     try {
-        const response = await fetch('/api/jobs/postgres/view-stub/create', {
+        const response = await fetch('/api/views/postgres/stubs/create', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -565,7 +565,7 @@ async function createPostgresViewImplementation() {
     updateProgress(0, 'Starting PostgreSQL view implementation');
 
     try {
-        const response = await fetch('/api/jobs/postgres/view-implementation/create', {
+        const response = await fetch('/api/views/postgres/implementation/create', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -783,7 +783,7 @@ async function verifyPostgresViewImplementation() {
     updateProgress(0, 'Starting PostgreSQL view implementation verification');
 
     try {
-        const response = await fetch('/api/jobs/postgres/view-implementation-verification/verify', {
+        const response = await fetch('/api/views/postgres/implementation/verify', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

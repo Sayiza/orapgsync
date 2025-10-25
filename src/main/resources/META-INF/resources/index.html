@@ -471,29 +471,6 @@
             </div>
           </td>
         </tr>
-        <tr class="view-implementation-row">
-          <td class="source-cell">
-            <div class="component-info" id="oracle-view-implementation">
-              <span class="component-text">N/A - see Views above</span>
-            </div>
-          </td>
-          <td class="target-cell">
-            <div class="component-info" id="postgres-view-implementation">
-              <span class="count-badge">-</span>
-              <span class="component-text">Views created</span>
-              <button class="refresh-btn" onclick="verifyPostgresViewImplementation()" title="Verify PostgreSQL view implementations">⚙</button>
-              <button class="action-btn" onclick="createPostgresViewImplementation()" title="Create PostgreSQL views with actual SQL">Create Views</button>
-              <div class="table-creation-results" id="postgres-view-implementation-results" style="display: none;">
-                <div class="table-creation-header" onclick="toggleViewImplementationResults('postgres')">
-                  <span class="toggle-indicator">▼</span> View Implementation Results
-                </div>
-                <div class="table-creation-details" id="postgres-view-implementation-details">
-                  <!-- View implementation results will be populated here -->
-                </div>
-              </div>
-            </div>
-          </td>
-        </tr>
         <tr class="oracle-compat-row">
           <td class="source-cell">
             <div class="component-info" id="oracle-compat-source">
@@ -520,6 +497,29 @@
                 </div>
                 <div class="table-creation-details" id="postgres-oracle-compat-verification-details">
                   <!-- Oracle compatibility verification results will be populated here -->
+                </div>
+              </div>
+            </div>
+          </td>
+        </tr>
+        <tr class="view-implementation-row">
+          <td class="source-cell">
+            <div class="component-info" id="oracle-view-implementation">
+              <span class="component-text">N/A - see Views above</span>
+            </div>
+          </td>
+          <td class="target-cell">
+            <div class="component-info" id="postgres-view-implementation">
+              <span class="count-badge">-</span>
+              <span class="component-text">Views created</span>
+              <button class="refresh-btn" onclick="verifyPostgresViewImplementation()" title="Verify PostgreSQL view implementations">⚙</button>
+              <button class="action-btn" onclick="createPostgresViewImplementation()" title="Create PostgreSQL views with actual SQL">Create Views</button>
+              <div class="table-creation-results" id="postgres-view-implementation-results" style="display: none;">
+                <div class="table-creation-header" onclick="toggleViewImplementationResults('postgres')">
+                  <span class="toggle-indicator">▼</span> View Implementation Results
+                </div>
+                <div class="table-creation-details" id="postgres-view-implementation-details">
+                  <!-- View implementation results will be populated here -->
                 </div>
               </div>
             </div>

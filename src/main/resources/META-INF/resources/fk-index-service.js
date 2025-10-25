@@ -33,7 +33,7 @@ async function createPostgresFKIndexes() {
     updateProgress(0, 'Starting PostgreSQL FK index creation');
 
     try {
-        const response = await fetch('/api/jobs/postgres/fk-index-creation/create', {
+        const response = await fetch('/api/constraints/postgres/fk-indexes/create', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

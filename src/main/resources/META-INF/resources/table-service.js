@@ -49,7 +49,7 @@ async function extractTableMetadata() {
     updateProgress(0, 'Starting Oracle table metadata extraction');
 
     try {
-        const response = await fetch('/api/jobs/tables/oracle/extract', {
+        const response = await fetch('/api/tables/oracle/extract', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -95,7 +95,7 @@ async function extractPostgresTableMetadata() {
     updateProgress(0, 'Starting PostgreSQL table metadata extraction');
 
     try {
-        const response = await fetch('/api/jobs/tables/postgres/extract', {
+        const response = await fetch('/api/tables/postgres/extract', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -346,7 +346,7 @@ async function extractOracleRowCounts() {
     updateProgress(0, 'Starting Oracle row count extraction');
 
     try {
-        const response = await fetch('/api/jobs/oracle/row_count/extract', {
+        const response = await fetch('/api/transfer/oracle/row-counts', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -613,7 +613,7 @@ async function extractPostgresRowCounts() {
     updateProgress(0, 'Starting PostgreSQL row count extraction');
 
     try {
-        const response = await fetch('/api/jobs/postgres/row_count/extract', {
+        const response = await fetch('/api/transfer/postgres/row-counts', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -660,7 +660,7 @@ async function createPostgresTables() {
     updateProgress(0, 'Starting PostgreSQL table creation');
 
     try {
-        const response = await fetch('/api/jobs/postgres/table/create', {
+        const response = await fetch('/api/tables/postgres/create', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

@@ -20,7 +20,7 @@ async function loadOracleObjectTypes() {
 
     try {
         // Start the job
-        const startResponse = await fetch('/api/jobs/objects/oracle/extract', {
+        const startResponse = await fetch('/api/objects/oracle/extract', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -62,7 +62,7 @@ async function loadPostgresObjectTypes() {
 
     try {
         // Start the job
-        const startResponse = await fetch('/api/jobs/objects/postgres/extract', {
+        const startResponse = await fetch('/api/objects/postgres/extract', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -293,7 +293,7 @@ async function createPostgresObjectTypes() {
     updateProgress(0, 'Starting PostgreSQL object type creation');
 
     try {
-        const response = await fetch('/api/jobs/postgres/object-type/create', {
+        const response = await fetch('/api/objects/postgres/create', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

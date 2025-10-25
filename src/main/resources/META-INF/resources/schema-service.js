@@ -31,7 +31,7 @@ async function loadOracleSchemas() {
 
     try {
         // Start the job
-        const startResponse = await fetch('/api/jobs/schemas/oracle/extract', {
+        const startResponse = await fetch('/api/schemas/oracle/extract', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -76,7 +76,7 @@ async function loadPostgresSchemas() {
 
     try {
         // Start the job
-        const startResponse = await fetch('/api/jobs/schemas/postgres/extract', {
+        const startResponse = await fetch('/api/schemas/postgres/extract', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -238,7 +238,7 @@ async function createPostgresSchemas() {
     updateProgress(0, 'Starting PostgreSQL schema creation');
 
     try {
-        const response = await fetch('/api/jobs/postgres/schema/create', {
+        const response = await fetch('/api/schemas/postgres/create', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

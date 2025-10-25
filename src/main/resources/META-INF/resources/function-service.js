@@ -39,7 +39,7 @@ async function extractOracleFunctions() {
     updateProgress(0, 'Starting Oracle function/procedure extraction');
 
     try {
-        const response = await fetch('/api/jobs/oracle/function/extract', {
+        const response = await fetch('/api/functions/oracle/extract', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -82,7 +82,7 @@ async function extractPostgresFunctions() {
     updateProgress(0, 'Starting PostgreSQL function/procedure extraction');
 
     try {
-        const response = await fetch('/api/jobs/postgres/function-stub-verification/verify', {
+        const response = await fetch('/api/functions/postgres/stubs/verify', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -127,7 +127,7 @@ async function createPostgresFunctionStubs() {
     updateProgress(0, 'Starting PostgreSQL function stub creation');
 
     try {
-        const response = await fetch('/api/jobs/postgres/function-stub/create', {
+        const response = await fetch('/api/functions/postgres/stubs/create', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

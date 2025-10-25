@@ -37,7 +37,7 @@ async function installOracleCompat() {
     updateProgress(0, 'Starting Oracle compatibility layer installation');
 
     try {
-        const response = await fetch('/api/jobs/postgres/oracle-compat-installation/extract', {
+        const response = await fetch('/api/oracle-compat/postgres/install', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -82,7 +82,7 @@ async function verifyOracleCompat() {
     updateProgress(0, 'Starting Oracle compatibility layer verification');
 
     try {
-        const response = await fetch('/api/jobs/postgres/oracle-compat-verification/verify', {
+        const response = await fetch('/api/oracle-compat/postgres/verify', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

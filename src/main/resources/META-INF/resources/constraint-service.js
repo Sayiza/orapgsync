@@ -40,7 +40,7 @@ async function extractOracleConstraints() {
     updateProgress(0, 'Starting Oracle constraint extraction');
 
     try {
-        const response = await fetch('/api/jobs/oracle/constraint-source-state/read', {
+        const response = await fetch('/api/constraints/oracle/source-state', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -83,7 +83,7 @@ async function verifyPostgresConstraints() {
     updateProgress(0, 'Starting PostgreSQL constraint verification');
 
     try {
-        const response = await fetch('/api/jobs/postgres/constraint-verification/read', {
+        const response = await fetch('/api/constraints/postgres/verify', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -128,7 +128,7 @@ async function createPostgresConstraints() {
     updateProgress(0, 'Starting PostgreSQL constraint creation');
 
     try {
-        const response = await fetch('/api/jobs/postgres/constraint-creation/create', {
+        const response = await fetch('/api/constraints/postgres/create', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

@@ -18,7 +18,7 @@ async function loadOracleSynonyms() {
 
     try {
         // Start the job
-        const startResponse = await fetch('/api/jobs/oracle/synonym/extract', {
+        const startResponse = await fetch('/api/transfer/oracle/synonyms', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'

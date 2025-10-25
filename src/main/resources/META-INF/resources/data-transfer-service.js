@@ -25,7 +25,7 @@ async function transferData() {
     updateProgress(0, 'Starting data transfer');
 
     try {
-        const response = await fetch('/api/jobs/postgres/data-transfer/create', {
+        const response = await fetch('/api/transfer/postgres/execute', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

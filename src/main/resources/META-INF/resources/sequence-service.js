@@ -39,7 +39,7 @@ async function extractOracleSequences() {
     updateProgress(0, 'Starting Oracle sequence extraction');
 
     try {
-        const response = await fetch('/api/jobs/oracle/sequence/extract', {
+        const response = await fetch('/api/sequences/oracle/extract', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -82,7 +82,7 @@ async function extractPostgresSequences() {
     updateProgress(0, 'Starting PostgreSQL sequence extraction');
 
     try {
-        const response = await fetch('/api/jobs/postgres/sequence/extract', {
+        const response = await fetch('/api/sequences/postgres/extract', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -127,7 +127,7 @@ async function createPostgresSequences() {
     updateProgress(0, 'Starting PostgreSQL sequence creation');
 
     try {
-        const response = await fetch('/api/jobs/postgres/sequence-creation/create', {
+        const response = await fetch('/api/sequences/postgres/create', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
