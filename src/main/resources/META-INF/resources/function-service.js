@@ -573,7 +573,7 @@ async function createPostgresStandaloneFunctionImplementation() {
         // Re-enable button
         if (button) {
             button.disabled = false;
-            button.innerHTML = 'Implement Standalone Functions';
+            button.innerHTML = 'Create Standalone Functions';
         }
     }
 }
@@ -614,7 +614,7 @@ async function pollStandaloneFunctionImplementationJobStatus(jobId, database) {
                     const button = document.querySelector(`#${database}-standalone-function-implementation .action-btn`);
                     if (button) {
                         button.disabled = false;
-                        button.innerHTML = 'Implement Standalone Functions';
+                        button.innerHTML = 'Create Standalone Functions';
                     }
 
                     // Resolve the promise to signal completion
@@ -631,7 +631,7 @@ async function pollStandaloneFunctionImplementationJobStatus(jobId, database) {
                 const button = document.querySelector(`#${database}-standalone-function-implementation .action-btn`);
                 if (button) {
                     button.disabled = false;
-                    button.innerHTML = 'Implement Standalone Functions';
+                    button.innerHTML = 'Create Standalone Functions';
                 }
                 // Reject the promise to signal error
                 reject(error);
@@ -777,8 +777,8 @@ async function verifyPostgresStandaloneFunctionImplementation() {
             console.log('PostgreSQL standalone function implementation verification job started:', result.jobId);
             updateMessage('PostgreSQL standalone function implementation verification job started successfully');
 
-            // Start polling for progress
-            await pollStandaloneFunctionImplementationJobStatus(result.jobId, 'postgres');
+            // Start polling for progress - use verification-specific handler
+            await pollStandaloneFunctionVerificationJobStatus(result.jobId, 'postgres');
         } else {
             throw new Error(result.message || 'Failed to start PostgreSQL standalone function implementation verification job');
         }
@@ -794,6 +794,80 @@ async function verifyPostgresStandaloneFunctionImplementation() {
             button.innerHTML = '⟳';
         }
     }
+}
+
+// Polling handler for standalone function verification (returns List<FunctionMetadata>)
+async function pollStandaloneFunctionVerificationJobStatus(jobId, database) {
+    console.log(`Polling standalone function verification job status for ${database}:`, jobId);
+
+    return new Promise((resolve, reject) => {
+        const pollOnce = async () => {
+            try {
+                const response = await fetch(`/api/jobs/${jobId}/status`);
+                const status = await response.json();
+
+                if (status.status === 'error') {
+                    throw new Error(status.message || 'Job status check failed');
+                }
+
+                console.log(`Standalone function verification job status for ${database}:`, status);
+
+                if (status.progress) {
+                    updateProgress(status.progress.percentage, status.progress.currentTask);
+                }
+
+                if (status.isComplete) {
+                    console.log(`Standalone function verification job completed for ${database}`);
+                    // Get final results
+                    const resultResponse = await fetch(`/api/jobs/${jobId}/result`);
+                    const result = await resultResponse.json();
+
+                    if (result.status === 'success') {
+                        // Verification returns List<FunctionMetadata>, just update count
+                        const functionCount = result.functionCount || 0;
+                        updateComponentCount("postgres-standalone-function-implementation", functionCount);
+
+                        if (result.summary && result.summary.message) {
+                            updateMessage(`PostgreSQL: ${result.summary.message}`);
+                        } else {
+                            updateMessage(`Verified ${functionCount} standalone functions/procedures`);
+                        }
+
+                        updateProgress(100, 'Verification complete');
+                    } else {
+                        throw new Error(result.message || 'Job completed with errors');
+                    }
+
+                    // Re-enable button
+                    const button = document.querySelector(`#${database}-standalone-function-implementation .refresh-btn`);
+                    if (button) {
+                        button.disabled = false;
+                        button.innerHTML = '⟳';
+                    }
+
+                    resolve();
+                } else {
+                    // Continue polling
+                    setTimeout(pollOnce, 1000);
+                }
+            } catch (error) {
+                console.error('Error polling standalone function verification job status:', error);
+                updateMessage('Error checking standalone function verification progress: ' + error.message);
+                updateProgress(0, 'Error checking progress');
+
+                // Re-enable button
+                const button = document.querySelector(`#${database}-standalone-function-implementation .refresh-btn`);
+                if (button) {
+                    button.disabled = false;
+                    button.innerHTML = '⟳';
+                }
+
+                reject(error);
+            }
+        };
+
+        pollOnce();
+    });
 }
 
 // ===== END STANDALONE FUNCTION IMPLEMENTATION FUNCTIONS =====

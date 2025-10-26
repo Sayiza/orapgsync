@@ -8,6 +8,7 @@ import jakarta.ws.rs.core.Response;
 import me.christianrobert.orapgsync.core.job.Job;
 import me.christianrobert.orapgsync.core.job.model.function.FunctionMetadata;
 import me.christianrobert.orapgsync.core.job.model.function.FunctionStubCreationResult;
+import me.christianrobert.orapgsync.core.job.model.function.StandaloneFunctionImplementationResult;
 import me.christianrobert.orapgsync.core.job.service.JobRegistry;
 import me.christianrobert.orapgsync.core.job.service.JobService;
 import org.slf4j.Logger;
@@ -51,6 +52,20 @@ public class FunctionResource {
     @Path("/postgres/stubs/verify")
     public Response verifyPostgresFunctionStubs() {
         return startJob("POSTGRES", "FUNCTION_STUB_VERIFICATION", "PostgreSQL function stub verification");
+    }
+
+    @POST
+    @Path("/postgres/standalone-implementation/create")
+    public Response createStandaloneFunctionImplementation() {
+        return startJob("POSTGRES", "STANDALONE_FUNCTION_IMPLEMENTATION",
+            "PostgreSQL standalone function implementation");
+    }
+
+    @POST
+    @Path("/postgres/standalone-implementation/verify")
+    public Response verifyStandaloneFunctionImplementation() {
+        return startJob("POSTGRES", "STANDALONE_FUNCTION_IMPLEMENTATION_VERIFICATION",
+            "PostgreSQL standalone function implementation verification");
     }
 
     /**
@@ -175,6 +190,59 @@ public class FunctionResource {
                 "isSuccessful", functionStubResult.isSuccessful(),
                 "executionTimestamp", functionStubResult.getExecutionTimestamp(),
                 "createdFunctions", createdDetails,
+                "skippedFunctions", skippedDetails,
+                "errors", errorDetails
+        );
+    }
+
+    /**
+     * Generate summary for standalone function implementation results.
+     */
+    public static Map<String, Object> generateStandaloneFunctionImplementationSummary(
+            StandaloneFunctionImplementationResult standaloneFuncImplResult) {
+        Map<String, Object> implementedDetails = new HashMap<>();
+        Map<String, Object> skippedDetails = new HashMap<>();
+        Map<String, Object> errorDetails = new HashMap<>();
+
+        // Implemented functions details
+        for (Map.Entry<String, FunctionMetadata> entry : standaloneFuncImplResult.getImplementedFunctions().entrySet()) {
+            FunctionMetadata func = entry.getValue();
+            implementedDetails.put(entry.getKey(), Map.of(
+                    "functionName", func.getDisplayName(),
+                    "status", "implemented"
+            ));
+        }
+
+        // Skipped functions details
+        for (Map.Entry<String, FunctionMetadata> entry : standaloneFuncImplResult.getSkippedFunctions().entrySet()) {
+            FunctionMetadata func = entry.getValue();
+            skippedDetails.put(entry.getKey(), Map.of(
+                    "functionName", func.getDisplayName(),
+                    "status", "skipped",
+                    "reason", "PL/SQL transformation not yet implemented"
+            ));
+        }
+
+        // Error details
+        for (Map.Entry<String, StandaloneFunctionImplementationResult.ErrorInfo> entry :
+                standaloneFuncImplResult.getErrors().entrySet()) {
+            StandaloneFunctionImplementationResult.ErrorInfo error = entry.getValue();
+            Map<String, Object> errorMap = new HashMap<>();
+            errorMap.put("functionName", error.getFunctionName());
+            errorMap.put("status", "error");
+            errorMap.put("error", error.getError());
+            if (error.getSql() != null) {
+                errorMap.put("sql", error.getSql());
+            }
+            errorDetails.put(entry.getKey(), errorMap);
+        }
+
+        return Map.of(
+                "implementedCount", standaloneFuncImplResult.getImplementedCount(),
+                "skippedCount", standaloneFuncImplResult.getSkippedCount(),
+                "errorCount", standaloneFuncImplResult.getErrorCount(),
+                "isSuccessful", standaloneFuncImplResult.isSuccessful(),
+                "implementedFunctions", implementedDetails,
                 "skippedFunctions", skippedDetails,
                 "errors", errorDetails
         );

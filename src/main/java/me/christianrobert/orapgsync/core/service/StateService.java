@@ -18,6 +18,7 @@ import me.christianrobert.orapgsync.core.job.model.view.ViewStubCreationResult;
 import me.christianrobert.orapgsync.core.job.model.view.ViewImplementationResult;
 import me.christianrobert.orapgsync.core.job.model.function.FunctionMetadata;
 import me.christianrobert.orapgsync.core.job.model.function.FunctionStubCreationResult;
+import me.christianrobert.orapgsync.core.job.model.function.StandaloneFunctionImplementationResult;
 import me.christianrobert.orapgsync.core.job.model.typemethod.TypeMethodMetadata;
 import me.christianrobert.orapgsync.core.job.model.typemethod.TypeMethodStubCreationResult;
 import me.christianrobert.orapgsync.oraclecompat.model.OracleCompatInstallationResult;
@@ -74,6 +75,7 @@ public class StateService {
     List<FunctionMetadata> oracleFunctionMetadata = new ArrayList<>();
     List<FunctionMetadata> postgresFunctionMetadata = new ArrayList<>();
     FunctionStubCreationResult functionStubCreationResult;
+    StandaloneFunctionImplementationResult standaloneFunctionImplementationResult;
 
     List<TypeMethodMetadata> oracleTypeMethodMetadata = new ArrayList<>();
     List<TypeMethodMetadata> postgresTypeMethodMetadata = new ArrayList<>();
@@ -315,6 +317,14 @@ public class StateService {
         this.functionStubCreationResult = functionStubCreationResult;
     }
 
+    public StandaloneFunctionImplementationResult getStandaloneFunctionImplementationResult() {
+        return standaloneFunctionImplementationResult;
+    }
+
+    public void setStandaloneFunctionImplementationResult(StandaloneFunctionImplementationResult standaloneFunctionImplementationResult) {
+        this.standaloneFunctionImplementationResult = standaloneFunctionImplementationResult;
+    }
+
     public List<TypeMethodMetadata> getOracleTypeMethodMetadata() {
         return oracleTypeMethodMetadata;
     }
@@ -395,6 +405,7 @@ public class StateService {
         this.oracleFunctionMetadata = new ArrayList<>();
         this.postgresFunctionMetadata = new ArrayList<>();
         this.functionStubCreationResult = null;
+        this.standaloneFunctionImplementationResult = null;
         this.oracleTypeMethodMetadata = new ArrayList<>();
         this.postgresTypeMethodMetadata = new ArrayList<>();
         this.typeMethodStubCreationResult = null;

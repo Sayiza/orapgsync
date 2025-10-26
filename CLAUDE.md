@@ -297,18 +297,39 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
     - ✅ CREATE OR REPLACE VIEW preserves dependencies (critical!)
     - See [TRANSFORMATION.md](TRANSFORMATION.md) for detailed documentation
 
-12. **Function/Procedure Logic**: PL/SQL→PL/pgSQL conversion using ANTLR (Planned - see Phase 3 roadmap)
-13. **Type Method Logic**: Member method implementations (Planned - see Phase 3 roadmap)
-14. **Triggers**: Migration from Oracle to PostgreSQL (Planned - see Phase 3 roadmap)
-15. **Indexes**: Extraction and creation (Future)
+12. **Standalone Function/Procedure Implementation**: 🔄 **INFRASTRUCTURE COMPLETE** - Framework ready for PL/SQL transformation
+    - ✅ Frontend: HTML row + JavaScript handlers (verification & creation)
+    - ✅ Backend Jobs:
+      - `PostgresStandaloneFunctionImplementationJob` - Implementation job (skips all - transformation TODO)
+      - `PostgresStandaloneFunctionImplementationVerificationJob` - Verification job (fully functional)
+    - ✅ Data Model: `StandaloneFunctionImplementationResult` with implemented/skipped/errors tracking
+    - ✅ REST Endpoints:
+      - `POST /api/functions/postgres/standalone-implementation/create`
+      - `POST /api/functions/postgres/standalone-implementation/verify`
+    - ✅ Result Handling: JobResource integration with summary generators
+    - ✅ Filtering: Only processes standalone functions (excludes package members with `__`)
+    - ⏳ **Next**: Add PL/SQL→PL/pgSQL transformation logic using ANTLR (extend PostgresCodeBuilder)
+    - Location: `function/job/`, `core/job/model/function/`
+    - Step 25 in orchestration workflow
+
+13. **Package Function/Procedure Logic**: PL/SQL→PL/pgSQL conversion using ANTLR (Planned - see Phase 3 roadmap)
+14. **Type Method Logic**: Member method implementations (Planned - see Phase 3 roadmap)
+15. **Triggers**: Migration from Oracle to PostgreSQL (Planned - see Phase 3 roadmap)
+16. **Indexes**: Extraction and creation (Future)
 
 ### 📋 Phase 3 Detailed Roadmap (Next Steps)
 1. ~~**Oracle Built-in Replacements**~~ ✅ **COMPLETE** - See item #10 above
-2. **Package Analysis**: Analyze package variables and state management patterns
-3. **Type Method Implementation**: Transform type member methods using ANTLR (extend PostgresCodeBuilder)
-4. **Function/Procedure Implementation**: PL/SQL→PL/pgSQL using package analysis results
-5. **Trigger Migration**: Extract and transform Oracle triggers
-6. **REST Layer** (Optional): Auto-generate REST endpoints for testing and incremental cutover
+2. ~~**Standalone Function/Procedure Infrastructure**~~ ✅ **COMPLETE** - See item #12 above
+3. **Standalone Function/Procedure Transformation**: 🔄 **IN PROGRESS** - Add PL/SQL→PL/pgSQL logic to Step 25
+   - Extract Oracle function source from `ALL_SOURCE`
+   - Extend `PostgresCodeBuilder` with PL/SQL statement visitors
+   - Transform control flow, declarations, exceptions
+   - Execute `CREATE OR REPLACE FUNCTION/PROCEDURE` in PostgreSQL
+4. **Package Analysis**: Analyze package variables and state management patterns
+5. **Package Function/Procedure Implementation**: PL/SQL→PL/pgSQL using package analysis results
+6. **Type Method Implementation**: Transform type member methods using ANTLR (extend PostgresCodeBuilder)
+7. **Trigger Migration**: Extract and transform Oracle triggers
+8. **REST Layer** (Optional): Auto-generate REST endpoints for testing and incremental cutover
 
 ## Database Configuration
 
