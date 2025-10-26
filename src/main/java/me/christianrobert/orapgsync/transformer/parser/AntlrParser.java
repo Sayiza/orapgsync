@@ -73,16 +73,94 @@ public class AntlrParser {
     }
 
     /**
-     * Parses a PL/SQL function body (future implementation).
+     * Parses a PL/SQL function body (extracted from ALL_SOURCE).
+     * Expects source starting with "FUNCTION function_name(...) RETURN type IS/AS ..."
+     *
+     * @param plsql Oracle PL/SQL function source code
+     * @return ParseResult containing the parse tree and any errors
      */
     public ParseResult parseFunctionBody(String plsql) {
-        throw new UnsupportedOperationException("Function body parsing not yet implemented");
+        if (plsql == null || plsql.trim().isEmpty()) {
+            throw new TransformationException("PL/SQL cannot be null or empty");
+        }
+
+        log.debug("Parsing function body: {}", plsql.substring(0, Math.min(100, plsql.length())));
+
+        try {
+            // Create lexer and parser
+            CharStream input = CharStreams.fromString(plsql);
+            PlSqlLexer lexer = new PlSqlLexer(input);
+            CommonTokenStream tokens = new CommonTokenStream(lexer);
+            PlSqlParser parser = new PlSqlParser(tokens);
+
+            // Collect errors
+            List<String> errors = new ArrayList<>();
+            parser.removeErrorListeners(); // Remove default console error listener
+            parser.addErrorListener(new BaseErrorListener() {
+                @Override
+                public void syntaxError(Recognizer<?, ?> recognizer, Object offendingSymbol,
+                                        int line, int charPositionInLine, String msg,
+                                        RecognitionException e) {
+                    String error = String.format("Line %d:%d - %s", line, charPositionInLine, msg);
+                    errors.add(error);
+                    log.warn("Parse error: {}", error);
+                }
+            });
+
+            // Parse the function body
+            PlSqlParser.Function_bodyContext tree = parser.function_body();
+
+            return new ParseResult(tree, errors, plsql);
+
+        } catch (Exception e) {
+            log.error("Failed to parse function body", e);
+            throw new TransformationException("Failed to parse function body: " + e.getMessage(), plsql, "ANTLR parsing", e);
+        }
     }
 
     /**
-     * Parses a PL/SQL procedure body (future implementation).
+     * Parses a PL/SQL procedure body (extracted from ALL_SOURCE).
+     * Expects source starting with "PROCEDURE procedure_name(...) IS/AS ..."
+     *
+     * @param plsql Oracle PL/SQL procedure source code
+     * @return ParseResult containing the parse tree and any errors
      */
     public ParseResult parseProcedureBody(String plsql) {
-        throw new UnsupportedOperationException("Procedure body parsing not yet implemented");
+        if (plsql == null || plsql.trim().isEmpty()) {
+            throw new TransformationException("PL/SQL cannot be null or empty");
+        }
+
+        log.debug("Parsing procedure body: {}", plsql.substring(0, Math.min(100, plsql.length())));
+
+        try {
+            // Create lexer and parser
+            CharStream input = CharStreams.fromString(plsql);
+            PlSqlLexer lexer = new PlSqlLexer(input);
+            CommonTokenStream tokens = new CommonTokenStream(lexer);
+            PlSqlParser parser = new PlSqlParser(tokens);
+
+            // Collect errors
+            List<String> errors = new ArrayList<>();
+            parser.removeErrorListeners(); // Remove default console error listener
+            parser.addErrorListener(new BaseErrorListener() {
+                @Override
+                public void syntaxError(Recognizer<?, ?> recognizer, Object offendingSymbol,
+                                        int line, int charPositionInLine, String msg,
+                                        RecognitionException e) {
+                    String error = String.format("Line %d:%d - %s", line, charPositionInLine, msg);
+                    errors.add(error);
+                    log.warn("Parse error: {}", error);
+                }
+            });
+
+            // Parse the procedure body
+            PlSqlParser.Procedure_bodyContext tree = parser.procedure_body();
+
+            return new ParseResult(tree, errors, plsql);
+
+        } catch (Exception e) {
+            log.error("Failed to parse procedure body", e);
+            throw new TransformationException("Failed to parse procedure body: " + e.getMessage(), plsql, "ANTLR parsing", e);
+        }
     }
 }

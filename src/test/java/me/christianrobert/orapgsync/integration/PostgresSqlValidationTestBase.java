@@ -4,7 +4,7 @@ import me.christianrobert.orapgsync.transformer.context.MetadataIndexBuilder;
 import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
 import me.christianrobert.orapgsync.transformer.context.TransformationResult;
 import me.christianrobert.orapgsync.transformer.parser.AntlrParser;
-import me.christianrobert.orapgsync.transformer.service.SqlTransformationService;
+import me.christianrobert.orapgsync.transformer.service.TransformationService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -81,7 +81,7 @@ public abstract class PostgresSqlValidationTestBase {
     protected Connection connection;
 
     /** SQL transformation service */
-    protected SqlTransformationService transformationService;
+    protected TransformationService transformationService;
 
     /** Transformation indices (built from empty metadata by default) */
     protected TransformationIndices indices;
@@ -112,15 +112,15 @@ public abstract class PostgresSqlValidationTestBase {
         );
 
         // Initialize SQL transformation service
-        transformationService = new SqlTransformationService();
+        transformationService = new TransformationService();
 
         // Inject AntlrParser using reflection (package-private field)
         try {
-            java.lang.reflect.Field parserField = SqlTransformationService.class.getDeclaredField("parser");
+            java.lang.reflect.Field parserField = TransformationService.class.getDeclaredField("parser");
             parserField.setAccessible(true);
             parserField.set(transformationService, new AntlrParser());
         } catch (Exception e) {
-            throw new RuntimeException("Failed to inject parser into SqlTransformationService", e);
+            throw new RuntimeException("Failed to inject parser into TransformationService", e);
         }
 
         // Build empty transformation indices (tests can override with custom metadata)

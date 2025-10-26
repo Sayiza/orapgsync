@@ -6,11 +6,19 @@ import me.christianrobert.orapgsync.core.job.AbstractDatabaseWriteJob;
 import me.christianrobert.orapgsync.core.job.model.JobProgress;
 import me.christianrobert.orapgsync.core.job.model.function.FunctionMetadata;
 import me.christianrobert.orapgsync.core.job.model.function.StandaloneFunctionImplementationResult;
+import me.christianrobert.orapgsync.database.service.OracleConnectionService;
 import me.christianrobert.orapgsync.database.service.PostgresConnectionService;
+import me.christianrobert.orapgsync.transformer.context.MetadataIndexBuilder;
+import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
+import me.christianrobert.orapgsync.transformer.context.TransformationResult;
+import me.christianrobert.orapgsync.transformer.service.TransformationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -40,7 +48,13 @@ public class PostgresStandaloneFunctionImplementationJob extends AbstractDatabas
     private static final Logger log = LoggerFactory.getLogger(PostgresStandaloneFunctionImplementationJob.class);
 
     @Inject
+    private OracleConnectionService oracleConnectionService;
+
+    @Inject
     private PostgresConnectionService postgresConnectionService;
+
+    @Inject
+    private TransformationService transformationService;
 
     @Override
     public String getTargetDatabase() {
@@ -91,45 +105,92 @@ public class PostgresStandaloneFunctionImplementationJob extends AbstractDatabas
         log.info("Found {} standalone functions to implement (out of {} total functions)",
                 standaloneFunctions.size(), oracleFunctions.size());
 
-        updateProgress(progressCallback, 10, "Connecting to PostgreSQL",
-                "Establishing database connection");
+        updateProgress(progressCallback, 10, "Building metadata indices",
+                "Creating transformation indices from state");
 
-        try (Connection postgresConnection = postgresConnectionService.getConnection()) {
-            updateProgress(progressCallback, 20, "Connected",
-                    String.format("Processing %d standalone functions", standaloneFunctions.size()));
+        // Build transformation indices from state
+        List<String> schemas = standaloneFunctions.stream()
+                .map(FunctionMetadata::getSchema)
+                .distinct()
+                .toList();
 
-            int processed = 0;
-            int totalFunctions = standaloneFunctions.size();
+        TransformationIndices indices = MetadataIndexBuilder.build(stateService, schemas);
 
-            for (FunctionMetadata function : standaloneFunctions) {
-                try {
-                    updateProgress(progressCallback,
-                            20 + (processed * 70 / totalFunctions),
-                            "Processing function: " + function.getDisplayName(),
-                            String.format("Function %d of %d", processed + 1, totalFunctions));
+        updateProgress(progressCallback, 15, "Connecting to Oracle",
+                "Establishing Oracle database connection for source extraction");
 
-                    // TODO: Implement actual transformation logic
-                    // For now, skip all functions with a message
-                    String reason = "PL/SQL transformation not yet implemented";
-                    result.addSkippedFunction(function);
-                    log.info("Skipped function {}: {}", function.getDisplayName(), reason);
+        // Open Oracle connection for source extraction
+        try (Connection oracleConnection = oracleConnectionService.getConnection()) {
+            updateProgress(progressCallback, 20, "Connected to Oracle",
+                    "Oracle connection established");
 
-                } catch (Exception e) {
-                    log.error("Error implementing function: " + function.getDisplayName(), e);
-                    result.addError(function.getDisplayName(), e.getMessage(), null);
+            updateProgress(progressCallback, 25, "Connecting to PostgreSQL",
+                    "Establishing PostgreSQL database connection");
+
+            try (Connection postgresConnection = postgresConnectionService.getConnection()) {
+                updateProgress(progressCallback, 30, "Connected to both databases",
+                        String.format("Processing %d standalone functions", standaloneFunctions.size()));
+
+                int processed = 0;
+                int totalFunctions = standaloneFunctions.size();
+
+                for (FunctionMetadata function : standaloneFunctions) {
+                    try {
+                        updateProgress(progressCallback,
+                                25 + (processed * 65 / totalFunctions),
+                                "Processing function: " + function.getDisplayName(),
+                                String.format("Function %d of %d", processed + 1, totalFunctions));
+
+                        // Step 1: Extract Oracle source
+                        log.info("Extracting Oracle source for: {}", function.getDisplayName());
+                        String oracleSource = extractOracleFunctionSource(oracleConnection, function);
+
+                        log.info("Successfully extracted Oracle source for: {} ({} characters)",
+                                function.getDisplayName(), oracleSource.length());
+                        log.debug("Oracle source for {}:\n{}", function.getDisplayName(), oracleSource);
+
+                        // Step 2: Transform PL/SQL to PL/pgSQL
+                        log.info("Transforming PL/SQL to PL/pgSQL for: {}", function.getDisplayName());
+                        TransformationResult transformResult;
+
+                        if (function.isFunction()) {
+                            transformResult = transformationService.transformFunction(
+                                    oracleSource, function, function.getSchema(), indices);
+                        } else {
+                            transformResult = transformationService.transformProcedure(
+                                    oracleSource, function, function.getSchema(), indices);
+                        }
+
+                        if (!transformResult.isSuccess()) {
+                            // Transformation failed - skip this function
+                            String reason = "Transformation failed: " + transformResult.getErrorMessage();
+                            result.addSkippedFunction(function);
+                            log.warn("Skipped {}: {}", function.getDisplayName(), reason);
+                        } else {
+                            // Step 3: Execute CREATE OR REPLACE FUNCTION/PROCEDURE in PostgreSQL
+                            String pgSql = transformResult.getPostgresSql();
+                            log.info("Executing transformed SQL for: {}", function.getDisplayName());
+                            log.debug("PostgreSQL SQL for {}:\n{}", function.getDisplayName(), pgSql);
+
+                            executeInPostgres(postgresConnection, pgSql, function, result);
+                        }
+
+                    } catch (Exception e) {
+                        log.error("Error processing function: " + function.getDisplayName(), e);
+                        result.addError(function.getDisplayName(), e.getMessage(), null);
+                    }
+
+                    processed++;
                 }
 
-                processed++;
+                updateProgress(progressCallback, 90, "Finalizing",
+                        "Standalone function implementation complete");
+
+                log.info("Standalone function implementation complete: {} implemented, {} skipped, {} errors",
+                        result.getImplementedCount(), result.getSkippedCount(), result.getErrorCount());
+
+                return result;
             }
-
-            updateProgress(progressCallback, 90, "Finalizing",
-                    "Standalone function implementation complete");
-
-            log.info("Standalone function implementation complete: {} implemented, {} skipped, {} errors",
-                    result.getImplementedCount(), result.getSkippedCount(), result.getErrorCount());
-
-            return result;
-
         } catch (Exception e) {
             updateProgress(progressCallback, -1, "Failed",
                     "Standalone function implementation failed: " + e.getMessage());
@@ -145,17 +206,89 @@ public class PostgresStandaloneFunctionImplementationJob extends AbstractDatabas
     }
 
     /**
-     * TODO: Future implementation - Transform Oracle PL/SQL to PostgreSQL PL/pgSQL
+     * Extracts Oracle function/procedure source code from ALL_SOURCE.
      *
-     * This method will:
-     * 1. Extract Oracle function source from ALL_SOURCE
-     * 2. Use ANTLR to parse PL/SQL
-     * 3. Transform to PL/pgSQL using PostgresCodeBuilder visitors
-     * 4. Generate CREATE OR REPLACE FUNCTION/PROCEDURE statement
-     * 5. Execute in PostgreSQL
+     * Oracle stores PL/SQL source in ALL_SOURCE with one line per row.
+     * This method assembles the complete source code by:
+     * 1. Querying ALL_SOURCE for the function/procedure
+     * 2. Ordering by LINE to maintain correct order
+     * 3. Concatenating all lines into a single string
+     *
+     * @param oracleConn Oracle database connection
+     * @param function Function metadata (contains schema and name)
+     * @return Complete Oracle PL/SQL source code as a single string
+     * @throws SQLException if source extraction fails
      */
-    private String transformFunctionToPlpgsql(FunctionMetadata function) {
-        // Placeholder for future implementation
-        throw new UnsupportedOperationException("PL/SQL transformation not yet implemented");
+    private String extractOracleFunctionSource(Connection oracleConn, FunctionMetadata function) throws SQLException {
+        String schema = function.getSchema().toUpperCase();
+        String name = function.getObjectName().toUpperCase();
+        String type = function.isFunction() ? "FUNCTION" : "PROCEDURE";
+
+        // Query ALL_SOURCE to get the complete PL/SQL source
+        // ALL_SOURCE contains one row per line of code, ordered by LINE column
+        String sql = """
+            SELECT text
+            FROM all_source
+            WHERE owner = ?
+              AND name = ?
+              AND type = ?
+            ORDER BY line
+            """;
+
+        StringBuilder source = new StringBuilder();
+
+        try (PreparedStatement ps = oracleConn.prepareStatement(sql)) {
+            ps.setString(1, schema);
+            ps.setString(2, name);
+            ps.setString(3, type);
+
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    String line = rs.getString("text");
+                    if (line != null) {
+                        source.append(line);
+                        // Note: Oracle ALL_SOURCE.TEXT does NOT include newlines
+                        // We add them here to preserve line structure for debugging
+                        if (!line.endsWith("\n")) {
+                            source.append("\n");
+                        }
+                    }
+                }
+            }
+        }
+
+        String result = source.toString().trim();
+
+        if (result.isEmpty()) {
+            throw new SQLException(String.format(
+                "No source found in ALL_SOURCE for %s %s.%s",
+                type, schema, name
+            ));
+        }
+
+        return result;
+    }
+
+    /**
+     * Executes transformed PL/pgSQL in PostgreSQL.
+     * Creates or replaces the function/procedure in the target database.
+     *
+     * @param postgresConn PostgreSQL database connection
+     * @param pgSql Transformed CREATE OR REPLACE FUNCTION/PROCEDURE statement
+     * @param function Function metadata
+     * @param result Result tracker
+     */
+    private void executeInPostgres(Connection postgresConn, String pgSql,
+                                   FunctionMetadata function,
+                                   StandaloneFunctionImplementationResult result) {
+        try (PreparedStatement ps = postgresConn.prepareStatement(pgSql)) {
+            ps.execute();
+            result.addImplementedFunction(function);
+            log.info("Successfully implemented: {}", function.getDisplayName());
+        } catch (SQLException e) {
+            String errorMsg = String.format("Failed to execute in PostgreSQL: %s", e.getMessage());
+            result.addError(function.getDisplayName(), errorMsg, pgSql);
+            log.error("Failed to implement {}: {}", function.getDisplayName(), errorMsg, e);
+        }
     }
 }

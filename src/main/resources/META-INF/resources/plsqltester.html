@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ora Pg Sync Tool - Transformation Testing</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<div class="header">
+  <h1 style="padding: 1rem 0; margin: 0; font-size: 1.5rem; color: var(--mainblue);">Oracle → PostgreSQL Transformation Tester</h1>
+</div>
+
+<div class="configuration-container">
+  <div class="config-section">
+    <h2 class="config-title">Transform Oracle Code to PostgreSQL</h2>
+
+    <div class="config-form">
+      <!-- Parse Type Selection -->
+      <div class="config-group" style="margin-bottom: 1rem;">
+        <label class="config-label" for="parse-type-select">
+          Parse Type <span style="color: #666; font-weight: normal;">(ANTLR grammar entry point)</span>
+        </label>
+        <select
+          id="parse-type-select"
+          class="config-input"
+          style="max-width: 300px; cursor: pointer;"
+        >
+          <option value="select_statement">SQL: SELECT statement (views)</option>
+          <option value="function_body">PL/SQL: Function body</option>
+          <option value="procedure_body">PL/SQL: Procedure body</option>
+          <option value="package_body" disabled>PL/SQL: Package body (analysis - not yet implemented)</option>
+        </select>
+      </div>
+
+      <!-- Schema Input -->
+      <div class="config-group" style="margin-bottom: 1rem;">
+        <label class="config-label" for="schema-input">
+          Schema <span style="color: #666; font-weight: normal;">(optional - defaults to first in state)</span>
+        </label>
+        <input
+          type="text"
+          id="schema-input"
+          class="config-input"
+          placeholder="e.g., HR"
+          style="max-width: 300px;"
+        >
+      </div>
+
+      <!-- Oracle Code Input -->
+      <div class="config-group" style="margin-bottom: 1rem;">
+        <label class="config-label" for="code-input">
+          Oracle Code
+        </label>
+        <textarea
+          id="code-input"
+          class="config-input"
+          rows="15"
+          placeholder="Paste your Oracle code here...&#10;&#10;Examples:&#10;&#10;SELECT statement:&#10;SELECT empno, ename FROM emp WHERE dept_id = 10&#10;&#10;Function body:&#10;FUNCTION get_salary(p_empno NUMBER) RETURN NUMBER IS&#10;  v_salary NUMBER;&#10;BEGIN&#10;  SELECT salary INTO v_salary FROM employees WHERE empno = p_empno;&#10;  RETURN v_salary;&#10;END;&#10;&#10;Procedure body:&#10;PROCEDURE update_salary(p_empno NUMBER, p_amount NUMBER) IS&#10;BEGIN&#10;  UPDATE employees SET salary = p_amount WHERE empno = p_empno;&#10;END;"
+          style="font-family: 'Consolas', 'Monaco', monospace; font-size: 0.85rem; resize: vertical;"
+        ></textarea>
+      </div>
+
+      <!-- Transform Button -->
+      <div class="config-actions">
+        <button id="transform-btn" class="btn btn-primary">
+          Transform Code
+        </button>
+        <button id="clear-btn" class="btn btn-secondary">
+          Clear
+        </button>
+        <span id="status-text" style="font-size: 0.85rem; color: #666;"></span>
+      </div>
+    </div>
+
+    <!-- Result Display -->
+    <div id="result-container" style="margin-top: 2rem; display: none;">
+      <h3 style="font-size: 1rem; color: #444; margin-bottom: 1rem; border-bottom: 2px solid #f0f0f0; padding-bottom: 0.5rem;">
+        Transformation Result
+      </h3>
+
+      <!-- Success Result -->
+      <div id="success-result" style="display: none;">
+        <div class="config-group" style="margin-bottom: 1rem;">
+          <label class="config-label">
+            PostgreSQL Code
+          </label>
+          <div class="log-content" id="postgres-code" style="height: auto; min-height: 100px; background: #1e1e1e; color: #4CAF50; white-space: pre-wrap; word-wrap: break-word;"></div>
+        </div>
+
+        <div class="config-group" style="margin-bottom: 1rem;">
+          <label class="config-label">
+            Original Oracle Code
+          </label>
+          <div class="log-content" id="oracle-code-display" style="height: auto; min-height: 100px; white-space: pre-wrap; word-wrap: break-word;"></div>
+        </div>
+      </div>
+
+      <!-- Error Result -->
+      <div id="error-result" style="display: none;">
+        <div class="error-message">
+          <strong>Transformation Failed</strong>
+          <div id="error-message" style="margin-top: 0.5rem; font-family: monospace; font-size: 0.75rem; white-space: pre-wrap;"></div>
+        </div>
+
+        <div class="config-group" style="margin-top: 1rem;">
+          <label class="config-label">
+            Original Oracle Code
+          </label>
+          <div class="log-content" id="oracle-code-error" style="height: auto; min-height: 100px; white-space: pre-wrap; word-wrap: break-word;"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // DOM Elements
+  const parseTypeSelect = document.getElementById('parse-type-select');
+  const schemaInput = document.getElementById('schema-input');
+  const codeInput = document.getElementById('code-input');
+  const transformBtn = document.getElementById('transform-btn');
+  const clearBtn = document.getElementById('clear-btn');
+  const statusText = document.getElementById('status-text');
+  const resultContainer = document.getElementById('result-container');
+  const successResult = document.getElementById('success-result');
+  const errorResult = document.getElementById('error-result');
+  const postgresCode = document.getElementById('postgres-code');
+  const oracleCodeDisplay = document.getElementById('oracle-code-display');
+  const oracleCodeError = document.getElementById('oracle-code-error');
+  const errorMessage = document.getElementById('error-message');
+
+  // Transform Code
+  transformBtn.addEventListener('click', async () => {
+    const oracleCode = codeInput.value.trim();
+    const parseType = parseTypeSelect.value;
+    const schema = schemaInput.value.trim();
+
+    if (!oracleCode) {
+      statusText.textContent = 'Please enter Oracle code';
+      statusText.style.color = '#f44336';
+      return;
+    }
+
+    // Build URL with parameters
+    let url = '/api/transformation/code';
+    const params = [];
+
+    params.push(`parseType=${encodeURIComponent(parseType)}`);
+
+    if (schema) {
+      params.push(`schema=${encodeURIComponent(schema)}`);
+    }
+
+    if (params.length > 0) {
+      url += '?' + params.join('&');
+    }
+
+    // Show loading state
+    transformBtn.disabled = true;
+    statusText.textContent = 'Transforming...';
+    statusText.style.color = '#666';
+    resultContainer.style.display = 'none';
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'text/plain'
+        },
+        body: oracleCode
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const result = await response.json();
+
+      // Show result container
+      resultContainer.style.display = 'block';
+
+      if (result.success) {
+        // Show success result
+        successResult.style.display = 'block';
+        errorResult.style.display = 'none';
+
+        postgresCode.textContent = result.postgresSql;
+        oracleCodeDisplay.textContent = result.oracleSql;
+
+        statusText.textContent = 'Transformation successful!';
+        statusText.style.color = '#4CAF50';
+      } else {
+        // Show error result
+        successResult.style.display = 'none';
+        errorResult.style.display = 'block';
+
+        errorMessage.textContent = result.errorMessage || 'Unknown error';
+        oracleCodeError.textContent = result.oracleSql;
+
+        statusText.textContent = 'Transformation failed';
+        statusText.style.color = '#f44336';
+      }
+    } catch (error) {
+      // Network or parsing error
+      resultContainer.style.display = 'block';
+      successResult.style.display = 'none';
+      errorResult.style.display = 'block';
+
+      errorMessage.textContent = `Network error: ${error.message}`;
+      oracleCodeError.textContent = oracleCode;
+
+      statusText.textContent = 'Request failed';
+      statusText.style.color = '#f44336';
+    } finally {
+      transformBtn.disabled = false;
+    }
+  });
+
+  // Clear form
+  clearBtn.addEventListener('click', () => {
+    parseTypeSelect.value = 'select_statement';
+    schemaInput.value = '';
+    codeInput.value = '';
+    statusText.textContent = '';
+    resultContainer.style.display = 'none';
+    codeInput.focus();
+  });
+
+  // Allow Ctrl+Enter to transform
+  codeInput.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.key === 'Enter') {
+      transformBtn.click();
+    }
+  });
+
+  // Update placeholder based on parse type
+  parseTypeSelect.addEventListener('change', () => {
+    const parseType = parseTypeSelect.value;
+    let placeholder = '';
+
+    switch(parseType) {
+      case 'select_statement':
+        placeholder = 'Paste your Oracle SELECT statement here...\n\nExample:\nSELECT empno, ename, salary FROM employees WHERE dept_id = 10 ORDER BY ename';
+        break;
+      case 'function_body':
+        placeholder = 'Paste your Oracle function body here (without CREATE)...\n\nExample:\nFUNCTION get_salary(p_empno NUMBER) RETURN NUMBER IS\n  v_salary NUMBER;\nBEGIN\n  SELECT salary INTO v_salary FROM employees WHERE empno = p_empno;\n  RETURN v_salary;\nEND;';
+        break;
+      case 'procedure_body':
+        placeholder = 'Paste your Oracle procedure body here (without CREATE)...\n\nExample:\nPROCEDURE update_salary(p_empno NUMBER, p_amount NUMBER) IS\nBEGIN\n  UPDATE employees SET salary = p_amount WHERE empno = p_empno;\n  COMMIT;\nEND;';
+        break;
+      case 'package_body':
+        placeholder = 'Package body parsing for analysis (not yet implemented)';
+        break;
+      default:
+        placeholder = 'Paste your Oracle code here...';
+    }
+
+    codeInput.placeholder = placeholder;
+  });
+
+  // Focus code input on load
+  codeInput.focus();
+</script>
+
+</body>
+</html>

@@ -345,4 +345,16 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
     public String visitExpressions_(PlSqlParser.Expressions_Context ctx) {
         return VisitExpressions.v(ctx, this);
     }
+
+    // ========== PL/SQL FUNCTION/PROCEDURE BODIES ==========
+
+    @Override
+    public String visitFunction_body(PlSqlParser.Function_bodyContext ctx) {
+        return VisitFunctionBody.v(ctx, this);
+    }
+
+    @Override
+    public String visitProcedure_body(PlSqlParser.Procedure_bodyContext ctx) {
+        return VisitProcedureBody.v(ctx, this);
+    }
 }

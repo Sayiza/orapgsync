@@ -10,7 +10,7 @@ import me.christianrobert.orapgsync.transformer.context.MetadataIndexBuilder;
 import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
 import me.christianrobert.orapgsync.transformer.context.TransformationResult;
 import me.christianrobert.orapgsync.transformer.parser.AntlrParser;
-import me.christianrobert.orapgsync.transformer.service.SqlTransformationService;
+import me.christianrobert.orapgsync.transformer.service.TransformationService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -26,7 +26,7 @@ import static org.mockito.Mockito.when;
  * <p>These tests verify the complete workflow:
  * 1. StateService provides Oracle metadata (tables, synonyms, etc.)
  * 2. MetadataIndexBuilder builds transformation indices from StateService
- * 3. SqlTransformationService transforms Oracle SQL to PostgreSQL SQL
+ * 3. TransformationService transforms Oracle SQL to PostgreSQL SQL
  * 4. Direct AST transformation (no intermediate semantic tree)
  *
  * <p>This mirrors how an actual job (e.g., PostgresViewImplementationJob)
@@ -35,12 +35,12 @@ import static org.mockito.Mockito.when;
 class ViewTransformationIntegrationTest {
 
     private StateService mockStateService;
-    private SqlTransformationService transformationService;
+    private TransformationService transformationService;
 
     @BeforeEach
     void setUp() {
         mockStateService = Mockito.mock(StateService.class);
-        transformationService = new SqlTransformationService();
+        transformationService = new TransformationService();
 
         // Set up default empty returns for all StateService methods
         when(mockStateService.getOracleTableMetadata()).thenReturn(new ArrayList<>());
@@ -50,7 +50,7 @@ class ViewTransformationIntegrationTest {
 
         // Manually inject parser using reflection (package-private field)
         try {
-            java.lang.reflect.Field parserField = SqlTransformationService.class.getDeclaredField("parser");
+            java.lang.reflect.Field parserField = TransformationService.class.getDeclaredField("parser");
             parserField.setAccessible(true);
             parserField.set(transformationService, new AntlrParser());
         } catch (Exception e) {
