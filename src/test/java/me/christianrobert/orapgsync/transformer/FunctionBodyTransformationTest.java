@@ -1,6 +1,5 @@
 package me.christianrobert.orapgsync.transformer;
 
-import me.christianrobert.orapgsync.core.job.model.function.FunctionMetadata;
 import me.christianrobert.orapgsync.transformer.parser.AntlrParser;
 import me.christianrobert.orapgsync.transformer.parser.ParseResult;
 import me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder;
@@ -41,18 +40,17 @@ class FunctionBodyTransformationTest {
         );
     }
 
-    private String transform(String oracleFunctionBody, FunctionMetadata metadata) {
+    private String transform(String oracleFunctionBody) {
         ParseResult parseResult = parser.parseFunctionBody(oracleFunctionBody);
         if (parseResult.hasErrors()) {
             fail("Parse failed: " + parseResult.getErrors());
         }
 
-        // Create context with function metadata (visitor pattern!)
+        // Create context (only schema needed - function name/params extracted from AST)
         TransformationContext context = new TransformationContext(
             "hr",
             indices,
-            new SimpleTypeEvaluator("hr", indices),
-            metadata
+            new SimpleTypeEvaluator("hr", indices)
         );
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
 
@@ -71,8 +69,7 @@ class FunctionBodyTransformationTest {
             "  RETURN NULL;\n" +
             "END;";
 
-        FunctionMetadata metadata = new FunctionMetadata("hr", "get_test", "FUNCTION");
-        String result = transform(oracleSql, metadata);
+        String result = transform(oracleSql);
         String normalized = result.trim().replaceAll("\\s+", " ");
 
         // Debug output
@@ -110,8 +107,7 @@ class FunctionBodyTransformationTest {
             "  RETURN 42;\n" +
             "END;";
 
-        FunctionMetadata metadata = new FunctionMetadata("hr", "get_constant", "FUNCTION");
-        String result = transform(oracleSql, metadata);
+        String result = transform(oracleSql);
         String normalized = result.trim().replaceAll("\\s+", " ");
 
         // Debug output
@@ -146,8 +142,7 @@ class FunctionBodyTransformationTest {
             "  RETURN 'Hello World';\n" +
             "END;";
 
-        FunctionMetadata metadata = new FunctionMetadata("hr", "get_greeting", "FUNCTION");
-        String result = transform(oracleSql, metadata);
+        String result = transform(oracleSql);
         String normalized = result.trim().replaceAll("\\s+", " ");
 
         // Debug output
@@ -184,8 +179,7 @@ class FunctionBodyTransformationTest {
             "  RETURN 2 + 2;\n" +
             "END;";
 
-        FunctionMetadata metadata = new FunctionMetadata("hr", "calculate", "FUNCTION");
-        String result = transform(oracleSql, metadata);
+        String result = transform(oracleSql);
         String normalized = result.trim().replaceAll("\\s+", " ");
 
         // Debug output

@@ -18,6 +18,7 @@
 [ ] 1 more job for package body data
 [ ] 1 more job for oracle build ins
 [ ] evaluate usage of s/get_config for package variable replacement!
+[ ] function stubs need ast parsing too!
 Let's proceed with starting the implementation of the actual function-code-transformation. I usually want you to proceed in small
 steps that allow for manual testing in between. So I have thought we could create a mechasims for manual review, similar as we did
 with @src/main/resources/META-INF/resources/sqltester.html ... What files we would need to create to get this basically working for

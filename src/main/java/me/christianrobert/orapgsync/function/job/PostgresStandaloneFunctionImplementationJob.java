@@ -155,10 +155,10 @@ public class PostgresStandaloneFunctionImplementationJob extends AbstractDatabas
 
                         if (function.isFunction()) {
                             transformResult = transformationService.transformFunction(
-                                    oracleSource, function, function.getSchema(), indices);
+                                    oracleSource, function.getSchema(), indices);
                         } else {
                             transformResult = transformationService.transformProcedure(
-                                    oracleSource, function, function.getSchema(), indices);
+                                    oracleSource, function.getSchema(), indices);
                         }
 
                         if (!transformResult.isSuccess()) {

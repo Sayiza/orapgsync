@@ -1,6 +1,5 @@
 package me.christianrobert.orapgsync.integration;
 
-import me.christianrobert.orapgsync.core.job.model.function.FunctionMetadata;
 import me.christianrobert.orapgsync.transformer.context.TransformationResult;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -58,10 +57,9 @@ public class PostgresFunctionValidationTest extends PostgresSqlValidationTestBas
             END;
             """;
 
-        // When: Transform function body
-        FunctionMetadata metadata = new FunctionMetadata("hr", "get_test", "FUNCTION");
+        // When: Transform function body (function name extracted from AST)
         TransformationResult result = transformationService.transformFunction(
-            oracleFunctionBody, metadata, "hr", indices);
+            oracleFunctionBody, "hr", indices);
 
         // Then: Transformation succeeds
         assertTrue(result.isSuccess(),
@@ -94,10 +92,9 @@ public class PostgresFunctionValidationTest extends PostgresSqlValidationTestBas
             END;
             """;
 
-        // When: Transform function body
-        FunctionMetadata metadata = new FunctionMetadata("hr", "get_constant", "FUNCTION");
+        // When: Transform function body (function name extracted from AST)
         TransformationResult result = transformationService.transformFunction(
-            oracleFunctionBody, metadata, "hr", indices);
+            oracleFunctionBody, "hr", indices);
 
         // Then: Transformation succeeds
         assertTrue(result.isSuccess(),
@@ -134,10 +131,9 @@ public class PostgresFunctionValidationTest extends PostgresSqlValidationTestBas
             END;
             """;
 
-        // When: Transform function body
-        FunctionMetadata metadata = new FunctionMetadata("hr", "get_greeting", "FUNCTION");
+        // When: Transform function body (function name extracted from AST)
         TransformationResult result = transformationService.transformFunction(
-            oracleFunctionBody, metadata, "hr", indices);
+            oracleFunctionBody, "hr", indices);
 
         // Then: Transformation succeeds
         assertTrue(result.isSuccess(),
@@ -170,10 +166,9 @@ public class PostgresFunctionValidationTest extends PostgresSqlValidationTestBas
             END;
             """;
 
-        // When: Transform function body
-        FunctionMetadata metadata = new FunctionMetadata("hr", "calculate", "FUNCTION");
+        // When: Transform function body (function name extracted from AST)
         TransformationResult result = transformationService.transformFunction(
-            oracleFunctionBody, metadata, "hr", indices);
+            oracleFunctionBody, "hr", indices);
 
         // Then: Transformation succeeds
         assertTrue(result.isSuccess(),
@@ -211,8 +206,7 @@ public class PostgresFunctionValidationTest extends PostgresSqlValidationTestBas
             END;
             """;
 
-        FunctionMetadata meta1 = new FunctionMetadata("hr", "func1", "FUNCTION");
-        TransformationResult result1 = transformationService.transformFunction(func1Body, meta1, "hr", indices);
+        TransformationResult result1 = transformationService.transformFunction(func1Body, "hr", indices);
         assertTrue(result1.isSuccess());
 
         // Use result directly - it's already a complete CREATE OR REPLACE FUNCTION statement
@@ -226,8 +220,7 @@ public class PostgresFunctionValidationTest extends PostgresSqlValidationTestBas
             END;
             """;
 
-        FunctionMetadata meta2 = new FunctionMetadata("hr", "func2", "FUNCTION");
-        TransformationResult result2 = transformationService.transformFunction(func2Body, meta2, "hr", indices);
+        TransformationResult result2 = transformationService.transformFunction(func2Body, "hr", indices);
         assertTrue(result2.isSuccess());
 
         // Use result directly - it's already a complete CREATE OR REPLACE FUNCTION statement
@@ -255,8 +248,7 @@ public class PostgresFunctionValidationTest extends PostgresSqlValidationTestBas
             END;
             """;
 
-        FunctionMetadata metadata = new FunctionMetadata("hr", "counter", "FUNCTION");
-        TransformationResult result1 = transformationService.transformFunction(initialBody, metadata, "hr", indices);
+        TransformationResult result1 = transformationService.transformFunction(initialBody, "hr", indices);
         assertTrue(result1.isSuccess());
 
         // Use result directly - it's already a complete CREATE OR REPLACE FUNCTION statement
@@ -274,7 +266,7 @@ public class PostgresFunctionValidationTest extends PostgresSqlValidationTestBas
             END;
             """;
 
-        TransformationResult result2 = transformationService.transformFunction(updatedBody, metadata, "hr", indices);
+        TransformationResult result2 = transformationService.transformFunction(updatedBody, "hr", indices);
         assertTrue(result2.isSuccess());
 
         // Use result directly - it's already a complete CREATE OR REPLACE FUNCTION statement

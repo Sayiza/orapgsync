@@ -178,39 +178,35 @@ public class TransformationService {
      * <ul>
      *   <li>Parsing Oracle PL/SQL function body using ANTLR (entry: function_body)</li>
      *   <li>Direct AST transformation via PostgresCodeBuilder</li>
+     *   <li>Extracting function name and parameters from AST</li>
      *   <li>Generating CREATE OR REPLACE FUNCTION statement</li>
      *   <li>Error handling and reporting</li>
      * </ul>
      *
+     * <p>Note: Function name and parameters are extracted from the AST, not from metadata.
+     * Only schema is required from metadata, consistent with SQL transformation.</p>
+     *
      * @param oraclePlSql Oracle PL/SQL function source (from ALL_SOURCE)
-     * @param function Function metadata (for signature information)
      * @param schema Schema context for name resolution
      * @param indices Pre-built metadata indices for lookups
      * @return TransformationResult containing either transformed SQL or error details
      */
-    public TransformationResult transformFunction(String oraclePlSql, FunctionMetadata function,
-                                                   String schema, TransformationIndices indices) {
-        return transformFunction(oraclePlSql, function, schema, indices, false);
+    public TransformationResult transformFunction(String oraclePlSql, String schema, TransformationIndices indices) {
+        return transformFunction(oraclePlSql, schema, indices, false);
     }
 
     /**
      * Transforms Oracle PL/SQL function to PostgreSQL equivalent with optional AST tree output.
      *
      * @param oraclePlSql Oracle PL/SQL function source (from ALL_SOURCE)
-     * @param function Function metadata (for signature information)
      * @param schema Schema context for name resolution
      * @param indices Pre-built metadata indices for lookups
      * @param includeAst Whether to include AST tree in result (for debugging)
      * @return TransformationResult containing transformed SQL and optionally AST tree
      */
-    public TransformationResult transformFunction(String oraclePlSql, FunctionMetadata function,
-                                                   String schema, TransformationIndices indices, boolean includeAst) {
+    public TransformationResult transformFunction(String oraclePlSql, String schema, TransformationIndices indices, boolean includeAst) {
         if (oraclePlSql == null || oraclePlSql.trim().isEmpty()) {
             return TransformationResult.failure(oraclePlSql, "Oracle PL/SQL cannot be null or empty");
-        }
-
-        if (function == null) {
-            return TransformationResult.failure(oraclePlSql, "Function metadata cannot be null");
         }
 
         if (schema == null || schema.trim().isEmpty()) {
@@ -221,7 +217,7 @@ public class TransformationService {
             return TransformationResult.failure(oraclePlSql, "Transformation indices cannot be null");
         }
 
-        log.debug("Transforming function: {}", function.getDisplayName());
+        log.debug("Transforming function for schema: {}", schema);
         log.trace("Oracle PL/SQL: {}", oraclePlSql);
 
         try {
@@ -239,28 +235,28 @@ public class TransformationService {
             // Check for parse errors
             if (parseResult.hasErrors()) {
                 String errorMsg = "Parse errors: " + parseResult.getErrorMessage();
-                log.warn("Parse failed for {}: {}", function.getDisplayName(), errorMsg);
+                log.warn("Parse failed for schema {}: {}", schema, errorMsg);
                 if (includeAst && astTree != null) {
                     return TransformationResult.failureWithAst(oraclePlSql, errorMsg, astTree);
                 }
                 return TransformationResult.failure(oraclePlSql, errorMsg);
             }
 
-            // STEP 2: Create TransformationContext with schema, indices, type evaluator, and function metadata
+            // STEP 2: Create TransformationContext with schema, indices, and type evaluator
             log.debug("Step 2: Creating transformation context with schema: {}", schema);
 
             // Create type evaluator
             TypeEvaluator typeEvaluator = new SimpleTypeEvaluator(schema, indices);
 
-            // Create context with type evaluator and function metadata (visitor pattern!)
-            TransformationContext context = new TransformationContext(schema, indices, typeEvaluator, function);
+            // Create context (only schema needed - function name/params extracted from AST)
+            TransformationContext context = new TransformationContext(schema, indices, typeEvaluator);
 
-            // STEP 3: Transform ANTLR parse tree to PostgreSQL PL/pgSQL with context
+            // STEP 3: Transform ANTLR parse tree to PostgreSQL PL/pgSQL
             log.debug("Step 3: Transforming to PostgreSQL PL/pgSQL");
             PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
             String createFunction = builder.visit(parseResult.getTree());
 
-            log.info("Successfully transformed function: {}", function.getDisplayName());
+            log.info("Successfully transformed function for schema: {}", schema);
             log.debug("PostgreSQL PL/pgSQL: {}", createFunction);
 
             if (includeAst && astTree != null) {
@@ -269,11 +265,11 @@ public class TransformationService {
             return TransformationResult.success(oraclePlSql, createFunction);
 
         } catch (TransformationException e) {
-            log.error("Transformation failed for {}: {}", function.getDisplayName(), e.getDetailedMessage(), e);
+            log.error("Transformation failed for schema {}: {}", schema, e.getDetailedMessage(), e);
             return TransformationResult.failure(oraclePlSql, e);
 
         } catch (Exception e) {
-            log.error("Unexpected error during transformation of {}", function.getDisplayName(), e);
+            log.error("Unexpected error during transformation for schema {}", schema, e);
             String errorMsg = "Unexpected error: " + e.getMessage();
             return TransformationResult.failure(oraclePlSql, errorMsg);
         }
@@ -284,35 +280,30 @@ public class TransformationService {
      *
      * <p>Same as {@link #transformFunction} but for procedures (no return type).</p>
      *
+     * <p>Note: Procedure name and parameters are extracted from the AST, not from metadata.
+     * Only schema is required from metadata, consistent with SQL transformation.</p>
+     *
      * @param oraclePlSql Oracle PL/SQL procedure source (from ALL_SOURCE)
-     * @param function Function metadata (for signature information)
      * @param schema Schema context for name resolution
      * @param indices Pre-built metadata indices for lookups
      * @return TransformationResult containing either transformed SQL or error details
      */
-    public TransformationResult transformProcedure(String oraclePlSql, FunctionMetadata function,
-                                                    String schema, TransformationIndices indices) {
-        return transformProcedure(oraclePlSql, function, schema, indices, false);
+    public TransformationResult transformProcedure(String oraclePlSql, String schema, TransformationIndices indices) {
+        return transformProcedure(oraclePlSql, schema, indices, false);
     }
 
     /**
      * Transforms Oracle PL/SQL procedure to PostgreSQL equivalent with optional AST tree output.
      *
      * @param oraclePlSql Oracle PL/SQL procedure source (from ALL_SOURCE)
-     * @param function Function metadata (for signature information)
      * @param schema Schema context for name resolution
      * @param indices Pre-built metadata indices for lookups
      * @param includeAst Whether to include AST tree in result (for debugging)
      * @return TransformationResult containing transformed SQL and optionally AST tree
      */
-    public TransformationResult transformProcedure(String oraclePlSql, FunctionMetadata function,
-                                                    String schema, TransformationIndices indices, boolean includeAst) {
+    public TransformationResult transformProcedure(String oraclePlSql, String schema, TransformationIndices indices, boolean includeAst) {
         if (oraclePlSql == null || oraclePlSql.trim().isEmpty()) {
             return TransformationResult.failure(oraclePlSql, "Oracle PL/SQL cannot be null or empty");
-        }
-
-        if (function == null) {
-            return TransformationResult.failure(oraclePlSql, "Function metadata cannot be null");
         }
 
         if (schema == null || schema.trim().isEmpty()) {
@@ -323,7 +314,7 @@ public class TransformationService {
             return TransformationResult.failure(oraclePlSql, "Transformation indices cannot be null");
         }
 
-        log.debug("Transforming procedure: {}", function.getDisplayName());
+        log.debug("Transforming procedure for schema: {}", schema);
         log.trace("Oracle PL/SQL: {}", oraclePlSql);
 
         try {
@@ -341,28 +332,28 @@ public class TransformationService {
             // Check for parse errors
             if (parseResult.hasErrors()) {
                 String errorMsg = "Parse errors: " + parseResult.getErrorMessage();
-                log.warn("Parse failed for {}: {}", function.getDisplayName(), errorMsg);
+                log.warn("Parse failed for schema {}: {}", schema, errorMsg);
                 if (includeAst && astTree != null) {
                     return TransformationResult.failureWithAst(oraclePlSql, errorMsg, astTree);
                 }
                 return TransformationResult.failure(oraclePlSql, errorMsg);
             }
 
-            // STEP 2: Create TransformationContext with schema, indices, type evaluator, and function metadata
+            // STEP 2: Create TransformationContext with schema, indices, and type evaluator
             log.debug("Step 2: Creating transformation context with schema: {}", schema);
 
             // Create type evaluator
             TypeEvaluator typeEvaluator = new SimpleTypeEvaluator(schema, indices);
 
-            // Create context with type evaluator and function metadata (visitor pattern!)
-            TransformationContext context = new TransformationContext(schema, indices, typeEvaluator, function);
+            // Create context (only schema needed - procedure name/params extracted from AST)
+            TransformationContext context = new TransformationContext(schema, indices, typeEvaluator);
 
-            // STEP 3: Transform ANTLR parse tree to PostgreSQL PL/pgSQL with context
+            // STEP 3: Transform ANTLR parse tree to PostgreSQL PL/pgSQL
             log.debug("Step 3: Transforming to PostgreSQL PL/pgSQL");
             PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
             String createFunction = builder.visit(parseResult.getTree());
 
-            log.info("Successfully transformed procedure: {}", function.getDisplayName());
+            log.info("Successfully transformed procedure for schema: {}", schema);
             log.debug("PostgreSQL PL/pgSQL: {}", createFunction);
 
             if (includeAst && astTree != null) {
@@ -371,11 +362,11 @@ public class TransformationService {
             return TransformationResult.success(oraclePlSql, createFunction);
 
         } catch (TransformationException e) {
-            log.error("Transformation failed for {}: {}", function.getDisplayName(), e.getDetailedMessage(), e);
+            log.error("Transformation failed for schema {}: {}", schema, e.getDetailedMessage(), e);
             return TransformationResult.failure(oraclePlSql, e);
 
         } catch (Exception e) {
-            log.error("Unexpected error during transformation of {}", function.getDisplayName(), e);
+            log.error("Unexpected error during transformation for schema {}", schema, e);
             String errorMsg = "Unexpected error: " + e.getMessage();
             return TransformationResult.failure(oraclePlSql, errorMsg);
         }

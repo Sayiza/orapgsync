@@ -1,19 +1,17 @@
 package me.christianrobert.orapgsync.transformer.builder;
 
 import me.christianrobert.orapgsync.antlr.PlSqlParser;
-import me.christianrobert.orapgsync.core.job.model.function.FunctionMetadata;
-import me.christianrobert.orapgsync.core.job.model.function.FunctionParameter;
-import me.christianrobert.orapgsync.core.tools.TypeConverter;
 
 /**
  * Static helper for visiting PL/SQL procedure bodies.
  *
- * <p>Generates complete CREATE OR REPLACE FUNCTION statement using metadata from TransformationContext.</p>
+ * <p>Generates complete CREATE OR REPLACE FUNCTION statement by extracting all
+ * information from the ANTLR parse tree. Only requires schema from context.</p>
  *
  * <p>Note: Procedures and functions share the same body structure (DECLARE + BEGIN...END),
  * the only difference is procedures don't have a RETURN type (they return void).</p>
  *
- * <h3>Oracle Structure:</h3>
+ * <h3>Oracle Structure (from AST):</h3>
  * <pre>
  * PROCEDURE procedure_name (params) IS/AS
  *   [DECLARE declarations]
@@ -43,23 +41,44 @@ public class VisitProcedureBody {
 
     /**
      * Transforms procedure to complete CREATE OR REPLACE FUNCTION statement.
-     * Gets all necessary metadata from TransformationContext via the builder.
+     * Extracts procedure name and parameters from AST.
+     * Only uses schema from context (consistent with SQL transformation).
      * Note: PostgreSQL uses FUNCTION with RETURNS void for procedures.
      *
      * @param ctx Procedure body parse tree context
-     * @param b PostgresCodeBuilder instance (provides access to context)
+     * @param b PostgresCodeBuilder instance (provides access to context for schema)
      * @return Complete CREATE OR REPLACE FUNCTION statement
      */
     public static String v(PlSqlParser.Procedure_bodyContext ctx, PostgresCodeBuilder b) {
-        // Get function metadata from context (visitor pattern - everything comes from context)
-        FunctionMetadata metadata = b.getContext().getFunctionMetadata();
-        if (metadata == null) {
-            throw new IllegalStateException("Function metadata not found in transformation context");
-        }
-
+        // Get schema from context (only metadata dependency - consistent with SQL transformation)
         String schema = b.getContext().getCurrentSchema();
 
-        // STEP 1: Build procedure body (DECLARE + BEGIN...END)
+        // STEP 1: Extract procedure name from AST
+        String procedureName;
+        if (ctx.identifier() != null) {
+            procedureName = ctx.identifier().getText().toLowerCase();
+        } else {
+            throw new IllegalStateException("Procedure name not found in AST");
+        }
+        String qualifiedName = schema.toLowerCase() + "." + procedureName;
+
+        // STEP 2: Build parameter list from AST
+        StringBuilder paramList = new StringBuilder();
+        if (ctx.parameter() != null && !ctx.parameter().isEmpty()) {
+            boolean first = true;
+            for (PlSqlParser.ParameterContext paramCtx : ctx.parameter()) {
+                String paramString = VisitParameter.v(paramCtx, b);
+                if (paramString != null) {
+                    if (!first) {
+                        paramList.append(", ");
+                    }
+                    first = false;
+                    paramList.append(paramString);
+                }
+            }
+        }
+
+        // STEP 3: Build procedure body (DECLARE + BEGIN...END)
         StringBuilder procedureBody = new StringBuilder();
 
         // Visit declarations (if present)
@@ -73,40 +92,6 @@ public class VisitProcedureBody {
         if (ctx.body() != null) {
             String bodyCode = b.visit(ctx.body());
             procedureBody.append(bodyCode);
-        }
-
-        // STEP 2: Build procedure signature
-        String procedureName = metadata.getPostgresName();
-        String qualifiedName = schema.toLowerCase() + "." + procedureName;
-
-        // STEP 3: Build parameter list
-        StringBuilder paramList = new StringBuilder();
-        if (metadata.getParameters() != null && !metadata.getParameters().isEmpty()) {
-            boolean first = true;
-            for (FunctionParameter param : metadata.getParameters()) {
-                String inOut = param.getInOut();
-                // Only include IN and IN OUT parameters in signature
-                if ("IN".equals(inOut) || "IN OUT".equals(inOut)) {
-                    if (!first) {
-                        paramList.append(", ");
-                    }
-                    first = false;
-
-                    // Parameter name
-                    paramList.append(param.getParameterName().toLowerCase());
-                    paramList.append(" ");
-
-                    // IN OUT mode indicator
-                    if ("IN OUT".equals(inOut)) {
-                        paramList.append("INOUT ");
-                    }
-
-                    // Parameter type (Oracle → PostgreSQL type mapping)
-                    String oracleType = param.getDataType();
-                    String postgresType = TypeConverter.toPostgre(oracleType);
-                    paramList.append(postgresType);
-                }
-            }
         }
 
         // STEP 4: Generate complete CREATE OR REPLACE FUNCTION statement

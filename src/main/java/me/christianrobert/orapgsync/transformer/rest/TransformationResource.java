@@ -264,30 +264,18 @@ public class TransformationResource {
 
     /**
      * Helper to transform function body for testing.
-     * Creates minimal FunctionMetadata since we don't have full metadata in test context.
+     * No metadata required - function name and parameters extracted from AST.
      */
     private TransformationResult transformFunctionBody(String oracleCode, String schema, TransformationIndices indices, boolean showAst) {
-        // Create minimal metadata for testing
-        me.christianrobert.orapgsync.core.job.model.function.FunctionMetadata metadata =
-                new me.christianrobert.orapgsync.core.job.model.function.FunctionMetadata(
-                        schema, "test_function", "FUNCTION"
-                );
-
-        return transformationService.transformFunction(oracleCode, metadata, schema, indices, showAst);
+        return transformationService.transformFunction(oracleCode, schema, indices, showAst);
     }
 
     /**
      * Helper to transform procedure body for testing.
-     * Creates minimal FunctionMetadata since we don't have full metadata in test context.
+     * No metadata required - procedure name and parameters extracted from AST.
      */
     private TransformationResult transformProcedureBody(String oracleCode, String schema, TransformationIndices indices, boolean showAst) {
-        // Create minimal metadata for testing
-        me.christianrobert.orapgsync.core.job.model.function.FunctionMetadata metadata =
-                new me.christianrobert.orapgsync.core.job.model.function.FunctionMetadata(
-                        schema, "test_procedure", "PROCEDURE"
-                );
-
-        return transformationService.transformProcedure(oracleCode, metadata, schema, indices, showAst);
+        return transformationService.transformProcedure(oracleCode, schema, indices, showAst);
     }
 
     /**
