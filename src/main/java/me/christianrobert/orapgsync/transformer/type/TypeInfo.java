@@ -24,6 +24,7 @@ public class TypeInfo {
     public static final TypeInfo DATE = new TypeInfo(TypeCategory.DATE, "date", null, null);
     public static final TypeInfo TIMESTAMP = new TypeInfo(TypeCategory.DATE, "timestamp", null, null);
     public static final TypeInfo BOOLEAN = new TypeInfo(TypeCategory.BOOLEAN, "boolean", null, null);
+    public static final TypeInfo NULL_TYPE = new TypeInfo(TypeCategory.NULL_TYPE, "null", null, null);
 
     private final TypeCategory category;
     private final String postgresType;
@@ -91,6 +92,10 @@ public class TypeInfo {
         return category == TypeCategory.COMPOSITE;
     }
 
+    public boolean isNull() {
+        return category == TypeCategory.NULL_TYPE;
+    }
+
     // Getters
     public TypeCategory getCategory() {
         return category;
@@ -155,6 +160,7 @@ public class TypeInfo {
         TEXT,       // Text, varchar, char, etc.
         DATE,       // Date, timestamp, time, interval
         BOOLEAN,    // Boolean
-        COMPOSITE   // User-defined composite types
+        COMPOSITE,  // User-defined composite types
+        NULL_TYPE   // NULL literal
     }
 }
