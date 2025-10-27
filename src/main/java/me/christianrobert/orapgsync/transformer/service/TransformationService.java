@@ -187,6 +187,21 @@ public class TransformationService {
      */
     public TransformationResult transformFunction(String oraclePlSql, FunctionMetadata function,
                                                    String schema, TransformationIndices indices) {
+        return transformFunction(oraclePlSql, function, schema, indices, false);
+    }
+
+    /**
+     * Transforms Oracle PL/SQL function to PostgreSQL equivalent with optional AST tree output.
+     *
+     * @param oraclePlSql Oracle PL/SQL function source (from ALL_SOURCE)
+     * @param function Function metadata (for signature information)
+     * @param schema Schema context for name resolution
+     * @param indices Pre-built metadata indices for lookups
+     * @param includeAst Whether to include AST tree in result (for debugging)
+     * @return TransformationResult containing transformed SQL and optionally AST tree
+     */
+    public TransformationResult transformFunction(String oraclePlSql, FunctionMetadata function,
+                                                   String schema, TransformationIndices indices, boolean includeAst) {
         if (oraclePlSql == null || oraclePlSql.trim().isEmpty()) {
             return TransformationResult.failure(oraclePlSql, "Oracle PL/SQL cannot be null or empty");
         }
@@ -211,10 +226,20 @@ public class TransformationService {
             log.debug("Step 1: Parsing Oracle PL/SQL function body");
             ParseResult parseResult = parser.parseFunctionBody(oraclePlSql);
 
+            // Generate AST tree representation if requested
+            String astTree = null;
+            if (includeAst && parseResult.getTree() != null) {
+                log.debug("Generating AST tree representation");
+                astTree = AstTreeFormatter.format(parseResult.getTree());
+            }
+
             // Check for parse errors
             if (parseResult.hasErrors()) {
                 String errorMsg = "Parse errors: " + parseResult.getErrorMessage();
                 log.warn("Parse failed for {}: {}", function.getDisplayName(), errorMsg);
+                if (includeAst && astTree != null) {
+                    return TransformationResult.failureWithAst(oraclePlSql, errorMsg, astTree);
+                }
                 return TransformationResult.failure(oraclePlSql, errorMsg);
             }
 
@@ -242,6 +267,9 @@ public class TransformationService {
             log.info("Successfully transformed function: {}", function.getDisplayName());
             log.debug("PostgreSQL PL/pgSQL: {}", createFunction);
 
+            if (includeAst && astTree != null) {
+                return TransformationResult.successWithAst(oraclePlSql, createFunction, astTree);
+            }
             return TransformationResult.success(oraclePlSql, createFunction);
 
         } catch (TransformationException e) {
@@ -268,6 +296,21 @@ public class TransformationService {
      */
     public TransformationResult transformProcedure(String oraclePlSql, FunctionMetadata function,
                                                     String schema, TransformationIndices indices) {
+        return transformProcedure(oraclePlSql, function, schema, indices, false);
+    }
+
+    /**
+     * Transforms Oracle PL/SQL procedure to PostgreSQL equivalent with optional AST tree output.
+     *
+     * @param oraclePlSql Oracle PL/SQL procedure source (from ALL_SOURCE)
+     * @param function Function metadata (for signature information)
+     * @param schema Schema context for name resolution
+     * @param indices Pre-built metadata indices for lookups
+     * @param includeAst Whether to include AST tree in result (for debugging)
+     * @return TransformationResult containing transformed SQL and optionally AST tree
+     */
+    public TransformationResult transformProcedure(String oraclePlSql, FunctionMetadata function,
+                                                    String schema, TransformationIndices indices, boolean includeAst) {
         if (oraclePlSql == null || oraclePlSql.trim().isEmpty()) {
             return TransformationResult.failure(oraclePlSql, "Oracle PL/SQL cannot be null or empty");
         }
@@ -292,10 +335,20 @@ public class TransformationService {
             log.debug("Step 1: Parsing Oracle PL/SQL procedure body");
             ParseResult parseResult = parser.parseProcedureBody(oraclePlSql);
 
+            // Generate AST tree representation if requested
+            String astTree = null;
+            if (includeAst && parseResult.getTree() != null) {
+                log.debug("Generating AST tree representation");
+                astTree = AstTreeFormatter.format(parseResult.getTree());
+            }
+
             // Check for parse errors
             if (parseResult.hasErrors()) {
                 String errorMsg = "Parse errors: " + parseResult.getErrorMessage();
                 log.warn("Parse failed for {}: {}", function.getDisplayName(), errorMsg);
+                if (includeAst && astTree != null) {
+                    return TransformationResult.failureWithAst(oraclePlSql, errorMsg, astTree);
+                }
                 return TransformationResult.failure(oraclePlSql, errorMsg);
             }
 
@@ -323,6 +376,9 @@ public class TransformationService {
             log.info("Successfully transformed procedure: {}", function.getDisplayName());
             log.debug("PostgreSQL PL/pgSQL: {}", createFunction);
 
+            if (includeAst && astTree != null) {
+                return TransformationResult.successWithAst(oraclePlSql, createFunction, astTree);
+            }
             return TransformationResult.success(oraclePlSql, createFunction);
 
         } catch (TransformationException e) {

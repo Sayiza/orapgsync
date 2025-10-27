@@ -357,4 +357,19 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
     public String visitProcedure_body(PlSqlParser.Procedure_bodyContext ctx) {
         return VisitProcedureBody.v(ctx, this);
     }
+
+    @Override
+    public String visitBody(PlSqlParser.BodyContext ctx) {
+        return VisitBody.v(ctx, this);
+    }
+
+    @Override
+    public String visitSeq_of_statements(PlSqlParser.Seq_of_statementsContext ctx) {
+        return VisitSeq_of_statements.v(ctx, this);
+    }
+
+    @Override
+    public String visitReturn_statement(PlSqlParser.Return_statementContext ctx) {
+        return VisitReturn_statement.v(ctx, this);
+    }
 }

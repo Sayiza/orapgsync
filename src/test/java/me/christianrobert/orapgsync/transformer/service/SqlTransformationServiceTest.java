@@ -11,7 +11,7 @@ import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Integration tests for SqlTransformationService (direct AST approach).
+ * Integration tests for TransformationService (direct AST approach).
  * Tests the complete end-to-end transformation pipeline.
  *
  * These tests validate:
@@ -25,13 +25,13 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class SqlTransformationServiceTest {
 
-    private SqlTransformationService transformationService;
+    private TransformationService transformationService;
     private TransformationIndices emptyIndices;
 
     @BeforeEach
     void setUp() {
         // Manually create service and inject dependencies
-        transformationService = new SqlTransformationService();
+        transformationService = new TransformationService();
         transformationService.parser = new AntlrParser();
 
         // Create empty indices for simple tests (no metadata needed)
@@ -307,7 +307,7 @@ class SqlTransformationServiceTest {
 
     @Test
     void serviceIsCreated() {
-        assertNotNull(transformationService, "SqlTransformationService should be created");
+        assertNotNull(transformationService, "TransformationService should be created");
     }
 
     @Test

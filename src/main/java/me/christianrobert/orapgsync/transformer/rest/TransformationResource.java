@@ -151,6 +151,7 @@ public class TransformationResource {
      *
      * @param parseType Grammar entry point: select_statement, function_body, procedure_body, package_body
      * @param schema Optional schema for metadata context (defaults to first schema in state)
+     * @param showAst Optional flag to include AST tree in response (for debugging)
      * @param oracleCode Oracle code to transform (text/plain body)
      * @return TransformationResult as JSON (always HTTP 200, check "success" field)
      */
@@ -160,6 +161,7 @@ public class TransformationResource {
     public TransformationResult transformCode(
             @QueryParam("parseType") @DefaultValue("select_statement") String parseType,
             @QueryParam("schema") String schema,
+            @QueryParam("showAst") @DefaultValue("false") boolean showAst,
             String oracleCode
     ) {
         log.info("Generic transformation request: parseType={}, schema={}", parseType, schema);
@@ -210,23 +212,23 @@ public class TransformationResource {
         }
 
         // Route to appropriate transformation method based on parse type
-        log.debug("Transforming code with parseType: {}, schema: {}", parseType, targetSchema);
+        log.debug("Transforming code with parseType: {}, schema: {}, showAst: {}", parseType, targetSchema, showAst);
         TransformationResult result;
 
         try {
             switch (parseType.toLowerCase()) {
                 case "select_statement":
-                    result = transformationService.transformSql(oracleCode, targetSchema, indices);
+                    result = transformationService.transformSql(oracleCode, targetSchema, indices, showAst);
                     break;
 
                 case "function_body":
                     // For testing, create a minimal FunctionMetadata
                     // In production, this would come from proper metadata extraction
-                    result = transformFunctionBody(oracleCode, targetSchema, indices);
+                    result = transformFunctionBody(oracleCode, targetSchema, indices, showAst);
                     break;
 
                 case "procedure_body":
-                    result = transformProcedureBody(oracleCode, targetSchema, indices);
+                    result = transformProcedureBody(oracleCode, targetSchema, indices, showAst);
                     break;
 
                 case "package_body":
@@ -264,28 +266,28 @@ public class TransformationResource {
      * Helper to transform function body for testing.
      * Creates minimal FunctionMetadata since we don't have full metadata in test context.
      */
-    private TransformationResult transformFunctionBody(String oracleCode, String schema, TransformationIndices indices) {
+    private TransformationResult transformFunctionBody(String oracleCode, String schema, TransformationIndices indices, boolean showAst) {
         // Create minimal metadata for testing
         me.christianrobert.orapgsync.core.job.model.function.FunctionMetadata metadata =
                 new me.christianrobert.orapgsync.core.job.model.function.FunctionMetadata(
                         schema, "test_function", "FUNCTION"
                 );
 
-        return transformationService.transformFunction(oracleCode, metadata, schema, indices);
+        return transformationService.transformFunction(oracleCode, metadata, schema, indices, showAst);
     }
 
     /**
      * Helper to transform procedure body for testing.
      * Creates minimal FunctionMetadata since we don't have full metadata in test context.
      */
-    private TransformationResult transformProcedureBody(String oracleCode, String schema, TransformationIndices indices) {
+    private TransformationResult transformProcedureBody(String oracleCode, String schema, TransformationIndices indices, boolean showAst) {
         // Create minimal metadata for testing
         me.christianrobert.orapgsync.core.job.model.function.FunctionMetadata metadata =
                 new me.christianrobert.orapgsync.core.job.model.function.FunctionMetadata(
                         schema, "test_procedure", "PROCEDURE"
                 );
 
-        return transformationService.transformProcedure(oracleCode, metadata, schema, indices);
+        return transformationService.transformProcedure(oracleCode, metadata, schema, indices, showAst);
     }
 
     /**

@@ -48,6 +48,18 @@
         >
       </div>
 
+      <!-- Show AST Checkbox -->
+      <div class="config-group" style="margin-bottom: 1rem;">
+        <label style="display: flex; align-items: center; cursor: pointer; font-size: 0.85rem;">
+          <input
+            type="checkbox"
+            id="show-ast-checkbox"
+            style="margin-right: 0.5rem; cursor: pointer;"
+          >
+          Show AST Tree (for debugging)
+        </label>
+      </div>
+
       <!-- Oracle Code Input -->
       <div class="config-group" style="margin-bottom: 1rem;">
         <label class="config-label" for="code-input">
@@ -95,6 +107,16 @@
           </label>
           <div class="log-content" id="oracle-code-display" style="height: auto; min-height: 100px; white-space: pre-wrap; word-wrap: break-word;"></div>
         </div>
+
+        <!-- AST Tree (shown only if available) -->
+        <div id="ast-tree-container" style="display: none;">
+          <div class="config-group">
+            <label class="config-label">
+              AST Tree (Parse Tree Structure)
+            </label>
+            <div class="log-content" id="ast-tree" style="height: auto; min-height: 100px; max-height: 500px; overflow-y: auto; background: #2b2b2b; color: #9cdcfe; white-space: pre-wrap; word-wrap: break-word;"></div>
+          </div>
+        </div>
       </div>
 
       <!-- Error Result -->
@@ -119,6 +141,7 @@
   // DOM Elements
   const parseTypeSelect = document.getElementById('parse-type-select');
   const schemaInput = document.getElementById('schema-input');
+  const showAstCheckbox = document.getElementById('show-ast-checkbox');
   const codeInput = document.getElementById('code-input');
   const transformBtn = document.getElementById('transform-btn');
   const clearBtn = document.getElementById('clear-btn');
@@ -130,6 +153,8 @@
   const oracleCodeDisplay = document.getElementById('oracle-code-display');
   const oracleCodeError = document.getElementById('oracle-code-error');
   const errorMessage = document.getElementById('error-message');
+  const astTreeContainer = document.getElementById('ast-tree-container');
+  const astTree = document.getElementById('ast-tree');
 
   // Transform Code
   transformBtn.addEventListener('click', async () => {
@@ -151,6 +176,11 @@
 
     if (schema) {
       params.push(`schema=${encodeURIComponent(schema)}`);
+    }
+
+    const showAst = showAstCheckbox.checked;
+    if (showAst) {
+      params.push('showAst=true');
     }
 
     if (params.length > 0) {
@@ -189,6 +219,14 @@
         postgresCode.textContent = result.postgresSql;
         oracleCodeDisplay.textContent = result.oracleSql;
 
+        // Show AST tree if available
+        if (result.astTree) {
+          astTreeContainer.style.display = 'block';
+          astTree.textContent = result.astTree;
+        } else {
+          astTreeContainer.style.display = 'none';
+        }
+
         statusText.textContent = 'Transformation successful!';
         statusText.style.color = '#4CAF50';
       } else {
@@ -222,9 +260,11 @@
   clearBtn.addEventListener('click', () => {
     parseTypeSelect.value = 'select_statement';
     schemaInput.value = '';
+    showAstCheckbox.checked = false;
     codeInput.value = '';
     statusText.textContent = '';
     resultContainer.style.display = 'none';
+    astTreeContainer.style.display = 'none';
     codeInput.focus();
   });
 
