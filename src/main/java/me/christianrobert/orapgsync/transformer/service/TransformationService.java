@@ -3,6 +3,9 @@ package me.christianrobert.orapgsync.transformer.service;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import me.christianrobert.orapgsync.core.job.model.function.FunctionMetadata;
+import me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder;
+import me.christianrobert.orapgsync.transformer.builder.VisitFunctionBody;
+import me.christianrobert.orapgsync.transformer.builder.VisitProcedureBody;
 import me.christianrobert.orapgsync.transformer.util.AstTreeFormatter;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
 import me.christianrobert.orapgsync.transformer.context.TransformationException;
@@ -143,8 +146,8 @@ public class TransformationService {
 
             // STEP 3: Transform ANTLR parse tree to PostgreSQL SQL with context
             log.debug("Step 3: Transforming to PostgreSQL");
-            me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder builder =
-                new me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder(context);
+            PostgresCodeBuilder builder =
+                new PostgresCodeBuilder(context);
             String postgresSql = builder.visit(parseResult.getTree());
 
             log.info("Successfully transformed SQL for schema: {}", schema);
@@ -243,26 +246,19 @@ public class TransformationService {
                 return TransformationResult.failure(oraclePlSql, errorMsg);
             }
 
-            // STEP 2: Create TransformationContext with schema, indices, and type evaluator
+            // STEP 2: Create TransformationContext with schema, indices, type evaluator, and function metadata
             log.debug("Step 2: Creating transformation context with schema: {}", schema);
 
             // Create type evaluator
             TypeEvaluator typeEvaluator = new SimpleTypeEvaluator(schema, indices);
 
-            // Create context with type evaluator
-            TransformationContext context = new TransformationContext(schema, indices, typeEvaluator);
+            // Create context with type evaluator and function metadata (visitor pattern!)
+            TransformationContext context = new TransformationContext(schema, indices, typeEvaluator, function);
 
             // STEP 3: Transform ANTLR parse tree to PostgreSQL PL/pgSQL with context
             log.debug("Step 3: Transforming to PostgreSQL PL/pgSQL");
-            me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder builder =
-                new me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder(context);
-
-            // Visit the function body parse tree
-            String functionBody = builder.visit(parseResult.getTree());
-
-            // STEP 4: Generate CREATE OR REPLACE FUNCTION statement
-            log.debug("Step 4: Generating CREATE OR REPLACE FUNCTION statement");
-            String createFunction = generateCreateFunctionStatement(function, functionBody, schema);
+            PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
+            String createFunction = builder.visit(parseResult.getTree());
 
             log.info("Successfully transformed function: {}", function.getDisplayName());
             log.debug("PostgreSQL PL/pgSQL: {}", createFunction);
@@ -352,26 +348,19 @@ public class TransformationService {
                 return TransformationResult.failure(oraclePlSql, errorMsg);
             }
 
-            // STEP 2: Create TransformationContext with schema, indices, and type evaluator
+            // STEP 2: Create TransformationContext with schema, indices, type evaluator, and function metadata
             log.debug("Step 2: Creating transformation context with schema: {}", schema);
 
             // Create type evaluator
             TypeEvaluator typeEvaluator = new SimpleTypeEvaluator(schema, indices);
 
-            // Create context with type evaluator
-            TransformationContext context = new TransformationContext(schema, indices, typeEvaluator);
+            // Create context with type evaluator and function metadata (visitor pattern!)
+            TransformationContext context = new TransformationContext(schema, indices, typeEvaluator, function);
 
             // STEP 3: Transform ANTLR parse tree to PostgreSQL PL/pgSQL with context
             log.debug("Step 3: Transforming to PostgreSQL PL/pgSQL");
-            me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder builder =
-                new me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder(context);
-
-            // Visit the procedure body parse tree
-            String procedureBody = builder.visit(parseResult.getTree());
-
-            // STEP 4: Generate CREATE OR REPLACE FUNCTION statement (PostgreSQL uses FUNCTION for procedures too)
-            log.debug("Step 4: Generating CREATE OR REPLACE FUNCTION statement");
-            String createFunction = generateCreateProcedureStatement(function, procedureBody, schema);
+            PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
+            String createFunction = builder.visit(parseResult.getTree());
 
             log.info("Successfully transformed procedure: {}", function.getDisplayName());
             log.debug("PostgreSQL PL/pgSQL: {}", createFunction);
@@ -390,61 +379,5 @@ public class TransformationService {
             String errorMsg = "Unexpected error: " + e.getMessage();
             return TransformationResult.failure(oraclePlSql, errorMsg);
         }
-    }
-
-    // ==================== HELPER METHODS ====================
-
-    /**
-     * Generates CREATE OR REPLACE FUNCTION statement for a function.
-     * Uses the transformed PL/pgSQL body and function metadata.
-     *
-     * @param function Function metadata
-     * @param functionBody Transformed function body (PL/pgSQL)
-     * @param schema Schema name
-     * @return Complete CREATE OR REPLACE FUNCTION statement
-     */
-    private String generateCreateFunctionStatement(FunctionMetadata function, String functionBody, String schema) {
-        // TODO: Full implementation - for now, return a placeholder
-        // This will need to:
-        // 1. Build parameter list with proper PostgreSQL types
-        // 2. Add RETURNS clause with mapped return type
-        // 3. Wrap body in CREATE OR REPLACE FUNCTION
-        // 4. Add LANGUAGE plpgsql and other modifiers
-
-        String functionName = function.getPostgresName();
-        String qualifiedName = schema.toLowerCase() + "." + functionName;
-
-        return String.format(
-            "-- CREATE OR REPLACE FUNCTION %s\n-- TODO: Full statement generation not yet implemented\n-- Transformed body:\n%s",
-            qualifiedName,
-            functionBody
-        );
-    }
-
-    /**
-     * Generates CREATE OR REPLACE FUNCTION statement for a procedure.
-     * PostgreSQL 11+ uses PROCEDURE, but we can also use FUNCTION with RETURNS void.
-     *
-     * @param function Function metadata
-     * @param procedureBody Transformed procedure body (PL/pgSQL)
-     * @param schema Schema name
-     * @return Complete CREATE OR REPLACE FUNCTION/PROCEDURE statement
-     */
-    private String generateCreateProcedureStatement(FunctionMetadata function, String procedureBody, String schema) {
-        // TODO: Full implementation - for now, return a placeholder
-        // This will need to:
-        // 1. Build parameter list with proper PostgreSQL types
-        // 2. Add RETURNS void (or use CREATE PROCEDURE for PG 11+)
-        // 3. Wrap body in CREATE OR REPLACE FUNCTION
-        // 4. Add LANGUAGE plpgsql and other modifiers
-
-        String functionName = function.getPostgresName();
-        String qualifiedName = schema.toLowerCase() + "." + functionName;
-
-        return String.format(
-            "-- CREATE OR REPLACE FUNCTION %s\n-- TODO: Full statement generation not yet implemented\n-- Transformed body:\n%s",
-            qualifiedName,
-            procedureBody
-        );
     }
 }

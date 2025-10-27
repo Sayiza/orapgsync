@@ -1,5 +1,6 @@
 package me.christianrobert.orapgsync.transformer;
 
+import me.christianrobert.orapgsync.core.job.model.function.FunctionMetadata;
 import me.christianrobert.orapgsync.transformer.parser.AntlrParser;
 import me.christianrobert.orapgsync.transformer.parser.ParseResult;
 import me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder;
@@ -15,42 +16,46 @@ import java.util.HashSet;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Integration tests for PL/SQL function body transformation.
+ * Unit tests for PL/SQL function body transformation.
  *
  * <p>These tests verify that Oracle PL/SQL function bodies are correctly
- * transformed to PostgreSQL PL/pgSQL syntax.</p>
+ * transformed to complete PostgreSQL CREATE OR REPLACE FUNCTION statements.</p>
  *
  * <p>Tests start with the simplest possible functions and gradually increase complexity.</p>
  */
 class FunctionBodyTransformationTest {
 
     private AntlrParser parser;
-    private PostgresCodeBuilder builder;
+    private TransformationIndices indices;
 
     @BeforeEach
     void setUp() {
         parser = new AntlrParser();
 
-        // Set up transformation context with schema "hr"
-        TransformationIndices indices = new TransformationIndices(
+        // Set up transformation indices
+        indices = new TransformationIndices(
             new HashMap<>(), // tableColumns
             new HashMap<>(), // typeMethods
             new HashSet<>(), // packageFunctions
             new HashMap<>()  // synonyms
         );
-        TransformationContext context = new TransformationContext(
-            "hr",
-            indices,
-            new SimpleTypeEvaluator("hr", indices)
-        );
-        builder = new PostgresCodeBuilder(context);
     }
 
-    private String transform(String oracleFunctionBody) {
+    private String transform(String oracleFunctionBody, FunctionMetadata metadata) {
         ParseResult parseResult = parser.parseFunctionBody(oracleFunctionBody);
         if (parseResult.hasErrors()) {
             fail("Parse failed: " + parseResult.getErrors());
         }
+
+        // Create context with function metadata (visitor pattern!)
+        TransformationContext context = new TransformationContext(
+            "hr",
+            indices,
+            new SimpleTypeEvaluator("hr", indices),
+            metadata
+        );
+        PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
+
         return builder.visit(parseResult.getTree());
     }
 
@@ -66,16 +71,25 @@ class FunctionBodyTransformationTest {
             "  RETURN NULL;\n" +
             "END;";
 
-        String result = transform(oracleSql);
+        FunctionMetadata metadata = new FunctionMetadata("hr", "get_test", "FUNCTION");
+        String result = transform(oracleSql, metadata);
         String normalized = result.trim().replaceAll("\\s+", " ");
 
         // Debug output
         System.out.println("\n=== TEST: simplestFunction_returnNull ===");
         System.out.println("ORACLE FUNCTION:");
         System.out.println(oracleSql);
-        System.out.println("\nPOSTGRESQL FUNCTION BODY:");
+        System.out.println("\nPOSTGRESQL COMPLETE FUNCTION:");
         System.out.println(result);
         System.out.println("=========================================\n");
+
+        // Should have complete CREATE OR REPLACE FUNCTION statement
+        assertTrue(result.contains("CREATE OR REPLACE FUNCTION"), "Should have CREATE OR REPLACE FUNCTION");
+        assertTrue(result.contains("hr.get_test"), "Should have qualified function name");
+        assertTrue(result.contains("RETURNS numeric"), "Should have RETURNS numeric");
+        assertTrue(result.contains("LANGUAGE plpgsql"), "Should have LANGUAGE plpgsql");
+        assertTrue(result.contains("AS $$"), "Should have AS $$");
+        assertTrue(result.contains("$$;"), "Should have $$;");
 
         // Should have BEGIN...END block
         assertTrue(result.contains("BEGIN"), "Should have BEGIN");
@@ -83,13 +97,6 @@ class FunctionBodyTransformationTest {
 
         // Should have RETURN NULL
         assertTrue(normalized.contains("RETURN NULL"), "Should have RETURN NULL");
-
-        // Should NOT have the function signature (that's handled by TransformationService)
-        assertFalse(result.contains("FUNCTION"), "Should not include FUNCTION keyword");
-        assertFalse(result.contains("RETURN NUMBER"), "Should not include RETURN type");
-
-        // Should be valid PL/pgSQL body structure
-        assertFalse(result.isEmpty(), "Should generate non-empty result");
     }
 
     // ========== RETURN LITERAL VALUE ==========
@@ -103,16 +110,22 @@ class FunctionBodyTransformationTest {
             "  RETURN 42;\n" +
             "END;";
 
-        String result = transform(oracleSql);
+        FunctionMetadata metadata = new FunctionMetadata("hr", "get_constant", "FUNCTION");
+        String result = transform(oracleSql, metadata);
         String normalized = result.trim().replaceAll("\\s+", " ");
 
         // Debug output
         System.out.println("\n=== TEST: simpleFunction_returnLiteral ===");
         System.out.println("ORACLE FUNCTION:");
         System.out.println(oracleSql);
-        System.out.println("\nPOSTGRESQL FUNCTION BODY:");
+        System.out.println("\nPOSTGRESQL COMPLETE FUNCTION:");
         System.out.println(result);
         System.out.println("==========================================\n");
+
+        // Should have complete CREATE OR REPLACE FUNCTION statement
+        assertTrue(result.contains("CREATE OR REPLACE FUNCTION"), "Should have CREATE OR REPLACE FUNCTION");
+        assertTrue(result.contains("hr.get_constant"), "Should have qualified function name");
+        assertTrue(result.contains("RETURNS numeric"), "Should have RETURNS numeric");
 
         // Should have RETURN 42
         assertTrue(normalized.contains("RETURN 42"), "Should have RETURN 42");
@@ -133,16 +146,22 @@ class FunctionBodyTransformationTest {
             "  RETURN 'Hello World';\n" +
             "END;";
 
-        String result = transform(oracleSql);
+        FunctionMetadata metadata = new FunctionMetadata("hr", "get_greeting", "FUNCTION");
+        String result = transform(oracleSql, metadata);
         String normalized = result.trim().replaceAll("\\s+", " ");
 
         // Debug output
         System.out.println("\n=== TEST: simpleFunction_returnString ===");
         System.out.println("ORACLE FUNCTION:");
         System.out.println(oracleSql);
-        System.out.println("\nPOSTGRESQL FUNCTION BODY:");
+        System.out.println("\nPOSTGRESQL COMPLETE FUNCTION:");
         System.out.println(result);
         System.out.println("=========================================\n");
+
+        // Should have complete CREATE OR REPLACE FUNCTION statement
+        assertTrue(result.contains("CREATE OR REPLACE FUNCTION"), "Should have CREATE OR REPLACE FUNCTION");
+        assertTrue(result.contains("hr.get_greeting"), "Should have qualified function name");
+        assertTrue(result.contains("RETURNS text"), "Should have RETURNS text");
 
         // Should have RETURN 'Hello World'
         assertTrue(normalized.contains("RETURN 'Hello World'") ||
@@ -165,16 +184,22 @@ class FunctionBodyTransformationTest {
             "  RETURN 2 + 2;\n" +
             "END;";
 
-        String result = transform(oracleSql);
+        FunctionMetadata metadata = new FunctionMetadata("hr", "calculate", "FUNCTION");
+        String result = transform(oracleSql, metadata);
         String normalized = result.trim().replaceAll("\\s+", " ");
 
         // Debug output
         System.out.println("\n=== TEST: simpleFunction_returnExpression ===");
         System.out.println("ORACLE FUNCTION:");
         System.out.println(oracleSql);
-        System.out.println("\nPOSTGRESQL FUNCTION BODY:");
+        System.out.println("\nPOSTGRESQL COMPLETE FUNCTION:");
         System.out.println(result);
         System.out.println("============================================\n");
+
+        // Should have complete CREATE OR REPLACE FUNCTION statement
+        assertTrue(result.contains("CREATE OR REPLACE FUNCTION"), "Should have CREATE OR REPLACE FUNCTION");
+        assertTrue(result.contains("hr.calculate"), "Should have qualified function name");
+        assertTrue(result.contains("RETURNS numeric"), "Should have RETURNS numeric");
 
         // Should have RETURN with arithmetic expression
         assertTrue(normalized.contains("RETURN 2 + 2"), "Should have RETURN 2 + 2");

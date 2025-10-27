@@ -44,12 +44,14 @@ public class VisitBody {
             }
         }
 
-        // END keyword
-        result.append("END");
+        // END keyword (requires semicolon in PL/pgSQL)
+        result.append("END;");
 
         // Label name (optional) - rare, usually omitted
         if (ctx.label_name() != null) {
-            result.append(" ").append(ctx.label_name().getText());
+            // Label goes before semicolon
+            // Note: This is very rare in practice
+            result.insert(result.length() - 1, " " + ctx.label_name().getText());
         }
 
         return result.toString();

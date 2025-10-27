@@ -1,5 +1,6 @@
 package me.christianrobert.orapgsync.transformer.context;
 
+import me.christianrobert.orapgsync.core.job.model.function.FunctionMetadata;
 import me.christianrobert.orapgsync.transformer.type.TypeEvaluator;
 
 import java.util.HashMap;
@@ -16,6 +17,7 @@ import java.util.Set;
  *   <li>Current schema context</li>
  *   <li>Query-local state (table aliases, CTE names)</li>
  *   <li>Type evaluator for type-aware transformations</li>
+ *   <li>Function metadata (for PL/SQL function/procedure transformations)</li>
  * </ul>
  *
  * <p>This context is passed to every semantic node's {@code toPostgres()} method,
@@ -26,6 +28,7 @@ public class TransformationContext {
     private final String currentSchema;
     private final TransformationIndices indices;
     private final TypeEvaluator typeEvaluator;
+    private final FunctionMetadata functionMetadata;  // Null for SQL transformations, present for PL/SQL
 
     // Query-local state (mutable, reset per query)
     private final Map<String, String> tableAliases;  // alias → table name
@@ -41,13 +44,25 @@ public class TransformationContext {
     // across query nesting levels.
 
     /**
-     * Creates context with metadata indices and type evaluator.
+     * Creates context with metadata indices and type evaluator (for SQL transformations).
      *
      * @param currentSchema Schema context for resolution
      * @param indices Pre-built metadata indices
      * @param typeEvaluator Type evaluator for type-aware transformations
      */
     public TransformationContext(String currentSchema, TransformationIndices indices, TypeEvaluator typeEvaluator) {
+        this(currentSchema, indices, typeEvaluator, null);
+    }
+
+    /**
+     * Creates context with metadata indices, type evaluator, and function metadata (for PL/SQL transformations).
+     *
+     * @param currentSchema Schema context for resolution
+     * @param indices Pre-built metadata indices
+     * @param typeEvaluator Type evaluator for type-aware transformations
+     * @param functionMetadata Function/procedure metadata (null for SQL transformations)
+     */
+    public TransformationContext(String currentSchema, TransformationIndices indices, TypeEvaluator typeEvaluator, FunctionMetadata functionMetadata) {
         if (currentSchema == null || currentSchema.trim().isEmpty()) {
             throw new IllegalArgumentException("Current schema cannot be null or empty");
         }
@@ -61,6 +76,7 @@ public class TransformationContext {
         this.currentSchema = currentSchema;
         this.indices = indices;
         this.typeEvaluator = typeEvaluator;
+        this.functionMetadata = functionMetadata;
         this.tableAliases = new HashMap<>();
         this.cteNames = new HashSet<>();
     }
@@ -75,6 +91,15 @@ public class TransformationContext {
 
     public TypeEvaluator getTypeEvaluator() {
         return typeEvaluator;
+    }
+
+    /**
+     * Gets function metadata (for PL/SQL transformations).
+     *
+     * @return Function metadata or null for SQL transformations
+     */
+    public FunctionMetadata getFunctionMetadata() {
+        return functionMetadata;
     }
 
     // ========== Synonym Resolution ==========
