@@ -14,9 +14,14 @@ import me.christianrobert.orapgsync.transformer.context.TransformationResult;
 import me.christianrobert.orapgsync.transformer.parser.AntlrParser;
 import me.christianrobert.orapgsync.transformer.parser.ParseResult;
 import me.christianrobert.orapgsync.transformer.type.SimpleTypeEvaluator;
+import me.christianrobert.orapgsync.transformer.type.TypeAnalysisVisitor;
 import me.christianrobert.orapgsync.transformer.type.TypeEvaluator;
+import me.christianrobert.orapgsync.transformer.type.TypeInfo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Unified transformation service for Oracle SQL and PL/SQL to PostgreSQL.
@@ -118,25 +123,30 @@ public class TransformationService {
             log.debug("Step 1: Parsing Oracle SQL");
             ParseResult parseResult = parser.parseSelectStatement(oracleSql);
 
-            // Generate AST tree representation if requested
-            String astTree = null;
-            if (includeAst && parseResult.getTree() != null) {
-                log.debug("Generating AST tree representation");
-                astTree = AstTreeFormatter.format(parseResult.getTree());
-            }
-
             // Check for parse errors
             if (parseResult.hasErrors()) {
                 String errorMsg = "Parse errors: " + parseResult.getErrorMessage();
                 log.warn("Parse failed: {}", errorMsg);
-                if (includeAst && astTree != null) {
-                    return TransformationResult.failureWithAst(oracleSql, errorMsg, astTree);
-                }
                 return TransformationResult.failure(oracleSql, errorMsg);
             }
 
-            // STEP 2: Create TransformationContext with schema, indices, and type evaluator
-            log.debug("Step 2: Creating transformation context with schema: {}", schema);
+            // STEP 2: Run type analysis pass (populate type cache)
+            log.debug("Step 2: Running type analysis pass");
+            Map<String, TypeInfo> typeCache = new HashMap<>();
+            TypeAnalysisVisitor typeAnalysisVisitor =
+                new TypeAnalysisVisitor(schema, indices, typeCache);
+            typeAnalysisVisitor.visit(parseResult.getTree());
+            log.debug("Type analysis complete: {} types cached", typeCache.size());
+
+            // Generate AST tree representation with type information if requested
+            String astTree = null;
+            if (includeAst && parseResult.getTree() != null) {
+                log.debug("Generating AST tree representation with type information");
+                astTree = AstTreeFormatter.format(parseResult.getTree(), typeCache);
+            }
+
+            // STEP 3: Create TransformationContext with schema, indices, and type evaluator
+            log.debug("Step 3: Creating transformation context with schema: {}", schema);
 
             // Create type evaluator (simple implementation for SQL views)
             TypeEvaluator typeEvaluator = new SimpleTypeEvaluator(schema, indices);
@@ -144,8 +154,8 @@ public class TransformationService {
             // Create context with type evaluator
             TransformationContext context = new TransformationContext(schema, indices, typeEvaluator);
 
-            // STEP 3: Transform ANTLR parse tree to PostgreSQL SQL with context
-            log.debug("Step 3: Transforming to PostgreSQL");
+            // STEP 4: Transform ANTLR parse tree to PostgreSQL SQL with context
+            log.debug("Step 4: Transforming to PostgreSQL");
             PostgresCodeBuilder builder =
                 new PostgresCodeBuilder(context);
             String postgresSql = builder.visit(parseResult.getTree());
@@ -225,25 +235,30 @@ public class TransformationService {
             log.debug("Step 1: Parsing Oracle PL/SQL function body");
             ParseResult parseResult = parser.parseFunctionBody(oraclePlSql);
 
-            // Generate AST tree representation if requested
-            String astTree = null;
-            if (includeAst && parseResult.getTree() != null) {
-                log.debug("Generating AST tree representation");
-                astTree = AstTreeFormatter.format(parseResult.getTree());
-            }
-
             // Check for parse errors
             if (parseResult.hasErrors()) {
                 String errorMsg = "Parse errors: " + parseResult.getErrorMessage();
                 log.warn("Parse failed for schema {}: {}", schema, errorMsg);
-                if (includeAst && astTree != null) {
-                    return TransformationResult.failureWithAst(oraclePlSql, errorMsg, astTree);
-                }
                 return TransformationResult.failure(oraclePlSql, errorMsg);
             }
 
-            // STEP 2: Create TransformationContext with schema, indices, and type evaluator
-            log.debug("Step 2: Creating transformation context with schema: {}", schema);
+            // STEP 2: Run type analysis pass (populate type cache)
+            log.debug("Step 2: Running type analysis pass");
+            Map<String, TypeInfo> typeCache = new HashMap<>();
+            TypeAnalysisVisitor typeAnalysisVisitor =
+                new TypeAnalysisVisitor(schema, indices, typeCache);
+            typeAnalysisVisitor.visit(parseResult.getTree());
+            log.debug("Type analysis complete: {} types cached", typeCache.size());
+
+            // Generate AST tree representation with type information if requested
+            String astTree = null;
+            if (includeAst && parseResult.getTree() != null) {
+                log.debug("Generating AST tree representation with type information");
+                astTree = AstTreeFormatter.format(parseResult.getTree(), typeCache);
+            }
+
+            // STEP 3: Create TransformationContext with schema, indices, and type evaluator
+            log.debug("Step 3: Creating transformation context with schema: {}", schema);
 
             // Create type evaluator
             TypeEvaluator typeEvaluator = new SimpleTypeEvaluator(schema, indices);
@@ -251,8 +266,8 @@ public class TransformationService {
             // Create context (only schema needed - function name/params extracted from AST)
             TransformationContext context = new TransformationContext(schema, indices, typeEvaluator);
 
-            // STEP 3: Transform ANTLR parse tree to PostgreSQL PL/pgSQL
-            log.debug("Step 3: Transforming to PostgreSQL PL/pgSQL");
+            // STEP 4: Transform ANTLR parse tree to PostgreSQL PL/pgSQL
+            log.debug("Step 4: Transforming to PostgreSQL PL/pgSQL");
             PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
             String createFunction = builder.visit(parseResult.getTree());
 
@@ -322,25 +337,30 @@ public class TransformationService {
             log.debug("Step 1: Parsing Oracle PL/SQL procedure body");
             ParseResult parseResult = parser.parseProcedureBody(oraclePlSql);
 
-            // Generate AST tree representation if requested
-            String astTree = null;
-            if (includeAst && parseResult.getTree() != null) {
-                log.debug("Generating AST tree representation");
-                astTree = AstTreeFormatter.format(parseResult.getTree());
-            }
-
             // Check for parse errors
             if (parseResult.hasErrors()) {
                 String errorMsg = "Parse errors: " + parseResult.getErrorMessage();
                 log.warn("Parse failed for schema {}: {}", schema, errorMsg);
-                if (includeAst && astTree != null) {
-                    return TransformationResult.failureWithAst(oraclePlSql, errorMsg, astTree);
-                }
                 return TransformationResult.failure(oraclePlSql, errorMsg);
             }
 
-            // STEP 2: Create TransformationContext with schema, indices, and type evaluator
-            log.debug("Step 2: Creating transformation context with schema: {}", schema);
+            // STEP 2: Run type analysis pass (populate type cache)
+            log.debug("Step 2: Running type analysis pass");
+            Map<String, TypeInfo> typeCache = new HashMap<>();
+            TypeAnalysisVisitor typeAnalysisVisitor =
+                new TypeAnalysisVisitor(schema, indices, typeCache);
+            typeAnalysisVisitor.visit(parseResult.getTree());
+            log.debug("Type analysis complete: {} types cached", typeCache.size());
+
+            // Generate AST tree representation with type information if requested
+            String astTree = null;
+            if (includeAst && parseResult.getTree() != null) {
+                log.debug("Generating AST tree representation with type information");
+                astTree = AstTreeFormatter.format(parseResult.getTree(), typeCache);
+            }
+
+            // STEP 3: Create TransformationContext with schema, indices, and type evaluator
+            log.debug("Step 3: Creating transformation context with schema: {}", schema);
 
             // Create type evaluator
             TypeEvaluator typeEvaluator = new SimpleTypeEvaluator(schema, indices);
@@ -348,8 +368,8 @@ public class TransformationService {
             // Create context (only schema needed - procedure name/params extracted from AST)
             TransformationContext context = new TransformationContext(schema, indices, typeEvaluator);
 
-            // STEP 3: Transform ANTLR parse tree to PostgreSQL PL/pgSQL
-            log.debug("Step 3: Transforming to PostgreSQL PL/pgSQL");
+            // STEP 4: Transform ANTLR parse tree to PostgreSQL PL/pgSQL
+            log.debug("Step 4: Transforming to PostgreSQL PL/pgSQL");
             PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
             String createFunction = builder.visit(parseResult.getTree());
 
