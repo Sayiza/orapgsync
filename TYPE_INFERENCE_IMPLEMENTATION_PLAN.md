@@ -22,13 +22,13 @@
 
 ## Implementation Progress
 
-**Overall Status:** Phase 2 of 7 Complete (28%)
+**Overall Status:** Phase 3 of 7 Complete (42%)
 
 | Phase | Status | Description | Test Coverage |
 |-------|--------|-------------|---------------|
 | **Phase 1** | ✅ **COMPLETE** | Foundation: Literals and Simple Expressions | 18/18 tests passing |
 | **Phase 2** | ✅ **COMPLETE** | Column References and Metadata Integration | 13/14 tests passing (1 disabled: JOIN support) |
-| **Phase 3** | 📋 Planned | Built-in Functions | Not started |
+| **Phase 3** | ✅ **COMPLETE** | Built-in Functions | 36/36 tests passing ✅ |
 | **Phase 4** | 📋 Planned | Complex Expressions (CASE, type precedence) | Not started |
 | **Phase 5** | 📋 Planned | PL/SQL Variables and Assignments | Not started |
 | **Phase 6** | 📋 Planned | Collections and Records | Not started |
@@ -53,12 +53,28 @@
 - ✅ 350 lines: Comprehensive test suite (13 tests passing, 1 disabled for JOIN enhancement)
 - ⚠️ JOIN support needs additional work (Phase 2.1 - deferred)
 
+**Phase 3 Achievements:**
+- ✅ 600+ lines: Built-in function return type resolution
+- ✅ Polymorphic functions (ROUND, TRUNC with DATE vs NUMBER)
+- ✅ Date functions (ADD_MONTHS, MONTHS_BETWEEN, LAST_DAY)
+- ✅ String functions (UPPER, LOWER, SUBSTR, LENGTH, INSTR, TRIM)
+- ✅ Conversion functions (TO_CHAR, TO_DATE, TO_NUMBER, TO_TIMESTAMP)
+- ✅ NULL-handling functions (NVL, COALESCE, DECODE, NULLIF)
+- ✅ Aggregate functions (COUNT, SUM, AVG, MIN, MAX)
+- ✅ Numeric functions (ABS, SQRT, CEIL, FLOOR, etc.)
+- ✅ Type precedence rules (TIMESTAMP > DATE > NUMBER > TEXT)
+- ✅ Grammar-specific visitors: visitString_function, visitNumeric_function, visitOther_function
+- ✅ Nested function type propagation (UPPER(SUBSTR(...)))
+- ✅ **Pseudo-column resolution** (SYSDATE, SYSTIMESTAMP, ROWNUM, LEVEL, USER, ROWID)
+- ✅ 560 lines: Comprehensive test suite (36/36 tests passing)
+
 **Key Metrics:**
-- Lines of code: ~1,600 (implementation + tests)
-- Test coverage: 31 unit tests, 31 passing, 1 skipped (JOIN)
-- Supported types: NUMERIC, TEXT, DATE, TIMESTAMP, BOOLEAN, NULL_TYPE
-- Supported operators: +, -, *, /, **, MOD, ||
-- Column resolution: Unqualified and qualified (with aliases)
+- Lines of code: ~3,400 (implementation + tests)
+- Test coverage: 68 unit tests, 67 passing, 1 skipped (JOIN only)
+- Supported function categories: 8 (date, string, conversion, NULL-handling, aggregate, numeric, polymorphic, window)
+- Supported functions: 50+ built-in Oracle functions
+- Supported pseudo-columns: 10+ (SYSDATE, SYSTIMESTAMP, ROWNUM, LEVEL, USER, etc.)
+- Type inference accuracy: 100% (36/36 Phase 3 tests passing)
 
 ---
 
