@@ -297,7 +297,19 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
     - ✅ CREATE OR REPLACE VIEW preserves dependencies (critical!)
     - See [TRANSFORMATION.md](TRANSFORMATION.md) for detailed documentation
 
-12. **Standalone Function/Procedure Implementation**: 🔄 **INFRASTRUCTURE COMPLETE** - Framework ready for PL/SQL transformation
+12. **Type Inference System**: 🔄 **42% COMPLETE** - Two-pass type analysis for accurate PL/SQL transformation
+    - ✅ Phase 1: Foundation - Literals and simple expressions (18/18 tests)
+    - ✅ Phase 2: Column References - Metadata integration with TransformationIndices (13/14 tests)
+    - ✅ Phase 3: Built-in Functions - 50+ Oracle functions with polymorphic support (36/36 tests)
+    - ✅ **Architecture Refactored** - TypeAnalysisVisitor (498 lines) + 5 static helper classes (following PostgresCodeBuilder pattern)
+    - ✅ Token position-based caching for AST node type information
+    - ✅ Supports: Literals, operators, date arithmetic, column resolution, function return types, pseudo-columns
+    - 📋 Planned: Complex expressions (CASE), PL/SQL variables, collections, integration
+    - **Purpose:** Enable accurate ROUND/TRUNC disambiguation, optimal type casting, function overload resolution
+    - **Architecture:** TypeAnalysisVisitor (Pass 1) populates type cache → FullTypeEvaluator (Pass 2) queries cache
+    - See [TYPE_INFERENCE_IMPLEMENTATION_PLAN.md](TYPE_INFERENCE_IMPLEMENTATION_PLAN.md) for detailed documentation
+
+13. **Standalone Function/Procedure Implementation**: 🔄 **INFRASTRUCTURE COMPLETE** - Framework ready for PL/SQL transformation
     - ✅ Frontend: HTML row + JavaScript handlers (verification & creation)
     - ✅ Backend Jobs:
       - `PostgresStandaloneFunctionImplementationJob` - Implementation job (skips all - transformation TODO)
@@ -312,14 +324,14 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
     - Location: `function/job/`, `core/job/model/function/`
     - Step 25 in orchestration workflow
 
-13. **Package Function/Procedure Logic**: PL/SQL→PL/pgSQL conversion using ANTLR (Planned - see Phase 3 roadmap)
-14. **Type Method Logic**: Member method implementations (Planned - see Phase 3 roadmap)
-15. **Triggers**: Migration from Oracle to PostgreSQL (Planned - see Phase 3 roadmap)
-16. **Indexes**: Extraction and creation (Future)
+14. **Package Function/Procedure Logic**: PL/SQL→PL/pgSQL conversion using ANTLR (Planned - see Phase 3 roadmap)
+15. **Type Method Logic**: Member method implementations (Planned - see Phase 3 roadmap)
+16. **Triggers**: Migration from Oracle to PostgreSQL (Planned - see Phase 3 roadmap)
+17. **Indexes**: Extraction and creation (Future)
 
 ### 📋 Phase 3 Detailed Roadmap (Next Steps)
 1. ~~**Oracle Built-in Replacements**~~ ✅ **COMPLETE** - See item #10 above
-2. ~~**Standalone Function/Procedure Infrastructure**~~ ✅ **COMPLETE** - See item #12 above
+2. ~~**Standalone Function/Procedure Infrastructure**~~ ✅ **COMPLETE** - See item #13 above
 3. **Standalone Function/Procedure Transformation**: 🔄 **IN PROGRESS** - Add PL/SQL→PL/pgSQL logic to Step 25
    - Extract Oracle function source from `ALL_SOURCE`
    - Extend `PostgresCodeBuilder` with PL/SQL statement visitors

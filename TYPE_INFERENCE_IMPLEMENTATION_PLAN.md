@@ -1,8 +1,8 @@
 # Type Inference Implementation Plan
 
-**Status:** Phase 1 Complete ✅ (Foundation: Literals and Simple Expressions)
+**Status:** Phase 3 Complete + Refactored ✅ (Foundation, Metadata, Functions - Clean Architecture)
 **Created:** 2025-10-27
-**Last Updated:** 2025-10-27
+**Last Updated:** 2025-10-28
 **Purpose:** Design and implement a full two-pass type inference system for accurate Oracle→PostgreSQL PL/SQL transformation
 
 ---
@@ -75,6 +75,70 @@
 - Supported functions: 50+ built-in Oracle functions
 - Supported pseudo-columns: 10+ (SYSDATE, SYSTIMESTAMP, ROWNUM, LEVEL, USER, etc.)
 - Type inference accuracy: 100% (36/36 Phase 3 tests passing)
+
+### Phase 3.5: Architecture Refactoring ✅ **COMPLETE** (2025-10-28)
+
+**Motivation:** TypeAnalysisVisitor grew to ~1,383 lines during Phase 1-3 implementation. Following PostgresCodeBuilder's successful static helper pattern, we refactored to improve maintainability.
+
+**Refactoring Results:**
+- **Before:** TypeAnalysisVisitor.java (1,383 lines - monolithic)
+- **After:** TypeAnalysisVisitor.java (498 lines - coordinator) + 5 helper classes
+- **Reduction:** 885 lines (64% reduction in main visitor)
+
+**Static Helper Classes Created:**
+
+1. **ResolveConstant.java** (86 lines)
+   - Handles all literal type resolution
+   - DATE, TIMESTAMP, numeric, string, NULL, boolean literals
+   - Order matters: DATE/TIMESTAMP checked before quoted_string
+
+2. **ResolveOperator.java** (168 lines)
+   - Handles arithmetic operators (*, /, +, -, **, MOD)
+   - String concatenation (|| → TEXT)
+   - Date arithmetic rules (DATE+NUMBER→DATE, DATE-DATE→NUMBER)
+   - NULL propagation logic
+
+3. **ResolveColumn.java** (246 lines)
+   - Column type resolution from metadata
+   - Unqualified column resolution (tries all tables in FROM clause)
+   - Qualified column resolution (table.column or alias.column)
+   - Fully qualified resolution (schema.table.column)
+   - Oracle type → TypeInfo mapping
+
+4. **ResolvePseudoColumn.java** (70 lines)
+   - Oracle pseudo-column type resolution
+   - SYSDATE, SYSTIMESTAMP → DATE/TIMESTAMP
+   - ROWNUM, LEVEL, UID → NUMERIC
+   - USER, ROWID, SESSIONTIMEZONE → TEXT
+
+5. **ResolveFunction.java** (514 lines)
+   - 50+ Oracle built-in function return type resolution
+   - Polymorphic functions (ROUND, TRUNC)
+   - Date, string, conversion, NULL-handling functions
+   - Type precedence rules (TIMESTAMP > DATE > NUMBER > TEXT)
+   - Handles grammar-specific contexts (string_function, numeric_function, other_function)
+
+**TypeAnalysisVisitor Role (After Refactoring):**
+- Coordinator for type inference (not implementation)
+- Manages scope stack and table aliases
+- Handles caching (`nodeKey()`, `cacheAndReturn()`)
+- Delegates actual type resolution to helpers
+- Maintains query-local state (FROM clause tracking)
+
+**Architecture Benefits:**
+- ✅ Follows PostgresCodeBuilder pattern (consistency)
+- ✅ Improved maintainability (logic organized by responsibility)
+- ✅ Better testability (helpers can be tested independently)
+- ✅ Easier to extend (new type resolution logic → appropriate helper)
+- ✅ Reduced complexity (main visitor is now clean coordinator)
+
+**Test Results After Refactoring:**
+```
+Tests run: 68, Failures: 0, Errors: 0, Skipped: 1 ✅
+All Phase 1-3 tests passing!
+```
+
+**Key Fix:** Made `nodeKey()` method `public` so helper classes can generate cache keys for looking up argument types.
 
 ---
 

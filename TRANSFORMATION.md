@@ -682,6 +682,22 @@ Detailed implementation documentation:
 - ✅ Creates foundation for PL/SQL code that depends on these packages
 - See Phase 4.5 section above for details
 
+**1.5. Type Inference System** 🔄 **42% COMPLETE** (Supporting PL/SQL Transformation)
+- ✅ Phase 1-3 Complete: Literals, operators, column resolution, 50+ Oracle functions
+- ✅ Architecture refactored: TypeAnalysisVisitor + 5 static helper classes (following PostgresCodeBuilder pattern)
+- ✅ 68 unit tests, 67 passing (98.5% success rate)
+- **Purpose:** Enable accurate ROUND/TRUNC disambiguation, optimal type casting, function overload resolution
+- **Architecture:** Two-pass design
+  - Pass 1: TypeAnalysisVisitor populates type cache (token position-based keys)
+  - Pass 2: FullTypeEvaluator queries cache during PostgresCodeBuilder transformation
+- **Why needed for PL/SQL:**
+  - Polymorphic functions (ROUND on DATE vs NUMBER require different PostgreSQL equivalents)
+  - Variable type tracking (required for assignment compatibility checks)
+  - Function overload resolution (choose correct PostgreSQL function signature)
+  - Type-based optimizations (eliminate unnecessary casts)
+- 📋 Planned: Complex expressions (CASE), PL/SQL variables, collections, full integration
+- See [TYPE_INFERENCE_IMPLEMENTATION_PLAN.md](TYPE_INFERENCE_IMPLEMENTATION_PLAN.md) for details
+
 **2. Standalone Function/Procedure Implementation** 
 - Transform standalone functions/procedures
 - PL/SQL → PL/pgSQL conversion using ANTLR
