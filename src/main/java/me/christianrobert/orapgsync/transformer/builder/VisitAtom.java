@@ -6,10 +6,10 @@ import me.christianrobert.orapgsync.transformer.context.TransformationException;
 public class VisitAtom {
   public static String v(PlSqlParser.AtomContext ctx, PostgresCodeBuilder b) {
 
-    // Check for bind_variable
+    // Check for bind_variable (e.g., :variable_name)
+    // Transform by stripping : prefix and converting to simple variable reference
     if (ctx.bind_variable() != null) {
-      throw new TransformationException(
-          "Bind variables not yet supported in minimal implementation");
+      return b.visit(ctx.bind_variable());
     }
 
     // Check for constant (literals)

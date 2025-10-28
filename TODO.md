@@ -12,6 +12,10 @@
 [x] SQL Transform: subquery support in all phases, outer join support in all phases
 [x] revisit outer join transformer once all subquery support is in place
 [x] The AND handler (lines 17-30) correctly handles null (filtered ROWNUM), but OR doesn't. If ROWNUM appears in an OR condition, this will cause "null OR something".
+[x] PL/SQL Variable declarations visitor (Step 25 Phase 2.1)
+[x] PL/SQL Assignment statements visitor (Step 25 Phase 2.1)
+[x] PL/SQL IF/ELSIF/ELSE statements visitor (Step 25 Phase 2.2)
+[x] PL/SQL SELECT INTO statements visitor (Step 25 Phase 2.3)
 [ ] Frontend: - vs ?, no check for fks
 [ ] 2 - pass architecture for preparing types before transformation
 [ ] 3 jobs: type-methos, functions, triggers

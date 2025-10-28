@@ -68,9 +68,23 @@ public class VisitQueryBlock {
       }
       String selectedList = b.visit(selectedListCtx);
 
+      // Extract INTO clause (if present) - PL/SQL SELECT INTO statements
+      // Oracle: SELECT col1, col2 INTO v1, v2 FROM table
+      // PostgreSQL: Same syntax
+      String intoClause = null;
+      PlSqlParser.Into_clauseContext intoCtx = ctx.into_clause();
+      if (intoCtx != null) {
+        intoClause = b.visit(intoCtx);
+      }
+
       // Build the SELECT statement
       StringBuilder result = new StringBuilder();
       result.append("SELECT ").append(selectedList);
+
+      // Add INTO clause if present (must come after SELECT list, before FROM)
+      if (intoClause != null) {
+        result.append(" ").append(intoClause);
+      }
 
       // Only add FROM clause if not a DUAL query
       // Oracle: SELECT SYSDATE FROM DUAL → PostgreSQL: SELECT CURRENT_TIMESTAMP
