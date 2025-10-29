@@ -8,6 +8,8 @@ import me.christianrobert.orapgsync.transformer.context.TransformationContext;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.HashSet;
+import java.util.Set;
 
 public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
 
@@ -25,6 +27,12 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
     // Each query_block pushes its context, pops when done
     private final Deque<RownumContext> rownumContextStack;
 
+    // Block-level state for loop RECORD variable declarations
+    // PostgreSQL requires explicit RECORD declarations for cursor FOR loop variables
+    // Stack to handle nested blocks (anonymous DECLARE...BEGIN...END blocks)
+    // Each block (function or nested anonymous block) pushes its context, pops when done
+    private final Deque<Set<String>> loopRecordVariablesStack;
+
     /**
      * Creates a PostgresCodeBuilder with transformation context.
      * @param context Transformation context for metadata lookups (can be null for simple transformations)
@@ -33,6 +41,7 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
         this.context = context;
         this.outerJoinContextStack = new ArrayDeque<>();
         this.rownumContextStack = new ArrayDeque<>();
+        this.loopRecordVariablesStack = new ArrayDeque<>();
     }
 
     /**
@@ -42,6 +51,7 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
         this.context = null;
         this.outerJoinContextStack = new ArrayDeque<>();
         this.rownumContextStack = new ArrayDeque<>();
+        this.loopRecordVariablesStack = new ArrayDeque<>();
     }
 
     /**
@@ -107,6 +117,43 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
      */
     public RownumContext getRownumContext() {
         return rownumContextStack.peek();
+    }
+
+    /**
+     * Pushes a new loop RECORD variables context onto the stack for the current block.
+     * Used when entering a block (function body or anonymous DECLARE...BEGIN...END block).
+     * Creates a new empty set for tracking loop variables in this block scope.
+     */
+    public void pushLoopRecordVariablesContext() {
+        loopRecordVariablesStack.push(new HashSet<>());
+    }
+
+    /**
+     * Pops the loop RECORD variables context from the stack when exiting a block.
+     * Used when leaving a block (function body or anonymous DECLARE...BEGIN...END block).
+     * Returns the set of loop variables for the block being exited.
+     *
+     * @return Set of loop variable names for the current block (may be empty)
+     */
+    public Set<String> popLoopRecordVariablesContext() {
+        if (!loopRecordVariablesStack.isEmpty()) {
+            return loopRecordVariablesStack.pop();
+        }
+        return new HashSet<>();  // Empty set if stack is empty (shouldn't happen in valid code)
+    }
+
+    /**
+     * Registers a loop variable that needs RECORD type declaration in the current block.
+     * Used by VisitLoop_statement to track cursor FOR loop variables.
+     * Adds to the current block's context (top of stack).
+     *
+     * @param variableName Name of the loop variable (e.g., "emp_rec")
+     */
+    public void registerLoopRecordVariable(String variableName) {
+        if (!loopRecordVariablesStack.isEmpty()) {
+            loopRecordVariablesStack.peek().add(variableName);
+        }
+        // If stack is empty, we can't register (shouldn't happen - block should push context first)
     }
 
     // ========== SELECT STATEMENT ==========
@@ -401,5 +448,10 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
     @Override
     public String visitBind_variable(PlSqlParser.Bind_variableContext ctx) {
         return VisitBind_variable.v(ctx, this);
+    }
+
+    @Override
+    public String visitLoop_statement(PlSqlParser.Loop_statementContext ctx) {
+        return VisitLoop_statement.v(ctx, this);
     }
 }

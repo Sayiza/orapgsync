@@ -3,6 +3,8 @@ package me.christianrobert.orapgsync.transformer.builder;
 import me.christianrobert.orapgsync.antlr.PlSqlParser;
 import me.christianrobert.orapgsync.core.tools.TypeConverter;
 
+import java.util.Set;
+
 /**
  * Static helper for visiting PL/SQL function bodies.
  *
@@ -89,16 +91,43 @@ public class VisitFunctionBody {
         // STEP 4: Build function body (DECLARE + BEGIN...END)
         StringBuilder functionBody = new StringBuilder();
 
+        // Push loop RECORD variables context for this function block
+        // When nested anonymous blocks are implemented, they will push their own contexts
+        b.pushLoopRecordVariablesContext();
+
         // Visit declarations (if present)
-        if (ctx.seq_of_declare_specs() != null) {
+        boolean hasDeclareSection = ctx.seq_of_declare_specs() != null;
+        if (hasDeclareSection) {
             functionBody.append("DECLARE\n");
             String declarations = b.visit(ctx.seq_of_declare_specs());
             functionBody.append(declarations);
         }
 
-        // Visit the body (BEGIN...END block)
+        // Visit the body (BEGIN...END block) - this will register loop variables
+        String bodyCode = null;
         if (ctx.body() != null) {
-            String bodyCode = b.visit(ctx.body());
+            bodyCode = b.visit(ctx.body());
+        }
+
+        // Pop loop RECORD variables context to get variables for this block
+        Set<String> loopVariables = b.popLoopRecordVariablesContext();
+
+        // Inject RECORD declarations for cursor FOR loop variables
+        // PostgreSQL requires explicit RECORD declarations, Oracle has implicit declarations
+        if (!loopVariables.isEmpty()) {
+            // Add DECLARE section if not already present
+            if (!hasDeclareSection) {
+                functionBody.append("DECLARE\n");
+            }
+
+            // Add RECORD declarations
+            for (String varName : loopVariables) {
+                functionBody.append(varName).append(" RECORD;\n");
+            }
+        }
+
+        // Append the body code
+        if (bodyCode != null) {
             functionBody.append(bodyCode);
         }
 
