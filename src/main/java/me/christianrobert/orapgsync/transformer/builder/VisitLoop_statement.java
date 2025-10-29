@@ -40,9 +40,9 @@ import me.christianrobert.orapgsync.transformer.context.TransformationException;
  * <ul>
  *   <li>✅ FOR LOOP with numeric range (syntax identical in PostgreSQL)</li>
  *   <li>✅ FOR LOOP with inline SELECT (most common pattern)</li>
+ *   <li>✅ FOR LOOP with named cursor (syntax identical, declaration transformed)</li>
  *   <li>❌ Basic LOOP (not yet implemented)</li>
  *   <li>❌ WHILE LOOP (not yet implemented)</li>
- *   <li>❌ FOR LOOP with named cursor (not yet implemented)</li>
  * </ul>
  *
  * <h3>PostgreSQL PL/pgSQL:</h3>
@@ -193,12 +193,30 @@ public class VisitLoop_statement {
 
                     result.append(") LOOP\n");
                 } else if (cursorNameCtx != null) {
-                    // NAMED CURSOR - Not yet supported
-                    String cursorName = cursorNameCtx.getText();
-                    throw new UnsupportedOperationException(
-                            "FOR loops with named cursors (FOR rec IN " + cursorName + " LOOP) are not yet supported. " +
-                            "Only FOR loops with inline SELECT are currently implemented. " +
-                            "You can convert the cursor to inline: FOR rec IN (SELECT ...) LOOP");
+                    // NAMED CURSOR - syntax is identical in PostgreSQL
+                    // Oracle: FOR rec IN cursor_name LOOP
+                    // PostgreSQL: FOR rec IN cursor_name LOOP (no change)
+                    // Cursor declaration itself is transformed in DECLARE section
+
+                    // Register the loop variable for RECORD declaration
+                    b.registerLoopRecordVariable(recordName);
+
+                    // Extract cursor name (may include parameters)
+                    String cursorName = cursorNameCtx.getText().toLowerCase();
+
+                    // Check if cursor has parameters: cursor_name(param1, param2)
+                    // Grammar: cursor_name ('(' expressions_? ')')?
+                    result.append("FOR ").append(recordName).append(" IN ").append(cursorName);
+
+                    // Handle cursor parameters if present
+                    if (cursorParam.expressions_() != null) {
+                        result.append("(");
+                        String params = b.visit(cursorParam.expressions_());
+                        result.append(params);
+                        result.append(")");
+                    }
+
+                    result.append(" LOOP\n");
                 } else {
                     throw new TransformationException("Cursor FOR loop missing both select_statement and cursor_name");
                 }

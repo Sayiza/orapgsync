@@ -426,6 +426,11 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
     }
 
     @Override
+    public String visitCursor_declaration(PlSqlParser.Cursor_declarationContext ctx) {
+        return VisitCursor_declaration.v(ctx, this);
+    }
+
+    @Override
     public String visitAssignment_statement(PlSqlParser.Assignment_statementContext ctx) {
         return VisitAssignment_statement.v(ctx, this);
     }
@@ -453,5 +458,10 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
     @Override
     public String visitLoop_statement(PlSqlParser.Loop_statementContext ctx) {
         return VisitLoop_statement.v(ctx, this);
+    }
+
+    @Override
+    public String visitCall_statement(PlSqlParser.Call_statementContext ctx) {
+        return VisitCall_statement.v(ctx, this);
     }
 }
