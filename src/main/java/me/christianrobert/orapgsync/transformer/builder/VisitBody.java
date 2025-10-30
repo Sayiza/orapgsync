@@ -47,12 +47,10 @@ public class VisitBody {
         // END keyword (requires semicolon in PL/pgSQL)
         result.append("END;");
 
-        // Label name (optional) - rare, usually omitted
-        if (ctx.label_name() != null) {
-            // Label goes before semicolon
-            // Note: This is very rare in practice
-            result.insert(result.length() - 1, " " + ctx.label_name().getText());
-        }
+        // Note: Oracle allows labeled END blocks (e.g., END procedure_name;)
+        // but PostgreSQL doesn't support this syntax for functions/procedures.
+        // Labels are only supported in LOOP blocks in PostgreSQL.
+        // Therefore, we omit the label even if present in Oracle source.
 
         return result.toString();
     }

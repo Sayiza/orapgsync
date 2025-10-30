@@ -1,8 +1,28 @@
 # Step 25: Standalone Function/Procedure Implementation
 
 **Status:** 🔄 **PARTIALLY COMPLETE** - Infrastructure ✅, Variables ✅, IF statements ✅, SELECT INTO ✅, Loops 🔄 (Cursor FOR Loops ✅, Numeric FOR Loops ✅), Call Statements ✅
-**Date Completed:** Infrastructure: 2025-10-26 | Variables & IF: 2025-10-28 | SELECT INTO: 2025-10-28 | Cursor & Numeric FOR Loops: 2025-10-29 | Call Statements: 2025-10-29
+**Date Completed:** Infrastructure: 2025-10-26 | Variables & IF: 2025-10-28 | SELECT INTO: 2025-10-28 | Cursor & Numeric FOR Loops: 2025-10-29 | Call Statements: 2025-10-29 | OUT Parameter Fix: 2025-10-29
 **Workflow Position:** Step 25 in orchestration sequence (after View Implementation) - ✅ Integrated into orchestration workflow
+
+---
+
+## 🔴 CRITICAL ISSUE: Stub/Transformation Inconsistency
+
+**Date Identified:** 2025-10-29
+**Severity:** CRITICAL (blocks production use)
+
+**Problem:** Stub generator creates PROCEDURE objects, but transformer creates FUNCTION objects. These cannot replace each other in PostgreSQL!
+
+**Impact:**
+- ~50-70% of Oracle procedures will fail transformation
+- `CREATE OR REPLACE` fails with "cannot change routine kind"
+- Dependencies on stubs break when replaced
+
+**Solution:** See detailed analysis in [PLSQL_OUT_PARAMETER_CONSISTENCY_PLAN.md](PLSQL_OUT_PARAMETER_CONSISTENCY_PLAN.md)
+
+**Status:** 🔧 **FIX IN PROGRESS** - Stub generator needs immediate update
+
+**Priority:** **HIGH** - Must fix before Step 25 is production-ready
 
 ---
 

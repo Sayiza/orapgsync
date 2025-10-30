@@ -67,12 +67,6 @@ public class VisitParameter {
             mode = "IN";  // Default if nothing specified
         }
 
-        // Only include IN and INOUT parameters in signature
-        // OUT-only parameters are handled differently in PostgreSQL
-        if ("OUT".equals(mode)) {
-            return null;  // TODO: Handle OUT parameters (may need different return type)
-        }
-
         StringBuilder result = new StringBuilder();
 
         // STEP 2: Extract parameter name
@@ -82,8 +76,10 @@ public class VisitParameter {
             result.append(" ");
         }
 
-        // STEP 3: Add mode indicator (INOUT only, IN is default in PostgreSQL)
-        if ("INOUT".equals(mode)) {
+        // STEP 3: Add mode indicator (OUT and INOUT need explicit keywords, IN is default)
+        if ("OUT".equals(mode)) {
+            result.append("OUT ");
+        } else if ("INOUT".equals(mode)) {
             result.append("INOUT ");
         }
 
