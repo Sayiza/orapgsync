@@ -153,7 +153,7 @@ curl "http://localhost:8080/api/jobs/{jobId}/status"
 
 - **[CLAUDE.md](CLAUDE.md)** - Complete architecture, development guide, module documentation
 - **[TRANSFORMATION.md](TRANSFORMATION.md)** - SQL/PL-SQL transformation module (ANTLR implementation)
-- **[CTE_IMPLEMENTATION_PLAN.md](CTE_IMPLEMENTATION_PLAN.md)** - CTE (WITH clause) implementation details
+- **[CTE_IMPLEMENTATION_PLAN.md](documentation/completed/CTE_IMPLEMENTATION_PLAN.md)** - CTE (WITH clause) implementation details
 - **[CONNECT_BY_IMPLEMENTATION_PLAN.md](CONNECT_BY_IMPLEMENTATION_PLAN.md)** - Hierarchical query transformation
 
 ---

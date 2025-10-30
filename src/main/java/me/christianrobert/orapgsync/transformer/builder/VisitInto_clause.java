@@ -16,12 +16,35 @@ import me.christianrobert.orapgsync.antlr.PlSqlParser;
  *
  * <h3>PostgreSQL PL/pgSQL:</h3>
  * <pre>
- * INTO variable_list
+ * INTO STRICT variable_list
  * </pre>
+ *
+ * <h3>CRITICAL: STRICT Keyword Required</h3>
+ * <p><strong>Why STRICT is needed:</strong></p>
+ * <ul>
+ *   <li><strong>Oracle behavior:</strong> SELECT INTO automatically raises exceptions:
+ *     <ul>
+ *       <li>0 rows → NO_DATA_FOUND exception</li>
+ *       <li>&gt;1 rows → TOO_MANY_ROWS exception</li>
+ *     </ul>
+ *   </li>
+ *   <li><strong>PostgreSQL WITHOUT STRICT:</strong> Silent failure:
+ *     <ul>
+ *       <li>0 rows → Sets variables to NULL (no exception!)</li>
+ *       <li>&gt;1 rows → Uses first row (no exception!)</li>
+ *     </ul>
+ *   </li>
+ *   <li><strong>PostgreSQL WITH STRICT:</strong> Matches Oracle behavior:
+ *     <ul>
+ *       <li>0 rows → Raises no_data_found exception ✓</li>
+ *       <li>&gt;1 rows → Raises too_many_rows exception ✓</li>
+ *     </ul>
+ *   </li>
+ * </ul>
  *
  * <h3>Notes:</h3>
  * <ul>
- *   <li>Basic INTO syntax is identical between Oracle and PostgreSQL</li>
+ *   <li>STRICT is ALWAYS added to match Oracle semantics</li>
  *   <li>BULK COLLECT is Oracle-specific for array operations (not yet supported)</li>
  *   <li>Variable names need transformation (lowercase, expression resolution)</li>
  *   <li>Used in SELECT INTO statements within PL/SQL function bodies</li>
@@ -33,8 +56,8 @@ import me.christianrobert.orapgsync.antlr.PlSqlParser;
  * SELECT employee_name, salary INTO v_name, v_sal
  * FROM employees WHERE employee_id = p_emp_id;
  *
- * -- PostgreSQL (Generated)
- * SELECT employee_name, salary INTO v_name, v_sal
+ * -- PostgreSQL (Generated with STRICT)
+ * SELECT employee_name, salary INTO STRICT v_name, v_sal
  * FROM hr.employees WHERE employee_id = p_emp_id;
  * </pre>
  */
@@ -61,8 +84,12 @@ public class VisitInto_clause {
                     "Use simple SELECT INTO for single-row queries.");
         }
 
-        // STEP 1: Add INTO keyword
-        result.append("INTO ");
+        // STEP 1: Add INTO STRICT keyword
+        // STRICT is required to match Oracle's automatic exception raising behavior
+        // Oracle: 0 rows → NO_DATA_FOUND, >1 rows → TOO_MANY_ROWS
+        // PostgreSQL with STRICT: 0 rows → no_data_found, >1 rows → too_many_rows
+        // PostgreSQL without STRICT: Silent failure (sets NULL or uses first row)
+        result.append("INTO STRICT ");
 
         // STEP 2: Transform first variable
         // Can be either general_element (e.g., v_name) or bind_variable (e.g., :v_name)

@@ -24,11 +24,23 @@ import java.util.function.Consumer;
 /**
  * Creates function and procedure stubs in PostgreSQL database.
  *
- * Function/procedure stubs are created with empty implementations to support future
+ * <p>Function/procedure stubs are created with empty implementations to support future
  * view migration and PL/SQL code transformation. They have correct signatures but
- * return NULL (functions) or have empty body (procedures).
+ * return NULL.
  *
- * Naming convention for package members: packagename__functionname (double underscore)
+ * <p><strong>Important:</strong> Both Oracle functions and procedures are created as
+ * PostgreSQL FUNCTIONs (not PROCEDUREs) to ensure compatibility with the transformation
+ * layer and enable CREATE OR REPLACE when stubs are replaced with actual implementations.
+ *
+ * <p>Oracle procedures are mapped to PostgreSQL functions with RETURNS clause based on
+ * OUT parameters:
+ * <ul>
+ *   <li>No OUT/INOUT parameters → RETURNS void</li>
+ *   <li>Single OUT/INOUT parameter → RETURNS &lt;type&gt;</li>
+ *   <li>Multiple OUT/INOUT parameters → RETURNS RECORD</li>
+ * </ul>
+ *
+ * <p>Naming convention for package members: packagename__functionname (double underscore)
  */
 @Dependent
 public class PostgresFunctionStubCreationJob extends AbstractDatabaseWriteJob<FunctionStubCreationResult> {
@@ -236,13 +248,19 @@ public class PostgresFunctionStubCreationJob extends AbstractDatabaseWriteJob<Fu
 
     /**
      * Generates SQL for creating a function or procedure stub.
-     * Functions return NULL, procedures have empty body.
+     *
+     * <p>Note: Both Oracle functions and procedures are created as PostgreSQL FUNCTIONs
+     * (not PROCEDUREs) for consistency with the transformation layer and to support
+     * CREATE OR REPLACE when transformations are applied.
+     *
+     * <p>Functions return NULL, procedures have empty body with appropriate RETURNS clause
+     * based on OUT parameters.
      */
     private String generateCreateFunctionStubSQL(FunctionMetadata function) {
         StringBuilder sql = new StringBuilder();
 
-        sql.append("CREATE OR REPLACE ");
-        sql.append(function.isFunction() ? "FUNCTION " : "PROCEDURE ");
+        // Always create as FUNCTION (not PROCEDURE) for replaceability
+        sql.append("CREATE OR REPLACE FUNCTION ");
         sql.append(function.getSchema().toLowerCase());
         sql.append(".");
         sql.append(function.getPostgresName());
@@ -257,19 +275,27 @@ public class PostgresFunctionStubCreationJob extends AbstractDatabaseWriteJob<Fu
         sql.append(String.join(", ", paramDefinitions));
         sql.append(")");
 
-        // Add return type for functions
+        // Add RETURNS clause (required for all FUNCTIONs)
+        sql.append(" RETURNS ");
         if (function.isFunction()) {
-            sql.append(" RETURNS ");
+            // Oracle function - use explicit return type
             sql.append(mapReturnType(function));
+        } else {
+            // Oracle procedure - calculate based on OUT parameters
+            sql.append(calculateProcedureReturnsClause(function));
         }
 
         sql.append(" AS $$\n");
         sql.append("BEGIN\n");
 
+        // Add stub body with appropriate RETURN statement
         if (function.isFunction()) {
+            // Oracle function - use RETURN NULL for explicit return types
             sql.append("    RETURN NULL; -- Stub: Original Oracle function ");
         } else {
-            sql.append("    -- Stub: Original Oracle procedure ");
+            // Oracle procedure → PostgreSQL function with OUT parameters or void
+            // Use RETURN; (no value) for functions with OUT parameters or returning void
+            sql.append("    RETURN; -- Stub: Original Oracle procedure ");
         }
 
         // Add comment about original location
@@ -294,28 +320,30 @@ public class PostgresFunctionStubCreationJob extends AbstractDatabaseWriteJob<Fu
 
     /**
      * Generates a parameter definition for a function/procedure.
+     *
+     * <p>Format: param_name [MODE] type
+     * <p>Mode is only added for OUT and INOUT parameters (IN is default in PostgreSQL).
+     * <p>This matches the format used by the transformation layer for consistency.
      */
     private String generateParameterDefinition(FunctionParameter param, FunctionMetadata function) {
         StringBuilder def = new StringBuilder();
 
-        // Parameter mode (IN, OUT, INOUT)
+        // Parameter name (comes first in PostgreSQL)
+        String normalizedParamName = PostgresIdentifierNormalizer.normalizeIdentifier(param.getParameterName());
+        def.append(normalizedParamName);
+        def.append(" ");
+
+        // Parameter mode (IN, OUT, INOUT) - only add for OUT and INOUT
         String inOut = param.getInOut();
         if (inOut != null) {
             if (inOut.contains("IN") && inOut.contains("OUT")) {
                 def.append("INOUT ");
             } else if (inOut.contains("OUT")) {
                 def.append("OUT ");
-            } else {
-                def.append("IN ");
             }
-        } else {
-            def.append("IN ");
+            // IN is default in PostgreSQL, don't add keyword
         }
-
-        // Parameter name
-        String normalizedParamName = PostgresIdentifierNormalizer.normalizeIdentifier(param.getParameterName());
-        def.append(normalizedParamName);
-        def.append(" ");
+        // If inOut is null, it's an IN parameter (default)
 
         // Parameter type
         String postgresType;
@@ -347,6 +375,61 @@ public class PostgresFunctionStubCreationJob extends AbstractDatabaseWriteJob<Fu
         def.append(postgresType);
 
         return def.toString();
+    }
+
+    /**
+     * Calculates RETURNS clause for Oracle procedures based on OUT parameters.
+     *
+     * <p>Rules:
+     * <ul>
+     *   <li>No OUT/INOUT → RETURNS void</li>
+     *   <li>Single OUT/INOUT → RETURNS &lt;type&gt;</li>
+     *   <li>Multiple OUT/INOUT → RETURNS RECORD</li>
+     * </ul>
+     *
+     * @param function Function metadata (must be a procedure)
+     * @return PostgreSQL RETURNS clause type (void, type, or RECORD)
+     */
+    private String calculateProcedureReturnsClause(FunctionMetadata function) {
+        // Count OUT and INOUT parameters
+        int outParamCount = 0;
+        String singleOutParamType = null;
+
+        for (FunctionParameter param : function.getParameters()) {
+            String inOut = param.getInOut();
+            if (inOut != null && inOut.contains("OUT")) {
+                outParamCount++;
+                if (outParamCount == 1) {
+                    // Store type of first OUT parameter
+                    if (param.isCustomDataType()) {
+                        String owner = param.getDataTypeOwner().toLowerCase();
+                        String typeName = param.getDataTypeName().toLowerCase();
+
+                        // Check if it's a complex Oracle system type
+                        if (OracleTypeClassifier.isComplexOracleSystemType(owner, typeName)) {
+                            singleOutParamType = "jsonb";
+                        } else {
+                            // User-defined type - use the created PostgreSQL composite type
+                            singleOutParamType = owner + "." + typeName;
+                        }
+                    } else {
+                        // Convert Oracle built-in data type to PostgreSQL
+                        singleOutParamType = TypeConverter.toPostgre(param.getDataType());
+                        if (singleOutParamType == null) {
+                            singleOutParamType = "text"; // Fallback
+                        }
+                    }
+                }
+            }
+        }
+
+        if (outParamCount == 0) {
+            return "void";
+        } else if (outParamCount == 1) {
+            return singleOutParamType != null ? singleOutParamType : "text";
+        } else {
+            return "RECORD";
+        }
     }
 
     /**

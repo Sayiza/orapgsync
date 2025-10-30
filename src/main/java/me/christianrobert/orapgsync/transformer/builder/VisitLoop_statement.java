@@ -38,11 +38,12 @@ import me.christianrobert.orapgsync.transformer.context.TransformationException;
  *
  * <h3>Current Implementation:</h3>
  * <ul>
+ *   <li>✅ Basic LOOP (syntax identical in PostgreSQL)</li>
+ *   <li>✅ WHILE LOOP (syntax identical in PostgreSQL)</li>
  *   <li>✅ FOR LOOP with numeric range (syntax identical in PostgreSQL)</li>
  *   <li>✅ FOR LOOP with inline SELECT (most common pattern)</li>
  *   <li>✅ FOR LOOP with named cursor (syntax identical, declaration transformed)</li>
- *   <li>❌ Basic LOOP (not yet implemented)</li>
- *   <li>❌ WHILE LOOP (not yet implemented)</li>
+ *   <li>✅ Labeled loops with EXIT/CONTINUE label support</li>
  * </ul>
  *
  * <h3>PostgreSQL PL/pgSQL:</h3>
@@ -91,13 +92,21 @@ public class VisitLoop_statement {
 
         // Check for WHILE loop
         if (ctx.WHILE() != null) {
-            throw new UnsupportedOperationException(
-                    "WHILE loops are not yet supported. " +
-                    "Supported: FOR i IN 1..10 LOOP (numeric ranges) and FOR rec IN (SELECT ...) LOOP (cursor loops).");
-        }
+            // WHILE LOOP: WHILE condition LOOP ... END LOOP
+            // Syntax is identical in PostgreSQL
 
-        // Check for FOR loop
-        if (ctx.FOR() != null) {
+            PlSqlParser.ConditionContext conditionCtx = ctx.condition();
+            if (conditionCtx == null) {
+                throw new TransformationException("WHILE loop missing condition");
+            }
+
+            // Transform condition
+            String condition = b.visit(conditionCtx);
+
+            // Build WHILE loop statement
+            result.append("WHILE ").append(condition).append(" LOOP\n");
+        } else if (ctx.FOR() != null) {
+            // Check for FOR loop
             PlSqlParser.Cursor_loop_paramContext cursorParam = ctx.cursor_loop_param();
             if (cursorParam == null) {
                 throw new TransformationException("FOR loop missing cursor_loop_param");
@@ -223,9 +232,8 @@ public class VisitLoop_statement {
             }
         } else {
             // Basic LOOP (no WHILE or FOR)
-            throw new UnsupportedOperationException(
-                    "Basic LOOP statements (LOOP...END LOOP) are not yet supported. " +
-                    "Supported: FOR i IN 1..10 LOOP (numeric ranges) and FOR rec IN (SELECT ...) LOOP (cursor loops).");
+            // Syntax is identical in PostgreSQL: LOOP ... END LOOP
+            result.append("LOOP\n");
         }
 
         // STEP 3: Transform loop body statements

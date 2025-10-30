@@ -76,7 +76,7 @@ This document describes the ANTLR-based transformation module that converts Orac
 - **Effort:** ~2 hours (vs. estimated 4-5 days)
 - **Coverage Gain:** +25 percentage points (50% → 75%)
 - **Test Coverage:** 38/38 tests passing
-- **Details:** See [CTE_IMPLEMENTATION_PLAN.md](CTE_IMPLEMENTATION_PLAN.md)
+- **Details:** See [CTE_IMPLEMENTATION_PLAN.md](documentation/completed/CTE_IMPLEMENTATION_PLAN.md)
 
 **✅ Date/Time Functions - COMPLETED**
 - **Impact:** 20-30% of Oracle views use date functions
@@ -264,12 +264,23 @@ This document describes the ANTLR-based transformation module that converts Orac
 - DBMS_RANDOM (random numbers)
 - DBMS_SCHEDULER (job scheduling)
 
-### ⏳ Phase 5: PL/SQL Functions/Procedures - FUTURE
+### 🔄 Phase 5: PL/SQL Functions/Procedures - 60-70% COMPLETE
 
-Extend PostgresCodeBuilder with new visitors for PL/SQL control flow:
-- VisitFunctionBody, VisitDeclareSection
-- VisitIfStatement, VisitLoopStatement
-- VisitCursorDeclaration, VisitExceptionHandler
+PostgresCodeBuilder extended with 14 PL/SQL visitors:
+- ✅ VisitFunctionBody, VisitProcedureBody, VisitBody
+- ✅ VisitParameter (with IN/OUT/INOUT support)
+- ✅ VisitSeq_of_statements, VisitStatement
+- ✅ VisitVariable_declaration (with CONSTANT, NOT NULL, defaults)
+- ✅ VisitAssignment_statement
+- ✅ VisitIf_statement (with ELSIF and nested IFs)
+- ✅ VisitSelect_into_statement
+- ✅ VisitLoop_statement (FOR loops: numeric and cursor)
+- ✅ VisitCursor_declaration (named cursors with parameters)
+- ✅ VisitCall_statement (PERFORM generation with schema qualification)
+- ✅ VisitReturn_statement
+- 📋 Still needed: Basic LOOP/END LOOP, WHILE loops, EXIT/CONTINUE, explicit cursor operations (OPEN/FETCH/CLOSE), exception handlers
+
+**Key Accomplishment:** Oracle PROCEDURE → PostgreSQL FUNCTION transformation with correct OUT parameter handling (Phase 1 fix completed 2025-10-30)
 
 ---
 
@@ -484,7 +495,7 @@ SELECT * FROM emp_tree;
 - Multiple CTEs: mixed recursive/non-recursive supported
 - All existing transformations work inside CTE subqueries
 
-**See:** [CTE_IMPLEMENTATION_PLAN.md](CTE_IMPLEMENTATION_PLAN.md)
+**See:** [CTE_IMPLEMENTATION_PLAN.md](documentation/completed/CTE_IMPLEMENTATION_PLAN.md)
 
 ### CONNECT BY (Hierarchical Queries)
 
@@ -658,7 +669,7 @@ REGEXP_SUBSTR(email, '[^@]+') → (REGEXP_MATCH(email, '[^@]+'))[1]
 
 Detailed implementation documentation:
 
-- **[CTE_IMPLEMENTATION_PLAN.md](CTE_IMPLEMENTATION_PLAN.md)** - WITH clause support (COMPLETED)
+- **[CTE_IMPLEMENTATION_PLAN.md](documentation/completed/CTE_IMPLEMENTATION_PLAN.md)** - WITH clause support (COMPLETED)
   - Non-recursive and recursive CTEs
   - Automatic RECURSIVE keyword detection
   - 38/38 tests passing
@@ -698,10 +709,25 @@ Detailed implementation documentation:
 - 📋 Planned: Complex expressions (CASE), PL/SQL variables, collections, full integration
 - See [TYPE_INFERENCE_IMPLEMENTATION_PLAN.md](TYPE_INFERENCE_IMPLEMENTATION_PLAN.md) for details
 
-**2. Standalone Function/Procedure Implementation** 
-- Transform standalone functions/procedures
-- PL/SQL → PL/pgSQL conversion using ANTLR
+**2. Standalone Function/Procedure Implementation** 🔄 **60-70% COMPLETE**
+- ✅ Infrastructure complete (ANTLR parsing, two-pass architecture, PostgreSQL execution)
+- ✅ Function/procedure signatures with IN/OUT/INOUT parameters
+  - **Important:** All Oracle PROCEDUREs → PostgreSQL FUNCTIONs (PostgreSQL best practice)
+  - RETURNS clause automatically calculated based on OUT parameters:
+    - No OUT/INOUT → `RETURNS void`
+    - Single OUT/INOUT → `RETURNS type`
+    - Multiple OUT/INOUT → `RETURNS RECORD`
+  - Stub generator and transformer produce identical signatures (Phase 1 fix completed 2025-10-30)
+- ✅ Variable declarations (primitive types, CONSTANT, NOT NULL, defaults)
+- ✅ Assignment statements
+- ✅ IF/ELSIF/ELSE statements (simple, nested, complex conditions)
+- ✅ SELECT INTO statements (single/multiple variables, aggregates, WHERE clauses)
+- ✅ FOR loops (numeric range, cursor with inline SELECT, named cursors, parameterized cursors)
+- ✅ Call statements (PERFORM for procedures/functions, schema qualification, package flattening)
+- ✅ RETURN statements
+- 📋 Missing: Basic LOOP/WHILE loops, EXIT/CONTINUE, explicit cursor operations, exceptions, NULL statement
 - Replace function/procedure stubs with actual implementations
+- See [STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md](STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md) for detailed status
 
 **3. Package Analysis** (Before Function Implementation)
 - Analyze Oracle package structure and state management

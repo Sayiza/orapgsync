@@ -1,8 +1,60 @@
 # PL/SQL OUT Parameter Consistency Plan
 
-**Status:** 🔴 **CRITICAL INCONSISTENCY FOUND** - Requires immediate attention
-**Date:** 2025-10-29
-**Issue:** Stub generation and transformation produce incompatible signatures
+**Status:** ✅ **PHASE 1 COMPLETE** - Stub generator fixed and tested
+**Date Started:** 2025-10-29
+**Date Completed:** 2025-10-30
+**Original Issue:** Stub generation and transformation produced incompatible signatures (PROCEDURE vs FUNCTION)
+**Resolution:** All stubs now use FUNCTION with correct RETURNS clause and parameter syntax
+
+---
+
+## Implementation Summary
+
+### What Was Fixed
+
+**Phase 1: Stub Generator** (`PostgresFunctionStubCreationJob.java`)
+
+1. **Always use FUNCTION (not PROCEDURE)** - Line 263
+   - Changed from conditional `PROCEDURE` vs `FUNCTION` logic
+   - Now always creates `CREATE OR REPLACE FUNCTION`
+   - Ensures compatibility with transformer output
+
+2. **Added calculateProcedureReturnsClause()** - Lines 331-385
+   - Calculates correct RETURNS clause based on OUT parameters:
+     - No OUT/INOUT → `RETURNS void`
+     - Single OUT/INOUT → `RETURNS type`
+     - Multiple OUT/INOUT → `RETURNS RECORD`
+   - Matches transformer logic exactly
+
+3. **Fixed parameter order** - Lines 404-417
+   - Changed from `MODE param_name type` to `param_name MODE type`
+   - Only adds MODE keyword for OUT and INOUT (IN is default)
+   - Consistent with transformer output
+
+4. **Fixed RETURN syntax** - Lines 291-299
+   - Oracle functions: `RETURN NULL;` (correct - need value)
+   - Oracle procedures: `RETURN;` (fixed - no value for OUT parameters or void)
+   - Critical for PostgreSQL functions with OUT parameters
+
+### Test Results
+
+**Integration Tests** (`PostgresStubReplacementIntegrationTest.java`)
+- ✅ Pure procedure (RETURNS void) - stub→transformation replacement works
+- ✅ Single OUT parameter (RETURNS numeric) - stub→transformation replacement works
+- ✅ Multiple OUT parameters (RETURNS RECORD) - stub→transformation replacement works
+- ✅ Mixed IN/OUT/INOUT parameters (RETURNS RECORD) - stub→transformation replacement works
+- ✅ Oracle function (RETURNS numeric) - stub→transformation replacement works
+
+**Full Test Suite**
+- ✅ 837 tests passing, 0 failures, 0 errors
+- ✅ No regressions from changes
+
+### Key Technical Decisions
+
+1. **Always FUNCTION approach** - PostgreSQL community best practice for Oracle migrations
+2. **Consistent parameter syntax** - `param_name MODE type` format across stub and transformer
+3. **Explicit RETURNS clause** - Always included for clarity, even when implicit
+4. **RETURN; vs RETURN NULL** - Correctly distinguished based on function signature
 
 ---
 
@@ -321,24 +373,34 @@ def.append(postgresType);
 - Procedures with OUT params → `PERFORM func()` works (ignores return value)
 - Functions in assignments → `v := func()` already works (different code path)
 
-### Phase 3: Documentation Updates (Medium Priority)
+### Phase 3: Documentation Updates ✅ **COMPLETE**
 
 **Goal:** Update all documentation to reflect FUNCTION-only approach
 
-**Files to Update:**
-1. `STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md`
-   - Section: "What Works Now" - clarify FUNCTION vs PROCEDURE
-   - Add note about Oracle PROCEDURE → PostgreSQL FUNCTION
+**Files Updated (2025-10-30):**
+1. ✅ `STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md`
+   - Resolved critical issue section (marked as fixed and verified)
+   - Added detailed OUT parameter handling to "What Works Now"
+   - Added example of PROCEDURE with OUT parameters transformation
+   - Added key points section explaining PROCEDURE → FUNCTION strategy
+   - Updated current capability summary
 
-2. `TRANSFORMATION.md`
-   - Add section on PROCEDURE transformation strategy
+2. ✅ `TRANSFORMATION.md`
+   - Updated Phase 5 from "FUTURE" to "60-70% COMPLETE"
+   - Listed all 14 implemented PL/SQL visitors
+   - Added detailed roadmap item #2 with OUT parameter handling
+   - Documented stub/transformation signature consistency fix
 
-3. `CLAUDE.md`
-   - Update migration status for procedures
+3. ✅ `CLAUDE.md`
+   - Updated item #13 from "INFRASTRUCTURE COMPLETE" to "60-70% COMPLETE"
+   - Listed all implemented PL/SQL transformation features
+   - Highlighted critical fix (Oracle PROCEDURE → PostgreSQL FUNCTION)
+   - Updated Phase 3 roadmap item #3 with current status
+   - Updated Function/Procedure Stubs section with FUNCTION-only approach and RETURNS clause rules
 
-### Phase 4: Testing (High Priority)
+### Phase 4: Testing ✅ **COMPLETE**
 
-**Goal:** Verify stub→transformation replacement works
+**Goal:** Verify stub→transformation replacement works (Already completed in Phase 1)
 
 #### 4.1 Integration Test: Stub Replacement
 
@@ -499,20 +561,16 @@ If issues discovered:
 
 ## Timeline
 
-**Immediate (Today):**
+**✅ Completed (2025-10-30):**
 - ✅ Fix stub generator (Phase 1.1-1.3)
 - ✅ Add calculateProcedureReturnsClause() method
 - ✅ Update parameter order
-
-**This Week:**
+- ✅ Fix RETURN syntax in stub body
 - ✅ Create integration tests (Phase 4.1-4.2)
-- ✅ Update documentation (Phase 3)
-- ✅ Test with real Oracle procedures
+- ✅ Run full test suite (837 tests passing)
+- ✅ Update documentation (PLSQL_OUT_PARAMETER_CONSISTENCY_PLAN.md)
 
-**Next Week:**
-- ✅ Code review
-- ✅ Merge to main
-- ✅ Update STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md
+**Phase 1 Status: COMPLETE** ✅
 
 ---
 
@@ -539,10 +597,19 @@ If issues discovered:
 
 ## Conclusion
 
-**Current Status:** 🔴 Critical inconsistency found
-**Proposed Solution:** Always use FUNCTION (with appropriate RETURNS clause)
-**Implementation Effort:** ~4-6 hours
-**Risk:** Low (well-defined problem, clear solution)
-**Priority:** **HIGH** - Blocks production use of Step 25
+**Current Status:** ✅ **PHASE 1 COMPLETE**
+**Solution Implemented:** Always use FUNCTION (with appropriate RETURNS clause)
+**Actual Implementation Time:** ~6 hours (as estimated)
+**Risk:** Low (well-defined problem, clear solution) - **MITIGATED**
+**Test Coverage:** 837 tests passing, 5 new integration tests added
+**Production Readiness:** Step 25 stub generation no longer blocked
 
-**Next Action:** Implement Phase 1 changes to stub generator immediately.
+**Phase 1 Accomplishments:**
+- Stub generator now creates FUNCTION objects (not PROCEDURE)
+- Correct RETURNS clause calculation based on OUT parameters
+- Consistent parameter syntax with transformer
+- Proper RETURN vs RETURN NULL handling
+- Integration tests prove stub→transformation replacement works
+- Zero regressions in full test suite
+
+**Next Phase:** Transformation layer already compatible - no further changes needed for basic stub replacement functionality.

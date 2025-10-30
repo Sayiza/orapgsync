@@ -464,4 +464,34 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
     public String visitCall_statement(PlSqlParser.Call_statementContext ctx) {
         return VisitCall_statement.v(ctx, this);
     }
+
+    @Override
+    public String visitExit_statement(PlSqlParser.Exit_statementContext ctx) {
+        return VisitExit_statement.v(ctx, this);
+    }
+
+    @Override
+    public String visitContinue_statement(PlSqlParser.Continue_statementContext ctx) {
+        return VisitContinue_statement.v(ctx, this);
+    }
+
+    @Override
+    public String visitNull_statement(PlSqlParser.Null_statementContext ctx) {
+        return VisitNull_statement.v(ctx, this);
+    }
+
+    @Override
+    public String visitCase_statement(PlSqlParser.Case_statementContext ctx) {
+        return VisitCase_statement.v(ctx, this);
+    }
+
+    @Override
+    public String visitException_handler(PlSqlParser.Exception_handlerContext ctx) {
+        return VisitException_handler.v(ctx, this);
+    }
+
+    @Override
+    public String visitRaise_statement(PlSqlParser.Raise_statementContext ctx) {
+        return VisitRaise_statement.v(ctx, this);
+    }
 }

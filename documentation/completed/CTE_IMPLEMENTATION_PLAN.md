@@ -291,7 +291,7 @@ The CTE infrastructure implemented here serves as the foundation for CONNECT BY 
 - START WITH → base case WHERE clause
 - CONNECT BY PRIOR → JOIN conditions
 
-**See:** [CONNECT_BY_IMPLEMENTATION_PLAN.md](CONNECT_BY_IMPLEMENTATION_PLAN.md) for detailed implementation
+**See:** [CONNECT_BY_IMPLEMENTATION_PLAN.md](../../CONNECT_BY_IMPLEMENTATION_PLAN.md) for detailed implementation
 
 ---
 

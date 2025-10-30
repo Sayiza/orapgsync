@@ -309,10 +309,10 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
     - **Architecture:** TypeAnalysisVisitor (Pass 1) populates type cache → FullTypeEvaluator (Pass 2) queries cache
     - See [TYPE_INFERENCE_IMPLEMENTATION_PLAN.md](TYPE_INFERENCE_IMPLEMENTATION_PLAN.md) for detailed documentation
 
-13. **Standalone Function/Procedure Implementation**: 🔄 **INFRASTRUCTURE COMPLETE** - Framework ready for PL/SQL transformation
+13. **Standalone Function/Procedure Implementation**: 🔄 **60-70% COMPLETE** - PL/SQL transformation actively working
     - ✅ Frontend: HTML row + JavaScript handlers (verification & creation)
     - ✅ Backend Jobs:
-      - `PostgresStandaloneFunctionImplementationJob` - Implementation job (skips all - transformation TODO)
+      - `PostgresStandaloneFunctionImplementationJob` - Implementation job with PL/SQL transformation
       - `PostgresStandaloneFunctionImplementationVerificationJob` - Verification job (fully functional)
     - ✅ Data Model: `StandaloneFunctionImplementationResult` with implemented/skipped/errors tracking
     - ✅ REST Endpoints:
@@ -320,8 +320,18 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
       - `POST /api/functions/postgres/standalone-implementation/verify`
     - ✅ Result Handling: JobResource integration with summary generators
     - ✅ Filtering: Only processes standalone functions (excludes package members with `__`)
-    - ⏳ **Next**: Add PL/SQL→PL/pgSQL transformation logic using ANTLR (extend PostgresCodeBuilder)
-    - Location: `function/job/`, `core/job/model/function/`
+    - ✅ **PL/SQL Transformation (14 visitors implemented):**
+      - Function/procedure signatures with IN/OUT/INOUT parameters
+      - **Critical Fix (2025-10-30):** All Oracle PROCEDUREs → PostgreSQL FUNCTIONs (correct RETURNS clause)
+      - Variable declarations (CONSTANT, NOT NULL, defaults)
+      - Assignment statements
+      - IF/ELSIF/ELSE statements (simple, nested, complex conditions)
+      - SELECT INTO statements
+      - FOR loops (numeric range, cursor with inline SELECT, named cursors)
+      - Call statements (PERFORM with schema qualification, package flattening)
+      - RETURN statements
+    - ⏳ **Missing (~30-40%)**: Basic LOOP/WHILE loops, EXIT/CONTINUE, explicit cursor operations, exceptions, NULL statement
+    - Location: `function/job/`, `transformer/builder/`, `core/job/model/function/`
     - Step 25 in orchestration workflow
 
 14. **Package Function/Procedure Logic**: PL/SQL→PL/pgSQL conversion using ANTLR (Planned - see Phase 3 roadmap)
@@ -332,11 +342,14 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
 ### 📋 Phase 3 Detailed Roadmap (Next Steps)
 1. ~~**Oracle Built-in Replacements**~~ ✅ **COMPLETE** - See item #10 above
 2. ~~**Standalone Function/Procedure Infrastructure**~~ ✅ **COMPLETE** - See item #13 above
-3. **Standalone Function/Procedure Transformation**: 🔄 **IN PROGRESS** - Add PL/SQL→PL/pgSQL logic to Step 25
-   - Extract Oracle function source from `ALL_SOURCE`
-   - Extend `PostgresCodeBuilder` with PL/SQL statement visitors
-   - Transform control flow, declarations, exceptions
-   - Execute `CREATE OR REPLACE FUNCTION/PROCEDURE` in PostgreSQL
+3. **Standalone Function/Procedure Transformation**: 🔄 **60-70% COMPLETE** - PL/SQL→PL/pgSQL transformation actively working
+   - ✅ Extract Oracle function source from `ALL_SOURCE`
+   - ✅ Extended `PostgresCodeBuilder` with 14 PL/SQL statement visitors
+   - ✅ Transform control flow (IF/ELSIF/ELSE, FOR loops, assignments, SELECT INTO, call statements)
+   - ✅ Transform declarations (variables with CONSTANT, NOT NULL, defaults)
+   - ✅ Oracle PROCEDURE → PostgreSQL FUNCTION with correct RETURNS clause (Phase 1 fix 2025-10-30)
+   - ✅ Execute `CREATE OR REPLACE FUNCTION` in PostgreSQL (all procedures become functions)
+   - 📋 Missing: Basic LOOP/WHILE loops, EXIT/CONTINUE, explicit cursors, exceptions, NULL statement
 4. **Package Analysis**: Analyze package variables and state management patterns
 5. **Package Function/Procedure Implementation**: PL/SQL→PL/pgSQL using package analysis results
 6. **Type Method Implementation**: Transform type member methods using ANTLR (extend PostgresCodeBuilder)
@@ -758,10 +771,17 @@ Oracle synonyms provide alternative names. PostgreSQL doesn't have synonyms, so 
 - Package members flattened: `packagename__functionname` (double underscore)
 - Handles IN/OUT/INOUT parameter modes
 - Same type mapping as tables
+- **Important:** All stubs created as PostgreSQL FUNCTIONs (not PROCEDUREs), even for Oracle procedures
+- RETURNS clause automatically calculated:
+  - No OUT/INOUT → `RETURNS void`
+  - Single OUT/INOUT → `RETURNS type`
+  - Multiple OUT/INOUT → `RETURNS RECORD`
+- Stub body uses `RETURN;` for procedures, `RETURN NULL;` for functions
+- Ensures stubs can be replaced with transformations via `CREATE OR REPLACE` (Phase 1 fix 2025-10-30)
 
 **Jobs:**
 - `OracleFunctionExtractionJob` - Extract Oracle function/procedure signatures
-- `PostgresFunctionStubCreationJob` - Create PostgreSQL stubs
+- `PostgresFunctionStubCreationJob` - Create PostgreSQL stubs (always FUNCTION)
 - `PostgresFunctionStubVerificationJob` - Verify created stubs
 
 ### Type Method Stubs

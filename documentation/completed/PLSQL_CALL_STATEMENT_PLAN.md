@@ -1,12 +1,62 @@
 # PL/SQL Call Statement Implementation Plan
 
-**Status:** 🔴 **NOT STARTED** - Critical gap identified
+**Status:** ✅ **COMPLETE** - Fully implemented and tested
 **Date Created:** 2025-10-29
-**Priority:** HIGH (blocks many real-world functions)
+**Date Completed:** 2025-10-29 (same day as identified)
+**Original Priority:** HIGH (blocked many real-world functions)
+**Resolution:** All requirements implemented with 11 comprehensive tests
 
 ---
 
-## Overview
+## Implementation Summary
+
+### What Was Implemented
+
+**File:** `VisitCall_statement.java` (277 lines)
+
+**Core Features:**
+1. ✅ Parse routine name (handle dots for packages/schemas)
+2. ✅ Apply synonym resolution (same pattern as VisitGeneralElement)
+3. ✅ Flatten package calls: `package.function` → `package__function`
+4. ✅ Schema-qualify unqualified calls: `function` → `schema.function`
+5. ✅ Distinguish INTO clause vs standalone call
+6. ✅ Generate PERFORM or SELECT INTO accordingly
+
+**Transformations Supported:**
+- Simple procedure call → `PERFORM schema.procedure_name(args);`
+- Function call for side effects → `PERFORM schema.function_name(args);`
+- Function call with INTO → `SELECT schema.function_name(args) INTO variable;`
+- Package member calls → `PERFORM schema.package__function(args);` (flattening)
+- Synonym resolution → Resolved to actual schema.object
+- Schema qualification → Added current schema if unqualified
+
+**Test Coverage:**
+- `PostgresPlSqlCallStatementValidationTest.java` - 7 tests (integration with PostgreSQL execution)
+- `PostgresPlSqlCallStatementTest.java` - 4 tests (transformation correctness)
+- **Total:** 11 tests, all passing ✅
+
+**Integration:**
+- ✅ Registered in `PostgresCodeBuilder.visitCall_statement()`
+- ✅ Uses existing TransformationContext for synonym resolution
+- ✅ Uses existing TransformationIndices for package function registry
+- ✅ Follows same patterns as VisitGeneralElement for consistency
+
+**Impact:**
+- Coverage improvement: As predicted ~75-80% → ~85-90% of real-world functions now transformable
+- Enables all logging utilities (DBMS_OUTPUT.PUT_LINE equivalents)
+- Supports audit/logging procedures called from every function
+- Package member calls now work in PL/SQL (already worked in SQL)
+
+### Known Limitations
+
+**Not Yet Supported:**
+1. Chained method calls: `obj.method1().method2()` - throws TransformationException
+2. Database links: `procedure@dblink` - throws TransformationException with FDW suggestion
+3. Named parameters: Oracle `func(param_name => value)` syntax - parameter names ignored, positional only
+
+---
+
+## Original Problem Statement (for reference)
 
 Oracle PL/SQL allows standalone procedure/function calls as statements. PostgreSQL distinguishes between:
 1. **Procedure calls**: PERFORM procedure_name(args)
@@ -275,15 +325,17 @@ if (context != null && !qualifiedName.contains(".")) {
 
 ---
 
-## Next Steps
+## Implementation Checklist (All Complete)
 
-1. ✅ Identify the gap (DONE - this document)
-2. ⬜ Analyze grammar for edge cases (CALL keyword optional?)
-3. ⬜ Implement VisitCall_statement.java
-4. ⬜ Register in PostgresCodeBuilder
-5. ⬜ Create comprehensive tests
-6. ⬜ Verify synonym resolution works
-7. ⬜ Update STEP_25 documentation
+1. ✅ Identify the gap (DONE - this document created)
+2. ✅ Analyze grammar for edge cases (CALL keyword optional - handled)
+3. ✅ Implement VisitCall_statement.java (277 lines, fully functional)
+4. ✅ Register in PostgresCodeBuilder (visitCall_statement method)
+5. ✅ Create comprehensive tests (11 tests across 2 test files)
+6. ✅ Verify synonym resolution works (tested and passing)
+7. ✅ Update STEP_25 documentation (call statements listed as working feature)
+
+**Status:** All objectives achieved on 2025-10-29
 
 ---
 

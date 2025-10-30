@@ -904,7 +904,7 @@ Each phase is complete when:
 ## References
 
 - [TRANSFORMATION.md](TRANSFORMATION.md) - SQL transformation module documentation (includes roadmap)
-- [CTE_IMPLEMENTATION_PLAN.md](CTE_IMPLEMENTATION_PLAN.md) - CTE implementation (foundation for CONNECT BY)
+- [CTE_IMPLEMENTATION_PLAN.md](documentation/completed/CTE_IMPLEMENTATION_PLAN.md) - CTE implementation (foundation for CONNECT BY)
 - [TESTING.md](TESTING.md) - Testing strategy and integration tests
 - [CLAUDE.md](CLAUDE.md) - Project architecture and development guidelines
 
