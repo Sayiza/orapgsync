@@ -31,12 +31,12 @@ import me.christianrobert.orapgsync.antlr.PlSqlParser;
  *   </li>
  * </ol>
  *
- * <p><strong>Phase 1 Scope (Current Implementation):</strong>
+ * <p><strong>Implementation Scope:</strong>
  * <ul>
  *   <li>✅ Re-raise: {@code RAISE;} → {@code RAISE;} (pass-through)</li>
  *   <li>✅ Raise standard exception: {@code RAISE NO_DATA_FOUND;} → {@code RAISE no_data_found;}</li>
- *   <li>⏳ User-defined exceptions: Deferred to Phase 3</li>
- *   <li>⏳ RAISE_APPLICATION_ERROR: Deferred to Phase 2</li>
+ *   <li>✅ User-defined exceptions: {@code RAISE invalid_salary;} → {@code RAISE EXCEPTION USING ERRCODE = 'P0001';} (Phase 3.1)</li>
+ *   <li>✅ RAISE_APPLICATION_ERROR: Handled separately in VisitCall_statement (Phase 2)</li>
  * </ul>
  *
  * <p><strong>Example Transformations:</strong>
@@ -96,25 +96,43 @@ public class VisitRaise_statement {
 
         // Raise named exception: RAISE exception_name;
         String oracleExceptionName = exceptionNameCtx.getText();
-        String postgresExceptionName = mapExceptionName(oracleExceptionName);
+
+        // PHASE 3.1: Check if this is a user-defined exception
+        // User-defined exceptions are registered in the exception context
+        String errorCode = b.lookupExceptionErrorCode(oracleExceptionName);
+
+        if (errorCode != null) {
+            // User-defined exception found in context
+            // Transform to: RAISE EXCEPTION USING ERRCODE = 'P0001';
+            // Note: PostgreSQL RAISE EXCEPTION doesn't preserve the exception "name"
+            // in the same way Oracle does, but the ERRCODE allows catching it
+            return "RAISE EXCEPTION USING ERRCODE = '" + errorCode + "'";
+        }
+
+        // Standard Oracle exception (not user-defined)
+        // Map to PostgreSQL standard exception name
+        String postgresExceptionName = mapStandardExceptionName(oracleExceptionName);
 
         return "RAISE " + postgresExceptionName;
     }
 
     /**
-     * Maps an Oracle exception name to its PostgreSQL equivalent.
+     * Maps a standard Oracle exception name to its PostgreSQL equivalent.
      *
      * <p>Uses the same mapping as VisitException_handler to ensure consistency.
      * <ul>
      *   <li>Standard exceptions with name changes: ZERO_DIVIDE → division_by_zero</li>
      *   <li>Standard exceptions same name: NO_DATA_FOUND → no_data_found</li>
-     *   <li>User-defined: Convert to lowercase (will be enhanced in Phase 3)</li>
+     *   <li>Unknown: Convert to lowercase (fallback)</li>
      * </ul>
+     *
+     * <p>Note: This method should ONLY be called for standard Oracle exceptions.
+     * User-defined exceptions are handled separately via exception context lookup.
      *
      * @param oracleExceptionName Oracle exception name from AST
      * @return PostgreSQL exception name
      */
-    private static String mapExceptionName(String oracleExceptionName) {
+    private static String mapStandardExceptionName(String oracleExceptionName) {
         // Use the exception mapping from VisitException_handler
         // This is duplicated here to avoid circular dependencies between visitor helpers
         // In the future, this could be extracted to a shared ExceptionNameMapper utility

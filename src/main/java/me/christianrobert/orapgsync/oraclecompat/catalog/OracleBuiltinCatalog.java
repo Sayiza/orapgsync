@@ -3,6 +3,7 @@ package me.christianrobert.orapgsync.oraclecompat.catalog;
 import me.christianrobert.orapgsync.oraclecompat.implementations.DbmsLobImpl;
 import me.christianrobert.orapgsync.oraclecompat.implementations.DbmsOutputImpl;
 import me.christianrobert.orapgsync.oraclecompat.implementations.DbmsUtilityImpl;
+import me.christianrobert.orapgsync.oraclecompat.implementations.ExceptionHandlingImpl;
 import me.christianrobert.orapgsync.oraclecompat.implementations.UtlFileImpl;
 import me.christianrobert.orapgsync.oraclecompat.model.OracleBuiltinFunction;
 import me.christianrobert.orapgsync.oraclecompat.model.SupportLevel;
@@ -39,6 +40,9 @@ public class OracleBuiltinCatalog {
         registerDbmsUtility();
         registerUtlFile();
         registerDbmsLob();
+
+        // Register standalone exception handling functions
+        registerExceptionHandling();
     }
 
     private void registerDbmsOutput() {
@@ -202,6 +206,49 @@ public class OracleBuiltinCatalog {
                 .postgresFunction("oracle_compat.dbms_lob__append")
                 .notes("Appends text to existing LOB")
                 .sqlDefinition(DbmsLobImpl.getAppend())
+                .build());
+    }
+
+    private void registerExceptionHandling() {
+        // SQLCODE() - Full support via SQLSTATE mapping
+        // Note: This is a standalone function, not part of a package
+        allFunctions.add(OracleBuiltinFunction.builder()
+                .packageName("STANDALONE")  // Not a package function
+                .functionName("SQLCODE")
+                .signature("SQLCODE() RETURNS INTEGER")
+                .supportLevel(SupportLevel.FULL)
+                .postgresFunction("oracle_compat.sqlcode")
+                .notes("Maps PostgreSQL SQLSTATE to Oracle error numbers. " +
+                       "Standard exceptions return exact Oracle codes, unknown exceptions return -20000.")
+                .sqlDefinition(ExceptionHandlingImpl.getSqlcode())
+                .build());
+
+        // SQLERRM() - Already exists in PostgreSQL, no compatibility function needed
+        // Documented here for completeness, but not installed
+        allFunctions.add(OracleBuiltinFunction.builder()
+                .packageName("STANDALONE")  // Not a package function
+                .functionName("SQLERRM")
+                .signature("SQLERRM() RETURNS TEXT")
+                .supportLevel(SupportLevel.FULL)
+                .postgresFunction("SQLERRM")  // Native PostgreSQL function
+                .notes("PostgreSQL built-in function - identical to Oracle SQLERRM(). " +
+                       "No compatibility layer needed. Direct pass-through in transformation. " +
+                       "Note: SQLERRM(error_code) variant is NOT supported.")
+                .sqlDefinition(null)  // No SQL definition - native function
+                .build());
+
+        // RAISE_APPLICATION_ERROR - Handled via AST transformation, not a function
+        // Documented here for completeness, but not installed
+        allFunctions.add(OracleBuiltinFunction.builder()
+                .packageName("STANDALONE")  // Not a package function
+                .functionName("RAISE_APPLICATION_ERROR")
+                .signature("RAISE_APPLICATION_ERROR(error_number INTEGER, message TEXT)")
+                .supportLevel(SupportLevel.FULL)
+                .postgresFunction("N/A - Handled by transformation")
+                .notes("Transformed to RAISE EXCEPTION with ERRCODE mapping. " +
+                       "Error codes -20000 to -20999 map to SQLSTATE 'P0001' to 'P0999'. " +
+                       "Original error code preserved in HINT clause.")
+                .sqlDefinition(null)  // No SQL definition - handled by visitor transformation
                 .build());
     }
 

@@ -60,6 +60,13 @@ public class VisitCall_statement {
         // STEP 1: Extract routine name parts (schema.package.function or package.function or function)
         List<String> routineParts = extractRoutineParts(ctx.routine_name(0));
 
+        // SPECIAL CASE: Handle RAISE_APPLICATION_ERROR
+        // Oracle: RAISE_APPLICATION_ERROR(-20001, 'Error message');
+        // PostgreSQL: RAISE EXCEPTION 'Error message' USING ERRCODE = 'P0001', HINT = 'Original Oracle error code: -20001';
+        if (isRaiseApplicationError(routineParts)) {
+            return transformRaiseApplicationError(ctx, b);
+        }
+
         // STEP 2: Check for chained calls (obj.method1().method2())
         // Grammar: routine_name function_argument? ('.' routine_name function_argument?)*
         List<PlSqlParser.Routine_nameContext> allRoutineNames = ctx.routine_name();
@@ -272,5 +279,129 @@ public class VisitCall_statement {
 
         // Fallback: just get the text
         return argCtx.getText();
+    }
+
+    /**
+     * Checks if the routine is RAISE_APPLICATION_ERROR.
+     *
+     * @param routineParts Routine name parts
+     * @return True if it's RAISE_APPLICATION_ERROR (case-insensitive)
+     */
+    private static boolean isRaiseApplicationError(List<String> routineParts) {
+        // Must be single-part name (no schema qualification)
+        if (routineParts.size() != 1) {
+            return false;
+        }
+
+        String name = routineParts.get(0);
+        return "RAISE_APPLICATION_ERROR".equalsIgnoreCase(name);
+    }
+
+    /**
+     * Transforms RAISE_APPLICATION_ERROR to PostgreSQL RAISE EXCEPTION.
+     *
+     * <p>Transformation pattern:
+     * <pre>
+     * -- Oracle
+     * RAISE_APPLICATION_ERROR(-20001, 'Custom error message');
+     *
+     * -- PostgreSQL
+     * RAISE EXCEPTION 'Custom error message'
+     *   USING ERRCODE = 'P0001',
+     *         HINT = 'Original Oracle error code: -20001';
+     * </pre>
+     *
+     * <p>Error code mapping:
+     * <ul>
+     *   <li>Oracle user error range: -20000 to -20999</li>
+     *   <li>PostgreSQL user SQLSTATE range: 'P0001' to 'P0999'</li>
+     *   <li>Formula: ERRCODE = 'P' + LPAD((oracle_code + 20000), 4, '0')</li>
+     *   <li>Example: -20001 → 'P0001', -20055 → 'P0055', -20999 → 'P0999'</li>
+     * </ul>
+     *
+     * @param ctx Call statement context
+     * @param b PostgresCodeBuilder for visiting expressions
+     * @return PostgreSQL RAISE EXCEPTION statement
+     */
+    private static String transformRaiseApplicationError(
+            PlSqlParser.Call_statementContext ctx,
+            PostgresCodeBuilder b) {
+
+        // Extract arguments: RAISE_APPLICATION_ERROR(error_code, message)
+        PlSqlParser.Function_argumentContext funcArgCtx = ctx.function_argument(0);
+
+        if (funcArgCtx == null || funcArgCtx.argument() == null || funcArgCtx.argument().size() < 2) {
+            throw new TransformationException(
+                "RAISE_APPLICATION_ERROR requires 2 arguments: error_code and message. " +
+                "Found: " + (funcArgCtx == null ? 0 : (funcArgCtx.argument() == null ? 0 : funcArgCtx.argument().size())));
+        }
+
+        List<PlSqlParser.ArgumentContext> arguments = funcArgCtx.argument();
+
+        // Argument 1: Error code (must be numeric literal -20000 to -20999)
+        PlSqlParser.ArgumentContext errorCodeArg = arguments.get(0);
+        String errorCodeExpr = b.visit(errorCodeArg.expression());
+
+        // Argument 2: Error message (string expression)
+        PlSqlParser.ArgumentContext messageArg = arguments.get(1);
+        String messageExpr = b.visit(messageArg.expression());
+
+        // Try to extract numeric error code for mapping
+        String errcode;
+        String originalCode;
+
+        try {
+            // Parse error code (may be negative literal like "-20001" or expression)
+            int oracleErrorCode = Integer.parseInt(errorCodeExpr.trim());
+
+            // Validate range
+            if (oracleErrorCode < -20999 || oracleErrorCode > -20000) {
+                throw new TransformationException(
+                    "RAISE_APPLICATION_ERROR error code must be in range -20000 to -20999. " +
+                    "Found: " + oracleErrorCode);
+            }
+
+            // Map to PostgreSQL SQLSTATE (P0001 to P0999)
+            // Formula: P + LPAD(abs(oracle_code) - 20000, 4, '0')
+            // Oracle: -20001 to -20999 → PostgreSQL: P0001 to P0999
+            int pgCode = Math.abs(oracleErrorCode) - 20000;
+            // Use %04d to zero-pad to 4 digits (e.g., 1 → 0001, 55 → 0055, 999 → 0999)
+            errcode = String.format("'P%04d'", pgCode);
+            originalCode = String.valueOf(oracleErrorCode);
+
+        } catch (NumberFormatException e) {
+            // Error code is an expression, not a literal
+            // Use dynamic error code mapping via oracle_compat.map_error_code() function
+            // For now, use a default SQLSTATE and include the expression in HINT
+            errcode = "'P0001'";  // Generic user-defined exception
+            originalCode = errorCodeExpr;  // Expression text
+        }
+
+        // Build RAISE EXCEPTION statement
+        StringBuilder result = new StringBuilder();
+
+        // Check if message is a simple string literal or an expression
+        boolean isSimpleLiteral = messageExpr.trim().startsWith("'") && messageExpr.trim().endsWith("'");
+
+        if (isSimpleLiteral) {
+            // Simple string literal: RAISE EXCEPTION 'message'
+            result.append("RAISE EXCEPTION ")
+                  .append(messageExpr)
+                  .append(" USING ERRCODE = ")
+                  .append(errcode);
+        } else {
+            // Expression: RAISE EXCEPTION USING MESSAGE = expression, ERRCODE = ...
+            result.append("RAISE EXCEPTION USING MESSAGE = ")
+                  .append(messageExpr)
+                  .append(" , ERRCODE = ")
+                  .append(errcode);
+        }
+
+        // Add HINT with original Oracle error code
+        result.append(" , HINT = 'Original Oracle error code: ")
+              .append(originalCode)
+              .append("'");
+
+        return result.toString();
     }
 }

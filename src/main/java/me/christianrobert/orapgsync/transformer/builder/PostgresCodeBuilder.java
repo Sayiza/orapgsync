@@ -33,6 +33,87 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
     // Each block (function or nested anonymous block) pushes its context, pops when done
     private final Deque<Set<String>> loopRecordVariablesStack;
 
+    // Block-level state for user-defined exception declarations
+    // Oracle uses named exceptions with PRAGMA EXCEPTION_INIT to link to error codes
+    // PostgreSQL uses SQLSTATE codes in RAISE and exception handlers
+    // Stack to handle nested blocks with proper shadowing semantics
+    // Each block (function or nested anonymous block) pushes its context, pops when done
+    private final Deque<ExceptionContext> exceptionContextStack;
+
+    /**
+     * Exception context for a single block scope.
+     * Tracks user-defined exception declarations and their PostgreSQL SQLSTATE mappings.
+     */
+    private static class ExceptionContext {
+        // Maps exception name (lowercase) to PostgreSQL SQLSTATE code
+        // Null value means exception declared but not yet assigned a code (waiting for PRAGMA or auto-gen)
+        private final java.util.Map<String, String> exceptionToErrorCode = new java.util.HashMap<>();
+
+        // Auto-generated error code counter for exceptions without PRAGMA EXCEPTION_INIT
+        // Starts at 9001 (P9001), increments for each exception that needs auto-generation
+        // Range P9001-P9999 is reserved for auto-generated codes
+        private int nextAutoCode = 9001;
+
+        /**
+         * Declares a user-defined exception without assigning a code yet.
+         * The code will be auto-generated later if no PRAGMA EXCEPTION_INIT provides one.
+         * This prevents wasted auto-code slots when PRAGMA comes after declaration.
+         *
+         * @param exceptionName Exception name (will be lowercased)
+         */
+        public void declareException(String exceptionName) {
+            String normalizedName = exceptionName.toLowerCase();
+            if (!exceptionToErrorCode.containsKey(normalizedName)) {
+                // Mark as declared but not yet coded (null value)
+                // Code will be assigned on-demand in getErrorCode()
+                exceptionToErrorCode.put(normalizedName, null);
+            }
+        }
+
+        /**
+         * Links a user-defined exception to an Oracle error code via PRAGMA EXCEPTION_INIT.
+         * If the exception wasn't previously declared, it declares it first.
+         *
+         * @param exceptionName Exception name (will be lowercased)
+         * @param oracleCode Oracle error code (e.g., -20001)
+         */
+        public void linkToOracleCode(String exceptionName, int oracleCode) {
+            String normalizedName = exceptionName.toLowerCase();
+            // Map Oracle error code to PostgreSQL SQLSTATE
+            // Oracle: -20000 to -20999 → PostgreSQL: P0001 to P0999
+            String pgCode = String.format("P%04d", Math.abs(oracleCode) - 20000);
+            exceptionToErrorCode.put(normalizedName, pgCode);
+        }
+
+        /**
+         * Gets the PostgreSQL SQLSTATE code for a user-defined exception.
+         * Auto-generates a code if the exception was declared but has no code yet.
+         *
+         * @param exceptionName Exception name (will be lowercased)
+         * @return PostgreSQL SQLSTATE code (e.g., "P0001") or null if exception not declared
+         */
+        public String getErrorCode(String exceptionName) {
+            String normalizedName = exceptionName.toLowerCase();
+
+            // Check if exception exists
+            if (!exceptionToErrorCode.containsKey(normalizedName)) {
+                return null;  // Exception not declared
+            }
+
+            // Get current code (may be null)
+            String code = exceptionToErrorCode.get(normalizedName);
+
+            // If code is null, exception was declared but never got a PRAGMA
+            // Auto-generate a code now
+            if (code == null) {
+                code = String.format("P%04d", nextAutoCode++);
+                exceptionToErrorCode.put(normalizedName, code);
+            }
+
+            return code;
+        }
+    }
+
     /**
      * Creates a PostgresCodeBuilder with transformation context.
      * @param context Transformation context for metadata lookups (can be null for simple transformations)
@@ -42,6 +123,7 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
         this.outerJoinContextStack = new ArrayDeque<>();
         this.rownumContextStack = new ArrayDeque<>();
         this.loopRecordVariablesStack = new ArrayDeque<>();
+        this.exceptionContextStack = new ArrayDeque<>();
     }
 
     /**
@@ -52,6 +134,7 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
         this.outerJoinContextStack = new ArrayDeque<>();
         this.rownumContextStack = new ArrayDeque<>();
         this.loopRecordVariablesStack = new ArrayDeque<>();
+        this.exceptionContextStack = new ArrayDeque<>();
     }
 
     /**
@@ -154,6 +237,73 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
             loopRecordVariablesStack.peek().add(variableName);
         }
         // If stack is empty, we can't register (shouldn't happen - block should push context first)
+    }
+
+    /**
+     * Pushes a new exception context onto the stack for the current block.
+     * Used when entering a block (function body or anonymous DECLARE...BEGIN...END block).
+     * Creates a new empty context for tracking user-defined exceptions in this block scope.
+     */
+    public void pushExceptionContext() {
+        exceptionContextStack.push(new ExceptionContext());
+    }
+
+    /**
+     * Pops the exception context from the stack when exiting a block.
+     * Used when leaving a block (function body or anonymous DECLARE...BEGIN...END block).
+     */
+    public void popExceptionContext() {
+        if (!exceptionContextStack.isEmpty()) {
+            exceptionContextStack.pop();
+        }
+    }
+
+    /**
+     * Declares a user-defined exception in the current block scope.
+     * Assigns an auto-generated PostgreSQL SQLSTATE code (P9001, P9002, ...).
+     * Used by VisitException_declaration when encountering: exception_name EXCEPTION;
+     *
+     * @param exceptionName Exception name (will be normalized to lowercase)
+     */
+    public void declareException(String exceptionName) {
+        if (!exceptionContextStack.isEmpty()) {
+            exceptionContextStack.peek().declareException(exceptionName);
+        }
+    }
+
+    /**
+     * Links a user-defined exception to an Oracle error code.
+     * Maps the Oracle error code to a PostgreSQL SQLSTATE code.
+     * Used by VisitPragma_declaration when encountering: PRAGMA EXCEPTION_INIT(name, code);
+     *
+     * @param exceptionName Exception name (will be normalized to lowercase)
+     * @param oracleCode Oracle error code (e.g., -20001 maps to P0001)
+     */
+    public void linkExceptionToCode(String exceptionName, int oracleCode) {
+        if (!exceptionContextStack.isEmpty()) {
+            exceptionContextStack.peek().linkToOracleCode(exceptionName, oracleCode);
+        }
+    }
+
+    /**
+     * Looks up the PostgreSQL SQLSTATE code for a user-defined exception.
+     * Searches from innermost to outermost scope (supports shadowing).
+     * Used by VisitRaise_statement and VisitException_handler.
+     *
+     * @param exceptionName Exception name (will be normalized to lowercase)
+     * @return PostgreSQL SQLSTATE code (e.g., "P0001") or null if not found
+     */
+    public String lookupExceptionErrorCode(String exceptionName) {
+        // Search from innermost to outermost scope (top to bottom of stack)
+        for (int i = exceptionContextStack.size() - 1; i >= 0; i--) {
+            ExceptionContext context = ((java.util.List<ExceptionContext>)
+                new java.util.ArrayList<>(exceptionContextStack)).get(i);
+            String errorCode = context.getErrorCode(exceptionName);
+            if (errorCode != null) {
+                return errorCode;
+            }
+        }
+        return null;  // Exception not found in any scope
     }
 
     // ========== SELECT STATEMENT ==========
@@ -428,6 +578,16 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
     @Override
     public String visitCursor_declaration(PlSqlParser.Cursor_declarationContext ctx) {
         return VisitCursor_declaration.v(ctx, this);
+    }
+
+    @Override
+    public String visitException_declaration(PlSqlParser.Exception_declarationContext ctx) {
+        return VisitException_declaration.v(ctx, this);
+    }
+
+    @Override
+    public String visitPragma_declaration(PlSqlParser.Pragma_declarationContext ctx) {
+        return VisitPragma_declaration.v(ctx, this);
     }
 
     @Override

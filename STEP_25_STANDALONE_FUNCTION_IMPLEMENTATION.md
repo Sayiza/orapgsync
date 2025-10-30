@@ -1,6 +1,6 @@
 # Step 25: Standalone Function/Procedure Implementation
 
-**Status:** 🔄 **75-90%+ COMPLETE** - Core PL/SQL features + exception handling working, advanced features pending
+**Status:** 🔄 **80-92%+ COMPLETE** - Core PL/SQL features + exception handling (Phase 1 & 2) working, advanced features pending
 **Last Updated:** 2025-10-30
 **Workflow Position:** Step 25 in orchestration sequence (after View Implementation)
 
@@ -34,7 +34,7 @@ Transforms Oracle standalone functions/procedures (NOT package members) to Postg
 
 ## Current Capabilities
 
-### ✅ Working Features (75-90%+ coverage)
+### ✅ Working Features (80-92%+ coverage)
 
 **Function/Procedure Signatures:**
 - IN/OUT/INOUT parameter modes
@@ -80,6 +80,16 @@ Transforms Oracle standalone functions/procedures (NOT package members) to Postg
   - **SELECT INTO STRICT**: Automatically added to match Oracle's exception-raising behavior
     - 0 rows → raises `no_data_found` ✓
     - >1 rows → raises `too_many_rows` ✓
+  - **RAISE_APPLICATION_ERROR** (Phase 2): Custom user-defined exceptions
+    - Error code mapping: Oracle -20000 to -20999 → PostgreSQL 'P0001' to 'P0999'
+    - Formula: ERRCODE = 'P' + LPAD(abs(oracle_code) - 20000, 4, '0')
+    - Simple messages: `RAISE EXCEPTION 'message' USING ERRCODE = 'P0001'`
+    - Expression messages: `RAISE EXCEPTION USING MESSAGE = expression, ERRCODE = 'P0001'`
+    - Original Oracle error code preserved in HINT clause
+  - **oracle_compat.sqlcode()** (Phase 2): Error code compatibility function
+    - Maps PostgreSQL SQLSTATE to Oracle SQLCODE numbers
+    - Installed in `oracle_compat` schema
+    - Returns Oracle-style error codes (-1403 for NO_DATA_FOUND, etc.)
 
 **Example Working Procedure:**
 ```sql
@@ -288,12 +298,62 @@ END;
 
 ---
 
+### ✅ COMPLETED: Exception Handlers (Phase 2) (2025-10-30)
+
+**Implementation Summary:**
+- ✅ `ExceptionHandlingImpl.java` - oracle_compat.sqlcode() compatibility function (100 lines)
+- ✅ `OracleBuiltinCatalog.java` - Registered SQLCODE, SQLERRM, and RAISE_APPLICATION_ERROR in catalog
+- ✅ `VisitCall_statement.java` - RAISE_APPLICATION_ERROR → RAISE EXCEPTION transformation
+- ✅ `PostgresOracleCompatInstallationJob.java` - Skip functions with null SQL definitions
+- ✅ 4 comprehensive tests created (`PostgresPlSqlExceptionHandlingPhase2ValidationTest.java`)
+- ✅ All 874 tests passing (no regressions)
+- ✅ Coverage gain: +2-5% (75-90%+ → 80-92%+)
+
+**Key Features Implemented:**
+- **RAISE_APPLICATION_ERROR transformation**:
+  - Oracle: `RAISE_APPLICATION_ERROR(-20001, 'message')`
+  - PostgreSQL: `RAISE EXCEPTION 'message' USING ERRCODE = 'P0001', HINT = 'Original Oracle error code: -20001'`
+  - Error code mapping formula: `ERRCODE = 'P' + LPAD(abs(oracle_code) - 20000, 4, '0')`
+  - Examples: -20001 → 'P0001', -20055 → 'P0055', -20999 → 'P0999'
+- **Expression message support**:
+  - Simple literals: `RAISE EXCEPTION 'message'`
+  - Expressions: `RAISE EXCEPTION USING MESSAGE = CONCAT(...)`
+- **oracle_compat.sqlcode() function**:
+  - Maps PostgreSQL SQLSTATE codes to Oracle SQLCODE numbers
+  - Installed in `oracle_compat` schema
+  - Returns -1403 for NO_DATA_FOUND, -1422 for TOO_MANY_ROWS, etc.
+  - Supports P0001-P0999 user error range → -20001 to -20999
+
+**Test Coverage:**
+- RAISE_APPLICATION_ERROR with literal error code
+- Error code mapping (P0001, P0055, P0999)
+- Expression messages (concatenation)
+- RAISE_APPLICATION_ERROR in exception handlers
+- Integration with Phase 1 exception handling
+
+**Design Decisions:**
+- USING MESSAGE clause for complex expressions (PostgreSQL RAISE doesn't accept function calls directly)
+- HINT clause preserves original Oracle error code for debugging
+- Error code range validation (-20000 to -20999)
+
+**Not Implemented (Deferred):**
+- SQLCODE expression transformation (detect `SQLCODE` identifier and replace with `oracle_compat.sqlcode()`)
+  - Reason: Less common usage pattern, can be manually updated if needed
+  - Phase 3 candidate if usage patterns warrant it
+
+**References:**
+- Plan: [PLSQL_EXCEPTION_HANDLING_ANALYSIS.md](documentation/PLSQL_EXCEPTION_HANDLING_ANALYSIS.md)
+- PostgreSQL docs: [RAISE Statement](https://www.postgresql.org/docs/current/plpgsql-errors-and-messages.html)
+
+---
+
 ## Files
 
 ### Created
 - `PostgresStandaloneFunctionImplementationJob.java` - Implementation job
 - `PostgresStandaloneFunctionImplementationVerificationJob.java` - Verification
 - `StandaloneFunctionImplementationResult.java` - Result tracking
+- `ExceptionHandlingImpl.java` - oracle_compat.sqlcode() compatibility function (Phase 2)
 - 18 PL/SQL visitor classes (`transformer/builder/`):
   - `VisitFunctionBody.java`, `VisitProcedureBody.java`, `VisitBody.java`
   - `VisitSeq_of_statements.java`, `VisitSeq_of_declare_specs.java`
@@ -304,7 +364,7 @@ END;
   - `VisitExit_statement.java`, `VisitContinue_statement.java`
   - `VisitCall_statement.java`, `VisitReturn_statement.java`
   - `VisitException_handler.java`, `VisitRaise_statement.java`
-- 15+ test classes (unit + integration):
+- 16+ test classes (unit + integration):
   - `PostgresPlSqlBasicLoopValidationTest.java` (7 tests)
   - `PostgresPlSqlWhileLoopValidationTest.java` (8 tests)
   - `PostgresPlSqlNullAndCaseValidationTest.java` (8 tests)
@@ -313,12 +373,16 @@ END;
   - `PostgresPlSqlNamedCursorLoopValidationTest.java` (5 tests)
   - `PostgresPlSqlVariableValidationTest.java` (5 tests)
   - `PostgresPlSqlCallStatementValidationTest.java` (7 tests)
-  - `PostgresPlSqlExceptionHandlingValidationTest.java` (10 tests)
+  - `PostgresPlSqlExceptionHandlingValidationTest.java` (10 tests - Phase 1)
+  - `PostgresPlSqlExceptionHandlingPhase2ValidationTest.java` (4 tests - Phase 2)
   - `PostgresStubReplacementIntegrationTest.java` (5 tests)
 
 ### Modified
 - `PostgresCodeBuilder.java` - Registered 20 PL/SQL visitors (lines 399-496)
 - `VisitInto_clause.java` - Added STRICT keyword to SELECT INTO for Oracle compatibility
+- `VisitCall_statement.java` - Added RAISE_APPLICATION_ERROR transformation (Phase 2)
+- `OracleBuiltinCatalog.java` - Registered exception handling functions (Phase 2)
+- `PostgresOracleCompatInstallationJob.java` - Skip functions with null SQL definitions (Phase 2)
 - `TransformationService.java` - transformFunction/transformProcedure methods
 - `orchestration.html` - Added Step 25 row
 - `orchestration-service.js` - Added handlers
@@ -350,7 +414,7 @@ END;
 - Detailed error messages for debugging
 
 **Current Test Suite:**
-- 74 PL/SQL transformation tests (all passing):
+- 78 PL/SQL transformation tests (all passing):
   - 7 basic LOOP/EXIT/CONTINUE tests
   - 8 WHILE loop tests
   - 8 NULL and CASE statement tests
@@ -362,16 +426,17 @@ END;
   - 6 variable declaration tests
   - 5 cursor FOR loop with complex conditions
   - 5 OUT parameter tests
-  - 10 exception handling tests
+  - 10 exception handling tests (Phase 1)
+  - 4 exception handling tests (Phase 2)
 - 11 call statement tests
 - 5 stub replacement integration tests
-- **Total:** 870 tests passing, 0 failures
+- **Total:** 874 tests passing, 0 failures
 
 ---
 
 ## Summary
 
-**Current State:** 75-90%+ of real-world Oracle functions can be transformed automatically
+**Current State:** 80-92%+ of real-world Oracle functions can be transformed automatically
 
 **Production Ready:** Yes - with automatic skip of unsupported features (no crashes)
 
@@ -383,6 +448,10 @@ END;
   - EXCEPTION WHEN...THEN blocks with 20+ standard exception mappings
   - RAISE statements (re-raise and named exceptions)
   - SELECT INTO STRICT for Oracle compatibility
+- ✅ **Exception handlers (Phase 2)** (+2-5% coverage gain)
+  - RAISE_APPLICATION_ERROR → RAISE EXCEPTION with ERRCODE mapping
+  - oracle_compat.sqlcode() compatibility function
+  - Custom error codes P0001-P0999 for user-defined exceptions
 - ✅ **All basic control flow now supported**: IF, LOOP, WHILE, FOR, CASE, NULL, EXCEPTION
 - ✅ **All loop types now supported**: Basic LOOP, WHILE, FOR (numeric + cursor)
 

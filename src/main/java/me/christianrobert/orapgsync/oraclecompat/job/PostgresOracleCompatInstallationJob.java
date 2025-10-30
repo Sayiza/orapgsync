@@ -134,6 +134,13 @@ public class PostgresOracleCompatInstallationJob extends AbstractDatabaseWriteJo
             return;
         }
 
+        // Skip functions with no SQL definition (native PostgreSQL functions or transformation-only)
+        if (function.getSqlDefinition() == null) {
+            result.addSkipped(function.getFullOracleName());
+            log.debug("Skipped (native or transformation-only): {}", function.getFullOracleName());
+            return;
+        }
+
         try (Statement stmt = conn.createStatement()) {
             // Execute function definition (may contain multiple statements)
             stmt.execute(function.getSqlDefinition());

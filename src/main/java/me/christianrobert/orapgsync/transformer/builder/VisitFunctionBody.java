@@ -95,6 +95,10 @@ public class VisitFunctionBody {
         // When nested anonymous blocks are implemented, they will push their own contexts
         b.pushLoopRecordVariablesContext();
 
+        // Push exception context for this function block
+        // Tracks user-defined exceptions declared in this function's DECLARE section
+        b.pushExceptionContext();
+
         // Visit declarations (if present)
         boolean hasDeclareSection = ctx.seq_of_declare_specs() != null;
         if (hasDeclareSection) {
@@ -111,6 +115,10 @@ public class VisitFunctionBody {
 
         // Pop loop RECORD variables context to get variables for this block
         Set<String> loopVariables = b.popLoopRecordVariablesContext();
+
+        // Pop exception context when leaving function block
+        // User-defined exceptions go out of scope
+        b.popExceptionContext();
 
         // Inject RECORD declarations for cursor FOR loop variables
         // PostgreSQL requires explicit RECORD declarations, Oracle has implicit declarations

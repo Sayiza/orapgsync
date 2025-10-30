@@ -141,8 +141,8 @@ public class VisitException_handler {
             PlSqlParser.Exception_nameContext exceptionNameCtx = exceptionNames.get(i);
             String oracleExceptionName = exceptionNameCtx.getText();
 
-            // Transform exception name using mapping table
-            String postgresExceptionName = mapExceptionName(oracleExceptionName);
+            // Transform exception name using mapping table and user-defined exception context
+            String postgresExceptionName = mapExceptionName(oracleExceptionName, b);
             result.append(postgresExceptionName);
         }
 
@@ -161,31 +161,41 @@ public class VisitException_handler {
     /**
      * Maps an Oracle exception name to its PostgreSQL equivalent.
      *
-     * <p>Handles:
+     * <p>Handles (in priority order):
      * <ul>
-     *   <li>Standard exceptions via lookup table</li>
      *   <li>OTHERS special case (remains uppercase)</li>
-     *   <li>Unknown exceptions (convert to lowercase, warn in future)</li>
+     *   <li>User-defined exceptions via context lookup (SQLSTATE codes)</li>
+     *   <li>Standard exceptions via lookup table</li>
+     *   <li>Unknown exceptions (convert to lowercase, fallback)</li>
      * </ul>
      *
-     * @param oracleExceptionName Oracle exception name (e.g., "NO_DATA_FOUND", "OTHERS")
-     * @return PostgreSQL exception name (e.g., "no_data_found", "OTHERS")
+     * @param oracleExceptionName Oracle exception name (e.g., "NO_DATA_FOUND", "OTHERS", "invalid_salary")
+     * @param b PostgresCodeBuilder instance (provides exception context for user-defined exceptions)
+     * @return PostgreSQL exception handler clause (e.g., "no_data_found", "OTHERS", "SQLSTATE 'P0001'")
      */
-    private static String mapExceptionName(String oracleExceptionName) {
+    private static String mapExceptionName(String oracleExceptionName, PostgresCodeBuilder b) {
         // Special case: OTHERS remains uppercase in PostgreSQL
         if ("OTHERS".equalsIgnoreCase(oracleExceptionName)) {
             return "OTHERS";
         }
 
-        // Check mapping table for standard exceptions
+        // PHASE 3.1: Check if this is a user-defined exception
+        // User-defined exceptions are registered in the exception context
+        String errorCode = b.lookupExceptionErrorCode(oracleExceptionName);
+        if (errorCode != null) {
+            // User-defined exception found in context
+            // PostgreSQL catches user-defined exceptions by SQLSTATE code
+            return "SQLSTATE '" + errorCode + "'";
+        }
+
+        // Check mapping table for standard Oracle exceptions
         String mapped = EXCEPTION_NAME_MAP.get(oracleExceptionName.toUpperCase());
         if (mapped != null) {
             return mapped;
         }
 
-        // Unknown exception - convert to lowercase (user-defined or future Oracle exception)
-        // PostgreSQL user-defined exceptions are typically lowercase
-        // This handles both user-defined exceptions and future Oracle standard exceptions gracefully
+        // Unknown exception - convert to lowercase (fallback)
+        // This handles future Oracle standard exceptions gracefully
         return oracleExceptionName.toLowerCase();
     }
 }
