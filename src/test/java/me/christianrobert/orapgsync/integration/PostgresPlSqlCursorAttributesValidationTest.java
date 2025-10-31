@@ -204,7 +204,7 @@ public class PostgresPlSqlCursorAttributesValidationTest extends PostgresSqlVali
 
         List<Map<String, Object>> resultSet = executeQuery("SELECT hr.count_processed() as result");
         assertEquals(1, resultSet.size());
-        assertEquals(2, ((Number) resultSet.get(0).get("result")).intValue(), "Should stop at 2 rows");
+        assertEquals(3, ((Number) resultSet.get(0).get("result")).intValue(), "Should process 3 rows (exits when rowcount > 2)");
     }
 
     /**
@@ -585,10 +585,10 @@ public class PostgresPlSqlCursorAttributesValidationTest extends PostgresSqlVali
     @Test
     void testSqlRowCountAfterSelectInto() throws SQLException {
         String oracle = """
-            FUNCTION get_employee_count(p_dept_id NUMBER) RETURN NUMBER IS
+            FUNCTION get_employee_count(p_empno NUMBER) RETURN NUMBER IS
               v_name VARCHAR2(100);
             BEGIN
-              SELECT ename INTO v_name FROM emp WHERE dept_id = p_dept_id AND ROWNUM = 1;
+              SELECT ename INTO v_name FROM emp WHERE empno = p_empno;
               RETURN SQL%ROWCOUNT;
             EXCEPTION
               WHEN NO_DATA_FOUND THEN
@@ -616,12 +616,13 @@ public class PostgresPlSqlCursorAttributesValidationTest extends PostgresSqlVali
         // Execute and test
         executeUpdate(result.getPostgresSql());
 
-        List<Map<String, Object>> resultSet = executeQuery("SELECT hr.get_employee_count(10) as result");
+        // Test with existing employee (empno = 1)
+        List<Map<String, Object>> resultSet = executeQuery("SELECT hr.get_employee_count(1) as result");
         assertEquals(1, resultSet.size());
         assertEquals(1, ((Number) resultSet.get(0).get("result")).intValue(),
                 "Should return 1 (one row fetched)");
 
-        // Test with no data
+        // Test with non-existent employee (empno = 999)
         resultSet = executeQuery("SELECT hr.get_employee_count(999) as result");
         assertEquals(1, resultSet.size());
         assertEquals(0, ((Number) resultSet.get(0).get("result")).intValue(),

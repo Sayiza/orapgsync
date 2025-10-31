@@ -440,6 +440,52 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
         cursorAttributeTracker.reset();
     }
 
+    /**
+     * Pre-scans a function/procedure body to register all cursor attribute usage BEFORE transformation.
+     * This ensures that FETCH/OPEN/CLOSE statements can inject tracking code correctly.
+     *
+     * <p>Problem: Cursor attributes are registered lazily during traversal when encountered.
+     * If a FETCH appears before the first cursor attribute (e.g., c%NOTFOUND in EXIT WHEN),
+     * the FETCH visitor sees needsTracking() = false and skips state injection.
+     *
+     * <p>Solution: Pre-scan the entire body to register all cursor attribute usage,
+     * then perform the actual transformation with complete registration information.
+     *
+     * @param bodyCtx The function/procedure body context to scan
+     */
+    public void prescanCursorAttributes(PlSqlParser.BodyContext bodyCtx) {
+        if (bodyCtx == null) {
+            return;
+        }
+
+        // Create a visitor that only looks for cursor attributes
+        me.christianrobert.orapgsync.antlr.PlSqlParserBaseVisitor<Void> scanner =
+            new me.christianrobert.orapgsync.antlr.PlSqlParserBaseVisitor<Void>() {
+
+            @Override
+            public Void visitOther_function(PlSqlParser.Other_functionContext ctx) {
+                // Check if this is a cursor attribute reference
+                if (ctx.cursor_name() != null) {
+                    // Check for any cursor attribute (FOUND, NOTFOUND, ROWCOUNT, ISOPEN)
+                    if (ctx.PERCENT_FOUND() != null ||
+                        ctx.PERCENT_NOTFOUND() != null ||
+                        ctx.PERCENT_ROWCOUNT() != null ||
+                        ctx.PERCENT_ISOPEN() != null) {
+
+                        String cursorName = ctx.cursor_name().getText();
+                        registerCursorAttributeUsage(cursorName);
+                    }
+                }
+
+                // Continue visiting children
+                return super.visitOther_function(ctx);
+            }
+        };
+
+        // Walk the entire body tree to register all cursor attributes
+        bodyCtx.accept(scanner);
+    }
+
     // ========== SELECT INTO TRACKING (for SQL% implicit cursor) ==========
 
     /**

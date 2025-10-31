@@ -112,6 +112,13 @@ public class VisitProcedureBody {
         // Tracks user-defined exceptions declared in this procedure's DECLARE section
         b.pushExceptionContext();
 
+        // Pre-scan body for cursor attributes BEFORE transformation
+        // This ensures FETCH/OPEN/CLOSE statements can inject tracking code correctly
+        // (cursor attributes are encountered during traversal, but FETCH may come before first attribute)
+        if (ctx.body() != null) {
+            b.prescanCursorAttributes(ctx.body());
+        }
+
         // Visit declarations (if present)
         boolean hasDeclareSection = ctx.seq_of_declare_specs() != null;
         if (hasDeclareSection) {
