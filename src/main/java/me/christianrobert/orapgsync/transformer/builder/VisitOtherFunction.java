@@ -229,15 +229,43 @@ public class VisitOtherFunction {
         }
 
         // cursor_name (PERCENT_ISOPEN | PERCENT_FOUND | PERCENT_NOTFOUND | PERCENT_ROWCOUNT)
-        // Oracle cursor attributes → PostgreSQL tracking variables
-        // %FOUND → cursor__found
-        // %NOTFOUND → NOT cursor__found
-        // %ROWCOUNT → cursor__rowcount
-        // %ISOPEN → cursor__isopen
+        // Oracle cursor attributes → PostgreSQL tracking variables or expressions
+        //
+        // Two types of cursors:
+        // 1. Explicit cursors (named cursors with OPEN/FETCH/CLOSE):
+        //    %FOUND → cursor__found
+        //    %NOTFOUND → NOT cursor__found
+        //    %ROWCOUNT → cursor__rowcount
+        //    %ISOPEN → cursor__isopen
+        //
+        // 2. Implicit cursor (SQL%):
+        //    SQL%FOUND → (sql__rowcount > 0)
+        //    SQL%NOTFOUND → (sql__rowcount = 0)
+        //    SQL%ROWCOUNT → sql__rowcount
+        //    SQL%ISOPEN → FALSE (implicit cursor always closed in Oracle)
         if (ctx.cursor_name() != null) {
             String cursorName = ctx.cursor_name().getText();
 
-            // Register that this cursor uses attributes (triggers tracking variable generation)
+            // Special handling for SQL% implicit cursor attributes
+            if (cursorName.equalsIgnoreCase("SQL")) {
+                // Register SQL cursor usage (triggers sql__rowcount variable generation)
+                b.registerCursorAttributeUsage("sql");
+
+                // Transform SQL% attributes
+                // Note: sql__rowcount will be updated via GET DIAGNOSTICS after DML/SELECT INTO
+                if (ctx.PERCENT_FOUND() != null) {
+                    return "(sql__rowcount > 0)";
+                } else if (ctx.PERCENT_NOTFOUND() != null) {
+                    return "(sql__rowcount = 0)";
+                } else if (ctx.PERCENT_ROWCOUNT() != null) {
+                    return "sql__rowcount";
+                } else if (ctx.PERCENT_ISOPEN() != null) {
+                    // Oracle SQL%ISOPEN always returns FALSE (implicit cursor always closed)
+                    return "FALSE";
+                }
+            }
+
+            // Explicit cursor attributes (existing code)
             b.registerCursorAttributeUsage(cursorName);
 
             // Transform based on attribute type

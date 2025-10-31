@@ -414,4 +414,326 @@ public class PostgresPlSqlCursorAttributesValidationTest extends PostgresSqlVali
         assertEquals(1, resultSet.size());
         assertEquals(1, ((Number) resultSet.get(0).get("result")).intValue(), "Should return first empno");
     }
+
+    // ========== SQL% IMPLICIT CURSOR ATTRIBUTE TESTS ==========
+    //
+    // NOTE: DML statements (UPDATE/DELETE/INSERT) in PL/SQL context are not yet fully implemented.
+    // The transformation infrastructure exists, but complete DML visitor implementation is future work.
+    // For now, SQL% cursor attributes are tested only with SELECT INTO (which is fully supported).
+    //
+    // TODO: Uncomment these tests when DML statement transformation is implemented.
+
+    /**
+     * Test 8: SQL%ROWCOUNT after UPDATE statement (DISABLED - DML not yet supported)
+     * Tests: SQL%ROWCOUNT tracking with GET DIAGNOSTICS after UPDATE
+     */
+    @Test
+    @org.junit.jupiter.api.Disabled("DML statements in PL/SQL not yet implemented")
+    void testSqlRowCountAfterUpdate() throws SQLException {
+        String oracle = """
+            FUNCTION update_salaries RETURN NUMBER IS
+            BEGIN
+              UPDATE emp SET salary = salary * 1.1 WHERE dept_id = 10;
+              RETURN SQL%ROWCOUNT;
+            END;
+            """;
+
+        TransformationResult result = transformationService.transformFunction(oracle, "hr", indices);
+
+        System.out.println("=== Transformed SQL%ROWCOUNT (UPDATE) ===");
+        System.out.println(result.getPostgresSql());
+        System.out.println("==========================================\n");
+
+        assertTrue(result.isSuccess(), "Transformation should succeed");
+
+        String transformed = result.getPostgresSql();
+
+        // Should generate sql__rowcount variable (not __found or __isopen)
+        assertAll(
+                () -> assertTrue(transformed.contains("sql__rowcount INTEGER := 0;"), "Should declare sql__rowcount"),
+                () -> assertFalse(transformed.contains("sql__found"), "Should NOT declare sql__found"),
+                () -> assertFalse(transformed.contains("sql__isopen"), "Should NOT declare sql__isopen")
+        );
+
+        // UPDATE should have GET DIAGNOSTICS injection
+        assertTrue(transformed.contains("GET DIAGNOSTICS sql__rowcount = ROW_COUNT;"),
+                "Should inject GET DIAGNOSTICS after UPDATE");
+
+        // SQL%ROWCOUNT should be transformed
+        assertTrue(transformed.contains("RETURN sql__rowcount;"), "SQL%ROWCOUNT should be transformed");
+
+        // Execute and test
+        executeUpdate(result.getPostgresSql());
+
+        List<Map<String, Object>> resultSet = executeQuery("SELECT hr.update_salaries() as result");
+        assertEquals(1, resultSet.size());
+        assertEquals(2, ((Number) resultSet.get(0).get("result")).intValue(),
+                "Should return 2 (two rows in dept_id 10 were updated)");
+    }
+
+    /**
+     * Test 9: SQL%FOUND after DELETE statement (DISABLED - DML not yet supported)
+     * Tests: SQL%FOUND → (sql__rowcount > 0)
+     */
+    @Test
+    @org.junit.jupiter.api.Disabled("DML statements in PL/SQL not yet implemented")
+    void testSqlFoundAfterDelete() throws SQLException {
+        String oracle = """
+            FUNCTION delete_employee(p_empno NUMBER) RETURN NUMBER IS
+            BEGIN
+              DELETE FROM emp WHERE empno = p_empno;
+              IF SQL%FOUND THEN
+                RETURN 1;
+              END IF;
+              RETURN 0;
+            END;
+            """;
+
+        TransformationResult result = transformationService.transformFunction(oracle, "hr", indices);
+
+        System.out.println("=== Transformed SQL%FOUND (DELETE) ===");
+        System.out.println(result.getPostgresSql());
+        System.out.println("=======================================\n");
+
+        assertTrue(result.isSuccess(), "Transformation should succeed");
+
+        String transformed = result.getPostgresSql();
+
+        // Should generate sql__rowcount variable
+        assertTrue(transformed.contains("sql__rowcount INTEGER := 0;"), "Should declare sql__rowcount");
+
+        // DELETE should have GET DIAGNOSTICS injection
+        assertTrue(transformed.contains("GET DIAGNOSTICS sql__rowcount = ROW_COUNT;"),
+                "Should inject GET DIAGNOSTICS after DELETE");
+
+        // SQL%FOUND should be transformed to (sql__rowcount > 0)
+        assertTrue(transformed.contains("IF (sql__rowcount > 0) THEN"),
+                "SQL%FOUND should be transformed to (sql__rowcount > 0)");
+
+        // Execute and test - delete existing employee
+        executeUpdate(result.getPostgresSql());
+
+        List<Map<String, Object>> resultSet = executeQuery("SELECT hr.delete_employee(1) as result");
+        assertEquals(1, resultSet.size());
+        assertEquals(1, ((Number) resultSet.get(0).get("result")).intValue(),
+                "Should return 1 (employee was found and deleted)");
+
+        // Test with non-existent employee
+        resultSet = executeQuery("SELECT hr.delete_employee(999) as result");
+        assertEquals(1, resultSet.size());
+        assertEquals(0, ((Number) resultSet.get(0).get("result")).intValue(),
+                "Should return 0 (employee not found)");
+    }
+
+    /**
+     * Test 10: SQL%NOTFOUND after INSERT statement (DISABLED - DML not yet supported)
+     * Tests: SQL%NOTFOUND → (sql__rowcount = 0)
+     */
+    @Test
+    @org.junit.jupiter.api.Disabled("DML statements in PL/SQL not yet implemented")
+    void testSqlNotFoundAfterInsert() throws SQLException {
+        String oracle = """
+            FUNCTION insert_if_not_exists(p_empno NUMBER, p_ename VARCHAR2) RETURN VARCHAR2 IS
+            BEGIN
+              INSERT INTO emp (empno, ename, salary, dept_id)
+              SELECT p_empno, p_ename, 50000, 10
+              WHERE NOT EXISTS (SELECT 1 FROM emp WHERE empno = p_empno);
+
+              IF SQL%NOTFOUND THEN
+                RETURN 'ALREADY_EXISTS';
+              END IF;
+              RETURN 'INSERTED';
+            END;
+            """;
+
+        TransformationResult result = transformationService.transformFunction(oracle, "hr", indices);
+
+        System.out.println("=== Transformed SQL%NOTFOUND (INSERT) ===");
+        System.out.println(result.getPostgresSql());
+        System.out.println("==========================================\n");
+
+        assertTrue(result.isSuccess(), "Transformation should succeed");
+
+        String transformed = result.getPostgresSql();
+
+        // SQL%NOTFOUND should be transformed to (sql__rowcount = 0)
+        assertTrue(transformed.contains("IF (sql__rowcount = 0) THEN"),
+                "SQL%NOTFOUND should be transformed to (sql__rowcount = 0)");
+
+        // INSERT should have GET DIAGNOSTICS injection
+        assertTrue(transformed.contains("GET DIAGNOSTICS sql__rowcount = ROW_COUNT;"),
+                "Should inject GET DIAGNOSTICS after INSERT");
+
+        // Execute and test
+        executeUpdate(result.getPostgresSql());
+
+        // Insert new employee (should succeed)
+        List<Map<String, Object>> resultSet = executeQuery("SELECT hr.insert_if_not_exists(100, 'David') as result");
+        assertEquals(1, resultSet.size());
+        assertEquals("INSERTED", resultSet.get(0).get("result"), "Should return INSERTED");
+
+        // Try to insert same employee again (should fail)
+        resultSet = executeQuery("SELECT hr.insert_if_not_exists(100, 'David') as result");
+        assertEquals(1, resultSet.size());
+        assertEquals("ALREADY_EXISTS", resultSet.get(0).get("result"), "Should return ALREADY_EXISTS");
+    }
+
+    /**
+     * Test 11: SQL%ROWCOUNT after SELECT INTO statement
+     * Tests: GET DIAGNOSTICS injection after SELECT INTO
+     */
+    @Test
+    void testSqlRowCountAfterSelectInto() throws SQLException {
+        String oracle = """
+            FUNCTION get_employee_count(p_dept_id NUMBER) RETURN NUMBER IS
+              v_name VARCHAR2(100);
+            BEGIN
+              SELECT ename INTO v_name FROM emp WHERE dept_id = p_dept_id AND ROWNUM = 1;
+              RETURN SQL%ROWCOUNT;
+            EXCEPTION
+              WHEN NO_DATA_FOUND THEN
+                RETURN 0;
+            END;
+            """;
+
+        TransformationResult result = transformationService.transformFunction(oracle, "hr", indices);
+
+        System.out.println("=== Transformed SQL%ROWCOUNT (SELECT INTO) ===");
+        System.out.println(result.getPostgresSql());
+        System.out.println("===============================================\n");
+
+        assertTrue(result.isSuccess(), "Transformation should succeed");
+
+        String transformed = result.getPostgresSql();
+
+        // Should have GET DIAGNOSTICS after SELECT INTO
+        // Note: PostgreSQL may add STRICT keyword, so check for "INTO" followed by "v_name"
+        assertTrue(transformed.contains("INTO") && transformed.contains("v_name"),
+                "Should have SELECT INTO (may include STRICT keyword)");
+        assertTrue(transformed.contains("GET DIAGNOSTICS sql__rowcount = ROW_COUNT;"),
+                "Should inject GET DIAGNOSTICS after SELECT INTO");
+
+        // Execute and test
+        executeUpdate(result.getPostgresSql());
+
+        List<Map<String, Object>> resultSet = executeQuery("SELECT hr.get_employee_count(10) as result");
+        assertEquals(1, resultSet.size());
+        assertEquals(1, ((Number) resultSet.get(0).get("result")).intValue(),
+                "Should return 1 (one row fetched)");
+
+        // Test with no data
+        resultSet = executeQuery("SELECT hr.get_employee_count(999) as result");
+        assertEquals(1, resultSet.size());
+        assertEquals(0, ((Number) resultSet.get(0).get("result")).intValue(),
+                "Should return 0 (no data found)");
+    }
+
+    /**
+     * Test 12: SQL%ISOPEN always returns FALSE (DISABLED - DML not yet supported)
+     * Tests: SQL%ISOPEN → FALSE (constant)
+     */
+    @Test
+    @org.junit.jupiter.api.Disabled("DML statements in PL/SQL not yet implemented")
+    void testSqlIsOpenAlwaysFalse() throws SQLException{
+        String oracle = """
+            FUNCTION check_sql_isopen RETURN NUMBER IS
+            BEGIN
+              UPDATE emp SET salary = salary WHERE dept_id = 10;
+              IF SQL%ISOPEN THEN
+                RETURN 1;
+              END IF;
+              RETURN 0;
+            END;
+            """;
+
+        TransformationResult result = transformationService.transformFunction(oracle, "hr", indices);
+
+        System.out.println("=== Transformed SQL%ISOPEN ===");
+        System.out.println(result.getPostgresSql());
+        System.out.println("===============================\n");
+
+        assertTrue(result.isSuccess(), "Transformation should succeed");
+
+        String transformed = result.getPostgresSql();
+
+        // SQL%ISOPEN should be transformed to FALSE (constant)
+        assertTrue(transformed.contains("IF FALSE THEN"), "SQL%ISOPEN should be transformed to FALSE");
+
+        // Should NOT generate sql__rowcount if only SQL%ISOPEN is used
+        // (optimizer: if only ISOPEN is used, we don't need tracking)
+        // Actually, we do register it, so sql__rowcount will be declared
+        assertTrue(transformed.contains("sql__rowcount"), "Should declare sql__rowcount");
+
+        // Execute and test
+        executeUpdate(result.getPostgresSql());
+
+        List<Map<String, Object>> resultSet = executeQuery("SELECT hr.check_sql_isopen() as result");
+        assertEquals(1, resultSet.size());
+        assertEquals(0, ((Number) resultSet.get(0).get("result")).intValue(),
+                "Should return 0 (SQL%ISOPEN always FALSE)");
+    }
+
+    /**
+     * Test 13: Multiple SQL% attributes in same function (DISABLED - DML not yet supported)
+     * Tests: Combined SQL%FOUND and SQL%ROWCOUNT
+     */
+    @Test
+    @org.junit.jupiter.api.Disabled("DML statements in PL/SQL not yet implemented")
+    void testMultipleSqlAttributes() throws SQLException {
+        String oracle = """
+            FUNCTION update_and_check RETURN VARCHAR2 IS
+              v_count NUMBER;
+            BEGIN
+              UPDATE emp SET salary = salary * 1.05 WHERE dept_id = 20;
+              v_count := SQL%ROWCOUNT;
+
+              IF SQL%FOUND THEN
+                RETURN 'Updated ' || v_count || ' rows';
+              ELSE
+                RETURN 'No rows updated';
+              END IF;
+            END;
+            """;
+
+        TransformationResult result = transformationService.transformFunction(oracle, "hr", indices);
+
+        System.out.println("=== Transformed Multiple SQL% Attributes ===");
+        System.out.println(result.getPostgresSql());
+        System.out.println("============================================\n");
+
+        assertTrue(result.isSuccess(), "Transformation should succeed");
+
+        String transformed = result.getPostgresSql();
+
+        // Should have single sql__rowcount variable (not duplicated)
+        int count = countOccurrences(transformed, "sql__rowcount INTEGER := 0;");
+        assertEquals(1, count, "Should declare sql__rowcount only once");
+
+        // Both SQL%ROWCOUNT and SQL%FOUND should be transformed
+        assertAll(
+                () -> assertTrue(transformed.contains("v_count := sql__rowcount;"), "SQL%ROWCOUNT should be transformed"),
+                () -> assertTrue(transformed.contains("IF (sql__rowcount > 0) THEN"), "SQL%FOUND should be transformed")
+        );
+
+        // Execute and test
+        executeUpdate(result.getPostgresSql());
+
+        List<Map<String, Object>> resultSet = executeQuery("SELECT hr.update_and_check() as result");
+        assertEquals(1, resultSet.size());
+        assertEquals("Updated 1 rows", resultSet.get(0).get("result"),
+                "Should return 'Updated 1 rows' (one employee in dept 20)");
+    }
+
+    /**
+     * Helper method to count string occurrences
+     */
+    private int countOccurrences(String text, String substring) {
+        int count = 0;
+        int index = 0;
+        while ((index = text.indexOf(substring, index)) != -1) {
+            count++;
+            index += substring.length();
+        }
+        return count;
+    }
 }

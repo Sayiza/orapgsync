@@ -150,10 +150,16 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
         /**
          * Generates tracking variable declarations for all cursors that need them.
          * Should be called once during DECLARE section processing.
-         * Generates three variables per cursor:
+         *
+         * For explicit cursors, generates three variables:
          *   - cursor__found BOOLEAN;
          *   - cursor__rowcount INTEGER := 0;
          *   - cursor__isopen BOOLEAN := FALSE;
+         *
+         * For SQL% implicit cursor, generates only one variable:
+         *   - sql__rowcount INTEGER := 0;
+         * (SQL%FOUND and SQL%NOTFOUND are expressions based on sql__rowcount,
+         *  and SQL%ISOPEN always returns FALSE)
          *
          * @return List of declaration statements (empty if no cursors need tracking)
          */
@@ -162,10 +168,19 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
 
             for (String cursorName : cursorsNeedingTracking) {
                 if (!trackingVariablesDeclared.contains(cursorName)) {
-                    // Generate three tracking variables per cursor
-                    declarations.add(cursorName + "__found BOOLEAN;");
-                    declarations.add(cursorName + "__rowcount INTEGER := 0;");
-                    declarations.add(cursorName + "__isopen BOOLEAN := FALSE;");
+                    // Special handling for SQL% implicit cursor
+                    if (cursorName.equalsIgnoreCase("sql")) {
+                        // Only generate rowcount variable for SQL cursor
+                        // SQL%FOUND → (sql__rowcount > 0)
+                        // SQL%NOTFOUND → (sql__rowcount = 0)
+                        // SQL%ISOPEN → FALSE (constant)
+                        declarations.add("sql__rowcount INTEGER := 0;");
+                    } else {
+                        // Generate three tracking variables per explicit cursor
+                        declarations.add(cursorName + "__found BOOLEAN;");
+                        declarations.add(cursorName + "__rowcount INTEGER := 0;");
+                        declarations.add(cursorName + "__isopen BOOLEAN := FALSE;");
+                    }
 
                     trackingVariablesDeclared.add(cursorName);
                 }
@@ -187,6 +202,11 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
     // Tracks cursors that use attributes in the current block
     // One instance per function/procedure (not a stack - cursor names are local to function scope)
     private final CursorAttributeTracker cursorAttributeTracker;
+
+    // Statement-level flag for SELECT INTO tracking
+    // Set by VisitQueryBlock when processing a query with INTO clause
+    // Checked by VisitSql_statement to inject GET DIAGNOSTICS for SQL% tracking
+    private boolean lastStatementHadIntoClause = false;
 
     /**
      * Creates a PostgresCodeBuilder with transformation context.
@@ -418,6 +438,29 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
      */
     public void resetCursorAttributeTracker() {
         cursorAttributeTracker.reset();
+    }
+
+    // ========== SELECT INTO TRACKING (for SQL% implicit cursor) ==========
+
+    /**
+     * Marks that the current statement has an INTO clause (SELECT INTO).
+     * Called by VisitQueryBlock when processing a query with INTO clause.
+     * Checked by VisitSql_statement to inject GET DIAGNOSTICS for SQL% tracking.
+     */
+    public void markStatementHasIntoClause() {
+        this.lastStatementHadIntoClause = true;
+    }
+
+    /**
+     * Checks if the last statement had an INTO clause and resets the flag.
+     * Called by VisitSql_statement after processing each statement.
+     *
+     * @return true if the last statement had an INTO clause
+     */
+    public boolean consumeIntoClauseFlag() {
+        boolean result = this.lastStatementHadIntoClause;
+        this.lastStatementHadIntoClause = false;  // Reset for next statement
+        return result;
     }
 
     // ========== SELECT STATEMENT ==========
@@ -725,6 +768,11 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
     }
 
     @Override
+    public String visitSql_statement(PlSqlParser.Sql_statementContext ctx) {
+        return VisitSql_statement.v(ctx, this);
+    }
+
+    @Override
     public String visitSeq_of_declare_specs(PlSqlParser.Seq_of_declare_specsContext ctx) {
         return VisitSeq_of_declare_specs.v(ctx, this);
     }
@@ -742,6 +790,11 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
     @Override
     public String visitBind_variable(PlSqlParser.Bind_variableContext ctx) {
         return VisitBind_variable.v(ctx, this);
+    }
+
+    @Override
+    public String visitVariable_or_collection(PlSqlParser.Variable_or_collectionContext ctx) {
+        return VisitVariable_or_collection.v(ctx, this);
     }
 
     @Override

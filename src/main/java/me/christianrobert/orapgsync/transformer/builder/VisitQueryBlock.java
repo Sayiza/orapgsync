@@ -75,6 +75,8 @@ public class VisitQueryBlock {
       PlSqlParser.Into_clauseContext intoCtx = ctx.into_clause();
       if (intoCtx != null) {
         intoClause = b.visit(intoCtx);
+        // Mark that this statement has an INTO clause (for SQL% tracking)
+        b.markStatementHasIntoClause();
       }
 
       // Build the SELECT statement
