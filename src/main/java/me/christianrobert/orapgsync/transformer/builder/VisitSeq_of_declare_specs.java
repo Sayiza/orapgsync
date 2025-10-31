@@ -57,6 +57,10 @@ public class VisitSeq_of_declare_specs {
             }
         }
 
+        // Note: Cursor tracking variables are NOT injected here
+        // They must be injected AFTER visiting the body (in VisitFunctionBody/VisitProcedureBody)
+        // because we need to know which cursors use attributes before generating declarations
+
         return result.toString();
     }
 }

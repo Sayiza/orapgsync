@@ -228,6 +228,30 @@ public class VisitOtherFunction {
             return result.toString();
         }
 
+        // cursor_name (PERCENT_ISOPEN | PERCENT_FOUND | PERCENT_NOTFOUND | PERCENT_ROWCOUNT)
+        // Oracle cursor attributes → PostgreSQL tracking variables
+        // %FOUND → cursor__found
+        // %NOTFOUND → NOT cursor__found
+        // %ROWCOUNT → cursor__rowcount
+        // %ISOPEN → cursor__isopen
+        if (ctx.cursor_name() != null) {
+            String cursorName = ctx.cursor_name().getText();
+
+            // Register that this cursor uses attributes (triggers tracking variable generation)
+            b.registerCursorAttributeUsage(cursorName);
+
+            // Transform based on attribute type
+            if (ctx.PERCENT_FOUND() != null) {
+                return cursorName + "__found";
+            } else if (ctx.PERCENT_NOTFOUND() != null) {
+                return "NOT " + cursorName + "__found";
+            } else if (ctx.PERCENT_ROWCOUNT() != null) {
+                return cursorName + "__rowcount";
+            } else if (ctx.PERCENT_ISOPEN() != null) {
+                return cursorName + "__isopen";
+            }
+        }
+
         // For any other function in other_function, throw descriptive error
         // This helps identify which functions need to be implemented next
         throw new TransformationException(

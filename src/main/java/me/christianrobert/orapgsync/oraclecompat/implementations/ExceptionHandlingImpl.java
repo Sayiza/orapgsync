@@ -108,9 +108,7 @@ public class ExceptionHandlingImpl {
             $$;
 
             COMMENT ON FUNCTION oracle_compat.sqlcode() IS
-              'Maps PostgreSQL SQLSTATE to Oracle SQLCODE for exception handling compatibility. ' ||
-              'Returns negative error numbers for exceptions, 0 for success. ' ||
-              'Standard exceptions map to exact Oracle codes, unknown exceptions return -20000.';
+              'Maps PostgreSQL SQLSTATE to Oracle SQLCODE for exception handling compatibility. Returns negative error numbers for exceptions, 0 for success. Standard exceptions map to exact Oracle codes, unknown exceptions return -20000.';
             """;
     }
 

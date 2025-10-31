@@ -115,6 +115,80 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
     }
 
     /**
+     * Cursor attribute tracking context.
+     * Tracks which cursors use attributes (%FOUND, %NOTFOUND, %ROWCOUNT, %ISOPEN)
+     * and generates tracking variables for those cursors.
+     */
+    private static class CursorAttributeTracker {
+        // Cursors that use at least one cursor attribute
+        // Used to determine if tracking variables need to be generated
+        private final Set<String> cursorsNeedingTracking = new HashSet<>();
+
+        // Tracking variables already declared (to avoid duplicates)
+        private final Set<String> trackingVariablesDeclared = new HashSet<>();
+
+        /**
+         * Registers that a cursor uses at least one attribute.
+         * Call this when encountering cursor%FOUND, cursor%NOTFOUND, cursor%ROWCOUNT, or cursor%ISOPEN.
+         *
+         * @param cursorName Cursor name (will be normalized to lowercase)
+         */
+        public void registerCursorAttributeUsage(String cursorName) {
+            cursorsNeedingTracking.add(cursorName.toLowerCase());
+        }
+
+        /**
+         * Checks if a cursor needs tracking variables.
+         *
+         * @param cursorName Cursor name (will be normalized to lowercase)
+         * @return true if cursor uses attributes and needs tracking
+         */
+        public boolean needsTracking(String cursorName) {
+            return cursorsNeedingTracking.contains(cursorName.toLowerCase());
+        }
+
+        /**
+         * Generates tracking variable declarations for all cursors that need them.
+         * Should be called once during DECLARE section processing.
+         * Generates three variables per cursor:
+         *   - cursor__found BOOLEAN;
+         *   - cursor__rowcount INTEGER := 0;
+         *   - cursor__isopen BOOLEAN := FALSE;
+         *
+         * @return List of declaration statements (empty if no cursors need tracking)
+         */
+        public java.util.List<String> generateTrackingDeclarations() {
+            java.util.List<String> declarations = new java.util.ArrayList<>();
+
+            for (String cursorName : cursorsNeedingTracking) {
+                if (!trackingVariablesDeclared.contains(cursorName)) {
+                    // Generate three tracking variables per cursor
+                    declarations.add(cursorName + "__found BOOLEAN;");
+                    declarations.add(cursorName + "__rowcount INTEGER := 0;");
+                    declarations.add(cursorName + "__isopen BOOLEAN := FALSE;");
+
+                    trackingVariablesDeclared.add(cursorName);
+                }
+            }
+
+            return declarations;
+        }
+
+        /**
+         * Resets the tracker (used when entering a new function/procedure).
+         */
+        public void reset() {
+            cursorsNeedingTracking.clear();
+            trackingVariablesDeclared.clear();
+        }
+    }
+
+    // Block-level cursor attribute tracker
+    // Tracks cursors that use attributes in the current block
+    // One instance per function/procedure (not a stack - cursor names are local to function scope)
+    private final CursorAttributeTracker cursorAttributeTracker;
+
+    /**
      * Creates a PostgresCodeBuilder with transformation context.
      * @param context Transformation context for metadata lookups (can be null for simple transformations)
      */
@@ -124,6 +198,7 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
         this.rownumContextStack = new ArrayDeque<>();
         this.loopRecordVariablesStack = new ArrayDeque<>();
         this.exceptionContextStack = new ArrayDeque<>();
+        this.cursorAttributeTracker = new CursorAttributeTracker();
     }
 
     /**
@@ -135,6 +210,7 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
         this.rownumContextStack = new ArrayDeque<>();
         this.loopRecordVariablesStack = new ArrayDeque<>();
         this.exceptionContextStack = new ArrayDeque<>();
+        this.cursorAttributeTracker = new CursorAttributeTracker();
     }
 
     /**
@@ -304,6 +380,44 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
             }
         }
         return null;  // Exception not found in any scope
+    }
+
+    /**
+     * Registers that a cursor uses at least one attribute (%FOUND, %NOTFOUND, %ROWCOUNT, %ISOPEN).
+     * This triggers generation of tracking variables for the cursor.
+     * Used by cursor attribute transformation visitors.
+     *
+     * @param cursorName Cursor name (will be normalized to lowercase)
+     */
+    public void registerCursorAttributeUsage(String cursorName) {
+        cursorAttributeTracker.registerCursorAttributeUsage(cursorName);
+    }
+
+    /**
+     * Checks if a cursor needs tracking variables (i.e., uses at least one attribute).
+     *
+     * @param cursorName Cursor name (will be normalized to lowercase)
+     * @return true if cursor uses attributes and needs tracking
+     */
+    public boolean cursorNeedsTracking(String cursorName) {
+        return cursorAttributeTracker.needsTracking(cursorName);
+    }
+
+    /**
+     * Generates tracking variable declarations for all cursors that use attributes.
+     * Should be called once during DECLARE section processing.
+     *
+     * @return List of declaration statements (empty if no cursors use attributes)
+     */
+    public java.util.List<String> generateCursorTrackingDeclarations() {
+        return cursorAttributeTracker.generateTrackingDeclarations();
+    }
+
+    /**
+     * Resets cursor attribute tracker (used when entering a new function/procedure).
+     */
+    public void resetCursorAttributeTracker() {
+        cursorAttributeTracker.reset();
     }
 
     // ========== SELECT STATEMENT ==========
@@ -578,6 +692,21 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
     @Override
     public String visitCursor_declaration(PlSqlParser.Cursor_declarationContext ctx) {
         return VisitCursor_declaration.v(ctx, this);
+    }
+
+    @Override
+    public String visitOpen_statement(PlSqlParser.Open_statementContext ctx) {
+        return VisitOpen_statement.v(ctx, this);
+    }
+
+    @Override
+    public String visitFetch_statement(PlSqlParser.Fetch_statementContext ctx) {
+        return VisitFetch_statement.v(ctx, this);
+    }
+
+    @Override
+    public String visitClose_statement(PlSqlParser.Close_statementContext ctx) {
+        return VisitClose_statement.v(ctx, this);
     }
 
     @Override

@@ -100,6 +100,10 @@ public class VisitProcedureBody {
         // STEP 3: Build procedure body (DECLARE + BEGIN...END)
         StringBuilder procedureBody = new StringBuilder();
 
+        // Reset cursor attribute tracker for this procedure
+        // Cursor names are local to procedure scope, so reset for each procedure
+        b.resetCursorAttributeTracker();
+
         // Push loop RECORD variables context for this procedure block
         // When nested anonymous blocks are implemented, they will push their own contexts
         b.pushLoopRecordVariablesContext();
@@ -135,11 +139,28 @@ public class VisitProcedureBody {
             // Add DECLARE section if not already present
             if (!hasDeclareSection) {
                 procedureBody.append("DECLARE\n");
+                hasDeclareSection = true;
             }
 
             // Add RECORD declarations
             for (String varName : loopVariables) {
-                procedureBody.append(varName).append(" RECORD;\n");
+                procedureBody.append("  ").append(varName).append(" RECORD;\n");
+            }
+        }
+
+        // Inject cursor tracking variables for cursors that use attributes
+        // These variables are auto-generated after visiting the body (now we know which cursors use attributes)
+        java.util.List<String> cursorTrackingVars = b.generateCursorTrackingDeclarations();
+        if (!cursorTrackingVars.isEmpty()) {
+            // Add DECLARE section if not already present
+            if (!hasDeclareSection) {
+                procedureBody.append("DECLARE\n");
+                hasDeclareSection = true;
+            }
+
+            // Add cursor tracking variable declarations
+            for (String trackingVar : cursorTrackingVars) {
+                procedureBody.append("  ").append(trackingVar).append("\n");
             }
         }
 

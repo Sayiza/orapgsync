@@ -91,6 +91,10 @@ public class VisitFunctionBody {
         // STEP 4: Build function body (DECLARE + BEGIN...END)
         StringBuilder functionBody = new StringBuilder();
 
+        // Reset cursor attribute tracker for this function
+        // Cursor names are local to function scope, so reset for each function
+        b.resetCursorAttributeTracker();
+
         // Push loop RECORD variables context for this function block
         // When nested anonymous blocks are implemented, they will push their own contexts
         b.pushLoopRecordVariablesContext();
@@ -126,11 +130,28 @@ public class VisitFunctionBody {
             // Add DECLARE section if not already present
             if (!hasDeclareSection) {
                 functionBody.append("DECLARE\n");
+                hasDeclareSection = true;
             }
 
             // Add RECORD declarations
             for (String varName : loopVariables) {
-                functionBody.append(varName).append(" RECORD;\n");
+                functionBody.append("  ").append(varName).append(" RECORD;\n");
+            }
+        }
+
+        // Inject cursor tracking variables for cursors that use attributes
+        // These variables are auto-generated after visiting the body (now we know which cursors use attributes)
+        java.util.List<String> cursorTrackingVars = b.generateCursorTrackingDeclarations();
+        if (!cursorTrackingVars.isEmpty()) {
+            // Add DECLARE section if not already present
+            if (!hasDeclareSection) {
+                functionBody.append("DECLARE\n");
+                hasDeclareSection = true;
+            }
+
+            // Add cursor tracking variable declarations
+            for (String trackingVar : cursorTrackingVars) {
+                functionBody.append("  ").append(trackingVar).append("\n");
             }
         }
 
