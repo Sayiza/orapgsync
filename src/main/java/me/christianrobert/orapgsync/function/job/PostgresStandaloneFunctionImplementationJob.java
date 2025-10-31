@@ -11,6 +11,10 @@ import me.christianrobert.orapgsync.database.service.PostgresConnectionService;
 import me.christianrobert.orapgsync.transformer.context.MetadataIndexBuilder;
 import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
 import me.christianrobert.orapgsync.transformer.context.TransformationResult;
+import me.christianrobert.orapgsync.transformer.packagevariable.PackageContext;
+import me.christianrobert.orapgsync.transformer.packagevariable.PackageContextExtractor;
+import me.christianrobert.orapgsync.transformer.packagevariable.PackageHelperGenerator;
+import me.christianrobert.orapgsync.transformer.parser.AntlrParser;
 import me.christianrobert.orapgsync.transformer.service.TransformationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,28 +23,36 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 /**
- * PostgreSQL Standalone Function Implementation Job.
+ * PostgreSQL Function Implementation Job (Unified).
  *
- * This job implements standalone functions/procedures by transforming Oracle PL/SQL
- * to PostgreSQL PL/pgSQL and replacing the stub implementations with actual logic.
+ * This job implements BOTH standalone functions/procedures AND package member functions/procedures
+ * by transforming Oracle PL/SQL to PostgreSQL PL/pgSQL and replacing stub implementations.
  *
- * Only processes STANDALONE functions (not package members).
+ * For PACKAGE FUNCTIONS, the job follows a unified on-demand approach:
+ * 1. Detects package membership (via "__" in function name)
+ * 2. Parses package spec from Oracle (if not already cached)
+ * 3. Generates helper functions (initialize, getters, setters) in PostgreSQL
+ * 4. Caches package context for remaining functions in same package
  *
  * The job:
- * 1. Retrieves Oracle standalone function metadata from state
- * 2. For each standalone function:
- *    a. Extracts Oracle PL/SQL source from ALL_SOURCE
- *    b. Transforms PL/SQL → PL/pgSQL using ANTLR (TODO: to be implemented)
- *    c. Executes CREATE OR REPLACE FUNCTION/PROCEDURE in PostgreSQL
+ * 1. Retrieves Oracle function metadata from state (both standalone and package members)
+ * 2. For each function:
+ *    a. If package function: ensure package context exists (parse spec, generate helpers)
+ *    b. Extract Oracle PL/SQL source from ALL_SOURCE
+ *    c. Transform PL/SQL → PL/pgSQL using ANTLR
+ *    d. Execute CREATE OR REPLACE FUNCTION in PostgreSQL
  * 3. Returns results tracking success/skipped/errors
  *
- * NOTE: This is currently a STUB implementation. The actual PL/SQL transformation
- * logic will be added in follow-up steps.
+ * Package context is ephemeral - exists only during job execution, cached in-memory.
+ * Maintains ANTLR-only-in-transformation pattern (no ANTLR in extraction jobs).
  */
 @Dependent
 public class PostgresStandaloneFunctionImplementationJob extends AbstractDatabaseWriteJob<StandaloneFunctionImplementationResult> {
@@ -55,6 +67,13 @@ public class PostgresStandaloneFunctionImplementationJob extends AbstractDatabas
 
     @Inject
     private TransformationService transformationService;
+
+    @Inject
+    private AntlrParser antlrParser;
+
+    // Package context cache (ephemeral, per-job execution)
+    // Caches parsed package specifications to avoid re-parsing for each function
+    private final Map<String, PackageContext> packageContextCache = new HashMap<>();
 
     @Override
     public String getTargetDatabase() {
@@ -81,9 +100,9 @@ public class PostgresStandaloneFunctionImplementationJob extends AbstractDatabas
         StandaloneFunctionImplementationResult result = new StandaloneFunctionImplementationResult();
 
         updateProgress(progressCallback, 0, "Initializing",
-                "Starting standalone function implementation");
+                "Starting function implementation (standalone and package)");
 
-        // Get Oracle function metadata from state
+        // Get Oracle function metadata from state (both standalone and package members)
         List<FunctionMetadata> oracleFunctions = stateService.getOracleFunctionMetadata();
         if (oracleFunctions == null || oracleFunctions.isEmpty()) {
             updateProgress(progressCallback, 100, "Complete",
@@ -91,25 +110,18 @@ public class PostgresStandaloneFunctionImplementationJob extends AbstractDatabas
             return result;
         }
 
-        // Filter to only standalone functions (exclude package members)
-        List<FunctionMetadata> standaloneFunctions = oracleFunctions.stream()
-                .filter(FunctionMetadata::isStandalone)
-                .collect(Collectors.toList());
+        // Count standalone vs package functions
+        long standaloneCount = oracleFunctions.stream().filter(FunctionMetadata::isStandalone).count();
+        long packageCount = oracleFunctions.size() - standaloneCount;
 
-        if (standaloneFunctions.isEmpty()) {
-            updateProgress(progressCallback, 100, "Complete",
-                    "No standalone functions to implement (only package members found)");
-            return result;
-        }
-
-        log.info("Found {} standalone functions to implement (out of {} total functions)",
-                standaloneFunctions.size(), oracleFunctions.size());
+        log.info("Found {} functions to implement: {} standalone, {} package members",
+                oracleFunctions.size(), standaloneCount, packageCount);
 
         updateProgress(progressCallback, 10, "Building metadata indices",
                 "Creating transformation indices from state");
 
         // Build transformation indices from state
-        List<String> schemas = standaloneFunctions.stream()
+        List<String> schemas = oracleFunctions.stream()
                 .map(FunctionMetadata::getSchema)
                 .distinct()
                 .toList();
@@ -129,17 +141,27 @@ public class PostgresStandaloneFunctionImplementationJob extends AbstractDatabas
 
             try (Connection postgresConnection = postgresConnectionService.getConnection()) {
                 updateProgress(progressCallback, 30, "Connected to both databases",
-                        String.format("Processing %d standalone functions", standaloneFunctions.size()));
+                        String.format("Processing %d functions (%d standalone, %d package)",
+                                      oracleFunctions.size(), standaloneCount, packageCount));
 
                 int processed = 0;
-                int totalFunctions = standaloneFunctions.size();
+                int totalFunctions = oracleFunctions.size();
 
-                for (FunctionMetadata function : standaloneFunctions) {
+                for (FunctionMetadata function : oracleFunctions) {
                     try {
                         updateProgress(progressCallback,
                                 25 + (processed * 65 / totalFunctions),
                                 "Processing function: " + function.getDisplayName(),
                                 String.format("Function %d of %d", processed + 1, totalFunctions));
+
+                        // Step 0: If package function, ensure package context exists
+                        if (!function.isStandalone()) {
+                            String packageName = extractPackageName(function);
+                            if (packageName != null) {
+                                ensurePackageContext(oracleConnection, postgresConnection,
+                                                      function.getSchema(), packageName);
+                            }
+                        }
 
                         // Step 1: Extract Oracle source
                         log.info("Extracting Oracle source for: {}", function.getDisplayName());
@@ -184,24 +206,24 @@ public class PostgresStandaloneFunctionImplementationJob extends AbstractDatabas
                 }
 
                 updateProgress(progressCallback, 90, "Finalizing",
-                        "Standalone function implementation complete");
+                        "Function implementation complete (standalone and package)");
 
-                log.info("Standalone function implementation complete: {} implemented, {} skipped, {} errors",
+                log.info("Function implementation complete: {} implemented, {} skipped, {} errors",
                         result.getImplementedCount(), result.getSkippedCount(), result.getErrorCount());
 
                 return result;
             }
         } catch (Exception e) {
             updateProgress(progressCallback, -1, "Failed",
-                    "Standalone function implementation failed: " + e.getMessage());
-            log.error("Standalone function implementation failed", e);
+                    "Function implementation failed: " + e.getMessage());
+            log.error("Function implementation failed", e);
             throw e;
         }
     }
 
     @Override
     protected String generateSummaryMessage(StandaloneFunctionImplementationResult result) {
-        return String.format("Standalone function implementation completed: %d implemented, %d skipped, %d errors",
+        return String.format("Function implementation completed: %d implemented, %d skipped, %d errors",
                 result.getImplementedCount(), result.getSkippedCount(), result.getErrorCount());
     }
 
@@ -290,5 +312,131 @@ public class PostgresStandaloneFunctionImplementationJob extends AbstractDatabas
             result.addError(function.getDisplayName(), errorMsg, pgSql);
             log.error("Failed to implement {}: {}", function.getDisplayName(), errorMsg, e);
         }
+    }
+
+    // ========== Package Context Management ==========
+
+    /**
+     * Extracts package name from a package function.
+     * Package functions use naming convention: packagename__functionname (double underscore).
+     *
+     * @param function Function metadata
+     * @return Package name or null if standalone function
+     */
+    private String extractPackageName(FunctionMetadata function) {
+        String objectName = function.getObjectName();
+        int idx = objectName.indexOf("__");
+        if (idx > 0) {
+            return objectName.substring(0, idx);
+        }
+        return null;
+    }
+
+    /**
+     * Ensures package context exists for a given package.
+     * If not already cached, this method:
+     * 1. Queries Oracle for package spec source (ALL_SOURCE)
+     * 2. Parses spec with ANTLR to extract variable declarations
+     * 3. Generates helper functions (initialize, getters, setters)
+     * 4. Executes helper creation in PostgreSQL
+     * 5. Caches context for subsequent functions from same package
+     *
+     * @param oracleConn Oracle database connection
+     * @param postgresConn PostgreSQL database connection
+     * @param schema Schema name
+     * @param packageName Package name
+     * @throws SQLException if package spec query or helper creation fails
+     */
+    private void ensurePackageContext(Connection oracleConn, Connection postgresConn,
+                                      String schema, String packageName) throws SQLException {
+        String cacheKey = (schema + "." + packageName).toLowerCase();
+
+        // Check cache
+        if (packageContextCache.containsKey(cacheKey)) {
+            log.debug("Package context already cached: {}", cacheKey);
+            return;
+        }
+
+        log.info("Creating package context for: {}.{}", schema, packageName);
+
+        // Step 1: Query Oracle for package spec
+        String packageSpecSql = queryPackageSpec(oracleConn, schema, packageName);
+        log.debug("Retrieved package spec for {}.{} ({} characters)",
+                  schema, packageName, packageSpecSql.length());
+
+        // Step 2: Parse spec and extract variable declarations
+        PackageContextExtractor extractor = new PackageContextExtractor(antlrParser);
+        PackageContext context = extractor.extractContext(schema, packageName, packageSpecSql);
+        log.info("Extracted {} variables from package {}.{}",
+                 context.getVariables().size(), schema, packageName);
+
+        // Step 3: Generate helper function SQL
+        PackageHelperGenerator generator = new PackageHelperGenerator();
+        List<String> helperSqlStatements = generator.generateHelperSql(context);
+        log.info("Generated {} helper functions for package {}.{}",
+                 helperSqlStatements.size(), schema, packageName);
+
+        // Step 4: Execute helper creation in PostgreSQL
+        for (String sql : helperSqlStatements) {
+            try (Statement stmt = postgresConn.createStatement()) {
+                stmt.execute(sql);
+            }
+        }
+        log.info("Successfully created helper functions for package {}.{}", schema, packageName);
+
+        // Step 5: Cache context
+        context.setHelpersCreated(true);
+        packageContextCache.put(cacheKey, context);
+        log.debug("Cached package context: {}", cacheKey);
+    }
+
+    /**
+     * Queries Oracle ALL_SOURCE for package specification source code.
+     *
+     * @param oracleConn Oracle database connection
+     * @param schema Schema name
+     * @param packageName Package name
+     * @return Complete package spec SQL as a single string
+     * @throws SQLException if query fails or no source found
+     */
+    private String queryPackageSpec(Connection oracleConn, String schema, String packageName) throws SQLException {
+        String sql = """
+            SELECT text
+            FROM all_source
+            WHERE owner = ?
+              AND name = ?
+              AND type = 'PACKAGE'
+            ORDER BY line
+            """;
+
+        StringBuilder source = new StringBuilder();
+
+        try (PreparedStatement ps = oracleConn.prepareStatement(sql)) {
+            ps.setString(1, schema.toUpperCase());
+            ps.setString(2, packageName.toUpperCase());
+
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    String line = rs.getString("text");
+                    if (line != null) {
+                        source.append(line);
+                        if (!line.endsWith("\n")) {
+                            source.append("\n");
+                        }
+                    }
+                }
+            }
+        }
+
+        String result = source.toString().trim();
+
+        if (result.isEmpty()) {
+            throw new SQLException(String.format(
+                "No package spec found in ALL_SOURCE for %s.%s",
+                schema.toUpperCase(), packageName.toUpperCase()
+            ));
+        }
+
+        return result;
     }
 }

@@ -5,10 +5,12 @@ import me.christianrobert.orapgsync.antlr.PlSqlParserBaseVisitor;
 import me.christianrobert.orapgsync.transformer.builder.outerjoin.OuterJoinContext;
 import me.christianrobert.orapgsync.transformer.builder.rownum.RownumContext;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
+import me.christianrobert.orapgsync.transformer.packagevariable.PackageContext;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 
 public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
@@ -208,12 +210,39 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
     // Checked by VisitSql_statement to inject GET DIAGNOSTICS for SQL% tracking
     private boolean lastStatementHadIntoClause = false;
 
+    // ========== Package Variable Support ==========
+
+    // Package context cache (passed from job, ephemeral per-job execution)
+    // Maps "schema.packagename" (lowercase) to PackageContext
+    // Null if no package context available (standalone functions or not yet wired)
+    private final Map<String, PackageContext> packageContextCache;
+
+    // Current function context (for detecting package membership)
+    // Set when transforming a function/procedure body
+    private String currentSchema;
+    private String currentPackageName;  // null for standalone functions
+
+    // Assignment target flag for package variable transformation
+    // When true, package variable references should NOT be transformed to getters
+    // (assignment statement will handle transformation to setter)
+    private boolean isInAssignmentTarget = false;
+
     /**
      * Creates a PostgresCodeBuilder with transformation context.
      * @param context Transformation context for metadata lookups (can be null for simple transformations)
      */
     public PostgresCodeBuilder(TransformationContext context) {
+        this(context, null);
+    }
+
+    /**
+     * Creates a PostgresCodeBuilder with transformation context and package context cache.
+     * @param context Transformation context for metadata lookups (can be null for simple transformations)
+     * @param packageContextCache Package context cache (can be null if no package variable support needed)
+     */
+    public PostgresCodeBuilder(TransformationContext context, Map<String, PackageContext> packageContextCache) {
         this.context = context;
+        this.packageContextCache = packageContextCache;
         this.outerJoinContextStack = new ArrayDeque<>();
         this.rownumContextStack = new ArrayDeque<>();
         this.loopRecordVariablesStack = new ArrayDeque<>();
@@ -225,12 +254,7 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
      * Creates a PostgresCodeBuilder without context (for simple transformations without metadata).
      */
     public PostgresCodeBuilder() {
-        this.context = null;
-        this.outerJoinContextStack = new ArrayDeque<>();
-        this.rownumContextStack = new ArrayDeque<>();
-        this.loopRecordVariablesStack = new ArrayDeque<>();
-        this.exceptionContextStack = new ArrayDeque<>();
-        this.cursorAttributeTracker = new CursorAttributeTracker();
+        this(null, null);
     }
 
     /**
@@ -507,6 +531,149 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
         boolean result = this.lastStatementHadIntoClause;
         this.lastStatementHadIntoClause = false;  // Reset for next statement
         return result;
+    }
+
+    // ========== PACKAGE VARIABLE SUPPORT ==========
+
+    /**
+     * Sets the current package context for function transformation.
+     * Called when transforming a package function/procedure body.
+     *
+     * @param schema Schema name
+     * @param packageName Package name (null for standalone functions)
+     */
+    public void setCurrentPackage(String schema, String packageName) {
+        this.currentSchema = schema;
+        this.currentPackageName = packageName;
+    }
+
+    /**
+     * Sets the assignment target flag for package variable transformation.
+     * When true, package variable references will not be transformed to getters.
+     *
+     * @param value true if currently in assignment target context
+     */
+    public void setInAssignmentTarget(boolean value) {
+        this.isInAssignmentTarget = value;
+    }
+
+    /**
+     * Checks if currently in assignment target context.
+     *
+     * @return true if in assignment target context
+     */
+    public boolean isInAssignmentTarget() {
+        return this.isInAssignmentTarget;
+    }
+
+    /**
+     * Checks if a dot-qualified reference is a package variable.
+     *
+     * @param packageName Package name (first part of "pkg.varname")
+     * @param variableName Variable name (second part of "pkg.varname")
+     * @return true if this is a package variable reference
+     */
+    public boolean isPackageVariable(String packageName, String variableName) {
+        if (packageContextCache == null || currentSchema == null) {
+            return false;
+        }
+
+        String cacheKey = (currentSchema + "." + packageName).toLowerCase();
+        PackageContext ctx = packageContextCache.get(cacheKey);
+
+        if (ctx == null) {
+            return false;
+        }
+
+        return ctx.hasVariable(variableName);
+    }
+
+    /**
+     * Transforms a package variable reference to a getter function call.
+     * Pattern: packagename.varname → schema.packagename__get_varname()
+     *
+     * @param packageName Package name
+     * @param variableName Variable name
+     * @return PostgreSQL getter function call
+     */
+    public String transformToPackageVariableGetter(String packageName, String variableName) {
+        if (currentSchema == null) {
+            return packageName + "." + variableName;  // Fallback
+        }
+
+        return currentSchema.toLowerCase() + "." +
+               packageName.toLowerCase() + "__get_" +
+               variableName.toLowerCase() + "()";
+    }
+
+    /**
+     * Parses a package variable reference from assignment left-hand side.
+     * Pattern: "pkg.varname" → PackageVariableReference
+     *
+     * @param leftSide Left-hand side of assignment (e.g., "pkg.varname")
+     * @return PackageVariableReference or null if not a package variable
+     */
+    public PackageVariableReference parsePackageVariableReference(String leftSide) {
+        if (leftSide == null || currentSchema == null) {
+            return null;
+        }
+
+        // Check if it's a dot-qualified reference
+        String[] parts = leftSide.split("\\.");
+        if (parts.length != 2) {
+            return null;  // Not a simple dot reference
+        }
+
+        String packageName = parts[0].trim();
+        String variableName = parts[1].trim();
+
+        // Check if it's actually a package variable
+        if (!isPackageVariable(packageName, variableName)) {
+            return null;  // Not a package variable
+        }
+
+        return new PackageVariableReference(currentSchema, packageName, variableName);
+    }
+
+    /**
+     * Represents a parsed package variable reference.
+     * Used for transforming assignments to setter calls.
+     */
+    public static class PackageVariableReference {
+        private final String schema;
+        private final String packageName;
+        private final String variableName;
+
+        public PackageVariableReference(String schema, String packageName, String variableName) {
+            this.schema = schema;
+            this.packageName = packageName;
+            this.variableName = variableName;
+        }
+
+        /**
+         * Generates a setter function call for this package variable.
+         * Pattern: schema.packagename__set_varname(rhsExpression)
+         *
+         * @param rhsExpression Right-hand side expression (value to set)
+         * @return PostgreSQL setter function call
+         */
+        public String getSetterCall(String rhsExpression) {
+            return schema.toLowerCase() + "." +
+                   packageName.toLowerCase() + "__set_" +
+                   variableName.toLowerCase() + "(" + rhsExpression + ")";
+        }
+
+        public String getSchema() {
+            return schema;
+        }
+
+        public String getPackageName() {
+            return packageName;
+        }
+
+        public String getVariableName() {
+            return variableName;
+        }
     }
 
     // ========== SELECT STATEMENT ==========
