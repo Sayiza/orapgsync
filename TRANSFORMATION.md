@@ -709,8 +709,9 @@ Detailed implementation documentation:
 - 📋 Planned: Complex expressions (CASE), PL/SQL variables, collections, full integration
 - See [TYPE_INFERENCE_IMPLEMENTATION_PLAN.md](TYPE_INFERENCE_IMPLEMENTATION_PLAN.md) for details
 
-**2. Standalone Function/Procedure Implementation** 🔄 **60-70% COMPLETE**
+**2. Function/Procedure Implementation (Unified)** 🔄 **60-70% COMPLETE**
 - ✅ Infrastructure complete (ANTLR parsing, two-pass architecture, PostgreSQL execution)
+- ✅ Handles **both standalone and package functions** in single unified job
 - ✅ Function/procedure signatures with IN/OUT/INOUT parameters
   - **Important:** All Oracle PROCEDUREs → PostgreSQL FUNCTIONs (PostgreSQL best practice)
   - RETURNS clause automatically calculated based on OUT parameters:
@@ -726,36 +727,27 @@ Detailed implementation documentation:
 - ✅ Call statements (PERFORM for procedures/functions, schema qualification, package flattening)
 - ✅ RETURN statements
 - 📋 Missing: Basic LOOP/WHILE loops, EXIT/CONTINUE, explicit cursor operations, exceptions, NULL statement
+- 📋 **Planned: Package variable support** (unified on-demand approach)
+  - Package specs parsed on-demand during transformation
+  - Helper functions (initialize, getters, setters) generated and cached
+  - Package variables transformed to getter/setter calls
+  - No separate extraction/creation jobs (maintains ANTLR-only-in-transformation pattern)
+  - See [PACKAGE_VARIABLE_IMPLEMENTATION_PLAN.md](documentation/PACKAGE_VARIABLE_IMPLEMENTATION_PLAN.md)
 - Replace function/procedure stubs with actual implementations
 - See [STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md](STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md) for detailed status
 
-**3. Package Analysis** (Before Function Implementation)
-- Analyze Oracle package structure and state management
-- Classify package variables: constants, simple variables, complex state
-- Assess migration feasibility per package
-- Generate reports on supported vs. manual migration patterns
-- Informs function implementation strategy
-- Prepares helper functions to work with package variables and initialization
-- Creates meta-data to be used in the next step
-  
-**4. Package Function/Procedure Implementation** (Uses Package Analysis)
-- Transform package functions/procedures
-- PL/SQL → PL/pgSQL conversion using ANTLR
-- Implement strategies from package analysis (constants, session config, etc.)
-- Replace function/procedure stubs with actual implementations
-
-**5. Type Method Implementation** 
+**3. Type Method Implementation**
 - Transform Oracle type member methods to PostgreSQL functions
 - Extend PostgresCodeBuilder with PL/SQL statement visitors
 - Handle SELF parameter transformation
 - Replace type method stubs with actual implementations
 
-**6. Trigger Migration**
+**4. Trigger Migration**
 - Extract Oracle trigger definitions
 - Transform to PostgreSQL trigger functions
 - Handle :NEW/:OLD, timing, events, row/statement level
 
-**7. REST Layer Generation (Optional Future)**
+**5. REST Layer Generation (Optional Future)**
 - Auto-generate REST endpoints for migrated functions
 - Enable incremental cutover and testing
 - OpenAPI documentation

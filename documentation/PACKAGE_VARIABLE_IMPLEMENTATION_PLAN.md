@@ -1,14 +1,51 @@
-# Package Variable Implementation Plan
+# Package Variable Implementation Plan (Unified Approach)
 
 **Status:** 📋 **PLANNED** - Ready for implementation
 **Created:** 2025-10-31
-**Target:** Step 26 in orchestration workflow (Package Analysis and Variable Support)
+**Updated:** 2025-10-31 (Revised to unified architecture)
+**Integration:** Extends existing Step 25 (Function/Procedure Implementation)
 
 ---
 
 ## Overview
 
 Implements Oracle package variable support in PostgreSQL using `set_config`/`current_setting` mechanism for session-level state management. This enables migrated package functions/procedures to maintain state across calls, matching Oracle's package variable semantics.
+
+**Key Architectural Decision: Unified On-Demand Approach**
+
+Package variable support is **integrated directly into the existing function transformation job** (Step 25), not split into separate extraction/creation steps.
+
+**Why unified?**
+- ✅ Maintains ANTLR-only-in-transformation pattern (no ANTLR in extraction jobs)
+- ✅ Simpler: No StateService properties, no separate jobs, no new REST endpoints
+- ✅ More efficient: Package spec parsed once per package, cached in-memory during job
+- ✅ Self-contained: All package logic in transformation job
+- ✅ Same visitor classes work for standalone and package functions
+
+**Architecture:**
+```
+PostgresFunctionImplementationJob (existing Step 25)
+  ↓
+For each function to transform:
+  ↓
+Is it a package member? (detect "__" in function name)
+  ↓ YES
+  ↓
+Package context already cached? (in-memory, per-job execution)
+  ↓ NO
+  ↓
+Query ALL_SOURCE for package spec
+Parse with ANTLR (extract variable declarations)
+Generate helper SQL (initialize, getters, setters)
+Execute helper creation in PostgreSQL
+Cache package context
+  ↓
+Transform function body:
+  - Inject initialization call at start
+  - Transform pkg.variable references to getters/setters
+  ↓
+Execute CREATE OR REPLACE FUNCTION
+```
 
 **Strategy:** Progressive implementation starting with simple primitive types and expanding to complex cases.
 
@@ -118,31 +155,43 @@ $$ LANGUAGE plpgsql;
 
 ---
 
-### 4. Variable Metadata: Extraction Job ✅
+### 4. Package Context Management: On-Demand with Caching ✅
 
-**Decision:** Extract package variable declarations from Oracle `ALL_SOURCE` in separate extraction job
+**Decision:** Parse package specs on-demand during transformation, cache in-memory for job duration
 
-**Pattern:** Follow established architecture (extraction → state → creation)
+**Architecture:**
 
-**Job Structure:**
-```
-OraclePackageVariableExtractionJob
-  ↓ queries ALL_SOURCE
-  ↓ parses package spec declarations
-  ↓ stores in StateService.packageVariableMetadata
+Package context is **ephemeral** - exists only during transformation job execution, not stored in StateService.
 
-PostgresPackageVariableHelperCreationJob
-  ↓ reads from StateService
-  ↓ generates initialization functions
-  ↓ generates getter/setter helper functions
-  ↓ executes in PostgreSQL
-```
+**When first package function is encountered:**
+1. Query `ALL_SOURCE` for package spec
+2. Parse with ANTLR to extract variable declarations
+3. Generate helper function SQL (initialize + getters + setters)
+4. Execute helper creation SQL in PostgreSQL
+5. Cache package context in job-local map
+
+**When subsequent functions from same package are encountered:**
+1. Check cache - context already exists
+2. Use cached context for transformation
+3. No re-parsing, no re-generation
 
 **Benefits:**
-- ✅ Follows established pattern (no database queries during transformation)
-- ✅ Clear separation of concerns
-- ✅ Metadata available for transformation context
-- ✅ Testable with mocked metadata
+- ✅ Maintains pattern: ANTLR only in transformation jobs (not extraction jobs)
+- ✅ No StateService pollution with transformation-time context
+- ✅ Package spec parsed once per package per job execution
+- ✅ Self-contained: All package logic lives in transformation layer
+- ✅ Simpler: No separate extraction/creation jobs needed
+
+**Comparison to existing patterns:**
+
+| Feature | Metadata Extraction | Package Variables |
+|---------|---------------------|-------------------|
+| **Function Signatures** | Pre-extracted from ALL_ARGUMENTS | Stubs already created |
+| **Function Bodies** | Parsed on-demand from ALL_SOURCE | ✅ Same approach |
+| **Loop RECORD Variables** | Parsed on-demand in FOR loops | ✅ Same approach |
+| **Package Variables** | ~~Pre-extracted~~ ❌ | Parsed on-demand ✅ |
+
+Package variables are like loop RECORD variables - discovered during parsing, not pre-extracted as metadata.
 
 ---
 
@@ -256,89 +305,338 @@ PERFORM hr.pkg__set_g_total(hr.pkg__get_g_counter() + hr.pkg__get_g_increment())
 
 ---
 
-## Data Model
+## Package Context Components
 
-### PackageVariableMetadata
+### PackageContext (Ephemeral, In-Memory)
 
-**Location:** `core/job/model/packagelevel/PackageVariableMetadata.java`
+**Location:** Created on-demand in transformation job, cached during job execution
 
 ```java
-public class PackageVariableMetadata {
-    private String schema;
-    private String packageName;
-    private String variableName;
-    private String dataType;          // e.g., "INTEGER", "VARCHAR2(100)", "DATE"
-    private String defaultValue;      // e.g., "0", "'ACTIVE'", "SYSDATE"
-    private boolean isConstant;       // true if declared with CONSTANT keyword
+// In PostgresFunctionImplementationJob or PostgresCodeBuilder
+private Map<String, PackageContext> packageContextCache = new HashMap<>();
 
-    // constructors, getters, toString
+static class PackageContext {
+    String schema;
+    String packageName;
+    Map<String, PackageVariable> variables;  // variable name → variable metadata
+    boolean helpersCreated;  // Have helper functions been created in PostgreSQL?
+
+    static class PackageVariable {
+        String variableName;
+        String dataType;          // e.g., "INTEGER", "VARCHAR2(100)", "DATE"
+        String defaultValue;      // e.g., "0", "'ACTIVE'", "SYSDATE"
+        boolean isConstant;       // true if declared with CONSTANT keyword
+    }
 }
 ```
 
-### StateService Properties
+**Lifecycle:**
+1. **Creation:** When first function from package is encountered
+2. **Scope:** Exists for duration of job execution
+3. **Cache key:** `schema.packagename` (lowercase)
+4. **Cleanup:** Garbage collected when job completes
+
+**NOT stored in:**
+- ❌ StateService (not global metadata)
+- ❌ TransformationContext (too heavyweight for per-package data)
+- ❌ Database (generated on-demand)
+
+---
+
+### PackageContextExtractor (Helper Class)
+
+**Purpose:** Parse Oracle package spec with ANTLR, extract variable declarations
 
 ```java
-// In StateService.java
-private List<PackageVariableMetadata> packageVariableMetadata = new ArrayList<>();
+public class PackageContextExtractor {
+    /**
+     * Parses package spec and extracts variable declarations
+     *
+     * @param schema Schema name
+     * @param packageName Package name
+     * @param packageSpecSql Package spec SQL from ALL_SOURCE
+     * @return PackageContext with variables
+     */
+    public PackageContext extractContext(String schema, String packageName, String packageSpecSql) {
+        // 1. Parse package spec with ANTLR
+        PlSqlParser.Create_packageContext specCtx = AntlrParser.parsePackageSpec(packageSpecSql);
 
-public List<PackageVariableMetadata> getPackageVariableMetadata() {
-    return packageVariableMetadata;
-}
+        // 2. Extract variable declarations
+        List<PackageVariable> variables = new ArrayList<>();
 
-public void setPackageVariableMetadata(List<PackageVariableVariableMetadata> metadata) {
-    this.packageVariableMetadata = metadata;
+        for (PlSqlParser.Variable_declarationContext varCtx : specCtx.variable_declaration()) {
+            String varName = varCtx.identifier().getText();
+            String dataType = extractDataType(varCtx.type_spec());
+            String defaultValue = extractDefaultValue(varCtx);
+            boolean isConstant = varCtx.CONSTANT() != null;
+
+            variables.add(new PackageVariable(varName, dataType, defaultValue, isConstant));
+        }
+
+        // 3. Build context
+        return new PackageContext(schema, packageName, variables);
+    }
 }
 ```
 
 ---
 
-## Transformation Context
+### PackageHelperGenerator (Helper Class)
 
-### PackageVariableContext (Inner Class in PostgresCodeBuilder)
+**Purpose:** Generate SQL for helper functions (initialize, getters, setters)
 
 ```java
-// In PostgresCodeBuilder.java
-private static class PackageVariableContext {
-    // Key: schema.package.variable → metadata
-    private final Map<String, PackageVariable> variables = new HashMap<>();
+public class PackageHelperGenerator {
+    /**
+     * Generates helper function SQL for a package
+     *
+     * @param context Package context with variables
+     * @return List of SQL statements to execute
+     */
+    public List<String> generateHelperSql(PackageContext context) {
+        List<String> sqlStatements = new ArrayList<>();
 
-    static class PackageVariable {
-        String schema;
-        String packageName;
-        String variableName;
-        String dataType;
-        String defaultValue;
-        boolean isConstant;
+        // 1. Generate initialization function
+        sqlStatements.add(generateInitializeFunction(context));
+
+        // 2. Generate getters and setters for each variable
+        for (PackageVariable var : context.variables.values()) {
+            if (!var.isConstant) {  // Constants don't need setters
+                sqlStatements.add(generateGetterFunction(context, var));
+                sqlStatements.add(generateSetterFunction(context, var));
+            }
+        }
+
+        return sqlStatements;
     }
 
-    void registerVariable(String schema, String packageName, String varName,
-                         String type, String defaultValue, boolean isConstant) {
-        String key = (schema + "." + packageName + "." + varName).toLowerCase();
-        variables.put(key, new PackageVariable(...));
+    private String generateInitializeFunction(PackageContext ctx) {
+        StringBuilder sql = new StringBuilder();
+        sql.append("CREATE OR REPLACE FUNCTION ")
+           .append(ctx.schema).append(".").append(ctx.packageName).append("__initialize()\n");
+        sql.append("RETURNS void LANGUAGE plpgsql AS $$\n");
+        sql.append("BEGIN\n");
+        sql.append("  IF current_setting('").append(ctx.schema).append(".")
+           .append(ctx.packageName).append(".__initialized', true) = 'true' THEN\n");
+        sql.append("    RETURN;\n");
+        sql.append("  END IF;\n\n");
+
+        // Initialize all variables
+        for (PackageVariable var : ctx.variables.values()) {
+            String configKey = ctx.schema + "." + ctx.packageName + "." + var.variableName;
+            String pgDefaultValue = transformDefaultValue(var.defaultValue, var.dataType);
+            sql.append("  PERFORM set_config('").append(configKey).append("', '")
+               .append(pgDefaultValue).append("', false);\n");
+        }
+
+        sql.append("\n  PERFORM set_config('").append(ctx.schema).append(".")
+           .append(ctx.packageName).append(".__initialized', 'true', false);\n");
+        sql.append("END;$$;\n");
+
+        return sql.toString();
     }
 
-    boolean isPackageVariable(String schema, String packageName, String varName) {
-        String key = (schema + "." + packageName + "." + varName).toLowerCase();
-        return variables.containsKey(key);
+    // Similar for generateGetterFunction() and generateSetterFunction()
+}
+```
+
+---
+
+## Integration into Existing Function Transformation Job
+
+### Modified PostgresFunctionImplementationJob
+
+**Existing:** `PostgresFunctionImplementationJob` (Step 25) transforms standalone functions
+
+**New:** Same job now handles package functions by detecting package membership and managing package context
+
+```java
+@Dependent
+public class PostgresFunctionImplementationJob extends AbstractDatabaseCreationJob<FunctionImplementationResult> {
+
+    @Inject
+    PostgresConnectionService postgresConnectionService;
+
+    @Inject
+    StateService stateService;
+
+    @Inject
+    AntlrParser antlrParser;
+
+    // NEW: Package context cache (ephemeral, per-job execution)
+    private Map<String, PackageContext> packageContextCache = new HashMap<>();
+
+    @Override
+    protected FunctionImplementationResult performCreation(Consumer<JobProgress> progressCallback) {
+        List<FunctionMetadata> functions = stateService.getPostgresFunctionMetadata();
+
+        // Filter: Only standalone functions (no "__" in name)
+        // UPDATED: Remove filter, handle both standalone and package functions
+
+        int implemented = 0;
+        int skipped = 0;
+        List<String> errors = new ArrayList<>();
+
+        for (FunctionMetadata function : functions) {
+            try {
+                // NEW: Check if package function
+                if (isPackageFunction(function)) {
+                    // Ensure package context exists (parse spec if first function from package)
+                    ensurePackageContext(function.getSchema(), extractPackageName(function));
+                }
+
+                // Transform function body (works for both standalone and package)
+                String transformedSql = transformFunction(function);
+
+                // Execute CREATE OR REPLACE FUNCTION
+                executeCreation(transformedSql);
+                implemented++;
+
+            } catch (UnsupportedFeatureException e) {
+                skipped++;
+                // Log skipped function
+            } catch (Exception e) {
+                errors.add(function.getName() + ": " + e.getMessage());
+            }
+        }
+
+        return new FunctionImplementationResult(implemented, skipped, errors);
     }
 
-    PackageVariable getVariable(String schema, String packageName, String varName) {
-        String key = (schema + "." + packageName + "." + varName).toLowerCase();
-        return variables.get(key);
+    // NEW: Package context management
+    private void ensurePackageContext(String schema, String packageName) throws SQLException {
+        String cacheKey = (schema + "." + packageName).toLowerCase();
+
+        if (packageContextCache.containsKey(cacheKey)) {
+            return;  // Already cached
+        }
+
+        // 1. Query ALL_SOURCE for package spec
+        String packageSpecSql = queryPackageSpec(schema, packageName);
+
+        // 2. Parse and extract variable declarations
+        PackageContextExtractor extractor = new PackageContextExtractor();
+        PackageContext context = extractor.extractContext(schema, packageName, packageSpecSql);
+
+        // 3. Generate helper function SQL
+        PackageHelperGenerator generator = new PackageHelperGenerator();
+        List<String> helperSqlStatements = generator.generateHelperSql(context);
+
+        // 4. Execute helper creation in PostgreSQL
+        try (Connection conn = postgresConnectionService.getConnection()) {
+            for (String sql : helperSqlStatements) {
+                try (Statement stmt = conn.createStatement()) {
+                    stmt.execute(sql);
+                }
+            }
+        }
+
+        // 5. Cache context
+        context.helpersCreated = true;
+        packageContextCache.put(cacheKey, context);
     }
 
-    List<PackageVariable> getVariablesForPackage(String schema, String packageName) {
-        String prefix = (schema + "." + packageName + ".").toLowerCase();
-        return variables.entrySet().stream()
-            .filter(e -> e.getKey().startsWith(prefix))
-            .map(Map.Entry::getValue)
-            .collect(Collectors.toList());
+    private boolean isPackageFunction(FunctionMetadata function) {
+        return function.getName().contains("__");  // Double underscore = package member
+    }
+
+    private String extractPackageName(FunctionMetadata function) {
+        String name = function.getName();
+        int idx = name.indexOf("__");
+        return idx > 0 ? name.substring(0, idx) : null;
+    }
+
+    private String queryPackageSpec(String schema, String packageName) throws SQLException {
+        // Query ALL_SOURCE for package spec
+        // ORDER BY line, concatenate TEXT column
+        // ...
     }
 }
 ```
 
-**Initialization:**
-Populated when `PostgresCodeBuilder` is created, from `TransformationContext` which gets metadata from `StateService`.
+---
+
+### Modified PostgresCodeBuilder
+
+**Add package context access:**
+
+```java
+public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
+
+    // Existing fields
+    private TransformationContext transformationContext;
+    private boolean isInAssignmentTarget = false;
+
+    // NEW: Package context cache (passed from job)
+    private Map<String, PackageContext> packageContextCache;
+
+    // NEW: Current function context (for detecting package membership)
+    private String currentSchema;
+    private String currentPackageName;  // null for standalone functions
+
+    // Constructor
+    public PostgresCodeBuilder(
+        TransformationContext transformationContext,
+        Map<String, PackageContext> packageContextCache  // NEW parameter
+    ) {
+        this.transformationContext = transformationContext;
+        this.packageContextCache = packageContextCache;
+    }
+
+    // NEW: Package variable lookup
+    public boolean isPackageVariable(String packageName, String variableName) {
+        String cacheKey = (currentSchema + "." + packageName).toLowerCase();
+        PackageContext ctx = packageContextCache.get(cacheKey);
+
+        if (ctx == null) return false;
+
+        return ctx.variables.containsKey(variableName.toLowerCase());
+    }
+
+    public String transformToPackageVariableGetter(String packageName, String variableName) {
+        return currentSchema + "." + packageName + "__get_" + variableName.toLowerCase() + "()";
+    }
+
+    // Existing assignment target flag methods
+    public void setInAssignmentTarget(boolean value) { this.isInAssignmentTarget = value; }
+    public boolean isInAssignmentTarget() { return this.isInAssignmentTarget; }
+
+    // ... rest of visitor methods
+}
+```
+
+---
+
+### Modified VisitFunctionBody / VisitProcedureBody
+
+**Inject initialization call for package functions:**
+
+```java
+public class VisitFunctionBody {
+    public static String v(PlSqlParser.Function_bodyContext ctx, PostgresCodeBuilder b) {
+        // Detect package membership
+        String functionName = ctx.identifier(0).getText();
+        String packageName = extractPackageNameFromFunctionName(functionName);
+
+        // Transform body
+        StringBuilder body = new StringBuilder();
+        body.append("BEGIN\n");
+
+        // NEW: Inject initialization call for package functions
+        if (packageName != null) {
+            String schema = b.getCurrentSchema();
+            body.append("  PERFORM ").append(schema).append(".")
+                .append(packageName).append("__initialize();\n\n");
+        }
+
+        // Transform statements
+        body.append(b.visit(ctx.seq_of_statements()));
+
+        body.append("END");
+        return body.toString();
+    }
+}
+```
 
 ---
 
@@ -368,36 +666,24 @@ END;
 
 **Implementation Steps:**
 
-1. **Create Data Model** (1 class)
-   - `PackageVariableMetadata.java`
+1. **Create Helper Classes** (2 classes)
+   - `PackageContextExtractor.java` - Parse package spec, extract variables
+   - `PackageHelperGenerator.java` - Generate initialize/getter/setter SQL
 
-2. **Create Extraction Job** (1 class)
-   - `OraclePackageVariableExtractionJob.java`
-   - Queries `ALL_SOURCE` for package specs
-   - Parses variable declarations (regex: `^\s*(\w+)\s+(INTEGER|NUMBER|VARCHAR2|DATE|BOOLEAN).*$`)
-   - Extracts: name, type, default value, CONSTANT keyword
-   - Stores in `StateService.packageVariableMetadata`
+2. **Extend PostgresFunctionImplementationJob** (package context management)
+   - Add `packageContextCache` field (Map<String, PackageContext>)
+   - Add `ensurePackageContext()` method
+   - Add `queryPackageSpec()` method
+   - Remove standalone-only filter (handle all functions)
 
-3. **Extend StateService** (1 property)
-   - Add `packageVariableMetadata` list with getters/setters
-
-4. **Create Helper Generation Job** (1 class)
-   - `PostgresPackageVariableHelperCreationJob.java`
-   - Reads from `StateService.packageVariableMetadata`
-   - Generates for each package:
-     - `{schema}.{package}__initialize()` function
-     - `{schema}.{package}__get_{variable}()` getter for each variable
-     - `{schema}.{package}__set_{variable}(p_value type)` setter for each variable
-   - Executes CREATE FUNCTION statements in PostgreSQL
-
-5. **Extend PostgresCodeBuilder** (context tracking)
-   - Add `PackageVariableContext` inner class
+3. **Extend PostgresCodeBuilder** (context tracking)
+   - Add `packageContextCache` field (passed from job)
+   - Add `currentPackageName` field (set during function transformation)
    - Add `isInAssignmentTarget` flag with accessors
-   - Populate context from `TransformationContext` (which reads from `StateService`)
 
-6. **Add Helper Methods to PostgresCodeBuilder** (3 methods)
+4. **Add Helper Methods to PostgresCodeBuilder** (3 methods)
    ```java
-   public boolean isPackageVariable(List<General_element_partContext> parts) { ... }
+   public boolean isPackageVariable(String packageName, String variableName) { ... }
 
    public String transformToPackageVariableGetter(String packageName, String varName) {
        // Returns: schema.package__get_varname()
@@ -419,26 +705,27 @@ END;
    }
    ```
 
-7. **Modify VisitAssignment_statement.java** (setter detection)
+5. **Modify VisitAssignment_statement.java** (setter detection)
    - Add context flag protection for LHS parsing
    - Add package variable detection
    - Transform to setter call
 
-8. **Modify VisitGeneralElement.java** (getter detection)
+6. **Modify VisitGeneralElement.java** (getter detection)
    - Add package variable check in dot navigation section
    - Check `isInAssignmentTarget()` flag
    - Transform to getter if flag=false
 
-9. **Add initialization call injection** (modify function transformation)
+7. **Add initialization call injection** (modify function transformation)
    - In `VisitFunctionBody.java` and `VisitProcedureBody.java`
-   - For package functions only (detect package membership)
+   - For package functions only (detect package membership via `__` in name)
    - Inject `PERFORM {schema}.{package}__initialize();` at start of body
 
-10. **Test with real Oracle example**
-    - Extract package variables (Step 1)
-    - Create helper functions (Step 2)
-    - Transform package function (Step 3)
-    - Execute and verify in PostgreSQL
+8. **Test with real Oracle example**
+   - Create Oracle package with variable
+   - Run function transformation job
+   - Verify helper functions created
+   - Verify package function transformed correctly
+   - Execute and verify in PostgreSQL
 
 **Expected Transformation:**
 
@@ -531,32 +818,28 @@ g_max_retry CONSTANT INTEGER := 5;
 
 ### New Files (Created)
 
-**Data Model:**
-- `core/job/model/packagelevel/PackageVariableMetadata.java`
-
-**Jobs:**
-- `packagelevel/job/OraclePackageVariableExtractionJob.java`
-- `packagelevel/job/PostgresPackageVariableHelperCreationJob.java`
-- `packagelevel/job/PostgresPackageVariableHelperVerificationJob.java`
-
-**Results:**
-- `core/job/model/packagelevel/PackageVariableHelperCreationResult.java`
-
-**Services (if needed):**
-- `packagelevel/service/OraclePackageVariableExtractor.java` (optional helper)
+**Helper Classes:**
+- `transformer/packagevariable/PackageContextExtractor.java` - Parse package specs
+- `transformer/packagevariable/PackageHelperGenerator.java` - Generate helper SQL
+- `transformer/packagevariable/PackageContext.java` - Data model for package context (inner classes)
 
 ### Modified Files
 
-**State Management:**
-- `core/state/StateService.java` - Add `packageVariableMetadata` property
+**Transformation Job:**
+- `function/job/PostgresFunctionImplementationJob.java`
+  - Add `packageContextCache` field
+  - Add `ensurePackageContext()` method
+  - Add `queryPackageSpec()` method
+  - Remove standalone-only filter
 
-**Transformation:**
+**Code Builder:**
 - `transformer/builder/PostgresCodeBuilder.java`
-  - Add `PackageVariableContext` inner class
+  - Add `packageContextCache` field (constructor parameter)
+  - Add `currentPackageName` field
   - Add `isInAssignmentTarget` flag
-  - Add package variable helper methods
-  - Populate context from TransformationContext
+  - Add package variable helper methods (isPackageVariable, transformToGetter, parseReference)
 
+**Visitor Classes:**
 - `transformer/builder/VisitAssignment_statement.java`
   - Add context flag protection
   - Add package variable detection
@@ -570,42 +853,29 @@ g_max_retry CONSTANT INTEGER := 5;
 - `transformer/builder/VisitProcedureBody.java`
   - Inject initialization call for package functions
 
-**Context:**
-- `transformer/context/TransformationContext.java` - Add package variable lookup methods
-- `transformer/context/TransformationIndices.java` - Add package variable index
-
-**Frontend:**
-- `orchestration.html` - Add Step 26 row
-- `orchestration-service.js` - Add handlers
-
----
-
-## REST API Endpoints
-
-**Pattern:** `/api/jobs/{database}/{feature}/{action}`
-
-```
-# Oracle Extraction
-POST /api/jobs/oracle/package-variable/extract
-
-# PostgreSQL Helper Creation
-POST /api/jobs/postgres/package-variable-helper/create
-
-# PostgreSQL Helper Verification
-POST /api/jobs/postgres/package-variable-helper-verification/verify
-```
+**NO changes needed:**
+- ❌ StateService (no package variable metadata property)
+- ❌ REST endpoints (uses existing function implementation endpoint)
+- ❌ Frontend (uses existing Step 25 UI)
+- ❌ Job registry (reuses existing function implementation job)
 
 ---
 
 ## Testing Strategy
 
-### Unit Tests
+### Unit Tests (Integrated into Existing Test Suite)
 
-**Extraction Tests:**
-- `OraclePackageVariableExtractionTest.java`
+**Package Context Extraction Tests:**
+- `PackageContextExtractorTest.java`
   - Test parsing of variable declarations
   - Test CONSTANT keyword detection
   - Test default value extraction
+  - Test multiple variables in same package
+
+**Package Helper Generation Tests:**
+- `PackageHelperGeneratorTest.java`
+  - Test initialization function generation
+  - Test getter/setter generation for each type
   - Test multiple variables in same package
 
 **Transformation Tests:**
@@ -616,20 +886,14 @@ POST /api/jobs/postgres/package-variable-helper-verification/verify
   - Test initialization call injection
   - Test constants (if inlined)
 
-**Helper Generation Tests:**
-- `PostgresPackageVariableHelperCreationTest.java`
-  - Test initialization function generation
-  - Test getter/setter generation for each type
-  - Test multiple variables in same package
+### Integration Tests (PostgreSQL Validation)
 
-### Integration Tests
+**Test Class:** `PostgresPlSqlPackageVariableValidationTest.java`
 
-**PostgreSQL Validation Tests:**
-- `PostgresPlSqlPackageVariableValidationTest.java`
-  - Execute transformed code in real PostgreSQL (Testcontainers)
-  - Verify session-level state persistence
-  - Verify initialization idempotency
-  - Verify concurrent session isolation
+- Execute transformed code in real PostgreSQL (Testcontainers)
+- Verify session-level state persistence
+- Verify initialization idempotency
+- Verify concurrent session isolation
 
 **Test Cases:**
 1. Simple counter increment across multiple calls
@@ -677,7 +941,7 @@ END;
 
 ### PostgreSQL Transformed
 
-**Helper Functions (auto-generated):**
+**Helper Functions (auto-generated on-demand):**
 ```sql
 -- Initialization function
 CREATE OR REPLACE FUNCTION hr.test_pkg__initialize()
@@ -773,17 +1037,58 @@ SELECT hr.test_pkg__get_counter();       -- Returns: 0 (different session)
 ## Success Criteria
 
 **Phase 1 Complete When:**
-- ✅ Oracle package variable extraction working
-- ✅ PostgreSQL helper generation working
+- ✅ Package context extraction working (parse package spec with ANTLR)
+- ✅ Package helper generation working (initialize + getters + setters)
+- ✅ On-demand context caching working (parse once per package)
 - ✅ Getter transformation working (RHS references)
 - ✅ Setter transformation working (LHS assignments)
-- ✅ Initialization injection working
+- ✅ Initialization injection working (package functions only)
 - ✅ Session-level state verified in PostgreSQL
 - ✅ Multiple calls preserve state within session
 - ✅ Multiple sessions properly isolated
 - ✅ Zero regressions in existing tests (882+ tests still passing)
+- ✅ No new StateService properties, no new jobs, no new REST endpoints
 
 **Coverage Estimate:** +10-20% of package functions (many depend on package variables)
+
+---
+
+## Architecture Validation
+
+### Maintains Established Patterns ✅
+
+| Pattern | Extraction Jobs | Transformation Jobs | Package Variables |
+|---------|----------------|---------------------|-------------------|
+| **Use ANTLR** | ❌ Never | ✅ Always | ✅ In transformation |
+| **Query ALL_SOURCE** | ❌ Never | ✅ Always | ✅ On-demand |
+| **Store in StateService** | ✅ Always | ❌ Never | ❌ Ephemeral cache |
+
+**Comparison:**
+- **View transformation:** Queries ALL_VIEWS.TEXT, parses with ANTLR in transformation job ✅
+- **Function transformation:** Queries ALL_SOURCE, parses with ANTLR in transformation job ✅
+- **Package variables:** Queries ALL_SOURCE, parses with ANTLR in transformation job ✅
+
+### Simplicity Gains ✅
+
+**Eliminated:**
+- ❌ OraclePackageVariableExtractionJob
+- ❌ PostgresPackageVariableHelperCreationJob
+- ❌ PostgresPackageVariableHelperVerificationJob
+- ❌ PackageVariableMetadata class
+- ❌ PackageVariableHelperCreationResult class
+- ❌ StateService.packageVariableMetadata property
+- ❌ REST endpoint: POST /api/jobs/oracle/package-variable/extract
+- ❌ REST endpoint: POST /api/jobs/postgres/package-variable-helper/create
+- ❌ REST endpoint: POST /api/jobs/postgres/package-variable-helper-verification/verify
+- ❌ Frontend: Step 26 HTML row
+- ❌ Frontend: JavaScript handlers for package variables
+
+**Total lines of code saved:** ~1500-2000 lines
+
+**Complexity reduced:**
+- No extraction/state/creation pipeline
+- No synchronization between extraction and transformation
+- No global state for transformation-time context
 
 ---
 
@@ -803,6 +1108,7 @@ SELECT hr.test_pkg__get_counter();       -- Returns: 0 (different session)
 
 - **Existing Architecture:** `TRANSFORMATION.md` for overall transformation strategy
 - **Similar Patterns:** `PLSQL_CURSOR_ATTRIBUTES_PLAN.md` for context tracking pattern
+- **Existing Job:** `STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md` for function transformation job
 - **PostgreSQL Docs:** [set_config and current_setting](https://www.postgresql.org/docs/current/functions-admin.html#FUNCTIONS-ADMIN-SET)
 - **Oracle Docs:** [PL/SQL Packages](https://docs.oracle.com/en/database/oracle/oracle-database/19/lnpls/plsql-packages.html)
 
@@ -810,58 +1116,58 @@ SELECT hr.test_pkg__get_counter();       -- Returns: 0 (different session)
 
 ## Implementation Checklist
 
-### Data Model
-- [ ] Create `PackageVariableMetadata.java`
+### Helper Classes
+- [ ] Create `PackageContextExtractor.java` (parse package specs with ANTLR)
+- [ ] Create `PackageHelperGenerator.java` (generate initialize/getter/setter SQL)
+- [ ] Create `PackageContext.java` (inner classes for context data)
 
-### Oracle Extraction
-- [ ] Create `OraclePackageVariableExtractionJob.java`
-- [ ] Implement variable parsing logic (regex or ANTLR)
-- [ ] Add to JobRegistry
+### Extend Transformation Job
+- [ ] Add `packageContextCache` field to `PostgresFunctionImplementationJob`
+- [ ] Implement `ensurePackageContext()` method (parse + generate + execute + cache)
+- [ ] Implement `queryPackageSpec()` method (query ALL_SOURCE)
+- [ ] Remove standalone-only filter (handle all functions)
+- [ ] Pass `packageContextCache` to PostgresCodeBuilder constructor
 
-### State Management
-- [ ] Extend `StateService` with `packageVariableMetadata` property
-- [ ] Update state getters/setters
-
-### PostgreSQL Helper Generation
-- [ ] Create `PostgresPackageVariableHelperCreationJob.java`
-- [ ] Implement initialization function template
-- [ ] Implement getter function template
-- [ ] Implement setter function template
-- [ ] Create `PackageVariableHelperCreationResult.java`
-- [ ] Add to JobRegistry
-
-### Transformation Context
-- [ ] Add `PackageVariableContext` inner class to `PostgresCodeBuilder`
-- [ ] Extend `TransformationContext` with package variable lookup methods
-- [ ] Extend `TransformationIndices` with package variable index
-- [ ] Populate from `StateService` metadata
+### Extend PostgresCodeBuilder
+- [ ] Add `packageContextCache` constructor parameter
+- [ ] Add `currentPackageName` field
+- [ ] Add `isInAssignmentTarget` flag with accessors
+- [ ] Add `isPackageVariable()` method
+- [ ] Add `transformToPackageVariableGetter()` method
+- [ ] Add `parsePackageVariableReference()` method
+- [ ] Add `PackageVariableReference` inner class
 
 ### Visitor Modifications
-- [ ] Add `isInAssignmentTarget` flag to `PostgresCodeBuilder`
-- [ ] Add helper methods to `PostgresCodeBuilder` (isPackageVariable, transformToGetter, parseReference)
 - [ ] Modify `VisitAssignment_statement.java` (flag protection + setter detection)
 - [ ] Modify `VisitGeneralElement.java` (package variable check + getter transformation)
-- [ ] Modify `VisitFunctionBody.java` (inject initialization call)
-- [ ] Modify `VisitProcedureBody.java` (inject initialization call)
-
-### Frontend Integration
-- [ ] Add Step 26 row to `orchestration.html`
-- [ ] Add handlers to `orchestration-service.js`
-- [ ] Add API fetch calls
+- [ ] Modify `VisitFunctionBody.java` (inject initialization call for package functions)
+- [ ] Modify `VisitProcedureBody.java` (inject initialization call for package functions)
 
 ### Testing
-- [ ] Unit tests: Extraction job
-- [ ] Unit tests: Helper generation
-- [ ] Unit tests: Getter transformation
-- [ ] Unit tests: Setter transformation
+- [ ] Unit tests: PackageContextExtractor (parsing)
+- [ ] Unit tests: PackageHelperGenerator (SQL generation)
+- [ ] Unit tests: Getter transformation (VisitGeneralElement)
+- [ ] Unit tests: Setter transformation (VisitAssignment_statement)
 - [ ] Integration tests: PostgreSQL validation (Testcontainers)
+  - [ ] Simple counter increment
+  - [ ] Multiple variables in same package
+  - [ ] Multiple packages (namespace isolation)
+  - [ ] Multiple sessions (session isolation)
+  - [ ] Transaction boundaries (session persistence)
 - [ ] Verify zero regressions (all 882+ tests still passing)
 
 ### Documentation
-- [ ] Update `TRANSFORMATION.md` with Phase 6 status
-- [ ] Update `CLAUDE.md` with Step 26 status
-- [ ] Update `STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md` (link to package variables)
+- [ ] Update `TRANSFORMATION.md` with package variable status
+- [ ] Update `CLAUDE.md` with unified approach (no Step 26)
+- [ ] Update `STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md` (rename to include package functions)
 
 ---
 
-**Ready to implement Phase 1!** 🚀
+**Ready to implement Phase 1 with unified architecture!** 🚀
+
+**Key Advantages:**
+- ✅ Maintains architectural patterns (ANTLR only in transformation)
+- ✅ Simpler (no separate jobs, no StateService pollution)
+- ✅ More efficient (parse once per package, cache in-memory)
+- ✅ Self-contained (all package logic in transformation layer)
+- ✅ Same visitor classes work for standalone and package functions
