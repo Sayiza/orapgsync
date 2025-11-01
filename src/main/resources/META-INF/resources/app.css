@@ -1261,28 +1261,6 @@ td {
     cursor: not-allowed;
 }
 
-/* Verify All button - similar to action-btn but for verification */
-.verify-all-btn {
-    background: linear-gradient(#4a90e2, #357abd);
-    border: 1px solid #2e6da4;
-    border-radius: var(--radius-sm);
-    color: white;
-    cursor: pointer;
-    font-size: var(--font-base);
-    padding: var(--spacing-xs) 0.5rem;
-    transition: background-color var(--transition-fast);
-}
-
-.verify-all-btn:hover {
-    background: linear-gradient(#357abd, #2e6da4);
-}
-
-.verify-all-btn:disabled {
-    background: #6c757d;
-    border-color: #6c757d;
-    cursor: not-allowed;
-}
-
 /* Status badge for view verification results */
 .status-badge {
     font-size: 0.85em;

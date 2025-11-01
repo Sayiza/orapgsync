@@ -388,10 +388,6 @@
                   <!-- View stub creation results will be populated here -->
                 </div>
               </div>
-              <!-- Informational message: See View Implementations for verification -->
-              <div class="info-message" style="margin-top: 8px; padding: 8px; background-color: #e7f3ff; border-left: 3px solid #2196F3; font-size: 0.9em;">
-                ℹ️ <strong>Note:</strong> See "Views created" below to verify and inspect generated view DDL.
-              </div>
             </div>
           </td>
         </tr>
@@ -520,7 +516,7 @@
             <div class="component-info" id="postgres-view-implementation">
               <span class="count-badge">-</span>
               <span class="component-text">Views created</span>
-              <button class="verify-all-btn" onclick="verifyAllPostgresViews()" title="Verify all PostgreSQL views (stubs and implementations)" style="margin-left: 4px;">⟳ Verify All Views</button>
+              <button class="refresh-btn verify-all-btn" onclick="verifyAllPostgresViews()" title="Verify all PostgreSQL views (stubs and implementations)" style="margin-left: 4px;">⟳</button>
               <button class="action-btn" onclick="createPostgresViewImplementation()" title="Create PostgreSQL views with actual SQL">Create Views</button>
 
               <!-- UNIFIED VIEW VERIFICATION RESULTS (from ⟳ Verify All Views button) -->

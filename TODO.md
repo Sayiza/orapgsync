@@ -20,6 +20,9 @@
 [x] Frontend: - vs ?, no check for fks
 [x] 2 - pass architecture for preparing types before transformation
 [ ] 3 jobs: type-methos, functions, triggers
-[ ] 1 more job for package body data
-[ ] 1 more job for oracle build ins
-[ ] evaluate usage of s/get_config for package variable replacement!
+[x] 1 more job for package body data - no, integrated now
+[x] 1 more job for oracle build ins
+[x] evaluate usage of s/get_config for package variable replacement!
+[ ] insert update delete migration
+[ ] complex types to json - sync with package needs
+[ ] 

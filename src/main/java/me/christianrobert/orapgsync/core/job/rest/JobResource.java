@@ -40,6 +40,7 @@ import me.christianrobert.orapgsync.table.rest.TableResource;
 import me.christianrobert.orapgsync.transfer.rest.DataTransferResource;
 import me.christianrobert.orapgsync.typemethod.rest.TypeMethodResource;
 import me.christianrobert.orapgsync.view.rest.ViewResource;
+import me.christianrobert.orapgsync.core.job.model.view.ViewVerificationResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -312,6 +313,29 @@ public class JobResource {
                     response.put("warningCount", viewImplVerifyResult.getWarningCount());
                     response.put("isSuccessful", viewImplVerifyResult.isSuccessful());
                     response.put("result", viewImplVerifyResult); // Unwrap the single element
+                }
+            } else if (result instanceof ViewVerificationResult) {
+                ViewVerificationResult viewVerifyResult = (ViewVerificationResult) result;
+                Map<String, Object> summary = ViewResource.generateViewVerificationSummary(viewVerifyResult);
+                response.put("summary", summary);
+                response.put("totalViews", viewVerifyResult.getTotalViews());
+                response.put("implementedCount", viewVerifyResult.getImplementedCount());
+                response.put("stubCount", viewVerifyResult.getStubCount());
+                response.put("errorCount", viewVerifyResult.getErrorCount());
+                response.put("result", result);
+            } else if (result instanceof List<?> && jobType.contains("VIEW_VERIFICATION")) {
+                // Handle List<ViewVerificationResult> - unwrap single element
+                @SuppressWarnings("unchecked")
+                List<ViewVerificationResult> viewVerifyResults = (List<ViewVerificationResult>) result;
+                if (!viewVerifyResults.isEmpty()) {
+                    ViewVerificationResult viewVerifyResult = viewVerifyResults.get(0);
+                    Map<String, Object> summary = ViewResource.generateViewVerificationSummary(viewVerifyResult);
+                    response.put("summary", summary);
+                    response.put("totalViews", viewVerifyResult.getTotalViews());
+                    response.put("implementedCount", viewVerifyResult.getImplementedCount());
+                    response.put("stubCount", viewVerifyResult.getStubCount());
+                    response.put("errorCount", viewVerifyResult.getErrorCount());
+                    response.put("result", viewVerifyResult); // Unwrap the single element
                 }
             } else if (result instanceof OracleCompatInstallationResult) {
                 OracleCompatInstallationResult oracleCompatInstallResult = (OracleCompatInstallationResult) result;

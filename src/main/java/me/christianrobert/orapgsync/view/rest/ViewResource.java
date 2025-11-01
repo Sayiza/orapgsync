@@ -10,6 +10,7 @@ import me.christianrobert.orapgsync.core.job.model.view.ViewImplementationResult
 import me.christianrobert.orapgsync.core.job.model.view.ViewImplementationVerificationResult;
 import me.christianrobert.orapgsync.core.job.model.view.ViewMetadata;
 import me.christianrobert.orapgsync.core.job.model.view.ViewStubCreationResult;
+import me.christianrobert.orapgsync.core.job.model.view.ViewVerificationResult;
 import me.christianrobert.orapgsync.core.job.service.JobRegistry;
 import me.christianrobert.orapgsync.core.job.service.JobService;
 import org.slf4j.Logger;
@@ -65,6 +66,12 @@ public class ViewResource {
     @Path("/postgres/implementation/verify")
     public Response verifyPostgresViewImplementation() {
         return startJob("POSTGRES", "VIEW_IMPLEMENTATION_VERIFICATION", "PostgreSQL view implementation verification");
+    }
+
+    @POST
+    @Path("/postgres/verify")
+    public Response verifyAllPostgresViews() {
+        return startJob("POSTGRES", "VIEW_VERIFICATION", "PostgreSQL unified view verification");
     }
 
     /**
@@ -262,6 +269,46 @@ public class ViewResource {
                 "verifiedViews", verifiedDetails,
                 "failedViews", failedDetails,
                 "warnings", warnings
+        );
+    }
+
+    /**
+     * Generate summary for unified view verification results.
+     */
+    public static Map<String, Object> generateViewVerificationSummary(ViewVerificationResult viewVerifyResult) {
+        Map<String, Object> viewsBySchemaDetails = new HashMap<>();
+
+        // Process views grouped by schema
+        Map<String, List<ViewVerificationResult.ViewInfo>> viewsBySchema = viewVerifyResult.getViewsBySchema();
+        for (Map.Entry<String, List<ViewVerificationResult.ViewInfo>> entry : viewsBySchema.entrySet()) {
+            String schema = entry.getKey();
+            List<ViewVerificationResult.ViewInfo> views = entry.getValue();
+
+            List<Map<String, Object>> viewDetails = views.stream()
+                    .map(view -> {
+                        Map<String, Object> viewMap = new HashMap<>();
+                        viewMap.put("viewName", view.getViewName());
+                        viewMap.put("status", view.getStatus().toString());
+                        if (view.getViewDdl() != null) {
+                            viewMap.put("viewDdl", view.getViewDdl());
+                        }
+                        if (view.getErrorMessage() != null) {
+                            viewMap.put("errorMessage", view.getErrorMessage());
+                        }
+                        return viewMap;
+                    })
+                    .toList();
+
+            viewsBySchemaDetails.put(schema, viewDetails);
+        }
+
+        return Map.of(
+                "totalViews", viewVerifyResult.getTotalViews(),
+                "implementedCount", viewVerifyResult.getImplementedCount(),
+                "stubCount", viewVerifyResult.getStubCount(),
+                "errorCount", viewVerifyResult.getErrorCount(),
+                "executionTimestamp", viewVerifyResult.getExecutionDateTime(),
+                "viewsBySchema", viewsBySchemaDetails
         );
     }
 }

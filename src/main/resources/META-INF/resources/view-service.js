@@ -1161,7 +1161,7 @@ async function verifyAllPostgresViews() {
     updateProgress(0, 'Starting PostgreSQL view verification');
 
     try {
-        const response = await fetch('/api/jobs/postgres/view-verification/extract', {
+        const response = await fetch('/api/views/postgres/verify', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
