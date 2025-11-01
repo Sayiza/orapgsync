@@ -335,6 +335,19 @@ public class JobResource {
                     response.put("executionTimeMs", oracleCompatVerifyResult.getExecutionTimeMs());
                     response.put("result", oracleCompatVerifyResult);
                 }
+            } else if (result instanceof List<?> && jobType.contains("STANDALONE_FUNCTION_IMPLEMENTATION_VERIFICATION")) {
+                // Handle List<FunctionImplementationVerificationResult> - unwrap single element
+                @SuppressWarnings("unchecked")
+                List<me.christianrobert.orapgsync.core.job.model.function.FunctionImplementationVerificationResult> funcImplVerifyResults =
+                    (List<me.christianrobert.orapgsync.core.job.model.function.FunctionImplementationVerificationResult>) result;
+                if (!funcImplVerifyResults.isEmpty()) {
+                    me.christianrobert.orapgsync.core.job.model.function.FunctionImplementationVerificationResult funcImplVerifyResult = funcImplVerifyResults.get(0);
+                    response.put("verifiedCount", funcImplVerifyResult.getVerifiedCount());
+                    response.put("failedCount", funcImplVerifyResult.getFailedCount());
+                    response.put("warningCount", funcImplVerifyResult.getWarningCount());
+                    response.put("isSuccessful", funcImplVerifyResult.isSuccessful());
+                    response.put("result", funcImplVerifyResult); // Unwrap the single element
+                }
             } else if (result instanceof List<?>) {
                 // Handle List results based on jobType
                 if (jobType.contains("SCHEMA") && !jobType.contains("SCHEMA_CREATION")) {

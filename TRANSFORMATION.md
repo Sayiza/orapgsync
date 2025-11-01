@@ -1,7 +1,7 @@
 # Oracle to PostgreSQL SQL Transformation
 
-**Last Updated:** 2025-10-23
-**Status:** ✅ **90% REAL-WORLD COVERAGE ACHIEVED** - 662+ tests passing
+**Last Updated:** 2025-11-01
+**Status:** ✅ **90% REAL-WORLD COVERAGE ACHIEVED** - 662+ tests passing (SQL views), 85-95% PL/SQL functions
 **Implementation Time:** ~1.5 days actual (vs. 16-21 days estimated)
 
 This document describes the ANTLR-based transformation module that converts Oracle SQL to PostgreSQL-compatible SQL using a direct AST-to-code approach.
@@ -264,23 +264,36 @@ This document describes the ANTLR-based transformation module that converts Orac
 - DBMS_RANDOM (random numbers)
 - DBMS_SCHEDULER (job scheduling)
 
-### 🔄 Phase 5: PL/SQL Functions/Procedures - 60-70% COMPLETE
+### 🔄 Phase 5: PL/SQL Functions/Procedures - 85-95% COMPLETE
 
-PostgresCodeBuilder extended with 14 PL/SQL visitors:
+PostgresCodeBuilder extended with 20 PL/SQL visitors:
 - ✅ VisitFunctionBody, VisitProcedureBody, VisitBody
 - ✅ VisitParameter (with IN/OUT/INOUT support)
-- ✅ VisitSeq_of_statements, VisitStatement
+- ✅ VisitSeq_of_statements, VisitStatement, VisitSeq_of_declare_specs
 - ✅ VisitVariable_declaration (with CONSTANT, NOT NULL, defaults)
 - ✅ VisitAssignment_statement
 - ✅ VisitIf_statement (with ELSIF and nested IFs)
-- ✅ VisitSelect_into_statement
-- ✅ VisitLoop_statement (FOR loops: numeric and cursor)
+- ✅ VisitNull_statement (no-op placeholder)
+- ✅ VisitCase_statement (simple and searched CASE)
+- ✅ VisitSelect_into_statement (with STRICT keyword for Oracle compatibility)
+- ✅ VisitLoop_statement (basic LOOP, WHILE, FOR loops: numeric and cursor)
+- ✅ VisitExit_statement (EXIT, EXIT WHEN, with labels)
+- ✅ VisitContinue_statement (CONTINUE, CONTINUE WHEN, with labels)
 - ✅ VisitCursor_declaration (named cursors with parameters)
-- ✅ VisitCall_statement (PERFORM generation with schema qualification)
+- ✅ VisitCall_statement (PERFORM generation, RAISE_APPLICATION_ERROR transformation)
 - ✅ VisitReturn_statement
-- 📋 Still needed: Basic LOOP/END LOOP, WHILE loops, EXIT/CONTINUE, explicit cursor operations (OPEN/FETCH/CLOSE), exception handlers
+- ✅ VisitException_handler (EXCEPTION WHEN...THEN with 20+ standard exception mappings)
+- ✅ VisitRaise_statement (RAISE re-raise and named exceptions)
+- ✅ VisitException_declaration (user-defined exceptions)
+- ✅ VisitPragma_declaration (PRAGMA EXCEPTION_INIT)
+- 🔄 VisitOpen_statement, VisitFetch_statement, VisitClose_statement (cursor attributes infrastructure complete, testing in progress)
+- 📋 Still needed: BULK COLLECT, OUT/INOUT in call statements, named parameters, collections
 
-**Key Accomplishment:** Oracle PROCEDURE → PostgreSQL FUNCTION transformation with correct OUT parameter handling (Phase 1 fix completed 2025-10-30)
+**Key Accomplishments:**
+- Oracle PROCEDURE → PostgreSQL FUNCTION transformation with correct OUT parameter handling (Phase 1 fix completed 2025-10-30)
+- Complete exception handling with standard exception mapping, RAISE_APPLICATION_ERROR, and user-defined exceptions (Phase 1-3.1 completed 2025-10-30)
+- Package variable support via unified on-demand approach (26 tests passing - completed 2025-11-01)
+- All basic control flow statements: IF, LOOP, WHILE, FOR, CASE, NULL, EXIT, CONTINUE, EXCEPTION
 
 ---
 
@@ -425,6 +438,11 @@ transformer/
 │   ├── functions/                       # Function transformers (2 classes)
 │   │   ├── DateFunctionTransformer.java # Date/time function transformations
 │   │   └── StringFunctionTransformer.java # String function transformations
+│   │
+│   ├── packagevariable/                 # Package variable transformation (3 classes)
+│   │   ├── PackageContextExtractor.java # Extracts package specs on-demand
+│   │   ├── PackageHelperGenerator.java  # Generates getter/setter functions
+│   │   └── PackageVariableTransformer.java # Transforms variable references
 │   │
 │   └── Visit*.java                      # 37 static visitor helpers:
 │       ├── VisitSelectStatement.java
@@ -709,7 +727,7 @@ Detailed implementation documentation:
 - 📋 Planned: Complex expressions (CASE), PL/SQL variables, collections, full integration
 - See [TYPE_INFERENCE_IMPLEMENTATION_PLAN.md](TYPE_INFERENCE_IMPLEMENTATION_PLAN.md) for details
 
-**2. Function/Procedure Implementation (Unified)** 🔄 **60-70% COMPLETE**
+**2. Function/Procedure Implementation (Unified)** 🔄 **85-95% COMPLETE**
 - ✅ Infrastructure complete (ANTLR parsing, two-pass architecture, PostgreSQL execution)
 - ✅ Handles **both standalone and package functions** in single unified job
 - ✅ Function/procedure signatures with IN/OUT/INOUT parameters
@@ -722,17 +740,32 @@ Detailed implementation documentation:
 - ✅ Variable declarations (primitive types, CONSTANT, NOT NULL, defaults)
 - ✅ Assignment statements
 - ✅ IF/ELSIF/ELSE statements (simple, nested, complex conditions)
-- ✅ SELECT INTO statements (single/multiple variables, aggregates, WHERE clauses)
-- ✅ FOR loops (numeric range, cursor with inline SELECT, named cursors, parameterized cursors)
-- ✅ Call statements (PERFORM for procedures/functions, schema qualification, package flattening)
+- ✅ NULL statements (no-op placeholders)
+- ✅ CASE statements (simple and searched, with/without ELSE)
+- ✅ SELECT INTO statements (single/multiple variables, aggregates, WHERE clauses, with STRICT keyword)
+- ✅ All loop types:
+  - Basic LOOP with EXIT and CONTINUE (unconditional, conditional, with labels)
+  - WHILE loops
+  - FOR loops (numeric range with REVERSE, cursor with inline SELECT, named cursors, parameterized cursors)
+- ✅ Call statements (PERFORM for procedures/functions, schema qualification, package flattening, RAISE_APPLICATION_ERROR)
 - ✅ RETURN statements
-- 📋 Missing: Basic LOOP/WHILE loops, EXIT/CONTINUE, explicit cursor operations, exceptions, NULL statement
-- 📋 **Planned: Package variable support** (unified on-demand approach)
-  - Package specs parsed on-demand during transformation
-  - Helper functions (initialize, getters, setters) generated and cached
+- ✅ Exception handling:
+  - EXCEPTION WHEN...THEN blocks with 20+ standard exception mappings
+  - WHEN OTHERS catch-all handler
+  - RAISE statements (re-raise and named exceptions)
+  - User-defined exceptions with PRAGMA EXCEPTION_INIT
+  - RAISE_APPLICATION_ERROR transformation
+  - oracle_compat.sqlcode() compatibility function
+- ✅ **Package variable support** (unified on-demand approach)
+  - Package specs parsed on-demand during transformation (Phase 1A completed 2025-10-31)
+  - Helper functions (initialize, getters, setters) generated and cached (Phase 1B completed 2025-11-01)
   - Package variables transformed to getter/setter calls
   - No separate extraction/creation jobs (maintains ANTLR-only-in-transformation pattern)
+  - 26 tests passing (PackageContextExtractorTest, PackageHelperGeneratorTest, PackageVariableTransformationTest)
+  - Location: `transformer/packagevariable/`
   - See [PACKAGE_VARIABLE_IMPLEMENTATION_PLAN.md](documentation/PACKAGE_VARIABLE_IMPLEMENTATION_PLAN.md)
+- 🔄 Explicit cursor operations (OPEN/FETCH/CLOSE with cursor attributes - infrastructure complete, testing in progress)
+- 📋 Missing (~5-15%): BULK COLLECT, OUT/INOUT in call statements, named parameters, collections
 - Replace function/procedure stubs with actual implementations
 - See [STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md](STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md) for detailed status
 

@@ -1261,6 +1261,63 @@ td {
     cursor: not-allowed;
 }
 
+/* Verify All button - similar to action-btn but for verification */
+.verify-all-btn {
+    background: linear-gradient(#4a90e2, #357abd);
+    border: 1px solid #2e6da4;
+    border-radius: var(--radius-sm);
+    color: white;
+    cursor: pointer;
+    font-size: var(--font-base);
+    padding: var(--spacing-xs) 0.5rem;
+    transition: background-color var(--transition-fast);
+}
+
+.verify-all-btn:hover {
+    background: linear-gradient(#357abd, #2e6da4);
+}
+
+.verify-all-btn:disabled {
+    background: #6c757d;
+    border-color: #6c757d;
+    cursor: not-allowed;
+}
+
+/* Status badge for view verification results */
+.status-badge {
+    font-size: 0.85em;
+    font-weight: normal;
+    margin-left: 6px;
+    padding: 2px 6px;
+    border-radius: 3px;
+}
+
+/* View header (clickable to toggle DDL) */
+.view-header {
+    cursor: pointer;
+    user-select: none;
+}
+
+.view-header:hover {
+    background-color: #f5f5f5;
+}
+
+/* View DDL section */
+.view-ddl-section {
+    margin-top: 8px;
+    padding: 8px;
+    background-color: #f8f8f8;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+}
+
+.view-ddl-section pre {
+    margin: 0;
+    font-size: 0.85em;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
 /* Unified results container - used for schema, object type, and table creation */
 .schema-creation-results,
 .object-type-creation-results,
@@ -1477,4 +1534,101 @@ td {
 .table-creation-summary p {
     font-size: var(--font-sm);
     color: #495057;
+}
+
+/* ========================================
+   Function Verification Styles
+   ======================================== */
+
+/* Function item container */
+.function-item {
+    margin-bottom: var(--spacing-xs);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+
+/* Function metadata line (compact, clickable) */
+.function-metadata {
+    padding: var(--spacing-xs);
+    cursor: pointer;
+    user-select: none;
+    transition: background-color 0.2s ease;
+    font-size: var(--font-sm);
+}
+
+.function-metadata:hover {
+    background: var(--bg-dark);
+}
+
+/* Function signature styling */
+.function-signature {
+    color: #666;
+    font-size: var(--font-xs);
+    font-family: 'Consolas', 'Monaco', monospace;
+}
+
+.function-lines {
+    color: #999;
+    font-size: var(--font-xs);
+    margin-left: var(--spacing-xs);
+}
+
+/* Failure reason styling */
+.failure-reason {
+    color: var(--error-text);
+    font-size: var(--font-xs);
+    margin-left: 1.5rem;
+}
+
+/* Function DDL container (expandable) */
+.function-ddl {
+    background: #f8f9fa;
+    border-top: 1px solid var(--border-medium);
+    padding: var(--spacing-sm);
+}
+
+/* DDL content (pre-formatted code) */
+.ddl-content {
+    background: #2d2d2d;
+    color: #f0f0f0;
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: var(--font-xs);
+    padding: var(--spacing-sm);
+    margin: 0;
+    border-radius: var(--radius-sm);
+    overflow-x: auto;
+    max-height: 400px;
+    overflow-y: auto;
+    white-space: pre;
+    line-height: 1.4;
+}
+
+/* Copy DDL button */
+.copy-ddl-btn {
+    background: var(--mainblue);
+    color: white;
+    border: none;
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: var(--font-xs);
+    margin-bottom: var(--spacing-xs);
+    transition: background-color 0.2s ease;
+}
+
+.copy-ddl-btn:hover {
+    background: var(--mainblue2);
+}
+
+.copy-ddl-btn:active {
+    background: var(--mainblue3);
+}
+
+/* Function item status colors */
+.function-item.verified {
+    background: var(--success-bg);
+}
+
+.function-item.failed {
+    background: var(--error-bg);
 }

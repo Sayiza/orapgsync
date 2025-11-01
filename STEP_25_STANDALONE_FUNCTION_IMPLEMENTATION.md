@@ -48,6 +48,14 @@ Transforms Oracle standalone functions/procedures (NOT package members) to Postg
 - NULL statements (no-op placeholders)
 - CASE statements (simple and searched, with/without ELSE)
 - SELECT INTO (single/multiple variables, aggregates, WHERE clauses)
+- Package variables:
+  - **✅ Unified on-demand approach** (Phase 1A+1B completed 2025-11-01)
+  - Package specs parsed on-demand during transformation
+  - Helper functions (initialize, getters, setters) generated and cached per job execution
+  - Package variable references transformed to getter/setter calls
+  - 26 tests passing (PackageContextExtractorTest, PackageHelperGeneratorTest, PackageVariableTransformationTest)
+  - Location: `transformer/packagevariable/`
+  - See [PACKAGE_VARIABLE_IMPLEMENTATION_PLAN.md](documentation/PACKAGE_VARIABLE_IMPLEMENTATION_PLAN.md)
 - Loops:
   - **Basic LOOP**: `LOOP ... END LOOP` (identical syntax)
   - **WHILE LOOP**: `WHILE condition LOOP ... END LOOP` (identical syntax)

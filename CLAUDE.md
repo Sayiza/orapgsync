@@ -309,7 +309,7 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
     - **Architecture:** TypeAnalysisVisitor (Pass 1) populates type cache → FullTypeEvaluator (Pass 2) queries cache
     - See [TYPE_INFERENCE_IMPLEMENTATION_PLAN.md](TYPE_INFERENCE_IMPLEMENTATION_PLAN.md) for detailed documentation
 
-13. **Function/Procedure Implementation (Unified)**: 🔄 **60-70% COMPLETE** - PL/SQL transformation actively working for both standalone and package functions
+13. **Function/Procedure Implementation (Unified)**: 🔄 **85-95% COMPLETE** - PL/SQL transformation actively working for both standalone and package functions
     - ✅ Frontend: HTML row + JavaScript handlers (verification & creation)
     - ✅ Backend Jobs:
       - `PostgresFunctionImplementationJob` - Implementation job with PL/SQL transformation
@@ -320,24 +320,29 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
       - `POST /api/functions/postgres/standalone-implementation/verify`
     - ✅ Result Handling: JobResource integration with summary generators
     - ✅ Handles **both standalone and package functions** in single unified job
-    - ✅ **PL/SQL Transformation (14 visitors implemented):**
+    - ✅ **PL/SQL Transformation (20 visitors implemented):**
       - Function/procedure signatures with IN/OUT/INOUT parameters
       - **Critical Fix (2025-10-30):** All Oracle PROCEDUREs → PostgreSQL FUNCTIONs (correct RETURNS clause)
       - Variable declarations (CONSTANT, NOT NULL, defaults)
       - Assignment statements
       - IF/ELSIF/ELSE statements (simple, nested, complex conditions)
-      - SELECT INTO statements
-      - FOR loops (numeric range, cursor with inline SELECT, named cursors)
+      - NULL statements, CASE statements (simple and searched)
+      - SELECT INTO statements (with STRICT for Oracle compatibility)
+      - Loop statements: Basic LOOP, WHILE, FOR (numeric + cursor), EXIT, CONTINUE (with labels)
+      - Named cursors (with parameters)
+      - Explicit cursor operations: OPEN, FETCH, CLOSE (with cursor attributes)
       - Call statements (PERFORM with schema qualification, package flattening)
       - RETURN statements
-    - ⏳ **Missing (~30-40%)**: Basic LOOP/WHILE loops, EXIT/CONTINUE, explicit cursor operations, exceptions, NULL statement
-    - 📋 **Planned: Package variable support** (unified on-demand approach)
+      - Exception handling: EXCEPTION blocks, RAISE statements, user-defined exceptions
+    - ✅ **Package Variable Support** - COMPLETE (unified on-demand approach)
       - Package specs parsed on-demand during transformation (maintains ANTLR-only-in-transformation pattern)
       - Helper functions (initialize, getters, setters) generated and cached per job execution
       - Package variables transformed to getter/setter calls
       - No separate extraction/creation jobs, no StateService properties
+      - 26 tests passing (PackageContextExtractorTest, PackageHelperGeneratorTest, PackageVariableTransformationTest)
       - See [PACKAGE_VARIABLE_IMPLEMENTATION_PLAN.md](documentation/PACKAGE_VARIABLE_IMPLEMENTATION_PLAN.md)
-    - Location: `function/job/`, `transformer/builder/`, `core/job/model/function/`
+    - ⏳ **Missing (~5-15%)**: BULK COLLECT, OUT/INOUT in call statements, named parameters, collections
+    - Location: `function/job/`, `transformer/builder/`, `transformer/packagevariable/`, `core/job/model/function/`
     - Step 25 in orchestration workflow
 
 14. **Type Method Logic**: Member method implementations (Planned - see Phase 3 roadmap)
@@ -347,21 +352,22 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
 ### 📋 Phase 3 Detailed Roadmap (Next Steps)
 1. ~~**Oracle Built-in Replacements**~~ ✅ **COMPLETE** - See item #10 above
 2. ~~**Function/Procedure Infrastructure**~~ ✅ **COMPLETE** - See item #13 above
-3. **Function/Procedure Transformation (Unified)**: 🔄 **60-70% COMPLETE** - PL/SQL→PL/pgSQL transformation for both standalone and package functions
+3. **Function/Procedure Transformation (Unified)**: 🔄 **85-95% COMPLETE** - PL/SQL→PL/pgSQL transformation for both standalone and package functions
    - ✅ Extract Oracle function source from `ALL_SOURCE`
-   - ✅ Extended `PostgresCodeBuilder` with 14 PL/SQL statement visitors
-   - ✅ Transform control flow (IF/ELSIF/ELSE, FOR loops, assignments, SELECT INTO, call statements)
+   - ✅ Extended `PostgresCodeBuilder` with 20 PL/SQL statement visitors
+   - ✅ Transform control flow (IF/ELSIF/ELSE, all loop types, assignments, SELECT INTO, call statements, exceptions)
    - ✅ Transform declarations (variables with CONSTANT, NOT NULL, defaults)
    - ✅ Oracle PROCEDURE → PostgreSQL FUNCTION with correct RETURNS clause (Phase 1 fix 2025-10-30)
    - ✅ Execute `CREATE OR REPLACE FUNCTION` in PostgreSQL (all procedures become functions)
    - ✅ Handles both standalone and package functions in single job
-   - 📋 Missing: Basic LOOP/WHILE loops, EXIT/CONTINUE, explicit cursors, exceptions, NULL statement
-   - 📋 **Planned: Package variable support** (unified on-demand approach)
+   - ✅ **Package variable support** (unified on-demand approach) - COMPLETE
      - Package specs parsed on-demand during transformation (no separate extraction job)
-     - Helper functions generated and cached per job execution
+     - Helper functions (initialize, getters, setters) generated and cached per job execution
      - Package variables transformed to getter/setter calls
      - Maintains ANTLR-only-in-transformation architectural pattern
+     - 26 tests passing across 3 test classes
      - See [PACKAGE_VARIABLE_IMPLEMENTATION_PLAN.md](documentation/PACKAGE_VARIABLE_IMPLEMENTATION_PLAN.md)
+   - 📋 Missing: BULK COLLECT, OUT/INOUT in call statements, named parameters, collections
 4. **Type Method Implementation**: Transform type member methods using ANTLR (extend PostgresCodeBuilder)
 5. **Trigger Migration**: Extract and transform Oracle triggers
 6. **REST Layer** (Optional): Auto-generate REST endpoints for testing and incremental cutover

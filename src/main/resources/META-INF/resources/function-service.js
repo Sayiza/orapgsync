@@ -823,14 +823,22 @@ async function pollStandaloneFunctionVerificationJobStatus(jobId, database) {
                     const result = await resultResponse.json();
 
                     if (result.status === 'success') {
-                        // Verification returns List<FunctionMetadata>, just update count
-                        const functionCount = result.functionCount || 0;
-                        updateComponentCount("postgres-standalone-function-implementation", functionCount);
+                        // Verification returns FunctionImplementationVerificationResult
+                        const verificationResult = result.result; // Now unwrapped by backend
 
-                        if (result.summary && result.summary.message) {
-                            updateMessage(`PostgreSQL: ${result.summary.message}`);
-                        } else {
-                            updateMessage(`Verified ${functionCount} standalone functions/procedures`);
+                        if (verificationResult) {
+                            const verifiedCount = result.verifiedCount || 0;
+                            const failedCount = result.failedCount || 0;
+                            const warningCount = result.warningCount || 0;
+
+                            if (result.isSuccessful) {
+                                updateMessage(`Function implementation verification completed: ${verifiedCount} verified, ${failedCount} failed, ${warningCount} warnings`);
+                            } else {
+                                updateMessage(`Function implementation verification found issues: ${verifiedCount} verified, ${failedCount} failed, ${warningCount} warnings`);
+                            }
+
+                            updateComponentCount("postgres-standalone-function-implementation", verifiedCount);
+                            displayStandaloneFunctionImplementationVerificationResults(verificationResult);
                         }
 
                         updateProgress(100, 'Verification complete');
@@ -868,6 +876,209 @@ async function pollStandaloneFunctionVerificationJobStatus(jobId, database) {
 
         pollOnce();
     });
+}
+
+// Display standalone function implementation verification results
+function displayStandaloneFunctionImplementationVerificationResults(verificationResult) {
+    const resultsDiv = document.getElementById('postgres-standalone-function-implementation-verification-results');
+    const detailsDiv = document.getElementById('postgres-standalone-function-implementation-verification-details');
+
+    let html = '';
+
+    // Summary statistics
+    html += '<div class="table-creation-summary">';
+    html += '<div class="summary-stats">';
+    html += `<span class="stat-item created">Verified: ${verificationResult.verifiedCount || 0}</span>`;
+    html += `<span class="stat-item errors">Failed: ${verificationResult.failedCount || 0}</span>`;
+    html += `<span class="stat-item skipped">Warnings: ${verificationResult.warningCount || 0}</span>`;
+    html += '</div>';
+    html += '</div>';
+
+    // Show verified functions - GROUPED BY SCHEMA
+    if (verificationResult.verifiedFunctions && verificationResult.verifiedFunctions.length > 0) {
+        html += '<div class="created-tables-section">';
+        html += '<h4>Verified Functions (Implemented):</h4>';
+        html += generateSchemaGroupedFunctionList(verificationResult.verifiedFunctions, 'verified');
+        html += '</div>';
+    }
+
+    // Show failed functions - GROUPED BY SCHEMA
+    if (verificationResult.failedFunctions && verificationResult.failedFunctions.length > 0) {
+        html += '<div class="error-tables-section">';
+        html += '<h4>Failed Functions (Stubs or Errors):</h4>';
+        html += generateSchemaGroupedFunctionList(verificationResult.failedFunctions, 'failed', verificationResult.failureReasons);
+        html += '</div>';
+    }
+
+    // Show warnings - GROUPED BY SCHEMA
+    if (verificationResult.warnings && verificationResult.warnings.length > 0) {
+        html += '<div class="skipped-tables-section">';
+        html += '<h4>Warnings:</h4>';
+        html += '<div class="table-items">';
+        verificationResult.warnings.forEach(warning => {
+            html += `<div class="table-item warning">${escapeHtml(warning)}</div>`;
+        });
+        html += '</div>';
+        html += '</div>';
+    }
+
+    detailsDiv.innerHTML = html;
+    resultsDiv.style.display = 'block';
+}
+
+// Helper function to generate schema-grouped function list with expandable DDL
+function generateSchemaGroupedFunctionList(functions, statusClass, failureReasons) {
+    const functionsBySchema = {};
+    functions.forEach(func => {
+        const qualifiedName = func.qualifiedName || `${func.schema}.${func.functionName}`;
+        const parts = qualifiedName.split('.');
+        const schema = parts.length > 1 ? parts[0] : 'unknown';
+        const functionName = parts.length > 1 ? parts[1] : qualifiedName;
+
+        if (!functionsBySchema[schema]) {
+            functionsBySchema[schema] = [];
+        }
+        functionsBySchema[schema].push({
+            qualifiedName: qualifiedName,
+            functionName: functionName,
+            signature: func.signature,
+            objectType: func.objectType,
+            returnType: func.returnType,
+            ddl: func.ddl,
+            lineCount: func.lineCount,
+            isStub: func.isStub
+        });
+    });
+
+    let html = '<div class="table-items">';
+
+    Object.entries(functionsBySchema).sort(([a], [b]) => a.localeCompare(b)).forEach(([schemaName, schemaFunctions]) => {
+        const schemaId = `function-verification-${statusClass}-${schemaName.replace(/[^a-z0-9]/gi, '_')}`;
+
+        html += '<div class="table-schema-group">';
+        html += `<div class="table-schema-header" onclick="toggleSchemaGroup('${schemaId}')">`;
+        html += `<span class="toggle-indicator" id="${schemaId}-indicator">▼</span> ${schemaName} (${schemaFunctions.length} functions)`;
+        html += '</div>';
+        html += `<div class="table-items-list" id="${schemaId}">`;
+
+        schemaFunctions.forEach((func, index) => {
+            const funcId = `${schemaId}-func-${index}`;
+            const statusIcon = statusClass === 'verified' ? '✓' : '✗';
+            const stubLabel = func.isStub ? ' [STUB]' : '';
+
+            // Compact metadata line (collapsed)
+            html += `<div class="function-item ${statusClass}">`;
+            html += `<div class="function-metadata" onclick="toggleFunctionDDL('${funcId}')">`;
+            html += `<span class="toggle-indicator" id="${funcId}-indicator">▶</span> `;
+            html += `<strong>${func.functionName}</strong>${stubLabel} ${statusIcon}`;
+            html += ` <span class="function-signature">${escapeHtml(func.signature || '')}</span>`;
+            html += ` <span class="function-lines">(${func.lineCount || 0} lines)</span>`;
+
+            // Add failure reason if present
+            if (failureReasons && failureReasons[func.qualifiedName]) {
+                html += `<br/><span class="failure-reason">${escapeHtml(failureReasons[func.qualifiedName])}</span>`;
+            }
+
+            html += `</div>`;
+
+            // Expandable DDL section (hidden by default)
+            html += `<div class="function-ddl" id="${funcId}" style="display: none;">`;
+            html += `<button class="copy-ddl-btn" onclick="copyFunctionDDL('${funcId}-ddl')">Copy DDL</button>`;
+            html += `<pre id="${funcId}-ddl" class="ddl-content">${escapeHtml(func.ddl || 'No DDL available')}</pre>`;
+            html += `</div>`;
+            html += `</div>`;
+        });
+
+        html += '</div>';
+        html += '</div>';
+    });
+
+    html += '</div>';
+    return html;
+}
+
+// Toggle schema group (reuse from view-service.js pattern)
+function toggleSchemaGroup(schemaId) {
+    const itemsList = document.getElementById(schemaId);
+    const indicator = document.getElementById(`${schemaId}-indicator`);
+
+    if (!itemsList) {
+        console.warn(`Schema group not found: ${schemaId}`);
+        return;
+    }
+
+    if (itemsList.style.display === 'none') {
+        itemsList.style.display = 'block';
+        if (indicator) indicator.textContent = '▼';
+    } else {
+        itemsList.style.display = 'none';
+        if (indicator) indicator.textContent = '▶';
+    }
+}
+
+// Toggle function DDL display
+function toggleFunctionDDL(funcId) {
+    const ddlDiv = document.getElementById(funcId);
+    const indicator = document.getElementById(`${funcId}-indicator`);
+
+    if (!ddlDiv) {
+        console.warn(`Function DDL not found: ${funcId}`);
+        return;
+    }
+
+    if (ddlDiv.style.display === 'none') {
+        ddlDiv.style.display = 'block';
+        if (indicator) indicator.textContent = '▼';
+    } else {
+        ddlDiv.style.display = 'none';
+        if (indicator) indicator.textContent = '▶';
+    }
+}
+
+// Copy function DDL to clipboard
+function copyFunctionDDL(ddlId) {
+    const ddlElement = document.getElementById(ddlId);
+    if (!ddlElement) {
+        console.warn(`DDL element not found: ${ddlId}`);
+        return;
+    }
+
+    const ddl = ddlElement.textContent;
+    navigator.clipboard.writeText(ddl).then(() => {
+        console.log('DDL copied to clipboard');
+        // Optional: Show temporary "Copied!" feedback
+        const copyBtn = event.target;
+        const originalText = copyBtn.textContent;
+        copyBtn.textContent = 'Copied!';
+        setTimeout(() => {
+            copyBtn.textContent = originalText;
+        }, 2000);
+    }).catch(err => {
+        console.error('Failed to copy DDL:', err);
+        alert('Failed to copy DDL to clipboard');
+    });
+}
+
+// Toggle function implementation verification results container
+function toggleStandaloneFunctionImplementationVerificationResults(database) {
+    const resultsDiv = document.getElementById(`${database}-standalone-function-implementation-verification-results`);
+    const detailsDiv = document.getElementById(`${database}-standalone-function-implementation-verification-details`);
+    const toggleIndicator = resultsDiv.querySelector('.toggle-indicator');
+
+    if (detailsDiv.style.display === 'none' || !detailsDiv.style.display) {
+        detailsDiv.style.display = 'block';
+        toggleIndicator.textContent = '▲';
+    } else {
+        detailsDiv.style.display = 'none';
+        toggleIndicator.textContent = '▼';
+    }
+}
+
+// Utility function to escape HTML (prevent XSS)
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
 
 // ===== END STANDALONE FUNCTION IMPLEMENTATION FUNCTIONS =====

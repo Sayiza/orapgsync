@@ -1138,3 +1138,297 @@ function toggleSchemaGroup(schemaId) {
         if (indicator) indicator.textContent = '▶';
     }
 }
+
+// ==========================================
+// Unified View Verification (NEW)
+// ==========================================
+
+/**
+ * Verify all PostgreSQL views (unified verification job).
+ * Replaces separate stub and implementation verification jobs.
+ * Returns DDL for manual inspection instead of row counts.
+ */
+async function verifyAllPostgresViews() {
+    console.log('Starting unified PostgreSQL view verification job...');
+
+    const button = document.querySelector('#postgres-view-implementation .verify-all-btn');
+    if (button) {
+        button.disabled = true;
+        button.innerHTML = '⏳';
+    }
+
+    updateMessage('Starting PostgreSQL view verification...');
+    updateProgress(0, 'Starting PostgreSQL view verification');
+
+    try {
+        const response = await fetch('/api/jobs/postgres/view-verification/extract', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+
+        const result = await response.json();
+
+        if (result.status === 'success') {
+            console.log('PostgreSQL view verification job started:', result.jobId);
+            updateMessage('PostgreSQL view verification job started successfully');
+
+            // Start polling for progress
+            await pollUnifiedViewVerificationJobStatus(result.jobId);
+        } else {
+            throw new Error(result.message || 'Failed to start PostgreSQL view verification job');
+        }
+
+    } catch (error) {
+        console.error('Error starting PostgreSQL view verification job:', error);
+        updateMessage('Failed to start PostgreSQL view verification: ' + error.message);
+        updateProgress(0, 'Failed to start PostgreSQL view verification');
+
+        // Re-enable button
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = '⟳ Verify All Views';
+        }
+    }
+}
+
+async function pollUnifiedViewVerificationJobStatus(jobId) {
+    console.log('Polling unified view verification job status for:', jobId);
+
+    try {
+        const response = await fetch(`/api/jobs/${jobId}/status`);
+        const result = await response.json();
+
+        if (result.status === 'error') {
+            throw new Error(result.message);
+        }
+
+        console.log('Unified view verification job status:', result);
+
+        // Update progress if available
+        if (result.progress) {
+            const percentage = result.progress.percentage;
+            const currentTask = result.progress.currentTask || 'Processing...';
+            const details = result.progress.details || '';
+
+            updateProgress(percentage, currentTask);
+            if (details) {
+                updateMessage(details);
+            }
+        }
+
+        // Check if job is complete
+        if (result.isComplete) {
+            if (result.status === 'COMPLETED') {
+                console.log('Unified view verification job completed successfully');
+                updateProgress(100, 'View verification completed successfully');
+                updateMessage('View verification completed');
+
+                // Get job results
+                await getUnifiedViewVerificationJobResults(jobId);
+            } else if (result.status === 'FAILED') {
+                console.error('Unified view verification job failed:', result.error);
+                updateProgress(0, 'View verification failed');
+                updateMessage('View verification failed: ' + (result.error || 'Unknown error'));
+            }
+
+            // Re-enable button
+            const button = document.querySelector('#postgres-view-implementation .verify-all-btn');
+            if (button) {
+                button.disabled = false;
+                button.innerHTML = '⟳ Verify All Views';
+            }
+        } else {
+            // Continue polling
+            setTimeout(() => pollUnifiedViewVerificationJobStatus(jobId), 1000);
+        }
+
+    } catch (error) {
+        console.error('Error polling unified view verification job status:', error);
+        updateMessage('Error checking view verification job status: ' + error.message);
+        updateProgress(0, 'Error checking view verification job status');
+
+        // Re-enable button
+        const button = document.querySelector('#postgres-view-implementation .verify-all-btn');
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = '⟳ Verify All Views';
+        }
+    }
+}
+
+async function getUnifiedViewVerificationJobResults(jobId) {
+    console.log('Getting unified view verification job results for:', jobId);
+
+    try {
+        const response = await fetch(`/api/jobs/${jobId}/result`);
+        const result = await response.json();
+
+        if (result.status === 'success') {
+            console.log('Unified view verification job results:', result);
+
+            // The result contains the ViewVerificationResult object
+            const verificationResult = result.result;
+
+            if (verificationResult) {
+                const totalViews = result.totalViews || 0;
+                const implementedCount = result.implementedCount || 0;
+                const stubCount = result.stubCount || 0;
+                const errorCount = result.errorCount || 0;
+
+                updateMessage(`View verification completed: ${totalViews} views (${implementedCount} implemented, ${stubCount} stubs, ${errorCount} errors)`);
+                updateComponentCount("postgres-view-implementation", implementedCount);
+
+                // Display the detailed verification results
+                displayUnifiedViewVerificationResults(verificationResult);
+            } else {
+                updateMessage('View verification completed but returned no results');
+            }
+        } else {
+            throw new Error(result.message || 'Failed to get view verification job results');
+        }
+
+    } catch (error) {
+        console.error('Error getting unified view verification job results:', error);
+        updateMessage('Error getting view verification results: ' + error.message);
+    }
+}
+
+/**
+ * Display unified view verification results with DDL inspection.
+ * Groups views by schema with collapsible DDL sections.
+ */
+function displayUnifiedViewVerificationResults(verificationResult) {
+    const resultsDiv = document.getElementById('postgres-unified-view-verification-results');
+    const detailsDiv = document.getElementById('postgres-unified-view-verification-details');
+
+    if (!resultsDiv || !detailsDiv) {
+        console.error('Unified view verification results container not found');
+        return;
+    }
+
+    let html = '';
+
+    // Summary statistics
+    const totalViews = verificationResult.totalViews || 0;
+    const implementedCount = verificationResult.implementedCount || 0;
+    const stubCount = verificationResult.stubCount || 0;
+    const errorCount = verificationResult.errorCount || 0;
+
+    html += '<div class="table-creation-summary">';
+    html += '<div class="summary-stats">';
+    html += `<span class="stat-item created">Implemented: ${implementedCount}</span>`;
+    html += `<span class="stat-item skipped">Stubs: ${stubCount}</span>`;
+    html += `<span class="stat-item errors">Errors: ${errorCount}</span>`;
+    html += `<span class="stat-item">Total: ${totalViews}</span>`;
+    html += '</div>';
+    html += '</div>';
+
+    // Generate schema-grouped views with DDL
+    const viewsBySchema = verificationResult.viewsBySchema || {};
+
+    Object.keys(viewsBySchema).sort().forEach(schemaName => {
+        const schemaViews = viewsBySchema[schemaName] || [];
+        const schemaId = `view-verification-schema-${schemaName.replace(/[^a-z0-9]/gi, '_')}`;
+
+        // Count by status for this schema
+        const schemaImplemented = schemaViews.filter(v => v.status === 'IMPLEMENTED').length;
+        const schemaStubs = schemaViews.filter(v => v.status === 'STUB').length;
+        const schemaErrors = schemaViews.filter(v => v.status === 'ERROR').length;
+
+        html += '<div class="table-schema-group">';
+        html += `<div class="table-schema-header" onclick="toggleSchemaGroup('${schemaId}')">`;
+        html += `<span class="toggle-indicator" id="${schemaId}-indicator">▶</span> `;
+        html += `${schemaName} (${schemaViews.length} views - `;
+        html += `${schemaImplemented} implemented, ${schemaStubs} stubs, ${schemaErrors} errors)`;
+        html += '</div>';
+        html += `<div class="table-items-list" id="${schemaId}" style="display: none;">`;
+
+        // Sort views by name within schema
+        schemaViews.sort((a, b) => a.viewName.localeCompare(b.viewName));
+
+        schemaViews.forEach(view => {
+            const viewId = `view-ddl-${schemaName}-${view.viewName}`.replace(/[^a-z0-9]/gi, '_');
+            const statusClass = view.status === 'IMPLEMENTED' ? 'created' :
+                               view.status === 'STUB' ? 'skipped' : 'error';
+            const statusBadge = view.status === 'IMPLEMENTED' ? '✓ IMPLEMENTED' :
+                               view.status === 'STUB' ? '⚠ STUB' : '✗ ERROR';
+
+            html += `<div class="table-item ${statusClass}">`;
+            html += `<div class="view-header" onclick="toggleViewDdl('${viewId}')">`;
+            html += `<span class="toggle-indicator" id="${viewId}-indicator">▶</span> `;
+            html += `<strong>${view.viewName}</strong> <span class="status-badge">[${statusBadge}]</span>`;
+            html += '</div>';
+
+            // DDL section (collapsible, starts collapsed)
+            html += `<div class="view-ddl-section" id="${viewId}" style="display: none;">`;
+            if (view.viewDdl) {
+                html += '<pre class="sql-statement">';
+                html += escapeHtml(view.viewDdl);
+                html += '</pre>';
+            } else if (view.errorMessage) {
+                html += `<div class="error-message">Error: ${escapeHtml(view.errorMessage)}</div>`;
+            } else {
+                html += '<div class="error-message">No DDL available</div>';
+            }
+            html += '</div>';
+            html += '</div>';
+        });
+
+        html += '</div>';
+        html += '</div>';
+    });
+
+    detailsDiv.innerHTML = html;
+
+    // Show the results section
+    resultsDiv.style.display = 'block';
+}
+
+/**
+ * Toggle view DDL visibility.
+ */
+function toggleViewDdl(viewId) {
+    const ddlSection = document.getElementById(viewId);
+    const indicator = document.getElementById(`${viewId}-indicator`);
+
+    if (!ddlSection) {
+        console.warn(`View DDL section not found: ${viewId}`);
+        return;
+    }
+
+    if (ddlSection.style.display === 'none') {
+        ddlSection.style.display = 'block';
+        if (indicator) indicator.textContent = '▼';
+    } else {
+        ddlSection.style.display = 'none';
+        if (indicator) indicator.textContent = '▶';
+    }
+}
+
+/**
+ * Toggle unified view verification results visibility.
+ */
+function toggleUnifiedViewVerificationResults() {
+    const resultsDiv = document.getElementById('postgres-unified-view-verification-results');
+    const detailsDiv = document.getElementById('postgres-unified-view-verification-details');
+    const toggleIndicator = resultsDiv.querySelector('.toggle-indicator');
+
+    if (detailsDiv.style.display === 'none' || !detailsDiv.style.display) {
+        detailsDiv.style.display = 'block';
+        if (toggleIndicator) toggleIndicator.textContent = '▲';
+    } else {
+        detailsDiv.style.display = 'none';
+        if (toggleIndicator) toggleIndicator.textContent = '▼';
+    }
+}
+
+/**
+ * Escape HTML to prevent XSS attacks in DDL display.
+ */
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
