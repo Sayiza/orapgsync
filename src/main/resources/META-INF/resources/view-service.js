@@ -769,6 +769,20 @@ function toggleViewImplementationResults(database) {
     }
 }
 
+function toggleViewImplementationVerificationResults(database) {
+    const resultsDiv = document.getElementById(`${database}-view-implementation-verification-results`);
+    const detailsDiv = document.getElementById(`${database}-view-implementation-verification-details`);
+    const toggleIndicator = resultsDiv.querySelector('.toggle-indicator');
+
+    if (detailsDiv.style.display === 'none' || !detailsDiv.style.display) {
+        detailsDiv.style.display = 'block';
+        toggleIndicator.textContent = '▲';
+    } else {
+        detailsDiv.style.display = 'none';
+        toggleIndicator.textContent = '▼';
+    }
+}
+
 // Verify PostgreSQL view implementations
 async function verifyPostgresViewImplementation() {
     console.log('Starting PostgreSQL view implementation verification job...');
@@ -890,17 +904,28 @@ async function getViewImplementationVerificationJobResults(jobId) {
         if (result.status === 'success') {
             console.log('View implementation verification job results:', result);
 
-            const verifiedCount = result.verifiedCount || 0;
-            const failedCount = result.failedCount || 0;
-            const warningCount = result.warningCount || 0;
+            // The result is now the unwrapped ViewImplementationVerificationResult object
+            const verificationResult = result.result;
 
-            if (result.isSuccessful) {
-                updateMessage(`View implementation verification completed: ${verifiedCount} verified, ${failedCount} failed, ${warningCount} warnings`);
+            if (verificationResult) {
+                // Counts are also at top level for convenience
+                const verifiedCount = result.verifiedCount || 0;
+                const failedCount = result.failedCount || 0;
+                const warningCount = result.warningCount || 0;
+
+                if (result.isSuccessful) {
+                    updateMessage(`View implementation verification completed: ${verifiedCount} verified, ${failedCount} failed, ${warningCount} warnings`);
+                } else {
+                    updateMessage(`View implementation verification found issues: ${verifiedCount} verified, ${failedCount} failed, ${warningCount} warnings`);
+                }
+
+                updateComponentCount("postgres-view-implementation", verifiedCount);
+
+                // Display the detailed verification results
+                displayViewImplementationVerificationResults(verificationResult);
             } else {
-                updateMessage(`View implementation verification found issues: ${verifiedCount} verified, ${failedCount} failed, ${warningCount} warnings`);
+                updateMessage('View implementation verification completed but returned no results');
             }
-
-            updateComponentCount("postgres-view-implementation", verifiedCount);
         } else {
             throw new Error(result.message || 'Failed to get view implementation verification job results');
         }
@@ -908,5 +933,208 @@ async function getViewImplementationVerificationJobResults(jobId) {
     } catch (error) {
         console.error('Error getting view implementation verification job results:', error);
         updateMessage('Error getting view implementation verification results: ' + error.message);
+    }
+}
+
+// Display view implementation verification results
+function displayViewImplementationVerificationResults(verificationResult) {
+    const resultsDiv = document.getElementById('postgres-view-implementation-verification-results');
+    const detailsDiv = document.getElementById('postgres-view-implementation-verification-details');
+
+    if (!resultsDiv || !detailsDiv) {
+        console.error('View implementation verification results container not found');
+        return;
+    }
+
+    let html = '';
+
+    // Summary statistics
+    html += '<div class="table-creation-summary">';
+    html += '<div class="summary-stats">';
+    html += `<span class="stat-item created">Verified: ${verificationResult.verifiedCount || 0}</span>`;
+    html += `<span class="stat-item errors">Failed: ${verificationResult.failedCount || 0}</span>`;
+    html += `<span class="stat-item skipped">Warnings: ${verificationResult.warningCount || 0}</span>`;
+    html += '</div>';
+    html += '</div>';
+
+    // Show verified views with row counts - GROUPED BY SCHEMA
+    if (verificationResult.verifiedViews && verificationResult.verifiedViews.length > 0) {
+        html += '<div class="created-tables-section">';
+        html += '<h4>Verified Views (Implemented):</h4>';
+        html += generateSchemaGroupedViewList(verificationResult.verifiedViews, 'verified', verificationResult.rowCounts);
+        html += '</div>';
+    }
+
+    // Show failed views with failure reasons - GROUPED BY SCHEMA
+    if (verificationResult.failedViews && verificationResult.failedViews.length > 0) {
+        html += '<div class="error-tables-section">';
+        html += '<h4>Failed Views (Not Implemented or Errors):</h4>';
+        html += generateSchemaGroupedFailedViewList(verificationResult.failedViews, verificationResult.failureReasons);
+        html += '</div>';
+    }
+
+    // Show warnings - GROUPED BY SCHEMA
+    if (verificationResult.warnings && verificationResult.warnings.length > 0) {
+        html += '<div class="skipped-tables-section">';
+        html += '<h4>Warnings:</h4>';
+        html += generateSchemaGroupedWarningList(verificationResult.warnings);
+        html += '</div>';
+    }
+
+    detailsDiv.innerHTML = html;
+
+    // Show the results section
+    resultsDiv.style.display = 'block';
+}
+
+// Helper function to generate schema-grouped view list for verified views
+function generateSchemaGroupedViewList(verifiedViews, statusClass, rowCounts) {
+    // Group by schema
+    const viewsBySchema = {};
+    verifiedViews.forEach(view => {
+        const qualifiedName = view.viewName;
+        const parts = qualifiedName.split('.');
+        const schema = parts.length > 1 ? parts[0] : 'unknown';
+        const viewName = parts.length > 1 ? parts[1] : qualifiedName;
+
+        if (!viewsBySchema[schema]) {
+            viewsBySchema[schema] = [];
+        }
+        viewsBySchema[schema].push({
+            qualifiedName: qualifiedName,
+            viewName: viewName,
+            rowCount: view.rowCount
+        });
+    });
+
+    let html = '<div class="table-items">';
+
+    Object.entries(viewsBySchema).sort(([a], [b]) => a.localeCompare(b)).forEach(([schemaName, schemaViews]) => {
+        const schemaId = `view-verification-${statusClass}-${schemaName.replace(/[^a-z0-9]/gi, '_')}`;
+
+        html += '<div class="table-schema-group">';
+        html += `<div class="table-schema-header" onclick="toggleSchemaGroup('${schemaId}')">`;
+        html += `<span class="toggle-indicator" id="${schemaId}-indicator">▼</span> ${schemaName} (${schemaViews.length} views)`;
+        html += '</div>';
+        html += `<div class="table-items-list" id="${schemaId}">`;
+
+        schemaViews.forEach(view => {
+            const rowCountText = view.rowCount !== undefined ? ` (${view.rowCount} rows)` : '';
+            html += `<div class="table-item ${statusClass}">${view.viewName}${rowCountText} ✓</div>`;
+        });
+
+        html += '</div>';
+        html += '</div>';
+    });
+
+    html += '</div>';
+    return html;
+}
+
+// Helper function to generate schema-grouped view list for failed views
+function generateSchemaGroupedFailedViewList(failedViews, failureReasons) {
+    // Group by schema
+    const viewsBySchema = {};
+    failedViews.forEach(qualifiedName => {
+        const parts = qualifiedName.split('.');
+        const schema = parts.length > 1 ? parts[0] : 'unknown';
+        const viewName = parts.length > 1 ? parts[1] : qualifiedName;
+
+        if (!viewsBySchema[schema]) {
+            viewsBySchema[schema] = [];
+        }
+        viewsBySchema[schema].push({
+            qualifiedName: qualifiedName,
+            viewName: viewName,
+            reason: failureReasons && failureReasons[qualifiedName] ? failureReasons[qualifiedName] : 'Unknown reason'
+        });
+    });
+
+    let html = '<div class="table-items">';
+
+    Object.entries(viewsBySchema).sort(([a], [b]) => a.localeCompare(b)).forEach(([schemaName, schemaViews]) => {
+        const schemaId = `view-verification-failed-${schemaName.replace(/[^a-z0-9]/gi, '_')}`;
+
+        html += '<div class="table-schema-group">';
+        html += `<div class="table-schema-header" onclick="toggleSchemaGroup('${schemaId}')">`;
+        html += `<span class="toggle-indicator" id="${schemaId}-indicator">▼</span> ${schemaName} (${schemaViews.length} views)`;
+        html += '</div>';
+        html += `<div class="table-items-list" id="${schemaId}">`;
+
+        schemaViews.forEach(view => {
+            html += `<div class="table-item error">`;
+            html += `<strong>${view.viewName}</strong>: ${view.reason}`;
+            html += `</div>`;
+        });
+
+        html += '</div>';
+        html += '</div>';
+    });
+
+    html += '</div>';
+    return html;
+}
+
+// Helper function to generate schema-grouped warning list
+function generateSchemaGroupedWarningList(warnings) {
+    // Group by schema - warnings are in format "schema.viewname: warning message"
+    const warningsBySchema = {};
+    warnings.forEach(warning => {
+        const colonIndex = warning.indexOf(':');
+        const qualifiedName = colonIndex > 0 ? warning.substring(0, colonIndex).trim() : warning;
+        const message = colonIndex > 0 ? warning.substring(colonIndex + 1).trim() : 'Warning';
+
+        const parts = qualifiedName.split('.');
+        const schema = parts.length > 1 ? parts[0] : 'unknown';
+        const viewName = parts.length > 1 ? parts[1] : qualifiedName;
+
+        if (!warningsBySchema[schema]) {
+            warningsBySchema[schema] = [];
+        }
+        warningsBySchema[schema].push({
+            viewName: viewName,
+            message: message
+        });
+    });
+
+    let html = '<div class="table-items">';
+
+    Object.entries(warningsBySchema).sort(([a], [b]) => a.localeCompare(b)).forEach(([schemaName, schemaWarnings]) => {
+        const schemaId = `view-verification-warnings-${schemaName.replace(/[^a-z0-9]/gi, '_')}`;
+
+        html += '<div class="table-schema-group">';
+        html += `<div class="table-schema-header" onclick="toggleSchemaGroup('${schemaId}')">`;
+        html += `<span class="toggle-indicator" id="${schemaId}-indicator">▼</span> ${schemaName} (${schemaWarnings.length} warnings)`;
+        html += '</div>';
+        html += `<div class="table-items-list" id="${schemaId}">`;
+
+        schemaWarnings.forEach(warning => {
+            html += `<div class="table-item skipped">${warning.viewName}: ${warning.message}</div>`;
+        });
+
+        html += '</div>';
+        html += '</div>';
+    });
+
+    html += '</div>';
+    return html;
+}
+
+// Generic toggle function for schema groups
+function toggleSchemaGroup(schemaId) {
+    const viewItems = document.getElementById(schemaId);
+    const indicator = document.getElementById(`${schemaId}-indicator`);
+
+    if (!viewItems) {
+        console.warn(`Schema group not found: ${schemaId}`);
+        return;
+    }
+
+    if (viewItems.style.display === 'none') {
+        viewItems.style.display = 'block';
+        if (indicator) indicator.textContent = '▼';
+    } else {
+        viewItems.style.display = 'none';
+        if (indicator) indicator.textContent = '▶';
     }
 }

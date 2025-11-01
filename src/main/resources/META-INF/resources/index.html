@@ -518,12 +518,20 @@
               <span class="component-text">Views created</span>
               <button class="refresh-btn" onclick="verifyPostgresViewImplementation()" title="Verify PostgreSQL view implementations">⟳</button>
               <button class="action-btn" onclick="createPostgresViewImplementation()" title="Create PostgreSQL views with actual SQL">Create Views</button>
+              <div class="table-creation-results" id="postgres-view-implementation-verification-results" style="display: none;">
+                <div class="table-creation-header" onclick="toggleViewImplementationVerificationResults('postgres')">
+                  <span class="toggle-indicator">▼</span> View Implementation Verification Results
+                </div>
+                <div class="table-creation-details" id="postgres-view-implementation-verification-details">
+                  <!-- View implementation verification results will be populated here -->
+                </div>
+              </div>
               <div class="table-creation-results" id="postgres-view-implementation-results" style="display: none;">
                 <div class="table-creation-header" onclick="toggleViewImplementationResults('postgres')">
-                  <span class="toggle-indicator">▼</span> View Implementation Results
+                  <span class="toggle-indicator">▼</span> View Implementation Creation Results
                 </div>
                 <div class="table-creation-details" id="postgres-view-implementation-details">
-                  <!-- View implementation results will be populated here -->
+                  <!-- View implementation creation results will be populated here -->
                 </div>
               </div>
             </div>

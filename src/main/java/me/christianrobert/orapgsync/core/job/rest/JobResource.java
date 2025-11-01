@@ -299,6 +299,20 @@ public class JobResource {
                 response.put("warningCount", viewImplVerifyResult.getWarningCount());
                 response.put("isSuccessful", viewImplVerifyResult.isSuccessful());
                 response.put("result", result);
+            } else if (result instanceof List<?> && jobType.contains("VIEW_IMPLEMENTATION_VERIFICATION")) {
+                // Handle List<ViewImplementationVerificationResult> - unwrap single element
+                @SuppressWarnings("unchecked")
+                List<ViewImplementationVerificationResult> viewImplVerifyResults = (List<ViewImplementationVerificationResult>) result;
+                if (!viewImplVerifyResults.isEmpty()) {
+                    ViewImplementationVerificationResult viewImplVerifyResult = viewImplVerifyResults.get(0);
+                    Map<String, Object> summary = ViewResource.generateViewImplementationVerificationSummary(viewImplVerifyResult);
+                    response.put("summary", summary);
+                    response.put("verifiedCount", viewImplVerifyResult.getVerifiedCount());
+                    response.put("failedCount", viewImplVerifyResult.getFailedCount());
+                    response.put("warningCount", viewImplVerifyResult.getWarningCount());
+                    response.put("isSuccessful", viewImplVerifyResult.isSuccessful());
+                    response.put("result", viewImplVerifyResult); // Unwrap the single element
+                }
             } else if (result instanceof OracleCompatInstallationResult) {
                 OracleCompatInstallationResult oracleCompatInstallResult = (OracleCompatInstallationResult) result;
                 response.put("totalFunctions", oracleCompatInstallResult.getTotalFunctions());
