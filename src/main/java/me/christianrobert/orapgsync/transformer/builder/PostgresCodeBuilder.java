@@ -548,6 +548,49 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
     }
 
     /**
+     * Gets the current package name.
+     *
+     * @return Current package name, or null if not in a package function
+     */
+    public String getCurrentPackageName() {
+        return this.currentPackageName;
+    }
+
+    /**
+     * Checks if current function is a package member that needs initialization.
+     * Returns true if:
+     * 1. Currently processing a package function (currentPackageName != null)
+     * 2. Package has variables declared
+     *
+     * @return true if initialization call should be injected
+     */
+    public boolean needsPackageInitialization() {
+        if (currentPackageName == null || currentSchema == null || packageContextCache == null) {
+            return false;
+        }
+
+        String cacheKey = (currentSchema + "." + currentPackageName).toLowerCase();
+        PackageContext ctx = packageContextCache.get(cacheKey);
+
+        return ctx != null && !ctx.getVariables().isEmpty();
+    }
+
+    /**
+     * Generates package initialization call for injection into function body.
+     * Format: PERFORM schema.pkg__initialize();
+     *
+     * @return Initialization call string
+     */
+    public String generatePackageInitializationCall() {
+        if (currentPackageName == null || currentSchema == null) {
+            return null;
+        }
+
+        return "PERFORM " + currentSchema.toLowerCase() + "." +
+                currentPackageName.toLowerCase() + "__initialize()";
+    }
+
+    /**
      * Sets the assignment target flag for package variable transformation.
      * When true, package variable references will not be transformed to getters.
      *

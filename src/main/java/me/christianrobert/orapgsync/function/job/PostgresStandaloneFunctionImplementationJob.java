@@ -15,6 +15,7 @@ import me.christianrobert.orapgsync.transformer.packagevariable.PackageContext;
 import me.christianrobert.orapgsync.transformer.packagevariable.PackageContextExtractor;
 import me.christianrobert.orapgsync.transformer.packagevariable.PackageHelperGenerator;
 import me.christianrobert.orapgsync.transformer.parser.AntlrParser;
+import me.christianrobert.orapgsync.transformer.parser.ParseResult;
 import me.christianrobert.orapgsync.transformer.service.TransformationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -228,13 +229,20 @@ public class PostgresStandaloneFunctionImplementationJob extends AbstractDatabas
     }
 
     /**
-     * Extracts Oracle function/procedure source code from ALL_SOURCE.
+     * Extracts Oracle function/procedure source code.
      *
-     * Oracle stores PL/SQL source in ALL_SOURCE with one line per row.
-     * This method assembles the complete source code by:
-     * 1. Querying ALL_SOURCE for the function/procedure
-     * 2. Ordering by LINE to maintain correct order
-     * 3. Concatenating all lines into a single string
+     * <p>For STANDALONE functions/procedures:
+     * <ul>
+     *   <li>Queries ALL_SOURCE directly (type='FUNCTION' or 'PROCEDURE')</li>
+     *   <li>Assembles source from line-by-line rows</li>
+     * </ul>
+     *
+     * <p>For PACKAGE member functions/procedures:
+     * <ul>
+     *   <li>Extracts from cached package body AST (efficient for multi-function packages)</li>
+     *   <li>Package body already parsed and cached by ensurePackageContext()</li>
+     *   <li>Uses character index slicing to preserve Oracle formatting</li>
+     * </ul>
      *
      * @param oracleConn Oracle database connection
      * @param function Function metadata (contains schema and name)
@@ -242,6 +250,13 @@ public class PostgresStandaloneFunctionImplementationJob extends AbstractDatabas
      * @throws SQLException if source extraction fails
      */
     private String extractOracleFunctionSource(Connection oracleConn, FunctionMetadata function) throws SQLException {
+
+        // Check if this is a package member function
+        if (!function.isStandalone()) {
+            return extractPackageMemberSource(function);
+        }
+
+        // Standalone function/procedure - query ALL_SOURCE directly
         String schema = function.getSchema().toUpperCase();
         String name = function.getObjectName().toUpperCase();
         String type = function.isFunction() ? "FUNCTION" : "PROCEDURE";
@@ -292,6 +307,46 @@ public class PostgresStandaloneFunctionImplementationJob extends AbstractDatabas
     }
 
     /**
+     * Extracts package member function/procedure source from cached package body AST.
+     * This is more efficient than querying ALL_SOURCE for each function in a package.
+     *
+     * @param function Package member function metadata
+     * @return Oracle PL/SQL source code for the function
+     * @throws SQLException if package context not cached or function not found
+     */
+    private String extractPackageMemberSource(FunctionMetadata function) throws SQLException {
+        String packageName = extractPackageName(function);
+        if (packageName == null) {
+            throw new SQLException("Cannot extract package name from: " + function.getObjectName());
+        }
+
+        String cacheKey = (function.getSchema() + "." + packageName).toLowerCase();
+        PackageContext ctx = packageContextCache.get(cacheKey);
+
+        if (ctx == null || !ctx.hasPackageBody()) {
+            throw new SQLException(String.format(
+                "Package body not cached for: %s (function: %s)",
+                cacheKey, function.getObjectName()
+            ));
+        }
+
+        // Extract the specific function from the cached package body AST
+        String source = ctx.extractFunctionSource(function.getObjectName(), function.isFunction());
+
+        if (source == null) {
+            throw new SQLException(String.format(
+                "%s %s not found in package body %s.%s",
+                function.isFunction() ? "Function" : "Procedure",
+                function.getObjectName(),
+                function.getSchema(),
+                packageName
+            ));
+        }
+
+        return source;
+    }
+
+    /**
      * Executes transformed PL/pgSQL in PostgreSQL.
      * Creates or replaces the function/procedure in the target database.
      *
@@ -318,18 +373,13 @@ public class PostgresStandaloneFunctionImplementationJob extends AbstractDatabas
 
     /**
      * Extracts package name from a package function.
-     * Package functions use naming convention: packagename__functionname (double underscore).
+     * FunctionMetadata stores packageName as a separate field, not embedded in objectName.
      *
      * @param function Function metadata
      * @return Package name or null if standalone function
      */
     private String extractPackageName(FunctionMetadata function) {
-        String objectName = function.getObjectName();
-        int idx = objectName.indexOf("__");
-        if (idx > 0) {
-            return objectName.substring(0, idx);
-        }
-        return null;
+        return function.getPackageName();
     }
 
     /**
@@ -384,7 +434,24 @@ public class PostgresStandaloneFunctionImplementationJob extends AbstractDatabas
         }
         log.info("Successfully created helper functions for package {}.{}", schema, packageName);
 
-        // Step 5: Cache context
+        // Step 5: Query and parse package body (for function source extraction)
+        String packageBodySql = queryPackageBody(oracleConn, schema, packageName);
+        log.debug("Retrieved package body for {}.{} ({} characters)",
+                  schema, packageName, packageBodySql.length());
+
+        ParseResult bodyParseResult = antlrParser.parsePackageBody(packageBodySql);
+        if (bodyParseResult.hasErrors()) {
+            log.warn("Package body parsing had errors for {}.{}: {}",
+                     schema, packageName, bodyParseResult.getErrorMessage());
+            // Continue anyway - best effort
+        }
+
+        me.christianrobert.orapgsync.antlr.PlSqlParser.Create_package_bodyContext bodyAst =
+            (me.christianrobert.orapgsync.antlr.PlSqlParser.Create_package_bodyContext) bodyParseResult.getTree();
+        context.setPackageBody(packageBodySql, bodyAst);
+        log.info("Parsed and cached package body for {}.{}", schema, packageName);
+
+        // Step 6: Cache context
         context.setHelpersCreated(true);
         packageContextCache.put(cacheKey, context);
         log.debug("Cached package context: {}", cacheKey);
@@ -437,6 +504,62 @@ public class PostgresStandaloneFunctionImplementationJob extends AbstractDatabas
             ));
         }
 
-        return result;
+        // Oracle ALL_SOURCE doesn't include CREATE keyword - prepend it for ANTLR parsing
+        // ALL_SOURCE stores: "PACKAGE package_name AS ..."
+        // ANTLR expects: "CREATE OR REPLACE PACKAGE package_name AS ..."
+        return "CREATE OR REPLACE " + result;
+    }
+
+    /**
+     * Queries Oracle ALL_SOURCE for package body source code.
+     *
+     * @param oracleConn Oracle database connection
+     * @param schema Schema name
+     * @param packageName Package name
+     * @return Complete package body SQL as a single string
+     * @throws SQLException if query fails or no source found
+     */
+    private String queryPackageBody(Connection oracleConn, String schema, String packageName) throws SQLException {
+        String sql = """
+            SELECT text
+            FROM all_source
+            WHERE owner = ?
+              AND name = ?
+              AND type = 'PACKAGE BODY'
+            ORDER BY line
+            """;
+
+        StringBuilder source = new StringBuilder();
+
+        try (PreparedStatement ps = oracleConn.prepareStatement(sql)) {
+            ps.setString(1, schema.toUpperCase());
+            ps.setString(2, packageName.toUpperCase());
+
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    String line = rs.getString("text");
+                    if (line != null) {
+                        source.append(line);
+                        if (!line.endsWith("\n")) {
+                            source.append("\n");
+                        }
+                    }
+                }
+            }
+        }
+
+        String result = source.toString().trim();
+
+        if (result.isEmpty()) {
+            throw new SQLException(String.format(
+                "No package body found in ALL_SOURCE for %s.%s",
+                schema.toUpperCase(), packageName.toUpperCase()
+            ));
+        }
+
+        // Oracle ALL_SOURCE doesn't include CREATE keyword - prepend it for ANTLR parsing
+        // ALL_SOURCE stores: "PACKAGE BODY package_name AS ..."
+        // ANTLR expects: "CREATE OR REPLACE PACKAGE BODY package_name AS ..."
+        return "CREATE OR REPLACE " + result;
     }
 }

@@ -209,4 +209,50 @@ public class AntlrParser {
             throw new TransformationException("Failed to parse package spec: " + e.getMessage(), plsql, "ANTLR parsing", e);
         }
     }
+
+    /**
+     * Parses an Oracle package body (extracted from ALL_SOURCE).
+     * Expects source starting with "CREATE [OR REPLACE] PACKAGE BODY package_name AS/IS ..."
+     *
+     * @param plsql Oracle package body source code
+     * @return ParseResult containing the parse tree and any errors
+     */
+    public ParseResult parsePackageBody(String plsql) {
+        if (plsql == null || plsql.trim().isEmpty()) {
+            throw new TransformationException("PL/SQL cannot be null or empty");
+        }
+
+        log.debug("Parsing package body: {}", plsql.substring(0, Math.min(100, plsql.length())));
+
+        try {
+            // Create lexer and parser
+            CharStream input = CharStreams.fromString(plsql);
+            PlSqlLexer lexer = new PlSqlLexer(input);
+            CommonTokenStream tokens = new CommonTokenStream(lexer);
+            PlSqlParser parser = new PlSqlParser(tokens);
+
+            // Collect errors
+            List<String> errors = new ArrayList<>();
+            parser.removeErrorListeners(); // Remove default console error listener
+            parser.addErrorListener(new BaseErrorListener() {
+                @Override
+                public void syntaxError(Recognizer<?, ?> recognizer, Object offendingSymbol,
+                                        int line, int charPositionInLine, String msg,
+                                        RecognitionException e) {
+                    String error = String.format("Line %d:%d - %s", line, charPositionInLine, msg);
+                    errors.add(error);
+                    log.warn("Parse error: {}", error);
+                }
+            });
+
+            // Parse the package body
+            PlSqlParser.Create_package_bodyContext tree = parser.create_package_body();
+
+            return new ParseResult(tree, errors, plsql);
+
+        } catch (Exception e) {
+            log.error("Failed to parse package body", e);
+            throw new TransformationException("Failed to parse package body: " + e.getMessage(), plsql, "ANTLR parsing", e);
+        }
+    }
 }

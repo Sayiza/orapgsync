@@ -122,6 +122,18 @@ public class VisitFunctionBody {
         String bodyCode = null;
         if (ctx.body() != null) {
             bodyCode = b.visit(ctx.body());
+
+            // PACKAGE VARIABLE SUPPORT: Inject initialization call for package functions
+            // If this is a package member function with variables, inject PERFORM pkg__initialize()
+            // at the start of the BEGIN block
+            if (b.needsPackageInitialization()) {
+                String initCall = b.generatePackageInitializationCall();
+                if (initCall != null && bodyCode != null) {
+                    // Inject initialization call right after BEGIN
+                    // Format: BEGIN\n  PERFORM schema.pkg__initialize();\n  [existing body]
+                    bodyCode = injectInitializationCall(bodyCode, initCall);
+                }
+            }
         }
 
         // Pop loop RECORD variables context to get variables for this block
@@ -179,6 +191,41 @@ public class VisitFunctionBody {
             result.append("\n");
         }
         result.append("$$;\n");
+
+        return result.toString();
+    }
+
+    /**
+     * Injects package initialization call into the BEGIN block.
+     * Inserts the call right after the BEGIN keyword.
+     *
+     * @param bodyCode Original body code (BEGIN...END block)
+     * @param initCall Initialization call (e.g., "PERFORM schema.pkg__initialize()")
+     * @return Modified body code with initialization call injected
+     */
+    private static String injectInitializationCall(String bodyCode, String initCall) {
+        // Find BEGIN keyword and inject initialization call right after it
+        // Pattern: BEGIN\n  [statements]
+        // Result:  BEGIN\n  PERFORM schema.pkg__initialize();\n  [statements]
+
+        int beginIndex = bodyCode.indexOf("BEGIN");
+        if (beginIndex == -1) {
+            // No BEGIN found - return original (shouldn't happen for valid PL/SQL)
+            return bodyCode;
+        }
+
+        // Find the end of the BEGIN line (newline after BEGIN)
+        int endOfLineIndex = bodyCode.indexOf('\n', beginIndex);
+        if (endOfLineIndex == -1) {
+            // No newline after BEGIN - inject at end of string (edge case)
+            return bodyCode + "\n  " + initCall + ";\n";
+        }
+
+        // Build new body: [before BEGIN\n] + [BEGIN\n] + [  initCall;\n] + [rest]
+        StringBuilder result = new StringBuilder();
+        result.append(bodyCode, 0, endOfLineIndex + 1); // Include BEGIN\n
+        result.append("  ").append(initCall).append(";\n");
+        result.append(bodyCode.substring(endOfLineIndex + 1)); // Rest of body
 
         return result.toString();
     }

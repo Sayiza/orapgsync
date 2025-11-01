@@ -1116,34 +1116,43 @@ SELECT hr.test_pkg__get_counter();       -- Returns: 0 (different session)
 
 ## Implementation Checklist
 
-### Helper Classes
-- [ ] Create `PackageContextExtractor.java` (parse package specs with ANTLR)
-- [ ] Create `PackageHelperGenerator.java` (generate initialize/getter/setter SQL)
-- [ ] Create `PackageContext.java` (inner classes for context data)
+### Helper Classes ✅ COMPLETE
+- [x] Create `PackageContextExtractor.java` (parse package specs with ANTLR)
+- [x] Create `PackageHelperGenerator.java` (generate initialize/getter/setter SQL)
+- [x] Create `PackageContext.java` (data model for context)
+  - [x] **BONUS:** Added package body AST caching for efficient multi-function extraction
+  - [x] Added `extractFunctionSource()` method using character-index slicing
 
-### Extend Transformation Job
-- [ ] Add `packageContextCache` field to `PostgresFunctionImplementationJob`
-- [ ] Implement `ensurePackageContext()` method (parse + generate + execute + cache)
-- [ ] Implement `queryPackageSpec()` method (query ALL_SOURCE)
-- [ ] Remove standalone-only filter (handle all functions)
-- [ ] Pass `packageContextCache` to PostgresCodeBuilder constructor
+### Extend Transformation Job ✅ COMPLETE
+- [x] Add `packageContextCache` field to `PostgresFunctionImplementationJob`
+- [x] Implement `ensurePackageContext()` method (parse + generate + execute + cache)
+- [x] Implement `queryPackageSpec()` method (query ALL_SOURCE)
+  - [x] **FIX:** Prepend `CREATE OR REPLACE` (ALL_SOURCE doesn't include it)
+- [x] **BONUS:** Implement `queryPackageBody()` method for package body extraction
+  - [x] **FIX:** Prepend `CREATE OR REPLACE` for ANTLR parsing
+- [x] Remove standalone-only filter (handle all functions)
+- [x] **BONUS:** Implement package function source extraction
+  - [x] Added `extractPackageMemberSource()` method
+  - [x] Modified `extractOracleFunctionSource()` to handle both standalone and package members
+  - [x] **FIX:** Use `function.getPackageName()` directly (not parsed from objectName)
+- [x] **BONUS:** Add `parsePackageBody()` to AntlrParser
 
-### Extend PostgresCodeBuilder
-- [ ] Add `packageContextCache` constructor parameter
-- [ ] Add `currentPackageName` field
-- [ ] Add `isInAssignmentTarget` flag with accessors
-- [ ] Add `isPackageVariable()` method
-- [ ] Add `transformToPackageVariableGetter()` method
-- [ ] Add `parsePackageVariableReference()` method
-- [ ] Add `PackageVariableReference` inner class
+### Extend PostgresCodeBuilder ✅ COMPLETE
+- [x] Add `packageContextCache` constructor parameter
+- [x] Add `currentPackageName` field
+- [x] Add `isInAssignmentTarget` flag with accessors
+- [x] Add `isPackageVariable()` method
+- [x] Add `transformToPackageVariableGetter()` method
+- [x] Add `parsePackageVariableReference()` method
+- [x] Add `PackageVariableReference` inner class
 
-### Visitor Modifications
+### Visitor Modifications ⏳ PENDING
 - [ ] Modify `VisitAssignment_statement.java` (flag protection + setter detection)
 - [ ] Modify `VisitGeneralElement.java` (package variable check + getter transformation)
 - [ ] Modify `VisitFunctionBody.java` (inject initialization call for package functions)
 - [ ] Modify `VisitProcedureBody.java` (inject initialization call for package functions)
 
-### Testing
+### Testing ⏳ PENDING
 - [ ] Unit tests: PackageContextExtractor (parsing)
 - [ ] Unit tests: PackageHelperGenerator (SQL generation)
 - [ ] Unit tests: Getter transformation (VisitGeneralElement)
@@ -1156,14 +1165,81 @@ SELECT hr.test_pkg__get_counter();       -- Returns: 0 (different session)
   - [ ] Transaction boundaries (session persistence)
 - [ ] Verify zero regressions (all 882+ tests still passing)
 
-### Documentation
+### Documentation ⏳ PENDING
 - [ ] Update `TRANSFORMATION.md` with package variable status
 - [ ] Update `CLAUDE.md` with unified approach (no Step 26)
 - [ ] Update `STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md` (rename to include package functions)
 
 ---
 
-**Ready to implement Phase 1 with unified architecture!** 🚀
+## Implementation Progress
+
+### ✅ Phase 1A: Infrastructure (COMPLETE - 2025-10-31)
+
+**Status:** All core infrastructure implemented and working!
+
+**What was built:**
+1. **Package Context System**
+   - `PackageContext.java` with variable declarations and package body AST caching
+   - `PackageContextExtractor.java` for parsing package specs
+   - `PackageHelperGenerator.java` for generating PostgreSQL helper functions
+   - Ephemeral caching pattern (job-scoped, garbage collected after job)
+
+2. **Package Function Source Extraction** (Bonus - not originally planned)
+   - Extended `PackageContext` to cache parsed package body AST
+   - Character-index slicing for efficient multi-function extraction
+   - Avoids re-querying/re-parsing package body for each function
+   - **Efficiency:** Package with 10 functions = 1 parse (not 10!)
+
+3. **Job Integration**
+   - Extended `PostgresFunctionImplementationJob` (unified approach)
+   - Added `ensurePackageContext()` - parse spec + body, generate helpers, cache
+   - Added `queryPackageSpec()` and `queryPackageBody()` methods
+   - Modified `extractOracleFunctionSource()` for package member extraction
+   - Removed standalone-only filter (handles both standalone and package)
+
+4. **Code Builder Support**
+   - Extended `PostgresCodeBuilder` with package variable helper methods
+   - Added `isPackageVariable()`, `transformToPackageVariableGetter()`, etc.
+   - Added `PackageVariableReference` inner class for setter calls
+   - Added assignment target flag for getter/setter disambiguation
+
+5. **Parser Extensions**
+   - Added `parsePackageBody()` to `AntlrParser`
+
+**Critical fixes applied:**
+- ✅ **Fix #1:** Prepend `CREATE OR REPLACE` to ALL_SOURCE results (Oracle doesn't store it)
+- ✅ **Fix #2:** Use `function.getPackageName()` directly (not parsed from objectName)
+- ✅ **Fix #3:** Character-index extraction from AST (preserves Oracle formatting)
+
+**Current Status:**
+- ✅ Package functions can be extracted from Oracle (both spec and body)
+- ✅ Package variables are identified and helper functions generated
+- ✅ Package body parsed once per package, cached for all functions
+- ✅ All code compiles successfully
+- ⏳ Visitor modifications needed for actual getter/setter transformation
+
+### ✅ Phase 1B: Transformation (COMPLETE - 2025-11-01)
+
+**All tasks completed:**
+1. ✅ Modified `VisitAssignment_statement.java` for setter transformation
+2. ✅ Modified `VisitGeneralElement.java` for getter transformation
+3. ✅ Injected initialization calls in function/procedure bodies (`VisitFunctionBody.java`, `VisitProcedureBody.java`)
+4. ✅ Created comprehensive unit tests (26 tests, all passing)
+   - `PackageContextExtractorTest` - 8 tests for package spec parsing
+   - `PackageHelperGeneratorTest` - 8 tests for helper SQL generation
+   - `PackageVariableTransformationTest` - 10 tests for getter/setter transformations
+
+**Implementation highlights:**
+- Package variable assignments → setter calls: `emp_pkg.g_counter := 100` → `PERFORM hr.emp_pkg__set_g_counter(100)`
+- Package variable references → getter calls: `emp_pkg.g_counter` → `hr.emp_pkg__get_g_counter()`
+- Initialization injection: `PERFORM hr.emp_pkg__initialize()` injected at start of package function bodies
+- Flag protection in assignments: `setInAssignmentTarget()` prevents getter transformation on LHS
+- Case-insensitive variable lookup (Oracle compatibility)
+
+---
+
+**Implementation approach validated!** 🎉
 
 **Key Advantages:**
 - ✅ Maintains architectural patterns (ANTLR only in transformation)

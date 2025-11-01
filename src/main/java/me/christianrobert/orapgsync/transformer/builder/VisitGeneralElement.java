@@ -67,6 +67,7 @@ public class VisitGeneralElement {
    * Handles dot navigation: first.second.third...
    *
    * <p>Disambiguation logic:
+   * 0. Check for package variable reference (pkg.variable) - transform to getter call
    * 1. Check for sequence pseudo-column (seq.NEXTVAL, seq.CURRVAL)
    * 2. If last part has function arguments → function call
    *    - Check metadata: is this a type member method (table.col.method)?
@@ -80,7 +81,28 @@ public class VisitGeneralElement {
       List<PlSqlParser.General_element_partContext> parts,
       PostgresCodeBuilder b) {
 
-    // Check for sequence NEXTVAL/CURRVAL calls FIRST (before function call check)
+    // STEP 0: Check for package variable references (unless in assignment target)
+    // Pattern: package.variable (2 parts, no function arguments)
+    // Oracle:     pkg.g_counter
+    // PostgreSQL: schema.pkg__get_g_counter()
+    if (!b.isInAssignmentTarget() && parts.size() == 2) {
+      PlSqlParser.General_element_partContext lastPart = parts.get(parts.size() - 1);
+      boolean hasArguments = lastPart.function_argument() != null && !lastPart.function_argument().isEmpty();
+
+      if (!hasArguments) {
+        // Could be a package variable - build the reference string
+        String packageName = parts.get(0).id_expression().getText();
+        String variableName = parts.get(1).id_expression().getText();
+
+        // Check if this is a package variable
+        if (b.isPackageVariable(packageName, variableName)) {
+          // Transform to getter call
+          return b.transformToPackageVariableGetter(packageName, variableName);
+        }
+      }
+    }
+
+    // Check for sequence NEXTVAL/CURRVAL calls (before function call check)
     // Pattern: sequence_name.NEXTVAL or schema.sequence_name.NEXTVAL
     if (isSequenceCall(parts)) {
       return handleSequenceCall(parts, b);
