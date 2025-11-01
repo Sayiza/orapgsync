@@ -1083,4 +1083,299 @@ function escapeHtml(text) {
 
 // ===== END STANDALONE FUNCTION IMPLEMENTATION FUNCTIONS =====
 
+// ==========================================
+// Unified Function Verification (NEW)
+// ==========================================
+
+/**
+ * Verify all PostgreSQL functions (unified verification job).
+ * Replaces separate stub and implementation verification jobs.
+ * Returns DDL for manual inspection instead of execution.
+ */
+async function verifyAllPostgresFunctions() {
+    console.log('Starting unified PostgreSQL function verification job...');
+
+    const button = document.querySelector('#postgres-standalone-function-implementation .verify-all-btn');
+    if (button) {
+        button.disabled = true;
+        button.innerHTML = '⏳';
+    }
+
+    updateMessage('Starting PostgreSQL function verification...');
+    updateProgress(0, 'Starting PostgreSQL function verification');
+
+    try {
+        const response = await fetch('/api/functions/postgres/verify', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+
+        const result = await response.json();
+
+        if (result.status === 'success') {
+            console.log('PostgreSQL function verification job started:', result.jobId);
+            updateMessage('PostgreSQL function verification job started successfully');
+
+            // Start polling for progress
+            await pollUnifiedFunctionVerificationJobStatus(result.jobId);
+        } else {
+            throw new Error(result.message || 'Failed to start PostgreSQL function verification job');
+        }
+
+    } catch (error) {
+        console.error('Error starting PostgreSQL function verification job:', error);
+        updateMessage('Failed to start PostgreSQL function verification: ' + error.message);
+        updateProgress(0, 'Failed to start PostgreSQL function verification');
+
+        // Re-enable button
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = '⟳ Verify All Functions';
+        }
+    }
+}
+
+async function pollUnifiedFunctionVerificationJobStatus(jobId) {
+    console.log('Polling unified function verification job status for:', jobId);
+
+    try {
+        const response = await fetch(`/api/jobs/${jobId}/status`);
+        const result = await response.json();
+
+        if (result.status === 'error') {
+            throw new Error(result.message);
+        }
+
+        console.log('Unified function verification job status:', result);
+
+        // Update progress if available
+        if (result.progress) {
+            const percentage = result.progress.percentage;
+            const currentTask = result.progress.currentTask || 'Processing...';
+            const details = result.progress.details || '';
+
+            updateProgress(percentage, currentTask);
+            if (details) {
+                updateMessage(details);
+            }
+        }
+
+        // Check if job is complete
+        if (result.isComplete) {
+            if (result.status === 'COMPLETED') {
+                console.log('Unified function verification job completed successfully');
+                updateProgress(100, 'Function verification completed successfully');
+                updateMessage('Function verification completed');
+
+                // Get job results
+                await getUnifiedFunctionVerificationJobResults(jobId);
+            } else if (result.status === 'FAILED') {
+                console.error('Unified function verification job failed:', result.error);
+                updateProgress(0, 'Function verification failed');
+                updateMessage('Function verification failed: ' + (result.error || 'Unknown error'));
+            }
+
+            // Re-enable button
+            const button = document.querySelector('#postgres-standalone-function-implementation .verify-all-btn');
+            if (button) {
+                button.disabled = false;
+                button.innerHTML = '⟳ Verify All Functions';
+            }
+        } else {
+            // Continue polling
+            setTimeout(() => pollUnifiedFunctionVerificationJobStatus(jobId), 1000);
+        }
+
+    } catch (error) {
+        console.error('Error polling unified function verification job status:', error);
+        updateMessage('Error checking function verification job status: ' + error.message);
+        updateProgress(0, 'Error checking function verification job status');
+
+        // Re-enable button
+        const button = document.querySelector('#postgres-standalone-function-implementation .verify-all-btn');
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = '⟳ Verify All Functions';
+        }
+    }
+}
+
+async function getUnifiedFunctionVerificationJobResults(jobId) {
+    console.log('Getting unified function verification job results for:', jobId);
+
+    try {
+        const response = await fetch(`/api/jobs/${jobId}/result`);
+        const result = await response.json();
+
+        if (result.status === 'success') {
+            console.log('Unified function verification job results:', result);
+
+            // The result contains the FunctionVerificationResult object
+            const verificationResult = result.result;
+
+            if (verificationResult) {
+                const totalFunctions = result.totalFunctions || 0;
+                const implementedCount = result.implementedCount || 0;
+                const stubCount = result.stubCount || 0;
+                const errorCount = result.errorCount || 0;
+
+                updateMessage(`Function verification completed: ${totalFunctions} functions (${implementedCount} implemented, ${stubCount} stubs, ${errorCount} errors)`);
+                updateComponentCount("postgres-standalone-function-implementation", implementedCount);
+
+                // Display the detailed verification results
+                displayUnifiedFunctionVerificationResults(verificationResult);
+            } else {
+                updateMessage('Function verification completed but returned no results');
+            }
+        } else {
+            throw new Error(result.message || 'Failed to get function verification job results');
+        }
+
+    } catch (error) {
+        console.error('Error getting unified function verification job results:', error);
+        updateMessage('Error getting function verification results: ' + error.message);
+    }
+}
+
+/**
+ * Display unified function verification results with DDL inspection.
+ * Groups functions by schema with collapsible DDL sections.
+ * Includes function type (FUNCTION/PROCEDURE) and package member indicator.
+ */
+function displayUnifiedFunctionVerificationResults(verificationResult) {
+    const resultsDiv = document.getElementById('postgres-unified-function-verification-results');
+    const detailsDiv = document.getElementById('postgres-unified-function-verification-details');
+
+    if (!resultsDiv || !detailsDiv) {
+        console.error('Unified function verification results container not found');
+        return;
+    }
+
+    let html = '';
+
+    // Summary statistics
+    const totalFunctions = verificationResult.totalFunctions || 0;
+    const implementedCount = verificationResult.implementedCount || 0;
+    const stubCount = verificationResult.stubCount || 0;
+    const errorCount = verificationResult.errorCount || 0;
+
+    html += '<div class="table-creation-summary">';
+    html += '<div class="summary-stats">';
+    html += `<span class="stat-item created">Implemented: ${implementedCount}</span>`;
+    html += `<span class="stat-item skipped">Stubs: ${stubCount}</span>`;
+    html += `<span class="stat-item errors">Errors: ${errorCount}</span>`;
+    html += `<span class="stat-item">Total: ${totalFunctions}</span>`;
+    html += '</div>';
+    html += '</div>';
+
+    // Generate schema-grouped functions with DDL
+    const functionsBySchema = verificationResult.functionsBySchema || {};
+
+    Object.keys(functionsBySchema).sort().forEach(schemaName => {
+        const schemaFunctions = functionsBySchema[schemaName] || [];
+        const schemaId = `function-verification-schema-${schemaName.replace(/[^a-z0-9]/gi, '_')}`;
+
+        // Count by status for this schema
+        const schemaImplemented = schemaFunctions.filter(f => f.status === 'IMPLEMENTED').length;
+        const schemaStubs = schemaFunctions.filter(f => f.status === 'STUB').length;
+        const schemaErrors = schemaFunctions.filter(f => f.status === 'ERROR').length;
+
+        html += '<div class="table-schema-group">';
+        html += `<div class="table-schema-header" onclick="toggleSchemaGroup('${schemaId}')">`;
+        html += `<span class="toggle-indicator" id="${schemaId}-indicator">▶</span> `;
+        html += `${schemaName} (${schemaFunctions.length} functions - `;
+        html += `${schemaImplemented} implemented, ${schemaStubs} stubs, ${schemaErrors} errors)`;
+        html += '</div>';
+        html += `<div class="table-items-list" id="${schemaId}" style="display: none;">`;
+
+        // Sort functions by name within schema
+        schemaFunctions.sort((a, b) => a.functionName.localeCompare(b.functionName));
+
+        schemaFunctions.forEach(func => {
+            const funcId = `function-ddl-${schemaName}-${func.functionName}`.replace(/[^a-z0-9]/gi, '_');
+            const statusClass = func.status === 'IMPLEMENTED' ? 'created' :
+                               func.status === 'STUB' ? 'skipped' : 'error';
+            const statusBadge = func.status === 'IMPLEMENTED' ? '✓ IMPLEMENTED' :
+                               func.status === 'STUB' ? '⚠ STUB' : '✗ ERROR';
+
+            // Add type badge (FUNCTION/PROCEDURE) and package indicator
+            const typeBadge = func.functionType || 'FUNCTION';
+            const packageIndicator = func.isPackageMember ? '📦 Package' : 'Standalone';
+
+            html += `<div class="table-item ${statusClass}">`;
+            html += `<div class="view-header" onclick="toggleFunctionDdl('${funcId}')">`;
+            html += `<span class="toggle-indicator" id="${funcId}-indicator">▶</span> `;
+            html += `<strong>${func.functionName}</strong> `;
+            html += `<span class="status-badge">[${typeBadge}]</span> `;
+            html += `<span class="status-badge">[${packageIndicator}]</span> `;
+            html += `<span class="status-badge">[${statusBadge}]</span>`;
+            html += '</div>';
+
+            // DDL section (collapsible, starts collapsed)
+            html += `<div class="view-ddl-section" id="${funcId}" style="display: none;">`;
+            if (func.functionDdl) {
+                html += '<pre class="sql-statement">';
+                html += escapeHtml(func.functionDdl);
+                html += '</pre>';
+            } else if (func.errorMessage) {
+                html += `<div class="error-message">Error: ${escapeHtml(func.errorMessage)}</div>`;
+            } else {
+                html += '<div class="error-message">No DDL available</div>';
+            }
+            html += '</div>';
+            html += '</div>';
+        });
+
+        html += '</div>';
+        html += '</div>';
+    });
+
+    detailsDiv.innerHTML = html;
+
+    // Show the results section
+    resultsDiv.style.display = 'block';
+}
+
+/**
+ * Toggle function DDL visibility.
+ */
+function toggleFunctionDdl(funcId) {
+    const ddlSection = document.getElementById(funcId);
+    const indicator = document.getElementById(`${funcId}-indicator`);
+
+    if (!ddlSection) {
+        console.warn(`Function DDL section not found: ${funcId}`);
+        return;
+    }
+
+    if (ddlSection.style.display === 'none') {
+        ddlSection.style.display = 'block';
+        if (indicator) indicator.textContent = '▼';
+    } else {
+        ddlSection.style.display = 'none';
+        if (indicator) indicator.textContent = '▶';
+    }
+}
+
+/**
+ * Toggle unified function verification results visibility.
+ */
+function toggleUnifiedFunctionVerificationResults() {
+    const resultsDiv = document.getElementById('postgres-unified-function-verification-results');
+    const detailsDiv = document.getElementById('postgres-unified-function-verification-details');
+    const toggleIndicator = resultsDiv.querySelector('.toggle-indicator');
+
+    if (detailsDiv.style.display === 'none' || !detailsDiv.style.display) {
+        detailsDiv.style.display = 'block';
+        if (toggleIndicator) toggleIndicator.textContent = '▲';
+    } else {
+        detailsDiv.style.display = 'none';
+        if (toggleIndicator) toggleIndicator.textContent = '▼';
+    }
+}
+
+// ===== END UNIFIED FUNCTION VERIFICATION =====
+
 // ===== END FUNCTION FUNCTIONS =====

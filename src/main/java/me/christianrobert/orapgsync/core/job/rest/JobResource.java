@@ -41,6 +41,7 @@ import me.christianrobert.orapgsync.transfer.rest.DataTransferResource;
 import me.christianrobert.orapgsync.typemethod.rest.TypeMethodResource;
 import me.christianrobert.orapgsync.view.rest.ViewResource;
 import me.christianrobert.orapgsync.core.job.model.view.ViewVerificationResult;
+import me.christianrobert.orapgsync.core.job.model.function.FunctionVerificationResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -336,6 +337,29 @@ public class JobResource {
                     response.put("stubCount", viewVerifyResult.getStubCount());
                     response.put("errorCount", viewVerifyResult.getErrorCount());
                     response.put("result", viewVerifyResult); // Unwrap the single element
+                }
+            } else if (result instanceof FunctionVerificationResult) {
+                FunctionVerificationResult funcVerifyResult = (FunctionVerificationResult) result;
+                Map<String, Object> summary = FunctionResource.generateFunctionVerificationSummary(funcVerifyResult);
+                response.put("summary", summary);
+                response.put("totalFunctions", funcVerifyResult.getTotalFunctions());
+                response.put("implementedCount", funcVerifyResult.getImplementedCount());
+                response.put("stubCount", funcVerifyResult.getStubCount());
+                response.put("errorCount", funcVerifyResult.getErrorCount());
+                response.put("result", result);
+            } else if (result instanceof List<?> && jobType.contains("FUNCTION_VERIFICATION")) {
+                // Handle List<FunctionVerificationResult> - unwrap single element
+                @SuppressWarnings("unchecked")
+                List<FunctionVerificationResult> funcVerifyResults = (List<FunctionVerificationResult>) result;
+                if (!funcVerifyResults.isEmpty()) {
+                    FunctionVerificationResult funcVerifyResult = funcVerifyResults.get(0);
+                    Map<String, Object> summary = FunctionResource.generateFunctionVerificationSummary(funcVerifyResult);
+                    response.put("summary", summary);
+                    response.put("totalFunctions", funcVerifyResult.getTotalFunctions());
+                    response.put("implementedCount", funcVerifyResult.getImplementedCount());
+                    response.put("stubCount", funcVerifyResult.getStubCount());
+                    response.put("errorCount", funcVerifyResult.getErrorCount());
+                    response.put("result", funcVerifyResult); // Unwrap the single element
                 }
             } else if (result instanceof OracleCompatInstallationResult) {
                 OracleCompatInstallationResult oracleCompatInstallResult = (OracleCompatInstallationResult) result;

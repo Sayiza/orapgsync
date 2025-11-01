@@ -552,20 +552,20 @@
             <div class="component-info" id="postgres-standalone-function-implementation">
               <span class="count-badge">-</span>
               <span class="component-text">Standalone Functions/Procedures implemented</span>
-              <button class="refresh-btn" onclick="verifyPostgresStandaloneFunctionImplementation()" title="Verify PostgreSQL standalone function implementations">⟳</button>
+              <button class="verify-all-btn" onclick="verifyAllPostgresFunctions()" title="Verify all PostgreSQL functions (stubs and implementations)" style="margin-left: 4px;">⟳ Verify All Functions</button>
               <button class="action-btn" onclick="createPostgresStandaloneFunctionImplementation()" title="Create PostgreSQL standalone functions/procedures with PL/pgSQL logic">Create Standalone Functions</button>
 
-              <!-- VERIFICATION RESULTS (from ⟳ button) -->
-              <div class="table-creation-results" id="postgres-standalone-function-implementation-verification-results" style="display: none;">
-                <div class="table-creation-header" onclick="toggleStandaloneFunctionImplementationVerificationResults('postgres')">
-                  <span class="toggle-indicator">▼</span> Standalone Function/Procedure Implementation Verification Results
+              <!-- UNIFIED FUNCTION VERIFICATION RESULTS (from ⟳ Verify All Functions button) -->
+              <div class="table-creation-results" id="postgres-unified-function-verification-results" style="display: none;">
+                <div class="table-creation-header" onclick="toggleUnifiedFunctionVerificationResults()">
+                  <span class="toggle-indicator">▼</span> Function Verification Results (All Functions)
                 </div>
-                <div class="table-creation-details" id="postgres-standalone-function-implementation-verification-details">
-                  <!-- Standalone function implementation verification results will be populated here -->
+                <div class="table-creation-details" id="postgres-unified-function-verification-details">
+                  <!-- Unified function verification results will be populated here -->
                 </div>
               </div>
 
-              <!-- CREATION RESULTS (from Create button) -->
+              <!-- FUNCTION IMPLEMENTATION CREATION RESULTS (from Create Standalone Functions button) -->
               <div class="table-creation-results" id="postgres-standalone-function-implementation-results" style="display: none;">
                 <div class="table-creation-header" onclick="toggleStandaloneFunctionImplementationResults('postgres')">
                   <span class="toggle-indicator">▼</span> Standalone Function/Procedure Implementation Creation Results

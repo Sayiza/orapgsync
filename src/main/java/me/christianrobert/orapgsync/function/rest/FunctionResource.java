@@ -9,6 +9,7 @@ import me.christianrobert.orapgsync.core.job.Job;
 import me.christianrobert.orapgsync.core.job.model.function.FunctionMetadata;
 import me.christianrobert.orapgsync.core.job.model.function.FunctionStubCreationResult;
 import me.christianrobert.orapgsync.core.job.model.function.StandaloneFunctionImplementationResult;
+import me.christianrobert.orapgsync.core.job.model.function.FunctionVerificationResult;
 import me.christianrobert.orapgsync.core.job.service.JobRegistry;
 import me.christianrobert.orapgsync.core.job.service.JobService;
 import org.slf4j.Logger;
@@ -66,6 +67,12 @@ public class FunctionResource {
     public Response verifyStandaloneFunctionImplementation() {
         return startJob("POSTGRES", "STANDALONE_FUNCTION_IMPLEMENTATION_VERIFICATION",
             "PostgreSQL standalone function implementation verification");
+    }
+
+    @POST
+    @Path("/postgres/verify")
+    public Response verifyAllPostgresFunctions() {
+        return startJob("POSTGRES", "FUNCTION_VERIFICATION", "PostgreSQL unified function verification");
     }
 
     /**
@@ -245,6 +252,48 @@ public class FunctionResource {
                 "implementedFunctions", implementedDetails,
                 "skippedFunctions", skippedDetails,
                 "errors", errorDetails
+        );
+    }
+
+    /**
+     * Generate summary for unified function verification results.
+     */
+    public static Map<String, Object> generateFunctionVerificationSummary(FunctionVerificationResult functionVerifyResult) {
+        Map<String, Object> functionsBySchemaDetails = new HashMap<>();
+
+        // Process functions grouped by schema
+        Map<String, List<FunctionVerificationResult.FunctionInfo>> functionsBySchema = functionVerifyResult.getFunctionsBySchema();
+        for (Map.Entry<String, List<FunctionVerificationResult.FunctionInfo>> entry : functionsBySchema.entrySet()) {
+            String schema = entry.getKey();
+            List<FunctionVerificationResult.FunctionInfo> functions = entry.getValue();
+
+            List<Map<String, Object>> functionDetails = functions.stream()
+                    .map(function -> {
+                        Map<String, Object> functionMap = new HashMap<>();
+                        functionMap.put("functionName", function.getFunctionName());
+                        functionMap.put("functionType", function.getFunctionType());
+                        functionMap.put("isPackageMember", function.isPackageMember());
+                        functionMap.put("status", function.getStatus().toString());
+                        if (function.getFunctionDdl() != null) {
+                            functionMap.put("functionDdl", function.getFunctionDdl());
+                        }
+                        if (function.getErrorMessage() != null) {
+                            functionMap.put("errorMessage", function.getErrorMessage());
+                        }
+                        return functionMap;
+                    })
+                    .toList();
+
+            functionsBySchemaDetails.put(schema, functionDetails);
+        }
+
+        return Map.of(
+                "totalFunctions", functionVerifyResult.getTotalFunctions(),
+                "implementedCount", functionVerifyResult.getImplementedCount(),
+                "stubCount", functionVerifyResult.getStubCount(),
+                "errorCount", functionVerifyResult.getErrorCount(),
+                "executionTimestamp", functionVerifyResult.getExecutionDateTime(),
+                "functionsBySchema", functionsBySchemaDetails
         );
     }
 }
