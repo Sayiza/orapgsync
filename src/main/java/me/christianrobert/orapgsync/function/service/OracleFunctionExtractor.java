@@ -364,8 +364,13 @@ public class OracleFunctionExtractor {
                     metadata.setPackageName(packageName.toLowerCase());
                     metadata.setPackagePrivate(true);
 
-                    // Extract return type if available (we won't have full parameter details without more parsing)
-                    // For now, just mark it as a function - stub creation will use minimal signature
+                    // Extract return type from AST
+                    if (funcCtx.type_spec() != null) {
+                        String returnType = extractTypeFromTypeSpec(funcCtx.type_spec());
+                        metadata.setReturnDataType(returnType);
+                        log.trace("Extracted return type '{}' for private function: {}.{}.{}",
+                                 returnType, schema, packageName, functionName);
+                    }
 
                     functions.add(metadata);
                     log.trace("Found private function: {}.{}.{}", schema, packageName, functionName);
@@ -392,5 +397,42 @@ public class OracleFunctionExtractor {
         }
 
         return functions;
+    }
+
+    /**
+     * Extracts the Oracle data type string from a type_spec AST node.
+     *
+     * @param typeSpecCtx The type_spec AST node
+     * @return The Oracle type string (e.g., "NUMBER", "VARCHAR2", etc.)
+     */
+    private static String extractTypeFromTypeSpec(me.christianrobert.orapgsync.antlr.PlSqlParser.Type_specContext typeSpecCtx) {
+        if (typeSpecCtx == null) {
+            return null;
+        }
+
+        // type_spec can be: datatype | type_name
+        if (typeSpecCtx.datatype() != null) {
+            // Built-in type (NUMBER, VARCHAR2, DATE, etc.)
+            me.christianrobert.orapgsync.antlr.PlSqlParser.DatatypeContext datatypeCtx = typeSpecCtx.datatype();
+
+            if (datatypeCtx.native_datatype_element() != null) {
+                // Extract the base type name
+                me.christianrobert.orapgsync.antlr.PlSqlParser.Native_datatype_elementContext nativeType =
+                    datatypeCtx.native_datatype_element();
+
+                // Get the type name (NUMBER, VARCHAR2, etc.)
+                return nativeType.getText().toUpperCase();
+            } else if (datatypeCtx.INTERVAL() != null) {
+                // INTERVAL type
+                return "INTERVAL";
+            }
+        } else if (typeSpecCtx.type_name() != null) {
+            // User-defined type (custom type or ROWTYPE)
+            // For now, return the text representation
+            return typeSpecCtx.type_name().getText().toUpperCase();
+        }
+
+        // Fallback: return the entire text
+        return typeSpecCtx.getText().toUpperCase();
     }
 }

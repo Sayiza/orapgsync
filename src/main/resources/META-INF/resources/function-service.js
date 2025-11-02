@@ -691,7 +691,7 @@ function displayStandaloneFunctionImplementationResults(result, database) {
         // Show implemented functions - convert Map to Array using Object.values()
         if (summary.implementedCount > 0 && summary.implementedFunctions) {
             html += '<div class="created-tables-section">';
-            html += '<h4>Implemented Standalone Functions/Procedures:</h4>';
+            html += '<h4>Implemented Functions/Procedures:</h4>';
             html += '<div class="table-items">';
             Object.values(summary.implementedFunctions).forEach(func => {
                 html += `<div class="table-item created">${func.functionName} ✓</div>`;
