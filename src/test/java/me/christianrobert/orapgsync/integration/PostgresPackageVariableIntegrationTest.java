@@ -335,7 +335,135 @@ public class PostgresPackageVariableIntegrationTest extends PostgresSqlValidatio
     }
 
     /**
-     * Test 3: Package variable assignment with complex expression.
+     * Test 3: Package body variables (private variables declared in body).
+     *
+     * <p>Validates:
+     * <ul>
+     *   <li>Body variable extraction (variables declared in package body, not spec)</li>
+     *   <li>Helper function generation for body variables</li>
+     *   <li>Transformation of functions that use body variables</li>
+     *   <li>Mixed spec and body variables in same package</li>
+     * </ul>
+     */
+    @Test
+    void packageBodyVariables_privateVariables() throws SQLException {
+        // Oracle package with variables in BOTH spec (public) and body (private)
+        String oraclePackageSpec = """
+            CREATE OR REPLACE PACKAGE hr.state_pkg AS
+              g_public_counter INTEGER := 0;
+
+              FUNCTION get_counters RETURN VARCHAR2;
+              PROCEDURE increment_public;
+              PROCEDURE increment_private;
+            END state_pkg;
+            """;
+
+        // Package body with private variables
+        // In real Oracle, body variables are only visible within the package
+        String oraclePackageBody = """
+            CREATE OR REPLACE PACKAGE BODY hr.state_pkg AS
+              -- Private variables (declared in body, not spec)
+              g_private_counter INTEGER := 0;
+              g_internal_state VARCHAR2(20) := 'INIT';
+
+              FUNCTION get_counters RETURN VARCHAR2 IS
+              BEGIN
+                RETURN 'Public: ' || g_public_counter || ', Private: ' || g_private_counter;
+              END;
+
+              PROCEDURE increment_public IS
+              BEGIN
+                g_public_counter := g_public_counter + 1;
+              END;
+
+              PROCEDURE increment_private IS
+              BEGIN
+                g_private_counter := g_private_counter + 1;
+                g_internal_state := 'UPDATED';
+              END;
+            END state_pkg;
+            """;
+
+        // Extract package context from spec
+        PackageContextExtractor extractor = new PackageContextExtractor(new me.christianrobert.orapgsync.transformer.parser.AntlrParser());
+        PackageContext packageContext = extractor.extractContext("hr", "state_pkg", oraclePackageSpec);
+
+        // Should have 1 variable from spec
+        assertEquals(1, packageContext.getVariables().size(), "Should extract 1 variable from spec");
+        assertTrue(packageContext.hasVariable("g_public_counter"), "Should have g_public_counter from spec");
+
+        // Parse package body and extract body variables
+        me.christianrobert.orapgsync.transformer.parser.AntlrParser parser = new me.christianrobert.orapgsync.transformer.parser.AntlrParser();
+        me.christianrobert.orapgsync.transformer.parser.ParseResult bodyParseResult = parser.parsePackageBody(oraclePackageBody);
+        me.christianrobert.orapgsync.antlr.PlSqlParser.Create_package_bodyContext bodyAst =
+            (me.christianrobert.orapgsync.antlr.PlSqlParser.Create_package_bodyContext) bodyParseResult.getTree();
+
+        // Extract body variables
+        extractor.extractBodyVariables(bodyAst, packageContext);
+
+        // Should now have 3 variables total (1 from spec + 2 from body)
+        assertEquals(3, packageContext.getVariables().size(), "Should have 3 variables total (spec + body)");
+        assertTrue(packageContext.hasVariable("g_public_counter"), "Should have g_public_counter from spec");
+        assertTrue(packageContext.hasVariable("g_private_counter"), "Should have g_private_counter from body");
+        assertTrue(packageContext.hasVariable("g_internal_state"), "Should have g_internal_state from body");
+
+        // Generate and execute helpers for ALL variables
+        PackageHelperGenerator generator = new PackageHelperGenerator();
+        List<String> helperSqls = generator.generateHelperSql(packageContext);
+        for (String helperSql : helperSqls) {
+            executeUpdate(helperSql);
+        }
+
+        // Build package context cache
+        Map<String, PackageContext> packageContextCache = new HashMap<>();
+        packageContextCache.put("hr.state_pkg", packageContext);
+
+        // Transform function that uses BOTH public and private variables
+        String getCountersOracle = """
+            FUNCTION get_counters RETURN VARCHAR2 IS
+            BEGIN
+              RETURN 'Public: ' || g_public_counter || ', Private: ' || g_private_counter;
+            END;
+            """;
+
+        TransformationResult result = transformationService.transformFunction(
+            getCountersOracle,
+            "hr",
+            indices,
+            packageContextCache,
+            "get_counters",
+            "state_pkg"
+        );
+
+        assertTrue(result.isSuccess(), "Transformation should succeed: " + result.getErrorMessage());
+
+        System.out.println("=== Transformed get_counters (uses body variable) ===");
+        System.out.println(result.getPostgresSql());
+        System.out.println("=====================================================");
+
+        // Verify transformation uses getters for BOTH variables
+        assertTrue(result.getPostgresSql().contains("state_pkg__get_g_public_counter()"),
+            "Should use getter for g_public_counter (spec variable)");
+        assertTrue(result.getPostgresSql().contains("state_pkg__get_g_private_counter()"),
+            "Should use getter for g_private_counter (body variable)");
+
+        // Execute function
+        executeUpdate(result.getPostgresSql());
+
+        // Verify it works
+        List<Map<String, Object>> rows = executeQuery(
+            "SELECT hr.state_pkg__get_counters() AS counters"
+        );
+        String counters = (String) rows.get(0).get("counters");
+        assertTrue(counters.contains("Public: 0"), "Should include public counter");
+        assertTrue(counters.contains("Private: 0"), "Should include private counter");
+
+        System.out.println("✓ Counters string: " + counters);
+        System.out.println("\n✅ PACKAGE BODY VARIABLES TEST PASSED!");
+    }
+
+    /**
+     * Test 4: Package variable assignment with complex expression.
      *
      * <p>Validates:
      * <ul>

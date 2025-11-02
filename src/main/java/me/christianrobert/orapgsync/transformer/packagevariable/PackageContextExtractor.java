@@ -45,7 +45,7 @@ public class PackageContextExtractor {
      * @param schema Schema name (e.g., "HR")
      * @param packageName Package name (e.g., "EMP_PKG")
      * @param packageSpecSql Package spec SQL (CREATE [OR REPLACE] PACKAGE ... END;)
-     * @return PackageContext with extracted variables
+     * @return PackageContext with extracted variables (from spec only - call extractBodyVariables for body)
      * @throws TransformationException if parsing fails
      */
     public PackageContext extractContext(String schema, String packageName, String packageSpecSql) {
@@ -62,7 +62,7 @@ public class PackageContextExtractor {
         // Create context
         PackageContext context = new PackageContext(schema, packageName);
 
-        // Extract variable declarations
+        // Extract variable declarations from spec
         PlSqlParser.Create_packageContext packageCtx = (PlSqlParser.Create_packageContext) parseResult.getTree();
         if (packageCtx != null && packageCtx.package_obj_spec() != null) {
             for (PlSqlParser.Package_obj_specContext specCtx : packageCtx.package_obj_spec()) {
@@ -72,9 +72,46 @@ public class PackageContextExtractor {
             }
         }
 
-        log.debug("Extracted {} variables from package {}.{}",
+        log.debug("Extracted {} variables from package spec {}.{}",
                   context.getVariables().size(), schema, packageName);
         return context;
+    }
+
+    /**
+     * Extracts package variable declarations from a package body.
+     * This should be called after extractContext() to get body variables in addition to spec variables.
+     *
+     * <p>In Oracle, packages can declare variables in both:
+     * <ul>
+     *   <li>Package specification - Public variables (extracted by extractContext())</li>
+     *   <li>Package body - Private variables (extracted by this method)</li>
+     * </ul>
+     *
+     * <p>Both types of variables are stored in the same PackageContext and treated identically
+     * for transformation purposes (both get helper functions).
+     *
+     * @param bodyAst Parsed package body AST (from AntlrParser.parsePackageBody())
+     * @param context PackageContext to add body variables to
+     */
+    public void extractBodyVariables(PlSqlParser.Create_package_bodyContext bodyAst, PackageContext context) {
+        if (bodyAst == null || bodyAst.package_obj_body() == null) {
+            log.debug("No package body or no body objects to extract variables from");
+            return;
+        }
+
+        int bodyVariableCount = 0;
+
+        // Iterate through package body objects
+        for (PlSqlParser.Package_obj_bodyContext bodyObjCtx : bodyAst.package_obj_body()) {
+            // Extract variable declarations (package-level body variables)
+            if (bodyObjCtx.variable_declaration() != null) {
+                extractVariableDeclaration(bodyObjCtx.variable_declaration(), context);
+                bodyVariableCount++;
+            }
+        }
+
+        log.debug("Extracted {} variables from package body {}.{}",
+                  bodyVariableCount, context.getSchema(), context.getPackageName());
     }
 
     /**

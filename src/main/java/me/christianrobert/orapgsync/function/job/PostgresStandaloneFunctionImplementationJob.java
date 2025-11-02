@@ -396,16 +396,18 @@ public class PostgresStandaloneFunctionImplementationJob extends AbstractDatabas
      * Ensures package context exists for a given package.
      * If not already cached, this method:
      * 1. Queries Oracle for package spec source (ALL_SOURCE)
-     * 2. Parses spec with ANTLR to extract variable declarations
-     * 3. Generates helper functions (initialize, getters, setters)
-     * 4. Executes helper creation in PostgreSQL
-     * 5. Caches context for subsequent functions from same package
+     * 2. Parses spec with ANTLR to extract variable declarations from spec
+     * 3. Queries Oracle for package body source (ALL_SOURCE)
+     * 4. Parses body with ANTLR to extract variable declarations from body
+     * 5. Generates helper functions (initialize, getters, setters) for ALL variables
+     * 6. Executes helper creation in PostgreSQL
+     * 7. Caches context for subsequent functions from same package
      *
      * @param oracleConn Oracle database connection
      * @param postgresConn PostgreSQL database connection
      * @param schema Schema name
      * @param packageName Package name
-     * @throws SQLException if package spec query or helper creation fails
+     * @throws SQLException if package spec/body query or helper creation fails
      */
     private void ensurePackageContext(Connection oracleConn, Connection postgresConn,
                                       String schema, String packageName) throws SQLException {
@@ -424,27 +426,13 @@ public class PostgresStandaloneFunctionImplementationJob extends AbstractDatabas
         log.debug("Retrieved package spec for {}.{} ({} characters)",
                   schema, packageName, packageSpecSql.length());
 
-        // Step 2: Parse spec and extract variable declarations
+        // Step 2: Parse spec and extract variable declarations from spec
         PackageContextExtractor extractor = new PackageContextExtractor(antlrParser);
         PackageContext context = extractor.extractContext(schema, packageName, packageSpecSql);
-        log.info("Extracted {} variables from package {}.{}",
+        log.info("Extracted {} variables from package spec {}.{}",
                  context.getVariables().size(), schema, packageName);
 
-        // Step 3: Generate helper function SQL
-        PackageHelperGenerator generator = new PackageHelperGenerator();
-        List<String> helperSqlStatements = generator.generateHelperSql(context);
-        log.info("Generated {} helper functions for package {}.{}",
-                 helperSqlStatements.size(), schema, packageName);
-
-        // Step 4: Execute helper creation in PostgreSQL
-        for (String sql : helperSqlStatements) {
-            try (Statement stmt = postgresConn.createStatement()) {
-                stmt.execute(sql);
-            }
-        }
-        log.info("Successfully created helper functions for package {}.{}", schema, packageName);
-
-        // Step 5: Query and parse package body (for function source extraction)
+        // Step 3: Query and parse package body (for function source extraction AND body variables)
         String packageBodySql = queryPackageBody(oracleConn, schema, packageName);
         log.debug("Retrieved package body for {}.{} ({} characters)",
                   schema, packageName, packageBodySql.length());
@@ -461,7 +449,26 @@ public class PostgresStandaloneFunctionImplementationJob extends AbstractDatabas
         context.setPackageBody(packageBodySql, bodyAst);
         log.info("Parsed and cached package body for {}.{}", schema, packageName);
 
-        // Step 6: Cache context
+        // Step 4: Extract body variables (private package variables declared in body)
+        extractor.extractBodyVariables(bodyAst, context);
+        log.info("Total variables (spec + body) for package {}.{}: {}",
+                 schema, packageName, context.getVariables().size());
+
+        // Step 5: Generate helper function SQL (for ALL variables - spec + body)
+        PackageHelperGenerator generator = new PackageHelperGenerator();
+        List<String> helperSqlStatements = generator.generateHelperSql(context);
+        log.info("Generated {} helper functions for package {}.{}",
+                 helperSqlStatements.size(), schema, packageName);
+
+        // Step 6: Execute helper creation in PostgreSQL
+        for (String sql : helperSqlStatements) {
+            try (Statement stmt = postgresConn.createStatement()) {
+                stmt.execute(sql);
+            }
+        }
+        log.info("Successfully created helper functions for package {}.{}", schema, packageName);
+
+        // Step 7: Cache context
         context.setHelpersCreated(true);
         packageContextCache.put(cacheKey, context);
         log.debug("Cached package context: {}", cacheKey);

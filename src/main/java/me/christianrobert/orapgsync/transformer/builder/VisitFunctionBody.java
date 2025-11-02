@@ -52,14 +52,28 @@ public class VisitFunctionBody {
         // Get schema from context (only metadata dependency - consistent with SQL transformation)
         String schema = b.getContext().getCurrentSchema();
 
-        // STEP 1: Extract function name from AST
+        // STEP 1: Extract function name from AST and build qualified name
         String functionName;
         if (ctx.identifier() != null) {
             functionName = ctx.identifier().getText().toLowerCase();
         } else {
             throw new IllegalStateException("Function name not found in AST");
         }
-        String qualifiedName = schema.toLowerCase() + "." + functionName;
+
+        // Build qualified name based on package membership
+        // Package members: schema.packageName__functionName (double underscore convention)
+        // Standalone: schema.functionName
+        String qualifiedName;
+        String packageName = b.getContext().getCurrentPackageName();
+        if (packageName != null) {
+            // Package member function: include package prefix with double underscore
+            qualifiedName = schema.toLowerCase() + "." +
+                           packageName.toLowerCase() + "__" +
+                           functionName;
+        } else {
+            // Standalone function: just schema.functionName
+            qualifiedName = schema.toLowerCase() + "." + functionName;
+        }
 
         // STEP 2: Build parameter list from AST
         StringBuilder paramList = new StringBuilder();

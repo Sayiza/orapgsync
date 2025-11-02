@@ -55,14 +55,28 @@ public class VisitProcedureBody {
         // Get schema from context (only metadata dependency - consistent with SQL transformation)
         String schema = b.getContext().getCurrentSchema();
 
-        // STEP 1: Extract procedure name from AST
+        // STEP 1: Extract procedure name from AST and build qualified name
         String procedureName;
         if (ctx.identifier() != null) {
             procedureName = ctx.identifier().getText().toLowerCase();
         } else {
             throw new IllegalStateException("Procedure name not found in AST");
         }
-        String qualifiedName = schema.toLowerCase() + "." + procedureName;
+
+        // Build qualified name based on package membership
+        // Package members: schema.packageName__procedureName (double underscore convention)
+        // Standalone: schema.procedureName
+        String qualifiedName;
+        String packageName = b.getContext().getCurrentPackageName();
+        if (packageName != null) {
+            // Package member procedure: include package prefix with double underscore
+            qualifiedName = schema.toLowerCase() + "." +
+                           packageName.toLowerCase() + "__" +
+                           procedureName;
+        } else {
+            // Standalone procedure: just schema.procedureName
+            qualifiedName = schema.toLowerCase() + "." + procedureName;
+        }
 
         // STEP 2: Build parameter list from AST and count OUT parameters
         StringBuilder paramList = new StringBuilder();

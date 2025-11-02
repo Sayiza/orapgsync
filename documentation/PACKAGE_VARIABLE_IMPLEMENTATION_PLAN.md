@@ -1763,13 +1763,15 @@ This order minimizes breakage and allows incremental verification.
 
 **Status:** Three severe issues identified during integration testing that prevent package variable transformations from working correctly in production.
 
-### Issue A: Package Body Variables Not Recognized
+### ✅ Issue A: Package Body Variables Not Recognized - RESOLVED
 
-**Problem:** Package variables declared in the package body (not in the spec) are completely ignored.
+**Status:** ✅ **FIXED** (2025-11-02)
+
+**Problem:** Package variables declared in the package body (not in the spec) were completely ignored.
 
 **Root Cause Analysis:**
 
-`PackageContextExtractor.java` (lines 66-73):
+`PackageContextExtractor.java` (lines 66-73 before fix):
 ```java
 for (PlSqlParser.Package_obj_specContext specCtx : packageCtx.package_obj_spec()) {
     if (specCtx.variable_declaration() != null) {
@@ -1779,56 +1781,147 @@ for (PlSqlParser.Package_obj_specContext specCtx : packageCtx.package_obj_spec()
 ```
 
 This code:
-- ✅ Correctly extracts variables from **package specification** (public variables)
-- ❌ Does NOT extract variables from **package body** (private/body variables)
-- ❌ Ignores `package_obj_body()` entirely
+- ✅ Correctly extracted variables from **package specification** (public variables)
+- ❌ Did NOT extract variables from **package body** (private/body variables)
+- ❌ Ignored `package_obj_body()` entirely
 
 **Oracle Package Structure:**
 
 ```sql
 -- PACKAGE SPECIFICATION (public interface)
 CREATE OR REPLACE PACKAGE hr.test_pkg AS
-  g_public_counter INTEGER := 0;  -- ✅ Currently extracted
+  g_public_counter INTEGER := 0;  -- ✅ Extracted from spec
   FUNCTION get_counter RETURN INTEGER;
 END test_pkg;
 /
 
 -- PACKAGE BODY (implementation + private variables)
 CREATE OR REPLACE PACKAGE BODY hr.test_pkg AS
-  g_private_counter INTEGER := 0;  -- ❌ NOT extracted (ISSUE!)
-  g_internal_state VARCHAR2(20);   -- ❌ NOT extracted (ISSUE!)
+  g_private_counter INTEGER := 0;  -- ❌ Was NOT extracted (ISSUE!)
+  g_internal_state VARCHAR2(20);   -- ❌ Was NOT extracted (ISSUE!)
 
   FUNCTION get_counter RETURN INTEGER IS
   BEGIN
-    RETURN g_private_counter;  -- ❌ Not recognized as package variable!
+    RETURN g_private_counter;  -- ❌ Was not recognized as package variable!
   END;
 END test_pkg;
 /
 ```
 
-**Impact:**
-- Any function that references a body-only variable will fail transformation
-- Variables are NOT transformed to getter/setter calls
-- References remain as simple identifiers → PostgreSQL error: "column g_private_counter does not exist"
+**Impact (Before Fix):**
+- Any function that referenced a body-only variable failed transformation
+- Variables were NOT transformed to getter/setter calls
+- References remained as simple identifiers → PostgreSQL error: "column g_private_counter does not exist"
 - **SEVERE** - Many Oracle packages declare variables in the body for encapsulation
 
 **Evidence:**
-- `PostgresStandaloneFunctionImplementationJob.java:461` - Package body IS being parsed and cached
-- `PackageContext.setPackageBody()` - Body AST is stored but NEVER scanned for variables
+- `PostgresStandaloneFunctionImplementationJob.java:461` - Package body WAS being parsed and cached
+- `PackageContext.setPackageBody()` - Body AST was stored but NEVER scanned for variables
 - Body AST only used for function source extraction, not variable extraction
 
-**Why Not Caught Earlier:**
-- Unit tests only use package specs with variables (test pattern didn't include body variables)
-- Integration test created but shows failure: variables in body not working
+**Fix Applied (2025-11-02):**
+
+**1. Added `extractBodyVariables()` method to `PackageContextExtractor.java`:**
+```java
+/**
+ * Extracts package variable declarations from a package body.
+ * This should be called after extractContext() to get body variables in addition to spec variables.
+ */
+public void extractBodyVariables(PlSqlParser.Create_package_bodyContext bodyAst, PackageContext context) {
+    if (bodyAst == null || bodyAst.package_obj_body() == null) {
+        log.debug("No package body or no body objects to extract variables from");
+        return;
+    }
+
+    int bodyVariableCount = 0;
+
+    // Iterate through package body objects
+    for (PlSqlParser.Package_obj_bodyContext bodyObjCtx : bodyAst.package_obj_body()) {
+        // Extract variable declarations (package-level body variables)
+        if (bodyObjCtx.variable_declaration() != null) {
+            extractVariableDeclaration(bodyObjCtx.variable_declaration(), context);
+            bodyVariableCount++;
+        }
+    }
+
+    log.debug("Extracted {} variables from package body {}.{}",
+              bodyVariableCount, context.getSchema(), context.getPackageName());
+}
+```
+
+**2. Modified `PostgresStandaloneFunctionImplementationJob.ensurePackageContext()` to extract body variables BEFORE generating helpers:**
+
+**Flow Before (Wrong):**
+```
+1. Extract spec variables
+2. Generate helpers (spec only) ← Missing body variables!
+3. Execute helpers
+4. Parse package body
+5. Cache body AST
+```
+
+**Flow After (Correct):**
+```
+1. Extract spec variables
+2. Parse package body
+3. Extract body variables           ← NEW!
+4. Generate helpers (spec + body)   ← Now includes ALL variables
+5. Execute helpers
+6. Cache body AST
+```
+
+**Code Changes in Job (lines 427-467):**
+```java
+// Step 2: Parse spec and extract variable declarations from spec
+PackageContextExtractor extractor = new PackageContextExtractor(antlrParser);
+PackageContext context = extractor.extractContext(schema, packageName, packageSpecSql);
+log.info("Extracted {} variables from package spec {}.{}", ...);
+
+// Step 3: Query and parse package body (for function source extraction AND body variables)
+String packageBodySql = queryPackageBody(oracleConn, schema, packageName);
+ParseResult bodyParseResult = antlrParser.parsePackageBody(packageBodySql);
+PlSqlParser.Create_package_bodyContext bodyAst = ...;
+context.setPackageBody(packageBodySql, bodyAst);
+
+// Step 4: Extract body variables (private package variables declared in body)
+extractor.extractBodyVariables(bodyAst, context);  // ← NEW!
+log.info("Total variables (spec + body) for package {}.{}: {}", ...);
+
+// Step 5: Generate helper function SQL (for ALL variables - spec + body)
+PackageHelperGenerator generator = new PackageHelperGenerator();
+List<String> helperSqlStatements = generator.generateHelperSql(context);
+
+// Step 6: Execute helper creation in PostgreSQL
+...
+```
+
+**Verification:**
+
+Added integration test `packageBodyVariables_privateVariables()`:
+- Package spec with 1 public variable
+- Package body with 2 private variables
+- Function that uses both public and private variables
+- ✅ All variables extracted (3 total)
+- ✅ Helpers generated for all variables
+- ✅ Transformation converts all references to getters
+- ✅ PostgreSQL execution successful
+
+**Test Results:**
+- ✅ All 4 tests in PostgresPackageVariableIntegrationTest passing (0 failures, 0 errors)
+- ✅ Body variables now correctly recognized and transformed
+- ✅ Functions using body variables execute successfully in PostgreSQL
+- ✅ Zero regressions
 
 ---
 
-### Issue B: Generated Function Name Missing Package Prefix
+### ✅ Issue B: Generated Function Name Missing Package Prefix - RESOLVED
 
-**Problem:** Package member functions are generated with wrong names - missing the package prefix.
+**Status:** ✅ **FIXED** (2025-11-02)
+
+**Problem:** Package member functions were generated with wrong names - missing the package prefix.
 
 **Expected:** `CREATE OR REPLACE FUNCTION user_vanessa.testpackagevar1__test1()`
-**Actual:** `CREATE OR REPLACE FUNCTION user_vanessa.test1()`
+**Actual (before fix):** `CREATE OR REPLACE FUNCTION user_vanessa.test1()`
 
 **Root Cause Analysis:**
 
@@ -1884,7 +1977,36 @@ if (packageName != null) {
 
 **Same Issue in VisitProcedureBody:**
 - Same pattern exists in `VisitProcedureBody.java`
-- Must be fixed in both places
+- Fixed in both places
+
+**Fix Applied (2025-11-02):**
+
+Modified both `VisitFunctionBody.java` and `VisitProcedureBody.java` to check for package membership:
+
+```java
+// Build qualified name based on package membership
+String qualifiedName;
+String packageName = b.getContext().getCurrentPackageName();
+if (packageName != null) {
+    // Package member: schema.packageName__functionName
+    qualifiedName = schema.toLowerCase() + "." +
+                   packageName.toLowerCase() + "__" +
+                   functionName;
+} else {
+    // Standalone: schema.functionName
+    qualifiedName = schema.toLowerCase() + "." + functionName;
+}
+```
+
+**Verification:**
+- ✅ All 923 tests passing (0 failures, 0 errors, 6 skipped)
+- ✅ Integration tests confirm correct naming:
+  - `hr.counter_pkg__get_counter()` ✓
+  - `hr.counter_pkg__increment_counter()` ✓
+  - `hr.calc_pkg__calculate_total()` ✓
+  - `hr.config_pkg__get_config()` ✓
+- ✅ Stub replacement now works (names match)
+- ✅ Zero regressions
 
 ---
 
@@ -1998,18 +2120,18 @@ if (parts.size() == 3 && !hasArguments) {
 
 ### Summary of Issues
 
-| Issue | Location | Severity | Impact |
-|-------|----------|----------|--------|
-| **A: Body variables ignored** | `PackageContextExtractor.java:66-73` | CRITICAL | Body variables not extracted, transformation fails |
-| **B: Function name missing package** | `VisitFunctionBody.java:58-62` | CRITICAL | CREATE OR REPLACE fails, duplicate functions created |
-| **C: Detection patterns incomplete** | `VisitGeneralElement.java:84-100` | HIGH | 2 of 3 Oracle patterns fail, syntax errors |
+| Issue | Status | Location | Severity | Impact |
+|-------|--------|----------|----------|--------|
+| **A: Body variables ignored** | ✅ **FIXED** | `PackageContextExtractor.java:66-73` + `PostgresStandaloneFunctionImplementationJob.java:427-467` | CRITICAL | Body variables now extracted and transformed correctly |
+| **B: Function name missing package** | ✅ **FIXED** | `VisitFunctionBody.java:55-76` | CRITICAL | CREATE OR REPLACE now works, correct naming convention |
+| **C: Detection patterns incomplete** | ⏳ **PENDING** | `VisitGeneralElement.java:84-100` | HIGH | 2 of 3 Oracle patterns fail, syntax errors |
 
-**Recommended Fix Order:**
-1. **Issue B** (function naming) - HIGHEST PRIORITY - Blocks stub replacement
-2. **Issue A** (body variables) - HIGH PRIORITY - Needed for real Oracle packages
-3. **Issue C** (detection patterns) - MEDIUM PRIORITY - Improves coverage
+**Fix Progress:**
+- ✅ **Issue A** (body variables) - **COMPLETED** (2025-11-02) - All 4 integration tests passing
+- ✅ **Issue B** (function naming) - **COMPLETED** (2025-11-02) - 923 tests passing
+- ⏳ **Issue C** (detection patterns) - Next priority - Improves coverage
 
-**Testing Requirements:**
-- Add test with package body variables (Issue A)
-- Verify generated function name includes package prefix (Issue B)
-- Add tests for all 3 reference patterns (Issue C)
+**Testing Status:**
+- ✅ Generated function names verified (Issue B)
+- ✅ Package body variables test added and passing (Issue A)
+- ⏳ Add tests for all 3 reference patterns (Issue C)
