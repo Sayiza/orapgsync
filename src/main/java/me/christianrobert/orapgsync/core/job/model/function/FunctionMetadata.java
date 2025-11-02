@@ -12,6 +12,7 @@ public class FunctionMetadata {
     private String schema;
     private String objectName; // Function name for standalone, or function name for package subprograms
     private String packageName; // null for standalone functions/procedures
+    private boolean isPackagePrivate; // true if function is declared only in package body (not in spec)
     private String objectType; // FUNCTION or PROCEDURE
     private String returnDataType; // null for procedures
     private boolean isCustomReturnType; // true if return type is a user-defined type
@@ -51,6 +52,14 @@ public class FunctionMetadata {
 
     public void setPackageName(String packageName) {
         this.packageName = packageName;
+    }
+
+    public boolean isPackagePrivate() {
+        return isPackagePrivate;
+    }
+
+    public void setPackagePrivate(boolean packagePrivate) {
+        isPackagePrivate = packagePrivate;
     }
 
     public String getObjectType() {
@@ -184,6 +193,9 @@ public class FunctionMetadata {
         sb.append(", objectName='").append(objectName).append('\'');
         if (packageName != null) {
             sb.append(", packageName='").append(packageName).append('\'');
+        }
+        if (isPackagePrivate) {
+            sb.append(", isPackagePrivate=true");
         }
         sb.append(", objectType='").append(objectType).append('\'');
         if (returnDataType != null) {

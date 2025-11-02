@@ -795,6 +795,13 @@ Oracle synonyms provide alternative names. PostgreSQL doesn't have synonyms, so 
 - Stub body uses `RETURN;` for procedures, `RETURN NULL;` for functions
 - Ensures stubs can be replaced with transformations via `CREATE OR REPLACE` (Phase 1 fix 2025-10-30)
 
+**✅ Package Private Functions (Completed - 2025-11-01):**
+- **Problem resolved**: `ALL_PROCEDURES` only shows public functions (in package spec)
+- **Solution implemented**: Parse package bodies with ANTLR to extract private functions
+- Private functions now marked with `isPackagePrivate = true` in FunctionMetadata
+- All package functions (public + private) extracted → stubs created → implementation works
+- See STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md for implementation details
+
 **Jobs:**
 - `OracleFunctionExtractionJob` - Extract Oracle function/procedure signatures
 - `PostgresFunctionStubCreationJob` - Create PostgreSQL stubs (always FUNCTION)

@@ -21,6 +21,137 @@ See: [PLSQL_OUT_PARAMETER_CONSISTENCY_PLAN.md](documentation/completed/PLSQL_OUT
 
 ---
 
+## ✅ COMPLETED: Package Private Function Extraction (2025-11-01)
+
+**Problem:** Package body-private functions were missing from extraction/stub creation
+
+**Root Cause:**
+- Current extraction uses `ALL_PROCEDURES` which **ONLY shows public functions** (declared in package spec)
+- Private functions (declared only in package body) are **NOT included** in `ALL_PROCEDURES`
+- Oracle limitation: No metadata view lists package private functions
+
+**Impact:**
+- Package functions that call private helper functions **fail during implementation**
+- Example: `public_func()` calls `private_helper()` → `private_helper` has no stub → transformation fails
+- **HIGH severity** - Blocks implementation of any package with private functions (common Oracle pattern)
+
+**Why Not Caught Earlier:**
+1. ✅ Standalone functions have no "private" concept → no issue
+2. ✅ View dependencies typically call public functions → stubs worked
+3. ❌ Package function implementation is recent → issue now surfaces
+4. ❌ No dependency ordering meant we didn't see the missing references
+
+**Solution: Extract ALL Functions (Public + Private)**
+
+**Approach:**
+1. Keep current extraction for public functions via `ALL_PROCEDURES` + `ALL_ARGUMENTS`
+2. **Add secondary extraction** for private functions by parsing package bodies via ANTLR
+3. Merge both into `oracleFunctionMetadata`
+4. Mark with new field: `isPackagePrivate` boolean
+
+**Benefits:**
+- ✅ **Simple architecture** - All functions exist before implementation starts
+- ✅ **No dependency ordering** needed - Stubs created in any order
+- ✅ **Consistent with two-phase pattern** (stub first, implement later)
+- ✅ **ANTLR parsing already available** (used for package variables)
+- ✅ **Aligns with package variable approach** (on-demand parsing pattern)
+
+**Implementation Plan:**
+
+**Phase 1: Extend FunctionMetadata** (~5 minutes)
+```java
+// Add to FunctionMetadata.java
+private boolean isPackagePrivate = false; // true if only in package body
+
+public boolean isPackagePrivate() { return isPackagePrivate; }
+public void setPackagePrivate(boolean packagePrivate) { isPackagePrivate = packagePrivate; }
+```
+
+**Phase 2: Add Private Function Extraction** (~1-2 hours)
+```java
+// New method in OracleFunctionExtractor.java
+private static List<FunctionMetadata> extractPrivateFunctionsForSchema(Connection conn, String schema) {
+    // 1. Query all package bodies for schema from ALL_SOURCE
+    // 2. Group by package, concatenate lines
+    // 3. Parse each package body with ANTLR (reuse AntlrParser.parsePackageBody)
+    // 4. Extract function/procedure declarations from body AST
+    // 5. Filter: Only keep functions NOT in package spec (compare with ALL_PROCEDURES results)
+    // 6. Mark as packagePrivate = true
+    // 7. Return list of private functions
+}
+```
+
+**Phase 3: Integration** (~30 minutes)
+- Merge public + private functions in `extractAllFunctions()`
+- Update stub creation to handle private functions (same logic, just more functions)
+- Update function implementation to handle private functions (same logic)
+
+**Phase 4: Testing** (~1 hour)
+```sql
+-- Test case: Package with private function
+CREATE OR REPLACE PACKAGE test_pkg AS
+  FUNCTION public_func RETURN NUMBER; -- Public (in spec)
+END;
+/
+
+CREATE OR REPLACE PACKAGE BODY test_pkg AS
+  -- Private function (body-only)
+  FUNCTION private_helper RETURN NUMBER IS
+  BEGIN
+    RETURN 42;
+  END;
+
+  -- Public function that calls private function
+  FUNCTION public_func RETURN NUMBER IS
+  BEGIN
+    RETURN private_helper() * 2;
+  END;
+END;
+/
+```
+
+**Expected results:**
+- ✅ `public_func` extracted via ALL_PROCEDURES
+- ✅ `private_helper` extracted via package body parsing
+- ✅ Both get stubs created
+- ✅ Implementation of `public_func` succeeds (references existing `private_helper` stub)
+
+**Estimated Total Effort:** 3-4 hours
+
+**Files to Modify:**
+- `FunctionMetadata.java` - Add `isPackagePrivate` field
+- `OracleFunctionExtractor.java` - Add private function extraction logic
+- No changes to stub creation or implementation jobs (just more functions to process)
+
+**Alternative Considered (Rejected):**
+- **Dependency-ordered implementation** - Complex, requires dependency analysis, breaks two-phase architecture
+
+**Resolution:**
+
+**✅ Implemented (2025-11-01):**
+1. ✅ Added `isPackagePrivate` boolean field to `FunctionMetadata.java`
+2. ✅ Created `extractPrivateFunctionsForSchema()` method in `OracleFunctionExtractor.java`
+3. ✅ Queries `ALL_SOURCE` for all package bodies in schema
+4. ✅ Parses each package body with ANTLR (reuses existing `AntlrParser.parsePackageBody()`)
+5. ✅ Extracts function/procedure declarations from `Create_package_bodyContext`
+6. ✅ Filters out public functions (compares with `ALL_PROCEDURES` results)
+7. ✅ Marks private functions with `isPackagePrivate = true`
+8. ✅ Integrated into `extractAllFunctions()` - runs after public function extraction
+9. ✅ Compiles successfully with zero errors
+
+**Result:**
+- All package functions (public + private) now extracted
+- Stub creation handles both automatically (same logic, just more functions)
+- Function implementation will work when public functions call private functions
+- **Ready for testing** with real Oracle packages containing private functions
+
+**Next Steps:**
+- Test with Oracle database containing packages with private functions
+- Verify stub creation creates stubs for private functions
+- Verify function implementation succeeds when calling private functions
+
+---
+
 ## Overview
 
 Transforms Oracle standalone functions/procedures (NOT package members) to PostgreSQL using PL/SQL→PL/pgSQL via ANTLR.

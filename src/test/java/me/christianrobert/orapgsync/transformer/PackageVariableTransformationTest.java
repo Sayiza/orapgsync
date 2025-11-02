@@ -70,9 +70,11 @@ class PackageVariableTransformationTest {
         assertTrue(parseResult.isSuccess());
 
         // Create code builder with package context
-        TransformationContext context = new TransformationContext("hr", emptyIndices, typeEvaluator);
-        PostgresCodeBuilder builder = new PostgresCodeBuilder(context, packageContextCache);
-        builder.setCurrentPackage("hr", "emp_pkg");
+        TransformationContext context = new TransformationContext(
+            "hr", emptyIndices, typeEvaluator,
+            packageContextCache, "test_proc", "emp_pkg"
+        );
+        PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
 
         String postgresSql = builder.visit(parseResult.getTree());
 
@@ -95,9 +97,11 @@ class PackageVariableTransformationTest {
         ParseResult parseResult = parser.parseFunctionBody(plsql);
         assertTrue(parseResult.isSuccess());
 
-        TransformationContext context = new TransformationContext("hr", emptyIndices, typeEvaluator);
-        PostgresCodeBuilder builder = new PostgresCodeBuilder(context, packageContextCache);
-        builder.setCurrentPackage("hr", "emp_pkg");
+        TransformationContext context = new TransformationContext(
+            "hr", emptyIndices, typeEvaluator,
+            packageContextCache, "test_func", "emp_pkg"
+        );
+        PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
 
         String postgresSql = builder.visit(parseResult.getTree());
 
@@ -118,9 +122,11 @@ class PackageVariableTransformationTest {
         ParseResult parseResult = parser.parseProcedureBody(plsql);
         assertTrue(parseResult.isSuccess());
 
-        TransformationContext context = new TransformationContext("hr", emptyIndices, typeEvaluator);
-        PostgresCodeBuilder builder = new PostgresCodeBuilder(context, packageContextCache);
-        builder.setCurrentPackage("hr", "emp_pkg");
+        TransformationContext context = new TransformationContext(
+            "hr", emptyIndices, typeEvaluator,
+            packageContextCache, "test_func", "emp_pkg"
+        );
+        PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
 
         String postgresSql = builder.visit(parseResult.getTree());
 
@@ -143,9 +149,11 @@ class PackageVariableTransformationTest {
         ParseResult parseResult = parser.parseProcedureBody(plsql);
         assertTrue(parseResult.isSuccess());
 
-        TransformationContext context = new TransformationContext("hr", emptyIndices, typeEvaluator);
-        PostgresCodeBuilder builder = new PostgresCodeBuilder(context, packageContextCache);
-        builder.setCurrentPackage("hr", "emp_pkg");
+        TransformationContext context = new TransformationContext(
+            "hr", emptyIndices, typeEvaluator,
+            packageContextCache, "test_func", "emp_pkg"
+        );
+        PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
 
         String postgresSql = builder.visit(parseResult.getTree());
 
@@ -166,9 +174,11 @@ class PackageVariableTransformationTest {
         ParseResult parseResult = parser.parseProcedureBody(plsql);
         assertTrue(parseResult.isSuccess());
 
-        TransformationContext context = new TransformationContext("hr", emptyIndices, typeEvaluator);
-        PostgresCodeBuilder builder = new PostgresCodeBuilder(context, packageContextCache);
-        builder.setCurrentPackage("hr", "emp_pkg");
+        TransformationContext context = new TransformationContext(
+            "hr", emptyIndices, typeEvaluator,
+            packageContextCache, "test_func", "emp_pkg"
+        );
+        PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
 
         String postgresSql = builder.visit(parseResult.getTree());
 
@@ -193,9 +203,11 @@ class PackageVariableTransformationTest {
         ParseResult parseResult = parser.parseProcedureBody(plsql);
         assertTrue(parseResult.isSuccess());
 
-        TransformationContext context = new TransformationContext("hr", emptyIndices, typeEvaluator);
-        PostgresCodeBuilder builder = new PostgresCodeBuilder(context, packageContextCache);
-        builder.setCurrentPackage("hr", "emp_pkg");
+        TransformationContext context = new TransformationContext(
+            "hr", emptyIndices, typeEvaluator,
+            packageContextCache, "test_func", "emp_pkg"
+        );
+        PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
 
         String postgresSql = builder.visit(parseResult.getTree());
 
@@ -216,9 +228,11 @@ class PackageVariableTransformationTest {
         ParseResult parseResult = parser.parseFunctionBody(plsql);
         assertTrue(parseResult.isSuccess());
 
-        TransformationContext context = new TransformationContext("hr", emptyIndices, typeEvaluator);
-        PostgresCodeBuilder builder = new PostgresCodeBuilder(context, packageContextCache);
-        builder.setCurrentPackage("hr", "emp_pkg");
+        TransformationContext context = new TransformationContext(
+            "hr", emptyIndices, typeEvaluator,
+            packageContextCache, "test_func", "emp_pkg"
+        );
+        PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
 
         String postgresSql = builder.visit(parseResult.getTree());
 
@@ -247,10 +261,12 @@ class PackageVariableTransformationTest {
         ParseResult parseResult = parser.parseFunctionBody(plsql);
         assertTrue(parseResult.isSuccess());
 
-        TransformationContext context = new TransformationContext("hr", emptyIndices, typeEvaluator);
-        PostgresCodeBuilder builder = new PostgresCodeBuilder(context, packageContextCache);
-        // Don't set package name - this is a standalone function
-        builder.setCurrentPackage("hr", null);
+        // Standalone function - no package context
+        TransformationContext context = new TransformationContext(
+            "hr", emptyIndices, typeEvaluator,
+            packageContextCache, "test_func", null
+        );
+        PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
 
         String postgresSql = builder.visit(parseResult.getTree());
 
@@ -271,9 +287,11 @@ class PackageVariableTransformationTest {
         ParseResult parseResult = parser.parseProcedureBody(plsql);
         assertTrue(parseResult.isSuccess());
 
-        TransformationContext context = new TransformationContext("hr", emptyIndices, typeEvaluator);
-        PostgresCodeBuilder builder = new PostgresCodeBuilder(context, packageContextCache);
-        builder.setCurrentPackage("hr", "emp_pkg");
+        TransformationContext context = new TransformationContext(
+            "hr", emptyIndices, typeEvaluator,
+            packageContextCache, "test_func", "emp_pkg"
+        );
+        PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
 
         String postgresSql = builder.visit(parseResult.getTree());
 

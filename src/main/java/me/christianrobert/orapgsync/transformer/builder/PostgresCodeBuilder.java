@@ -212,37 +212,22 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
 
     // ========== Package Variable Support ==========
 
-    // Package context cache (passed from job, ephemeral per-job execution)
-    // Maps "schema.packagename" (lowercase) to PackageContext
-    // Null if no package context available (standalone functions or not yet wired)
-    private final Map<String, PackageContext> packageContextCache;
-
-    // Current function context (for detecting package membership)
-    // Set when transforming a function/procedure body
-    private String currentSchema;
-    private String currentPackageName;  // null for standalone functions
-
     // Assignment target flag for package variable transformation
     // When true, package variable references should NOT be transformed to getters
     // (assignment statement will handle transformation to setter)
+    // Package context is now in TransformationContext (unified architecture)
     private boolean isInAssignmentTarget = false;
 
     /**
      * Creates a PostgresCodeBuilder with transformation context.
+     *
+     * <p>All transformation-level context (package variables, function name, etc.)
+     * is now unified in TransformationContext. No separate parameters needed.</p>
+     *
      * @param context Transformation context for metadata lookups (can be null for simple transformations)
      */
     public PostgresCodeBuilder(TransformationContext context) {
-        this(context, null);
-    }
-
-    /**
-     * Creates a PostgresCodeBuilder with transformation context and package context cache.
-     * @param context Transformation context for metadata lookups (can be null for simple transformations)
-     * @param packageContextCache Package context cache (can be null if no package variable support needed)
-     */
-    public PostgresCodeBuilder(TransformationContext context, Map<String, PackageContext> packageContextCache) {
         this.context = context;
-        this.packageContextCache = packageContextCache;
         this.outerJoinContextStack = new ArrayDeque<>();
         this.rownumContextStack = new ArrayDeque<>();
         this.loopRecordVariablesStack = new ArrayDeque<>();
@@ -254,7 +239,7 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
      * Creates a PostgresCodeBuilder without context (for simple transformations without metadata).
      */
     public PostgresCodeBuilder() {
-        this(null, null);
+        this(null);
     }
 
     /**
@@ -536,24 +521,12 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
     // ========== PACKAGE VARIABLE SUPPORT ==========
 
     /**
-     * Sets the current package context for function transformation.
-     * Called when transforming a package function/procedure body.
-     *
-     * @param schema Schema name
-     * @param packageName Package name (null for standalone functions)
-     */
-    public void setCurrentPackage(String schema, String packageName) {
-        this.currentSchema = schema;
-        this.currentPackageName = packageName;
-    }
-
-    /**
-     * Gets the current package name.
+     * Gets the current package name from context.
      *
      * @return Current package name, or null if not in a package function
      */
     public String getCurrentPackageName() {
-        return this.currentPackageName;
+        return context != null ? context.getCurrentPackageName() : null;
     }
 
     /**
@@ -565,14 +538,12 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
      * @return true if initialization call should be injected
      */
     public boolean needsPackageInitialization() {
-        if (currentPackageName == null || currentSchema == null || packageContextCache == null) {
+        if (context == null || !context.isInPackageMember()) {
             return false;
         }
 
-        String cacheKey = (currentSchema + "." + currentPackageName).toLowerCase();
-        PackageContext ctx = packageContextCache.get(cacheKey);
-
-        return ctx != null && !ctx.getVariables().isEmpty();
+        PackageContext pkgContext = context.getPackageContext(context.getCurrentPackageName());
+        return pkgContext != null && !pkgContext.getVariables().isEmpty();
     }
 
     /**
@@ -582,12 +553,12 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
      * @return Initialization call string
      */
     public String generatePackageInitializationCall() {
-        if (currentPackageName == null || currentSchema == null) {
+        if (context == null || !context.isInPackageMember()) {
             return null;
         }
 
-        return "PERFORM " + currentSchema.toLowerCase() + "." +
-                currentPackageName.toLowerCase() + "__initialize()";
+        return "PERFORM " + context.getCurrentSchema().toLowerCase() + "." +
+                context.getCurrentPackageName().toLowerCase() + "__initialize()";
     }
 
     /**
@@ -617,18 +588,11 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
      * @return true if this is a package variable reference
      */
     public boolean isPackageVariable(String packageName, String variableName) {
-        if (packageContextCache == null || currentSchema == null) {
+        if (context == null) {
             return false;
         }
 
-        String cacheKey = (currentSchema + "." + packageName).toLowerCase();
-        PackageContext ctx = packageContextCache.get(cacheKey);
-
-        if (ctx == null) {
-            return false;
-        }
-
-        return ctx.hasVariable(variableName);
+        return context.isPackageVariable(packageName, variableName);
     }
 
     /**
@@ -640,13 +604,11 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
      * @return PostgreSQL getter function call
      */
     public String transformToPackageVariableGetter(String packageName, String variableName) {
-        if (currentSchema == null) {
+        if (context == null) {
             return packageName + "." + variableName;  // Fallback
         }
 
-        return currentSchema.toLowerCase() + "." +
-               packageName.toLowerCase() + "__get_" +
-               variableName.toLowerCase() + "()";
+        return context.getPackageVariableGetter(packageName, variableName);
     }
 
     /**
@@ -657,7 +619,7 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
      * @return PackageVariableReference or null if not a package variable
      */
     public PackageVariableReference parsePackageVariableReference(String leftSide) {
-        if (leftSide == null || currentSchema == null) {
+        if (leftSide == null || context == null) {
             return null;
         }
 
@@ -675,7 +637,7 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
             return null;  // Not a package variable
         }
 
-        return new PackageVariableReference(currentSchema, packageName, variableName);
+        return new PackageVariableReference(context.getCurrentSchema(), packageName, variableName);
     }
 
     /**

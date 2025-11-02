@@ -172,16 +172,26 @@ public class PostgresStandaloneFunctionImplementationJob extends AbstractDatabas
                                 function.getDisplayName(), oracleSource.length());
                         log.debug("Oracle source for {}:\n{}", function.getDisplayName(), oracleSource);
 
-                        // Step 2: Transform PL/SQL to PL/pgSQL
+                        // Step 2: Transform PL/SQL to PL/pgSQL with FULL context
                         log.info("Transforming PL/SQL to PL/pgSQL for: {}", function.getDisplayName());
                         TransformationResult transformResult;
 
                         if (function.isFunction()) {
                             transformResult = transformationService.transformFunction(
-                                    oracleSource, function.getSchema(), indices);
+                                    oracleSource,
+                                    function.getSchema(),
+                                    indices,
+                                    packageContextCache,       // Package variable context
+                                    function.getObjectName(),  // Function name
+                                    function.getPackageName()); // Package name (null for standalone)
                         } else {
                             transformResult = transformationService.transformProcedure(
-                                    oracleSource, function.getSchema(), indices);
+                                    oracleSource,
+                                    function.getSchema(),
+                                    indices,
+                                    packageContextCache,       // Package variable context
+                                    function.getObjectName(),  // Procedure name
+                                    function.getPackageName()); // Package name (null for standalone)
                         }
 
                         if (!transformResult.isSuccess()) {

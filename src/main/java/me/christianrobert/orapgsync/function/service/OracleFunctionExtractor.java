@@ -41,21 +41,26 @@ public class OracleFunctionExtractor {
                 continue;
             }
 
-            List<FunctionMetadata> schemaFunctions = fetchFunctionsForSchema(oracleConn, schema);
-            functionMetadataList.addAll(schemaFunctions);
+            // Step 1: Extract public functions (from ALL_PROCEDURES + ALL_ARGUMENTS)
+            List<FunctionMetadata> publicFunctions = fetchFunctionsForSchema(oracleConn, schema);
+            functionMetadataList.addAll(publicFunctions);
+            log.info("Extracted {} public functions/procedures from Oracle schema {}", publicFunctions.size(), schema);
 
-            log.info("Extracted {} functions/procedures from Oracle schema {}", schemaFunctions.size(), schema);
+            // Step 2: Extract private functions (from package bodies via ANTLR parsing)
+            List<FunctionMetadata> privateFunctions = extractPrivateFunctionsForSchema(oracleConn, schema, publicFunctions);
+            functionMetadataList.addAll(privateFunctions);
+            log.info("Extracted {} private functions/procedures from Oracle schema {}", privateFunctions.size(), schema);
         }
 
         return functionMetadataList;
     }
 
     /**
-     * Fetches all functions and procedures for a single schema.
+     * Fetches all public functions/procedures for a single schema (from ALL_PROCEDURES).
      *
      * @param oracleConn Oracle database connection
      * @param schema Schema name
-     * @return List of FunctionMetadata for the schema
+     * @return List of FunctionMetadata for public functions
      * @throws SQLException if database operations fail
      */
     private static List<FunctionMetadata> fetchFunctionsForSchema(Connection oracleConn, String schema) throws SQLException {
@@ -220,7 +225,172 @@ public class OracleFunctionExtractor {
         }
 
         List<FunctionMetadata> result = new ArrayList<>(functionsMap.values());
-        log.debug("Extracted {} functions/procedures from schema {}", result.size(), schema);
+        log.debug("Extracted {} public functions/procedures from schema {}", result.size(), schema);
         return result;
+    }
+
+    /**
+     * Extracts package-private functions/procedures by parsing package bodies with ANTLR.
+     * Private functions are those declared only in the package body, not in the package spec.
+     *
+     * @param oracleConn Oracle database connection
+     * @param schema Schema name
+     * @param publicFunctions List of public functions already extracted (for filtering)
+     * @return List of FunctionMetadata for package-private functions
+     * @throws SQLException if database operations fail
+     */
+    private static List<FunctionMetadata> extractPrivateFunctionsForSchema(
+            Connection oracleConn, String schema, List<FunctionMetadata> publicFunctions) throws SQLException {
+
+        List<FunctionMetadata> privateFunctions = new ArrayList<>();
+
+        // Build set of public function names for fast lookup (schema.package.function)
+        Set<String> publicFunctionKeys = new HashSet<>();
+        for (FunctionMetadata func : publicFunctions) {
+            if (func.isPackageMember()) {
+                String key = schema.toLowerCase() + "." +
+                            func.getPackageName().toLowerCase() + "." +
+                            func.getObjectName().toLowerCase();
+                publicFunctionKeys.add(key);
+            }
+        }
+
+        // Query ALL_SOURCE for all package bodies in this schema
+        String sql = """
+            SELECT name, text
+            FROM all_source
+            WHERE owner = ?
+              AND type = 'PACKAGE BODY'
+            ORDER BY name, line
+            """;
+
+        Map<String, StringBuilder> packageBodies = new HashMap<>();
+
+        try (PreparedStatement ps = oracleConn.prepareStatement(sql)) {
+            ps.setString(1, schema.toUpperCase());
+
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    String packageName = rs.getString("name");
+                    String line = rs.getString("text");
+
+                    packageBodies.computeIfAbsent(packageName, k -> new StringBuilder()).append(line);
+                }
+            }
+        }
+
+        log.debug("Found {} package bodies in schema {}", packageBodies.size(), schema);
+
+        // Parse each package body and extract function declarations
+        for (Map.Entry<String, StringBuilder> entry : packageBodies.entrySet()) {
+            String packageName = entry.getKey();
+            String bodySource = entry.getValue().toString().trim();
+
+            if (bodySource.isEmpty()) {
+                continue;
+            }
+
+            // Prepend CREATE OR REPLACE for ANTLR parsing (Oracle doesn't store it)
+            String fullSource = "CREATE OR REPLACE " + bodySource;
+
+            try {
+                // Parse package body with ANTLR
+                me.christianrobert.orapgsync.transformer.parser.AntlrParser parser =
+                    new me.christianrobert.orapgsync.transformer.parser.AntlrParser();
+
+                me.christianrobert.orapgsync.transformer.parser.ParseResult parseResult =
+                    parser.parsePackageBody(fullSource);
+
+                if (parseResult.hasErrors()) {
+                    log.warn("Failed to parse package body {}.{}: {}",
+                            schema, packageName, parseResult.getErrorMessage());
+                    continue;
+                }
+
+                me.christianrobert.orapgsync.antlr.PlSqlParser.Create_package_bodyContext bodyCtx =
+                    (me.christianrobert.orapgsync.antlr.PlSqlParser.Create_package_bodyContext) parseResult.getTree();
+
+                // Extract all function/procedure declarations from package body
+                List<FunctionMetadata> bodyFunctions = extractFunctionsFromPackageBody(
+                    bodyCtx, schema, packageName, publicFunctionKeys
+                );
+
+                privateFunctions.addAll(bodyFunctions);
+
+                log.debug("Found {} private functions in package {}.{}",
+                         bodyFunctions.size(), schema, packageName);
+
+            } catch (Exception e) {
+                log.error("Error parsing package body {}.{}: {}", schema, packageName, e.getMessage(), e);
+            }
+        }
+
+        return privateFunctions;
+    }
+
+    /**
+     * Extracts function/procedure metadata from a parsed package body AST.
+     * Only returns functions that are NOT in the public function set (i.e., package-private).
+     *
+     * @param bodyCtx Parsed package body AST
+     * @param schema Schema name
+     * @param packageName Package name
+     * @param publicFunctionKeys Set of public function keys (schema.package.function)
+     * @return List of FunctionMetadata for private functions only
+     */
+    private static List<FunctionMetadata> extractFunctionsFromPackageBody(
+            me.christianrobert.orapgsync.antlr.PlSqlParser.Create_package_bodyContext bodyCtx,
+            String schema, String packageName, Set<String> publicFunctionKeys) {
+
+        List<FunctionMetadata> functions = new ArrayList<>();
+
+        if (bodyCtx == null || bodyCtx.package_obj_body() == null) {
+            return functions;
+        }
+
+        // Iterate through all objects in package body
+        for (me.christianrobert.orapgsync.antlr.PlSqlParser.Package_obj_bodyContext objCtx : bodyCtx.package_obj_body()) {
+
+            // Check for function_body
+            if (objCtx.function_body() != null) {
+                me.christianrobert.orapgsync.antlr.PlSqlParser.Function_bodyContext funcCtx = objCtx.function_body();
+                String functionName = funcCtx.identifier().getText().toLowerCase();
+
+                // Check if this is a private function (not in public list)
+                String key = schema.toLowerCase() + "." + packageName.toLowerCase() + "." + functionName;
+                if (!publicFunctionKeys.contains(key)) {
+                    // This is a private function
+                    FunctionMetadata metadata = new FunctionMetadata(schema.toLowerCase(), functionName, "FUNCTION");
+                    metadata.setPackageName(packageName.toLowerCase());
+                    metadata.setPackagePrivate(true);
+
+                    // Extract return type if available (we won't have full parameter details without more parsing)
+                    // For now, just mark it as a function - stub creation will use minimal signature
+
+                    functions.add(metadata);
+                    log.trace("Found private function: {}.{}.{}", schema, packageName, functionName);
+                }
+            }
+
+            // Check for procedure_body
+            if (objCtx.procedure_body() != null) {
+                me.christianrobert.orapgsync.antlr.PlSqlParser.Procedure_bodyContext procCtx = objCtx.procedure_body();
+                String procedureName = procCtx.identifier().getText().toLowerCase();
+
+                // Check if this is a private procedure (not in public list)
+                String key = schema.toLowerCase() + "." + packageName.toLowerCase() + "." + procedureName;
+                if (!publicFunctionKeys.contains(key)) {
+                    // This is a private procedure
+                    FunctionMetadata metadata = new FunctionMetadata(schema.toLowerCase(), procedureName, "PROCEDURE");
+                    metadata.setPackageName(packageName.toLowerCase());
+                    metadata.setPackagePrivate(true);
+
+                    functions.add(metadata);
+                    log.trace("Found private procedure: {}.{}.{}", schema, packageName, procedureName);
+                }
+            }
+        }
+
+        return functions;
     }
 }

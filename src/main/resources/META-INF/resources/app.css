@@ -1505,6 +1505,10 @@ td {
     word-break: break-all;
 }
 
+.table-item.created .sql-statement {
+    background: white;
+}
+
 .execution-time {
     font-size: var(--font-xs);
 }
