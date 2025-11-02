@@ -1,6 +1,7 @@
 package me.christianrobert.orapgsync.core.service;
 
 import jakarta.enterprise.context.ApplicationScoped;
+import me.christianrobert.orapgsync.core.job.model.function.FunctionImplementationResult;
 import me.christianrobert.orapgsync.core.job.model.objectdatatype.ObjectDataTypeMetaData;
 import me.christianrobert.orapgsync.core.job.model.objectdatatype.ObjectTypeCreationResult;
 import me.christianrobert.orapgsync.core.job.model.synonym.SynonymMetadata;
@@ -18,7 +19,6 @@ import me.christianrobert.orapgsync.core.job.model.view.ViewStubCreationResult;
 import me.christianrobert.orapgsync.core.job.model.view.ViewImplementationResult;
 import me.christianrobert.orapgsync.core.job.model.function.FunctionMetadata;
 import me.christianrobert.orapgsync.core.job.model.function.FunctionStubCreationResult;
-import me.christianrobert.orapgsync.core.job.model.function.StandaloneFunctionImplementationResult;
 import me.christianrobert.orapgsync.core.job.model.typemethod.TypeMethodMetadata;
 import me.christianrobert.orapgsync.core.job.model.typemethod.TypeMethodStubCreationResult;
 import me.christianrobert.orapgsync.oraclecompat.model.OracleCompatInstallationResult;
@@ -75,7 +75,7 @@ public class StateService {
     List<FunctionMetadata> oracleFunctionMetadata = new ArrayList<>();
     List<FunctionMetadata> postgresFunctionMetadata = new ArrayList<>();
     FunctionStubCreationResult functionStubCreationResult;
-    StandaloneFunctionImplementationResult standaloneFunctionImplementationResult;
+    FunctionImplementationResult functionImplementationResult;
 
     List<TypeMethodMetadata> oracleTypeMethodMetadata = new ArrayList<>();
     List<TypeMethodMetadata> postgresTypeMethodMetadata = new ArrayList<>();
@@ -317,12 +317,12 @@ public class StateService {
         this.functionStubCreationResult = functionStubCreationResult;
     }
 
-    public StandaloneFunctionImplementationResult getStandaloneFunctionImplementationResult() {
-        return standaloneFunctionImplementationResult;
+    public FunctionImplementationResult getFunctionImplementationResult() {
+        return functionImplementationResult;
     }
 
-    public void setStandaloneFunctionImplementationResult(StandaloneFunctionImplementationResult standaloneFunctionImplementationResult) {
-        this.standaloneFunctionImplementationResult = standaloneFunctionImplementationResult;
+    public void setFunctionImplementationResult(FunctionImplementationResult functionImplementationResult) {
+        this.functionImplementationResult = functionImplementationResult;
     }
 
     public List<TypeMethodMetadata> getOracleTypeMethodMetadata() {
@@ -405,7 +405,7 @@ public class StateService {
         this.oracleFunctionMetadata = new ArrayList<>();
         this.postgresFunctionMetadata = new ArrayList<>();
         this.functionStubCreationResult = null;
-        this.standaloneFunctionImplementationResult = null;
+        this.functionImplementationResult = null;
         this.oracleTypeMethodMetadata = new ArrayList<>();
         this.postgresTypeMethodMetadata = new ArrayList<>();
         this.typeMethodStubCreationResult = null;

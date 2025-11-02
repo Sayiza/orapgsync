@@ -8,7 +8,7 @@ import java.util.Map;
  * Tracks which standalone functions were successfully implemented, skipped, or failed.
  * This is used for Phase 2 implementation (replacing stubs with actual PL/pgSQL logic).
  */
-public class StandaloneFunctionImplementationResult {
+public class FunctionImplementationResult {
     private Map<String, FunctionMetadata> implementedFunctions;
     private Map<String, FunctionMetadata> skippedFunctions;
     private Map<String, ErrorInfo> errors;
@@ -16,7 +16,7 @@ public class StandaloneFunctionImplementationResult {
     private int skippedCount;
     private int errorCount;
 
-    public StandaloneFunctionImplementationResult() {
+    public FunctionImplementationResult() {
         this.implementedFunctions = new HashMap<>();
         this.skippedFunctions = new HashMap<>();
         this.errors = new HashMap<>();

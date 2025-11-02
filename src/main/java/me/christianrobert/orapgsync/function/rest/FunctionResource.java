@@ -6,9 +6,9 @@ import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import me.christianrobert.orapgsync.core.job.Job;
+import me.christianrobert.orapgsync.core.job.model.function.FunctionImplementationResult;
 import me.christianrobert.orapgsync.core.job.model.function.FunctionMetadata;
 import me.christianrobert.orapgsync.core.job.model.function.FunctionStubCreationResult;
-import me.christianrobert.orapgsync.core.job.model.function.StandaloneFunctionImplementationResult;
 import me.christianrobert.orapgsync.core.job.model.function.FunctionVerificationResult;
 import me.christianrobert.orapgsync.core.job.service.JobRegistry;
 import me.christianrobert.orapgsync.core.job.service.JobService;
@@ -206,7 +206,7 @@ public class FunctionResource {
      * Generate summary for standalone function implementation results.
      */
     public static Map<String, Object> generateStandaloneFunctionImplementationSummary(
-            StandaloneFunctionImplementationResult standaloneFuncImplResult) {
+            FunctionImplementationResult standaloneFuncImplResult) {
         Map<String, Object> implementedDetails = new HashMap<>();
         Map<String, Object> skippedDetails = new HashMap<>();
         Map<String, Object> errorDetails = new HashMap<>();
@@ -231,9 +231,9 @@ public class FunctionResource {
         }
 
         // Error details
-        for (Map.Entry<String, StandaloneFunctionImplementationResult.ErrorInfo> entry :
+        for (Map.Entry<String, FunctionImplementationResult.ErrorInfo> entry :
                 standaloneFuncImplResult.getErrors().entrySet()) {
-            StandaloneFunctionImplementationResult.ErrorInfo error = entry.getValue();
+            FunctionImplementationResult.ErrorInfo error = entry.getValue();
             Map<String, Object> errorMap = new HashMap<>();
             errorMap.put("functionName", error.getFunctionName());
             errorMap.put("status", "error");

@@ -32,9 +32,9 @@ import java.util.function.Consumer;
  * 4. Returns detailed result with DDL for frontend display
  */
 @Dependent
-public class PostgresStandaloneFunctionImplementationVerificationJob extends AbstractDatabaseExtractionJob<FunctionImplementationVerificationResult> {
+public class PostgresFunctionImplementationVerificationJob extends AbstractDatabaseExtractionJob<FunctionImplementationVerificationResult> {
 
-    private static final Logger log = LoggerFactory.getLogger(PostgresStandaloneFunctionImplementationVerificationJob.class);
+    private static final Logger log = LoggerFactory.getLogger(PostgresFunctionImplementationVerificationJob.class);
 
     @Inject
     private PostgresConnectionService postgresConnectionService;

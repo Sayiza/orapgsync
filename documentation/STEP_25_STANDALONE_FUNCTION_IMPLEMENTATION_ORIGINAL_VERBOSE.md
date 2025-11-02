@@ -382,7 +382,7 @@ WHERE n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
 
 **Added:**
 - Import: `StandaloneFunctionImplementationResult`
-- Property: `standaloneFunctionImplementationResult`
+- Property: `functionImplementationResult`
 - Getter/setter methods
 - Reset in `resetState()`
 

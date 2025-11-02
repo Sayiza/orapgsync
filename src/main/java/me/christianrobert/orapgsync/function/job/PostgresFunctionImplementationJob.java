@@ -4,8 +4,8 @@ import jakarta.enterprise.context.Dependent;
 import jakarta.inject.Inject;
 import me.christianrobert.orapgsync.core.job.AbstractDatabaseWriteJob;
 import me.christianrobert.orapgsync.core.job.model.JobProgress;
+import me.christianrobert.orapgsync.core.job.model.function.FunctionImplementationResult;
 import me.christianrobert.orapgsync.core.job.model.function.FunctionMetadata;
-import me.christianrobert.orapgsync.core.job.model.function.StandaloneFunctionImplementationResult;
 import me.christianrobert.orapgsync.database.service.OracleConnectionService;
 import me.christianrobert.orapgsync.database.service.PostgresConnectionService;
 import me.christianrobert.orapgsync.transformer.context.MetadataIndexBuilder;
@@ -29,7 +29,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
-import java.util.stream.Collectors;
 
 /**
  * PostgreSQL Function Implementation Job (Unified).
@@ -56,9 +55,9 @@ import java.util.stream.Collectors;
  * Maintains ANTLR-only-in-transformation pattern (no ANTLR in extraction jobs).
  */
 @Dependent
-public class PostgresStandaloneFunctionImplementationJob extends AbstractDatabaseWriteJob<StandaloneFunctionImplementationResult> {
+public class PostgresFunctionImplementationJob extends AbstractDatabaseWriteJob<FunctionImplementationResult> {
 
-    private static final Logger log = LoggerFactory.getLogger(PostgresStandaloneFunctionImplementationJob.class);
+    private static final Logger log = LoggerFactory.getLogger(PostgresFunctionImplementationJob.class);
 
     @Inject
     private OracleConnectionService oracleConnectionService;
@@ -87,18 +86,18 @@ public class PostgresStandaloneFunctionImplementationJob extends AbstractDatabas
     }
 
     @Override
-    public Class<StandaloneFunctionImplementationResult> getResultType() {
-        return StandaloneFunctionImplementationResult.class;
+    public Class<FunctionImplementationResult> getResultType() {
+        return FunctionImplementationResult.class;
     }
 
     @Override
-    protected void saveResultsToState(StandaloneFunctionImplementationResult result) {
-        stateService.setStandaloneFunctionImplementationResult(result);
+    protected void saveResultsToState(FunctionImplementationResult result) {
+        stateService.setFunctionImplementationResult(result);
     }
 
     @Override
-    protected StandaloneFunctionImplementationResult performWriteOperation(Consumer<JobProgress> progressCallback) throws Exception {
-        StandaloneFunctionImplementationResult result = new StandaloneFunctionImplementationResult();
+    protected FunctionImplementationResult performWriteOperation(Consumer<JobProgress> progressCallback) throws Exception {
+        FunctionImplementationResult result = new FunctionImplementationResult();
 
         updateProgress(progressCallback, 0, "Initializing",
                 "Starting function implementation (standalone and package)");
@@ -233,7 +232,7 @@ public class PostgresStandaloneFunctionImplementationJob extends AbstractDatabas
     }
 
     @Override
-    protected String generateSummaryMessage(StandaloneFunctionImplementationResult result) {
+    protected String generateSummaryMessage(FunctionImplementationResult result) {
         return String.format("Function implementation completed: %d implemented, %d skipped, %d errors",
                 result.getImplementedCount(), result.getSkippedCount(), result.getErrorCount());
     }
@@ -367,7 +366,7 @@ public class PostgresStandaloneFunctionImplementationJob extends AbstractDatabas
      */
     private void executeInPostgres(Connection postgresConn, String pgSql,
                                    FunctionMetadata function,
-                                   StandaloneFunctionImplementationResult result) {
+                                   FunctionImplementationResult result) {
         try (PreparedStatement ps = postgresConn.prepareStatement(pgSql)) {
             ps.execute();
             result.addImplementedFunction(function);

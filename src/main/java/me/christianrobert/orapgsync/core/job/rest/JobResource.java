@@ -8,6 +8,7 @@ import jakarta.ws.rs.core.Response;
 import me.christianrobert.orapgsync.constraint.rest.ConstraintResource;
 import me.christianrobert.orapgsync.core.job.model.JobProgress;
 import me.christianrobert.orapgsync.core.job.model.JobStatus;
+import me.christianrobert.orapgsync.core.job.model.function.FunctionImplementationResult;
 import me.christianrobert.orapgsync.core.job.model.objectdatatype.ObjectDataTypeMetaData;
 import me.christianrobert.orapgsync.core.job.model.objectdatatype.ObjectTypeCreationResult;
 import me.christianrobert.orapgsync.core.job.model.schema.SchemaCreationResult;
@@ -26,7 +27,6 @@ import me.christianrobert.orapgsync.core.job.model.view.ViewMetadata;
 import me.christianrobert.orapgsync.core.job.model.view.ViewStubCreationResult;
 import me.christianrobert.orapgsync.core.job.model.function.FunctionMetadata;
 import me.christianrobert.orapgsync.core.job.model.function.FunctionStubCreationResult;
-import me.christianrobert.orapgsync.core.job.model.function.StandaloneFunctionImplementationResult;
 import me.christianrobert.orapgsync.core.job.model.typemethod.TypeMethodMetadata;
 import me.christianrobert.orapgsync.core.job.model.typemethod.TypeMethodStubCreationResult;
 import me.christianrobert.orapgsync.core.job.service.JobService;
@@ -265,14 +265,14 @@ public class JobResource {
                 response.put("errorCount", functionStubResult.getErrorCount());
                 response.put("isSuccessful", functionStubResult.isSuccessful());
                 response.put("result", result);
-            } else if (result instanceof StandaloneFunctionImplementationResult) {
-                StandaloneFunctionImplementationResult standaloneFuncImplResult = (StandaloneFunctionImplementationResult) result;
-                Map<String, Object> summary = FunctionResource.generateStandaloneFunctionImplementationSummary(standaloneFuncImplResult);
+            } else if (result instanceof FunctionImplementationResult) {
+                FunctionImplementationResult funcImplResult = (FunctionImplementationResult) result;
+                Map<String, Object> summary = FunctionResource.generateStandaloneFunctionImplementationSummary(funcImplResult);
                 response.put("summary", summary);
-                response.put("implementedCount", standaloneFuncImplResult.getImplementedCount());
-                response.put("skippedCount", standaloneFuncImplResult.getSkippedCount());
-                response.put("errorCount", standaloneFuncImplResult.getErrorCount());
-                response.put("isSuccessful", standaloneFuncImplResult.isSuccessful());
+                response.put("implementedCount", funcImplResult.getImplementedCount());
+                response.put("skippedCount", funcImplResult.getSkippedCount());
+                response.put("errorCount", funcImplResult.getErrorCount());
+                response.put("isSuccessful", funcImplResult.isSuccessful());
                 response.put("result", result);
             } else if (result instanceof TypeMethodStubCreationResult) {
                 TypeMethodStubCreationResult typeMethodStubResult = (TypeMethodStubCreationResult) result;
