@@ -486,6 +486,21 @@ public class VisitGeneralElement {
       return "CURRENT_TIMESTAMP";
     }
 
+    // Check for unqualified package variable reference
+    // In Oracle, within a package function, you can reference package variables directly:
+    // Oracle: RETURN g_counter;  (not counter_pkg.g_counter)
+    // PostgreSQL: RETURN hr.counter_pkg__get_g_counter();
+    // Note: Oracle identifiers are case-insensitive, so we normalize to lowercase
+    TransformationContext context = b.getContext();
+    if (!b.isInAssignmentTarget() && context != null && context.isInPackageMember()) {
+      String currentPackageName = context.getCurrentPackageName();
+      String identifierLower = identifier.toLowerCase();  // Case-insensitive match
+      if (context.isPackageVariable(currentPackageName, identifierLower)) {
+        // Transform unqualified variable reference to getter call
+        return context.getPackageVariableGetter(currentPackageName, identifierLower);
+      }
+    }
+
     // Simple identifier - use getText()
     return partCtx.getText();
   }

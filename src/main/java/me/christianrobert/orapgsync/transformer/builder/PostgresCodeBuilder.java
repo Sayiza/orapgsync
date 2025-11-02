@@ -623,21 +623,38 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
             return null;
         }
 
-        // Check if it's a dot-qualified reference
+        // Check if it's a dot-qualified reference (pkg.variable)
         String[] parts = leftSide.split("\\.");
-        if (parts.length != 2) {
-            return null;  // Not a simple dot reference
+
+        if (parts.length == 2) {
+            // Qualified reference: counter_pkg.g_counter
+            // Note: Oracle identifiers are case-insensitive, normalize to lowercase
+            String packageName = parts[0].trim().toLowerCase();
+            String variableName = parts[1].trim().toLowerCase();
+
+            // Check if it's actually a package variable
+            if (!isPackageVariable(packageName, variableName)) {
+                return null;  // Not a package variable
+            }
+
+            return new PackageVariableReference(context.getCurrentSchema(), packageName, variableName);
         }
+        else if (parts.length == 1 && context.isInPackageMember()) {
+            // Unqualified reference within a package function
+            // Oracle allows: g_counter := 100  (no package qualifier needed)
+            // Note: Oracle identifiers are case-insensitive, normalize to lowercase
+            String variableName = parts[0].trim().toLowerCase();
+            String currentPackageName = context.getCurrentPackageName();
 
-        String packageName = parts[0].trim();
-        String variableName = parts[1].trim();
+            // Check if it's a variable in the current package
+            if (context.isPackageVariable(currentPackageName, variableName)) {
+                return new PackageVariableReference(context.getCurrentSchema(), currentPackageName, variableName);
+            }
 
-        // Check if it's actually a package variable
-        if (!isPackageVariable(packageName, variableName)) {
             return null;  // Not a package variable
         }
 
-        return new PackageVariableReference(context.getCurrentSchema(), packageName, variableName);
+        return null;  // Not a simple reference or not in package context
     }
 
     /**

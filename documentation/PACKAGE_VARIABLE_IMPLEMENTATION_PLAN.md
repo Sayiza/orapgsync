@@ -1756,3 +1756,260 @@ This order minimizes breakage and allows incremental verification.
 1. ✅ Add inline type infrastructure now (as stub)
 2. ✅ Constructor overloading (no builder pattern)
 3. ✅ No API versioning (overload existing methods)
+
+---
+
+## ⚠️ CRITICAL ISSUES DISCOVERED (2025-11-02)
+
+**Status:** Three severe issues identified during integration testing that prevent package variable transformations from working correctly in production.
+
+### Issue A: Package Body Variables Not Recognized
+
+**Problem:** Package variables declared in the package body (not in the spec) are completely ignored.
+
+**Root Cause Analysis:**
+
+`PackageContextExtractor.java` (lines 66-73):
+```java
+for (PlSqlParser.Package_obj_specContext specCtx : packageCtx.package_obj_spec()) {
+    if (specCtx.variable_declaration() != null) {
+        extractVariableDeclaration(specCtx.variable_declaration(), context);
+    }
+}
+```
+
+This code:
+- ✅ Correctly extracts variables from **package specification** (public variables)
+- ❌ Does NOT extract variables from **package body** (private/body variables)
+- ❌ Ignores `package_obj_body()` entirely
+
+**Oracle Package Structure:**
+
+```sql
+-- PACKAGE SPECIFICATION (public interface)
+CREATE OR REPLACE PACKAGE hr.test_pkg AS
+  g_public_counter INTEGER := 0;  -- ✅ Currently extracted
+  FUNCTION get_counter RETURN INTEGER;
+END test_pkg;
+/
+
+-- PACKAGE BODY (implementation + private variables)
+CREATE OR REPLACE PACKAGE BODY hr.test_pkg AS
+  g_private_counter INTEGER := 0;  -- ❌ NOT extracted (ISSUE!)
+  g_internal_state VARCHAR2(20);   -- ❌ NOT extracted (ISSUE!)
+
+  FUNCTION get_counter RETURN INTEGER IS
+  BEGIN
+    RETURN g_private_counter;  -- ❌ Not recognized as package variable!
+  END;
+END test_pkg;
+/
+```
+
+**Impact:**
+- Any function that references a body-only variable will fail transformation
+- Variables are NOT transformed to getter/setter calls
+- References remain as simple identifiers → PostgreSQL error: "column g_private_counter does not exist"
+- **SEVERE** - Many Oracle packages declare variables in the body for encapsulation
+
+**Evidence:**
+- `PostgresStandaloneFunctionImplementationJob.java:461` - Package body IS being parsed and cached
+- `PackageContext.setPackageBody()` - Body AST is stored but NEVER scanned for variables
+- Body AST only used for function source extraction, not variable extraction
+
+**Why Not Caught Earlier:**
+- Unit tests only use package specs with variables (test pattern didn't include body variables)
+- Integration test created but shows failure: variables in body not working
+
+---
+
+### Issue B: Generated Function Name Missing Package Prefix
+
+**Problem:** Package member functions are generated with wrong names - missing the package prefix.
+
+**Expected:** `CREATE OR REPLACE FUNCTION user_vanessa.testpackagevar1__test1()`
+**Actual:** `CREATE OR REPLACE FUNCTION user_vanessa.test1()`
+
+**Root Cause Analysis:**
+
+`VisitFunctionBody.java` (lines 56-62):
+```java
+// STEP 1: Extract function name from AST
+String functionName;
+if (ctx.identifier() != null) {
+    functionName = ctx.identifier().getText().toLowerCase();  // ← Just the function name!
+} else {
+    throw new IllegalStateException("Function name not found in AST");
+}
+String qualifiedName = schema.toLowerCase() + "." + functionName;  // ← Missing package!
+```
+
+**The Problem:**
+1. Line 58: Extracts function name from AST (`test1`)
+2. Line 62: Builds qualified name as `schema.functionName` (`user_vanessa.test1`)
+3. ❌ Does NOT check if this is a package member
+4. ❌ Does NOT apply the `packageName__functionName` convention
+
+**What Should Happen:**
+```java
+// Get context info
+String schema = b.getContext().getCurrentSchema();          // "user_vanessa"
+String packageName = b.getContext().getCurrentPackageName(); // "testpackagevar1"
+String functionName = ctx.identifier().getText().toLowerCase(); // "test1"
+
+// Build qualified name based on package membership
+String qualifiedName;
+if (packageName != null) {
+    // Package member: schema.packageName__functionName
+    qualifiedName = schema.toLowerCase() + "." +
+                   packageName.toLowerCase() + "__" +
+                   functionName;
+} else {
+    // Standalone: schema.functionName
+    qualifiedName = schema.toLowerCase() + "." + functionName;
+}
+```
+
+**Impact:**
+- **CRITICAL** - Generated function name doesn't match the stub
+- Stub created as: `testpackagevar1__test1` (correct naming convention)
+- Implementation creates: `test1` (wrong - missing package prefix)
+- `CREATE OR REPLACE` fails because names don't match
+- Results in duplicate functions: stub still exists, new function created with different name
+
+**Evidence:**
+- `TransformationContext.getCurrentPackageName()` exists and returns correct package name
+- Value is set correctly in `TransformationService.transformFunction()` (line 120: 6-param call with packageName)
+- But VisitFunctionBody never uses it for naming!
+
+**Same Issue in VisitProcedureBody:**
+- Same pattern exists in `VisitProcedureBody.java`
+- Must be fixed in both places
+
+---
+
+### Issue C: Package Variable Detection Patterns Incomplete
+
+**Problem:** Package variable detection only handles one pattern (package.variable), missing two other valid Oracle patterns.
+
+**Root Cause Analysis:**
+
+`VisitGeneralElement.java` (lines 84-100):
+```java
+// STEP 0: Check for package variable references (unless in assignment target)
+// Pattern: package.variable (2 parts, no function arguments)
+if (!b.isInAssignmentTarget() && parts.size() == 2) {  // ← ONLY 2 parts!
+    PlSqlParser.General_element_partContext lastPart = parts.get(parts.size() - 1);
+    boolean hasArguments = lastPart.function_argument() != null && !lastPart.function_argument().isEmpty();
+
+    if (!hasArguments) {
+        // Could be a package variable - build the reference string
+        String packageName = parts.get(0).id_expression().getText();
+        String variableName = parts.get(1).id_expression().getText();
+
+        // Check if this is a package variable
+        if (b.isPackageVariable(packageName, variableName)) {
+            // Transform to getter call
+            return b.transformToPackageVariableGetter(packageName, variableName);
+```
+
+**Current Detection:** Only `parts.size() == 2`
+
+**Valid Oracle Patterns NOT Handled:**
+
+**Pattern 1: Schema-Qualified Reference (3 parts)**
+```sql
+-- Oracle code inside a package function
+FUNCTION calculate RETURN NUMBER IS
+BEGIN
+  RETURN hr.test_pkg.g_counter + 1;  -- schema.package.variable (3 parts)
+       -- ^^  ^^^^^^^^  ^^^^^^^^^
+       -- schema package  variable
+END;
+```
+
+Current code: `parts.size() == 2` → **FAILS** (size is 3)
+Result: Not recognized as package variable, passed through as-is
+PostgreSQL error: "column hr.test_pkg.g_counter does not exist"
+
+**Pattern 2: Unqualified Reference in Current Package (1 part)**
+```sql
+-- Oracle code inside testpackagevar1 package
+PACKAGE BODY testpackagevar1 AS
+  g_counter INTEGER := 0;
+
+  FUNCTION test1 RETURN NUMBER IS
+  BEGIN
+    RETURN g_counter + 1;  -- Just variable name (1 part)
+         -- ^^^^^^^^^
+         -- No package qualifier - use CURRENT package
+  END;
+END;
+```
+
+Current code: `parts.size() == 2` → **FAILS** (size is 1)
+Result: Not recognized as package variable, passed through as simple identifier
+PostgreSQL error: "column g_counter does not exist"
+
+**Required Logic:**
+
+```java
+// Pattern 1: Unqualified variable in current package (1 part)
+if (parts.size() == 1 && !hasArguments) {
+    String variableName = parts.get(0).id_expression().getText();
+    String currentPackage = b.getContext().getCurrentPackageName();
+
+    if (currentPackage != null && b.isPackageVariable(currentPackage, variableName)) {
+        return b.transformToPackageVariableGetter(currentPackage, variableName);
+    }
+}
+
+// Pattern 2: Package-qualified variable (2 parts) - CURRENT CODE
+if (parts.size() == 2 && !hasArguments) {
+    String packageName = parts.get(0).id_expression().getText();
+    String variableName = parts.get(1).id_expression().getText();
+
+    if (b.isPackageVariable(packageName, variableName)) {
+        return b.transformToPackageVariableGetter(packageName, variableName);
+    }
+}
+
+// Pattern 3: Schema-qualified variable (3 parts) - MISSING!
+if (parts.size() == 3 && !hasArguments) {
+    String schema = parts.get(0).id_expression().getText();
+    String packageName = parts.get(1).id_expression().getText();
+    String variableName = parts.get(2).id_expression().getText();
+
+    // Verify schema matches current schema (Oracle doesn't allow cross-schema package refs)
+    if (schema.equalsIgnoreCase(b.getContext().getCurrentSchema()) &&
+        b.isPackageVariable(packageName, variableName)) {
+        return b.transformToPackageVariableGetter(packageName, variableName);
+    }
+}
+```
+
+**Impact:**
+- ❌ Schema-qualified references (hr.pkg.var) not transformed → PostgreSQL syntax error
+- ❌ Unqualified references (just var) not transformed → "column does not exist" error
+- Only package.var pattern works
+- Real Oracle code uses all three patterns!
+
+---
+
+### Summary of Issues
+
+| Issue | Location | Severity | Impact |
+|-------|----------|----------|--------|
+| **A: Body variables ignored** | `PackageContextExtractor.java:66-73` | CRITICAL | Body variables not extracted, transformation fails |
+| **B: Function name missing package** | `VisitFunctionBody.java:58-62` | CRITICAL | CREATE OR REPLACE fails, duplicate functions created |
+| **C: Detection patterns incomplete** | `VisitGeneralElement.java:84-100` | HIGH | 2 of 3 Oracle patterns fail, syntax errors |
+
+**Recommended Fix Order:**
+1. **Issue B** (function naming) - HIGHEST PRIORITY - Blocks stub replacement
+2. **Issue A** (body variables) - HIGH PRIORITY - Needed for real Oracle packages
+3. **Issue C** (detection patterns) - MEDIUM PRIORITY - Improves coverage
+
+**Testing Requirements:**
+- Add test with package body variables (Issue A)
+- Verify generated function name includes package prefix (Issue B)
+- Add tests for all 3 reference patterns (Issue C)
