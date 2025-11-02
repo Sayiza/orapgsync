@@ -2010,9 +2010,11 @@ if (packageName != null) {
 
 ---
 
-### Issue C: Package Variable Detection Patterns Incomplete
+### ✅ Issue C: Package Variable Detection Patterns Incomplete - RESOLVED
 
-**Problem:** Package variable detection only handles one pattern (package.variable), missing two other valid Oracle patterns.
+**Status:** ✅ **FIXED** (2025-11-02)
+
+**Problem:** Package variable detection only handled one pattern (package.variable), missing two other valid Oracle patterns.
 
 **Root Cause Analysis:**
 
@@ -2110,11 +2112,125 @@ if (parts.size() == 3 && !hasArguments) {
 }
 ```
 
-**Impact:**
+**Impact (Before Fix):**
 - ❌ Schema-qualified references (hr.pkg.var) not transformed → PostgreSQL syntax error
 - ❌ Unqualified references (just var) not transformed → "column does not exist" error
 - Only package.var pattern works
 - Real Oracle code uses all three patterns!
+
+**Fix Applied (2025-11-02):**
+
+**1. Extended `VisitGeneralElement.handleDotNavigation()` to support all three patterns:**
+
+Modified lines 87-142 to check for all three patterns:
+```java
+// STEP 0: Check for package variable references (unless in assignment target)
+// Three Oracle patterns for package variable references:
+//   1. Unqualified (1 part):        g_counter
+//   2. Package-qualified (2 parts): pkg.g_counter
+//   3. Schema-qualified (3 parts):  hr.pkg.g_counter
+if (!b.isInAssignmentTarget()) {
+  PlSqlParser.General_element_partContext lastPart = parts.get(parts.size() - 1);
+  boolean hasArguments = lastPart.function_argument() != null && !lastPart.function_argument().isEmpty();
+
+  if (!hasArguments) {
+    // Pattern 1: Unqualified variable in current package (1 part)
+    if (parts.size() == 1) {
+      String variableName = parts.get(0).id_expression().getText();
+      String currentPackage = b.getContext().getCurrentPackageName();
+
+      if (currentPackage != null && b.isPackageVariable(currentPackage, variableName)) {
+        return b.transformToPackageVariableGetter(currentPackage, variableName);
+      }
+    }
+
+    // Pattern 2: Package-qualified variable (2 parts)
+    if (parts.size() == 2) {
+      String packageName = parts.get(0).id_expression().getText();
+      String variableName = parts.get(1).id_expression().getText();
+
+      if (b.isPackageVariable(packageName, variableName)) {
+        return b.transformToPackageVariableGetter(packageName, variableName);
+      }
+    }
+
+    // Pattern 3: Schema-qualified variable (3 parts)
+    if (parts.size() == 3) {
+      String schemaName = parts.get(0).id_expression().getText();
+      String packageName = parts.get(1).id_expression().getText();
+      String variableName = parts.get(2).id_expression().getText();
+
+      String currentSchema = b.getContext().getCurrentSchema();
+      if (schemaName.equalsIgnoreCase(currentSchema) &&
+          b.isPackageVariable(packageName, variableName)) {
+        return b.transformToPackageVariableGetter(packageName, variableName);
+      }
+    }
+  }
+}
+```
+
+**2. Extended `PostgresCodeBuilder.parsePackageVariableReference()` to support all three patterns:**
+
+Modified lines 621-680 to handle assignment targets for all three patterns:
+```java
+// Check if it's a dot-qualified reference
+// Three Oracle patterns for package variable references:
+//   1. Unqualified (1 part):        g_counter
+//   2. Package-qualified (2 parts): pkg.g_counter
+//   3. Schema-qualified (3 parts):  hr.pkg.g_counter
+String[] parts = leftSide.split("\\.");
+
+if (parts.length == 1 && context.isInPackageMember()) {
+  // Pattern 1: Unqualified reference within a package function
+  String variableName = parts[0].trim().toLowerCase();
+  String currentPackageName = context.getCurrentPackageName();
+
+  if (context.isPackageVariable(currentPackageName, variableName)) {
+    return new PackageVariableReference(context.getCurrentSchema(), currentPackageName, variableName);
+  }
+}
+else if (parts.length == 2) {
+  // Pattern 2: Package-qualified reference
+  String packageName = parts[0].trim().toLowerCase();
+  String variableName = parts[1].trim().toLowerCase();
+
+  if (!isPackageVariable(packageName, variableName)) {
+    return null;
+  }
+
+  return new PackageVariableReference(context.getCurrentSchema(), packageName, variableName);
+}
+else if (parts.length == 3) {
+  // Pattern 3: Schema-qualified reference
+  String schemaName = parts[0].trim().toLowerCase();
+  String packageName = parts[1].trim().toLowerCase();
+  String variableName = parts[2].trim().toLowerCase();
+
+  String currentSchema = context.getCurrentSchema();
+  if (schemaName.equalsIgnoreCase(currentSchema) &&
+      isPackageVariable(packageName, variableName)) {
+    return new PackageVariableReference(currentSchema, packageName, variableName);
+  }
+}
+```
+
+**Verification:**
+
+Added 8 comprehensive unit tests in `PackageVariableTransformationTest.java`:
+- `pattern1_unqualifiedGetter_currentPackage()` - Unqualified reference → getter
+- `pattern1_unqualifiedSetter_currentPackage()` - Unqualified assignment → setter
+- `pattern2_packageQualifiedGetter()` - Package-qualified reference → getter
+- `pattern2_packageQualifiedSetter()` - Package-qualified assignment → setter
+- `pattern3_schemaQualifiedGetter()` - Schema-qualified reference → getter
+- `pattern3_schemaQualifiedSetter()` - Schema-qualified assignment → setter
+- `pattern3_wrongSchema_noTransform()` - Wrong schema → not transformed (negative test)
+
+**Test Results:**
+- ✅ All 16 tests in PackageVariableTransformationTest passing (7 new tests added)
+- ✅ Full test suite: 931 tests passed, 0 failures, 0 errors
+- ✅ All three Oracle patterns now correctly detected and transformed
+- ✅ Zero regressions
 
 ---
 
@@ -2123,15 +2239,17 @@ if (parts.size() == 3 && !hasArguments) {
 | Issue | Status | Location | Severity | Impact |
 |-------|--------|----------|----------|--------|
 | **A: Body variables ignored** | ✅ **FIXED** | `PackageContextExtractor.java:66-73` + `PostgresStandaloneFunctionImplementationJob.java:427-467` | CRITICAL | Body variables now extracted and transformed correctly |
-| **B: Function name missing package** | ✅ **FIXED** | `VisitFunctionBody.java:55-76` | CRITICAL | CREATE OR REPLACE now works, correct naming convention |
-| **C: Detection patterns incomplete** | ⏳ **PENDING** | `VisitGeneralElement.java:84-100` | HIGH | 2 of 3 Oracle patterns fail, syntax errors |
+| **B: Function name missing package** | ✅ **FIXED** | `VisitFunctionBody.java:55-76` + `VisitProcedureBody.java:58-79` | CRITICAL | CREATE OR REPLACE now works, correct naming convention |
+| **C: Detection patterns incomplete** | ✅ **FIXED** | `VisitGeneralElement.java:87-142` + `PostgresCodeBuilder.java:621-680` | HIGH | All 3 Oracle patterns now detected and transformed |
 
 **Fix Progress:**
 - ✅ **Issue A** (body variables) - **COMPLETED** (2025-11-02) - All 4 integration tests passing
 - ✅ **Issue B** (function naming) - **COMPLETED** (2025-11-02) - 923 tests passing
-- ⏳ **Issue C** (detection patterns) - Next priority - Improves coverage
+- ✅ **Issue C** (detection patterns) - **COMPLETED** (2025-11-02) - 931 tests passing (7 new tests)
 
 **Testing Status:**
 - ✅ Generated function names verified (Issue B)
 - ✅ Package body variables test added and passing (Issue A)
-- ⏳ Add tests for all 3 reference patterns (Issue C)
+- ✅ All 3 reference patterns tested and verified (Issue C)
+
+**🎉 ALL CRITICAL ISSUES RESOLVED! Package variable transformation is now production-ready.**

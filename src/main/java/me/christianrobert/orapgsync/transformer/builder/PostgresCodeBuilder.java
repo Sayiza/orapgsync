@@ -623,24 +623,15 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
             return null;
         }
 
-        // Check if it's a dot-qualified reference (pkg.variable)
+        // Check if it's a dot-qualified reference
+        // Three Oracle patterns for package variable references:
+        //   1. Unqualified (1 part):        g_counter
+        //   2. Package-qualified (2 parts): pkg.g_counter
+        //   3. Schema-qualified (3 parts):  hr.pkg.g_counter
         String[] parts = leftSide.split("\\.");
 
-        if (parts.length == 2) {
-            // Qualified reference: counter_pkg.g_counter
-            // Note: Oracle identifiers are case-insensitive, normalize to lowercase
-            String packageName = parts[0].trim().toLowerCase();
-            String variableName = parts[1].trim().toLowerCase();
-
-            // Check if it's actually a package variable
-            if (!isPackageVariable(packageName, variableName)) {
-                return null;  // Not a package variable
-            }
-
-            return new PackageVariableReference(context.getCurrentSchema(), packageName, variableName);
-        }
-        else if (parts.length == 1 && context.isInPackageMember()) {
-            // Unqualified reference within a package function
+        if (parts.length == 1 && context.isInPackageMember()) {
+            // Pattern 1: Unqualified reference within a package function
             // Oracle allows: g_counter := 100  (no package qualifier needed)
             // Note: Oracle identifiers are case-insensitive, normalize to lowercase
             String variableName = parts[0].trim().toLowerCase();
@@ -652,6 +643,37 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
             }
 
             return null;  // Not a package variable
+        }
+        else if (parts.length == 2) {
+            // Pattern 2: Package-qualified reference
+            // Oracle: counter_pkg.g_counter := 100
+            // Note: Oracle identifiers are case-insensitive, normalize to lowercase
+            String packageName = parts[0].trim().toLowerCase();
+            String variableName = parts[1].trim().toLowerCase();
+
+            // Check if it's actually a package variable
+            if (!isPackageVariable(packageName, variableName)) {
+                return null;  // Not a package variable
+            }
+
+            return new PackageVariableReference(context.getCurrentSchema(), packageName, variableName);
+        }
+        else if (parts.length == 3) {
+            // Pattern 3: Schema-qualified reference
+            // Oracle: hr.counter_pkg.g_counter := 100
+            // Note: Oracle identifiers are case-insensitive, normalize to lowercase
+            String schemaName = parts[0].trim().toLowerCase();
+            String packageName = parts[1].trim().toLowerCase();
+            String variableName = parts[2].trim().toLowerCase();
+
+            // Verify schema matches current schema (Oracle doesn't allow cross-schema package refs)
+            String currentSchema = context.getCurrentSchema();
+            if (schemaName.equalsIgnoreCase(currentSchema) &&
+                isPackageVariable(packageName, variableName)) {
+                return new PackageVariableReference(currentSchema, packageName, variableName);
+            }
+
+            return null;  // Schema mismatch or not a package variable
         }
 
         return null;  // Not a simple reference or not in package context

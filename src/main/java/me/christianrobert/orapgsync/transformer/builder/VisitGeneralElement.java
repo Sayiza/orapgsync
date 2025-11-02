@@ -67,7 +67,10 @@ public class VisitGeneralElement {
    * Handles dot navigation: first.second.third...
    *
    * <p>Disambiguation logic:
-   * 0. Check for package variable reference (pkg.variable) - transform to getter call
+   * 0. Check for package variable reference (3 patterns) - transform to getter call
+   *    - Pattern 1: unqualified (variable) - uses current package
+   *    - Pattern 2: package-qualified (package.variable)
+   *    - Pattern 3: schema-qualified (schema.package.variable)
    * 1. Check for sequence pseudo-column (seq.NEXTVAL, seq.CURRVAL)
    * 2. If last part has function arguments → function call
    *    - Check metadata: is this a type member method (table.col.method)?
@@ -82,22 +85,58 @@ public class VisitGeneralElement {
       PostgresCodeBuilder b) {
 
     // STEP 0: Check for package variable references (unless in assignment target)
-    // Pattern: package.variable (2 parts, no function arguments)
-    // Oracle:     pkg.g_counter
-    // PostgreSQL: schema.pkg__get_g_counter()
-    if (!b.isInAssignmentTarget() && parts.size() == 2) {
+    // Three Oracle patterns for package variable references:
+    //   1. Unqualified (1 part):        g_counter
+    //   2. Package-qualified (2 parts): pkg.g_counter
+    //   3. Schema-qualified (3 parts):  hr.pkg.g_counter
+    if (!b.isInAssignmentTarget()) {
       PlSqlParser.General_element_partContext lastPart = parts.get(parts.size() - 1);
       boolean hasArguments = lastPart.function_argument() != null && !lastPart.function_argument().isEmpty();
 
       if (!hasArguments) {
-        // Could be a package variable - build the reference string
-        String packageName = parts.get(0).id_expression().getText();
-        String variableName = parts.get(1).id_expression().getText();
+        // Pattern 1: Unqualified variable in current package (1 part)
+        // Oracle:     g_counter (inside package function)
+        // PostgreSQL: schema.pkg__get_g_counter()
+        if (parts.size() == 1) {
+          String variableName = parts.get(0).id_expression().getText();
+          String currentPackage = b.getContext().getCurrentPackageName();
 
-        // Check if this is a package variable
-        if (b.isPackageVariable(packageName, variableName)) {
-          // Transform to getter call
-          return b.transformToPackageVariableGetter(packageName, variableName);
+          // Only check if we're inside a package context
+          if (currentPackage != null && b.isPackageVariable(currentPackage, variableName)) {
+            // Transform to getter call using current package
+            return b.transformToPackageVariableGetter(currentPackage, variableName);
+          }
+        }
+
+        // Pattern 2: Package-qualified variable (2 parts)
+        // Oracle:     pkg.g_counter
+        // PostgreSQL: schema.pkg__get_g_counter()
+        if (parts.size() == 2) {
+          String packageName = parts.get(0).id_expression().getText();
+          String variableName = parts.get(1).id_expression().getText();
+
+          // Check if this is a package variable
+          if (b.isPackageVariable(packageName, variableName)) {
+            // Transform to getter call
+            return b.transformToPackageVariableGetter(packageName, variableName);
+          }
+        }
+
+        // Pattern 3: Schema-qualified variable (3 parts)
+        // Oracle:     hr.pkg.g_counter
+        // PostgreSQL: schema.pkg__get_g_counter()
+        if (parts.size() == 3) {
+          String schemaName = parts.get(0).id_expression().getText();
+          String packageName = parts.get(1).id_expression().getText();
+          String variableName = parts.get(2).id_expression().getText();
+
+          // Verify schema matches current schema (Oracle doesn't allow cross-schema package refs)
+          String currentSchema = b.getContext().getCurrentSchema();
+          if (schemaName.equalsIgnoreCase(currentSchema) &&
+              b.isPackageVariable(packageName, variableName)) {
+            // Transform to getter call (schema prefix not needed in getter name)
+            return b.transformToPackageVariableGetter(packageName, variableName);
+          }
         }
       }
     }

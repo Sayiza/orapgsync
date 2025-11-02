@@ -299,4 +299,222 @@ class PackageVariableTransformationTest {
         assertTrue(postgresSql.contains("PERFORM hr.emp_pkg__set_g_counter"),
             "Case-insensitive variable reference should be transformed");
     }
+
+    // ========== ISSUE C: All Three Detection Patterns Tests ==========
+
+    @Test
+    void pattern1_unqualifiedGetter_currentPackage() {
+        // Pattern 1: Unqualified variable reference (inside package function)
+        // Oracle:     g_counter (no package qualifier)
+        // PostgreSQL: emp_pkg__get_g_counter()
+        String plsql = """
+            FUNCTION test_func RETURN NUMBER AS
+              v_result NUMBER;
+            BEGIN
+              v_result := g_counter + 10;
+              RETURN v_result;
+            END;
+            """;
+
+        ParseResult parseResult = parser.parseFunctionBody(plsql);
+        assertTrue(parseResult.isSuccess());
+
+        // Must be in package context (emp_pkg)
+        TransformationContext context = new TransformationContext(
+            "hr", emptyIndices, typeEvaluator,
+            packageContextCache, "test_func", "emp_pkg"
+        );
+        PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
+
+        String postgresSql = builder.visit(parseResult.getTree());
+
+        // Should transform unqualified reference to getter using current package
+        assertTrue(postgresSql.contains("hr.emp_pkg__get_g_counter()"),
+            "Unqualified variable reference should be transformed to getter using current package");
+        assertFalse(postgresSql.contains("g_counter +"),
+            "Unqualified variable should not remain as raw identifier");
+    }
+
+    @Test
+    void pattern1_unqualifiedSetter_currentPackage() {
+        // Pattern 1: Unqualified variable assignment (inside package function)
+        // Oracle:     g_counter := 100 (no package qualifier)
+        // PostgreSQL: PERFORM emp_pkg__set_g_counter(100)
+        String plsql = """
+            PROCEDURE test_proc AS
+            BEGIN
+              g_counter := 100;
+            END;
+            """;
+
+        ParseResult parseResult = parser.parseProcedureBody(plsql);
+        assertTrue(parseResult.isSuccess());
+
+        // Must be in package context (emp_pkg)
+        TransformationContext context = new TransformationContext(
+            "hr", emptyIndices, typeEvaluator,
+            packageContextCache, "test_proc", "emp_pkg"
+        );
+        PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
+
+        String postgresSql = builder.visit(parseResult.getTree());
+
+        // Should transform unqualified assignment to setter using current package
+        assertTrue(postgresSql.contains("PERFORM hr.emp_pkg__set_g_counter(100)"),
+            "Unqualified variable assignment should be transformed to setter using current package");
+        assertFalse(postgresSql.contains("g_counter :="),
+            "Unqualified variable should not remain as raw assignment");
+    }
+
+    @Test
+    void pattern2_packageQualifiedGetter() {
+        // Pattern 2: Package-qualified variable reference (already tested, but explicit here)
+        // Oracle:     emp_pkg.g_counter
+        // PostgreSQL: emp_pkg__get_g_counter()
+        String plsql = """
+            FUNCTION test_func RETURN NUMBER AS
+              v_result NUMBER;
+            BEGIN
+              v_result := emp_pkg.g_counter + 10;
+              RETURN v_result;
+            END;
+            """;
+
+        ParseResult parseResult = parser.parseFunctionBody(plsql);
+        assertTrue(parseResult.isSuccess());
+
+        TransformationContext context = new TransformationContext(
+            "hr", emptyIndices, typeEvaluator,
+            packageContextCache, "test_func", "emp_pkg"
+        );
+        PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
+
+        String postgresSql = builder.visit(parseResult.getTree());
+
+        // Should transform to getter
+        assertTrue(postgresSql.contains("hr.emp_pkg__get_g_counter()"),
+            "Package-qualified variable reference should be transformed to getter");
+    }
+
+    @Test
+    void pattern2_packageQualifiedSetter() {
+        // Pattern 2: Package-qualified variable assignment (already tested, but explicit here)
+        // Oracle:     emp_pkg.g_counter := 100
+        // PostgreSQL: PERFORM emp_pkg__set_g_counter(100)
+        String plsql = """
+            PROCEDURE test_proc AS
+            BEGIN
+              emp_pkg.g_counter := 100;
+            END;
+            """;
+
+        ParseResult parseResult = parser.parseProcedureBody(plsql);
+        assertTrue(parseResult.isSuccess());
+
+        TransformationContext context = new TransformationContext(
+            "hr", emptyIndices, typeEvaluator,
+            packageContextCache, "test_proc", "emp_pkg"
+        );
+        PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
+
+        String postgresSql = builder.visit(parseResult.getTree());
+
+        // Should transform to setter
+        assertTrue(postgresSql.contains("PERFORM hr.emp_pkg__set_g_counter(100)"),
+            "Package-qualified variable assignment should be transformed to setter");
+    }
+
+    @Test
+    void pattern3_schemaQualifiedGetter() {
+        // Pattern 3: Schema-qualified variable reference (NEW!)
+        // Oracle:     hr.emp_pkg.g_counter
+        // PostgreSQL: emp_pkg__get_g_counter()
+        String plsql = """
+            FUNCTION test_func RETURN NUMBER AS
+              v_result NUMBER;
+            BEGIN
+              v_result := hr.emp_pkg.g_counter + 10;
+              RETURN v_result;
+            END;
+            """;
+
+        ParseResult parseResult = parser.parseFunctionBody(plsql);
+        assertTrue(parseResult.isSuccess());
+
+        TransformationContext context = new TransformationContext(
+            "hr", emptyIndices, typeEvaluator,
+            packageContextCache, "test_func", "emp_pkg"
+        );
+        PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
+
+        String postgresSql = builder.visit(parseResult.getTree());
+
+        // Should transform schema-qualified reference to getter
+        assertTrue(postgresSql.contains("hr.emp_pkg__get_g_counter()"),
+            "Schema-qualified variable reference should be transformed to getter");
+        assertFalse(postgresSql.contains("hr.emp_pkg.g_counter"),
+            "Schema-qualified variable should not remain as raw reference");
+    }
+
+    @Test
+    void pattern3_schemaQualifiedSetter() {
+        // Pattern 3: Schema-qualified variable assignment (NEW!)
+        // Oracle:     hr.emp_pkg.g_counter := 100
+        // PostgreSQL: PERFORM emp_pkg__set_g_counter(100)
+        String plsql = """
+            PROCEDURE test_proc AS
+            BEGIN
+              hr.emp_pkg.g_counter := 100;
+            END;
+            """;
+
+        ParseResult parseResult = parser.parseProcedureBody(plsql);
+        assertTrue(parseResult.isSuccess());
+
+        TransformationContext context = new TransformationContext(
+            "hr", emptyIndices, typeEvaluator,
+            packageContextCache, "test_proc", "emp_pkg"
+        );
+        PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
+
+        String postgresSql = builder.visit(parseResult.getTree());
+
+        // Should transform schema-qualified assignment to setter
+        assertTrue(postgresSql.contains("PERFORM hr.emp_pkg__set_g_counter(100)"),
+            "Schema-qualified variable assignment should be transformed to setter");
+        assertFalse(postgresSql.contains("hr.emp_pkg.g_counter :="),
+            "Schema-qualified variable should not remain as raw assignment");
+    }
+
+    @Test
+    void pattern3_wrongSchema_noTransform() {
+        // Pattern 3: Schema-qualified variable with WRONG schema (should NOT transform)
+        // Oracle:     other_schema.emp_pkg.g_counter
+        // PostgreSQL: Should pass through (not transformed to package variable getter)
+        String plsql = """
+            FUNCTION test_func RETURN NUMBER AS
+              v_result NUMBER;
+            BEGIN
+              v_result := other_schema.emp_pkg.g_counter + 10;
+              RETURN v_result;
+            END;
+            """;
+
+        ParseResult parseResult = parser.parseFunctionBody(plsql);
+        assertTrue(parseResult.isSuccess());
+
+        TransformationContext context = new TransformationContext(
+            "hr", emptyIndices, typeEvaluator,
+            packageContextCache, "test_func", null
+        );
+        PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
+
+        String postgresSql = builder.visit(parseResult.getTree());
+
+        // Should NOT transform to package variable getter (schema mismatch)
+        assertFalse(postgresSql.contains("emp_pkg__get_g_counter()"),
+            "Wrong schema reference should NOT be transformed to package variable getter");
+        // Note: May be reformatted as column reference (e.g., other_schema.emp_pkg.g_counter or ((other_schema.emp_pkg).g_counter))
+        // The important part is it's NOT transformed to a package variable getter
+    }
 }
