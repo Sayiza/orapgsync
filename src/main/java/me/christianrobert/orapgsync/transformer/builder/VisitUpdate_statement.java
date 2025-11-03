@@ -1,6 +1,7 @@
 package me.christianrobert.orapgsync.transformer.builder;
 
 import me.christianrobert.orapgsync.antlr.PlSqlParser;
+import me.christianrobert.orapgsync.transformer.builder.tablereference.TableReferenceHelper;
 
 import java.util.List;
 import java.util.stream.Collectors;
@@ -82,10 +83,11 @@ public class VisitUpdate_statement {
         StringBuilder result = new StringBuilder("UPDATE ");
 
         // Table reference (with schema qualification)
+        // Use TableReferenceHelper for consistent table resolution
         if (ctx.general_table_ref() == null) {
             throw new IllegalArgumentException("UPDATE statement missing table reference");
         }
-        String tableRef = b.visit(ctx.general_table_ref());
+        String tableRef = TableReferenceHelper.resolveGeneralTableRef(ctx.general_table_ref(), b);
         result.append(tableRef);
 
         // SET clause (required)
@@ -189,14 +191,16 @@ public class VisitUpdate_statement {
 
         // Case 1: column_name = expression
         if (ctx.column_name() != null && ctx.expression() != null) {
-            String columnName = b.visit(ctx.column_name());
+            // Column names are simple identifiers - use getText() directly (no transformation needed)
+            String columnName = ctx.column_name().getText();
             String expression = b.visit(ctx.expression());
             return columnName + " = " + expression;
         }
 
         // Case 2: (col1, col2, ...) = subquery
         if (ctx.paren_column_list() != null && ctx.subquery() != null) {
-            String columnList = b.visit(ctx.paren_column_list());
+            // paren_column_list already includes parentheses - pass through as-is
+            String columnList = ctx.paren_column_list().getText();
             String subquery = b.visit(ctx.subquery());
             return columnList + " = " + subquery;
         }

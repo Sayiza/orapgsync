@@ -533,7 +533,7 @@ public class PostgresPlSqlCursorAttributesValidationTest extends PostgresSqlVali
             FUNCTION insert_if_not_exists(p_empno NUMBER, p_ename VARCHAR2) RETURN VARCHAR2 IS
             BEGIN
               INSERT INTO emp (empno, ename, salary, dept_id)
-              SELECT p_empno, p_ename, 50000, 10
+              SELECT p_empno, p_ename, 50000, 10 FROM DUAL
               WHERE NOT EXISTS (SELECT 1 FROM emp WHERE empno = p_empno);
 
               IF SQL%NOTFOUND THEN

@@ -1,6 +1,7 @@
 package me.christianrobert.orapgsync.transformer.builder;
 
 import me.christianrobert.orapgsync.antlr.PlSqlParser;
+import me.christianrobert.orapgsync.transformer.builder.tablereference.TableReferenceHelper;
 
 import java.util.List;
 import java.util.stream.Collectors;
@@ -173,15 +174,17 @@ public class VisitInsert_statement {
         StringBuilder result = new StringBuilder("INSERT INTO ");
 
         // Table reference (with schema qualification)
+        // Use TableReferenceHelper for consistent table resolution
         if (ctx.general_table_ref() == null) {
             throw new IllegalArgumentException("INSERT INTO clause missing table reference");
         }
-        String tableRef = b.visit(ctx.general_table_ref());
+        String tableRef = TableReferenceHelper.resolveGeneralTableRef(ctx.general_table_ref(), b);
         result.append(tableRef);
 
         // Optional column list: (col1, col2, ...)
         if (ctx.paren_column_list() != null) {
-            String columnList = b.visit(ctx.paren_column_list());
+            // paren_column_list already includes parentheses - pass through as-is
+            String columnList = ctx.paren_column_list().getText();
             result.append(" ").append(columnList);
         }
 

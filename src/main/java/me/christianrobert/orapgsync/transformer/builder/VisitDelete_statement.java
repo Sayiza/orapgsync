@@ -1,6 +1,7 @@
 package me.christianrobert.orapgsync.transformer.builder;
 
 import me.christianrobert.orapgsync.antlr.PlSqlParser;
+import me.christianrobert.orapgsync.transformer.builder.tablereference.TableReferenceHelper;
 
 /**
  * Static helper for visiting DELETE statements.
@@ -65,11 +66,11 @@ public class VisitDelete_statement {
         StringBuilder result = new StringBuilder("DELETE FROM ");
 
         // Table reference (with schema qualification)
-        // The visitor will handle schema qualification automatically
+        // Use TableReferenceHelper for consistent table resolution
         if (ctx.general_table_ref() == null) {
             throw new IllegalArgumentException("DELETE statement missing table reference");
         }
-        String tableRef = b.visit(ctx.general_table_ref());
+        String tableRef = TableReferenceHelper.resolveGeneralTableRef(ctx.general_table_ref(), b);
         result.append(tableRef);
 
         // Optional WHERE clause

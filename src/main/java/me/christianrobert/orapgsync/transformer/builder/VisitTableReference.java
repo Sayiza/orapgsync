@@ -1,6 +1,7 @@
 package me.christianrobert.orapgsync.transformer.builder;
 
 import me.christianrobert.orapgsync.antlr.PlSqlParser;
+import me.christianrobert.orapgsync.transformer.builder.tablereference.TableReferenceHelper;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
 import me.christianrobert.orapgsync.transformer.context.TransformationException;
 
@@ -181,26 +182,8 @@ public class VisitTableReference {
    */
   private static String handleDmlTableExpression(
       PlSqlParser.Dml_table_expression_clauseContext dmlTable, PostgresCodeBuilder b) {
-
-    if (dmlTable == null) {
-      throw new TransformationException("dml_table_expression_clause is null");
-    }
-
-    // CASE 1: Regular table reference (tableview_name)
-    PlSqlParser.Tableview_nameContext tableviewName = dmlTable.tableview_name();
-    if (tableviewName != null) {
-      return handleTableviewName(tableviewName, b);
-    }
-
-    // CASE 2: Subquery in FROM clause: '(' select_statement ')'
-    PlSqlParser.Select_statementContext selectStatement = dmlTable.select_statement();
-    if (selectStatement != null) {
-      return handleSubquery(selectStatement, b);
-    }
-
-    // CASE 3: Other cases (not yet implemented)
-    throw new TransformationException(
-        "Unsupported dml_table_expression_clause type. Only tableview_name and subqueries are currently supported.");
+    // Delegate to TableReferenceHelper for consistent table resolution across all statement types
+    return TableReferenceHelper.resolveDmlTableExpression(dmlTable, b);
   }
 
   /**
@@ -209,40 +192,8 @@ public class VisitTableReference {
    */
   private static String handleTableviewName(
       PlSqlParser.Tableview_nameContext tableviewName, PostgresCodeBuilder b) {
-
-    String tableName = tableviewName.getText();
-    TransformationContext context = b.getContext();
-
-    // Apply name resolution logic (only if context is available)
-    if (context != null) {
-      // STEP 0: Check if this is a CTE (Common Table Expression) name
-      // CTEs are temporary named result sets that don't belong to any schema
-      // Example: WITH my_cte AS (...) SELECT * FROM my_cte
-      if (context.isCTE(tableName)) {
-        // CTE name - do NOT schema-qualify
-        return tableName.toLowerCase();
-      }
-
-      // STEP 1: Try to resolve as synonym first
-      // Oracle synonyms don't exist in PostgreSQL, so we must resolve them during transformation
-      String resolvedName = context.resolveSynonym(tableName);
-      if (resolvedName != null) {
-        // Synonym resolved to actual qualified table name (schema.table)
-        tableName = resolvedName;
-      } else {
-        // STEP 2: Not a synonym - qualify unqualified names with current schema
-        // Oracle implicitly uses current schema for unqualified names
-        // PostgreSQL uses search_path, which can cause wrong table or "does not exist" errors
-        // Solution: Explicitly qualify all unqualified table names
-        if (!tableName.contains(".")) {
-          // Unqualified name → qualify with current schema
-          tableName = context.getCurrentSchema().toLowerCase() + "." + tableName.toLowerCase();
-        }
-      }
-    }
-    // If context not available, keep original name (e.g., in simple tests without metadata)
-
-    return tableName;
+    // Delegate to TableReferenceHelper for consistent table resolution across all statement types
+    return TableReferenceHelper.resolveTableviewName(tableviewName, b);
   }
 
   /**
@@ -257,12 +208,7 @@ public class VisitTableReference {
    */
   private static String handleSubquery(
       PlSqlParser.Select_statementContext selectStatement, PostgresCodeBuilder b) {
-
-    // Recursively transform the subquery using the same PostgresCodeBuilder
-    // This ensures all transformation rules (schema qualification, synonyms, etc.) apply
-    String transformedSubquery = b.visit(selectStatement);
-
-    // Wrap in parentheses (required for subqueries in FROM clause)
-    return "( " + transformedSubquery + " )";
+    // Delegate to TableReferenceHelper for consistent table resolution across all statement types
+    return TableReferenceHelper.resolveSubquery(selectStatement, b);
   }
 }
