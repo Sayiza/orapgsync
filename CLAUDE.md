@@ -279,23 +279,15 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
     - ✅ Installed into `oracle_compat` schema with flattened naming (e.g., `dbms_output__put_line`)
     - ✅ Extensible catalog system for future additions
     - ✅ Integrated as Step 23/24 in orchestration workflow
-    - See `oraclecompat/` module and [TRANSFORMATION.md](TRANSFORMATION.md) Phase 4.5
+    - See `oraclecompat/` module and [TRANSFORMATION.md](documentation/TRANSFORMATION.md) Phase 4.5
 
 11. **View SQL Transformation**: ✅ **90% COMPLETE** - ANTLR-based Oracle→PostgreSQL SQL conversion
-    - ✅ Architecture: Direct AST approach with 37 static visitor helpers
-    - ✅ PostgresViewImplementationJob integrated with SqlTransformationService
     - ✅ **662+ tests passing** across 42+ test classes
     - ✅ **90% real-world view coverage achieved**
-    - ✅ Complete SELECT support: WHERE, ORDER BY, GROUP BY, HAVING, all JOIN types
-    - ✅ Oracle-specific functions: NVL, DECODE, TO_CHAR, TO_DATE, SUBSTR, TRIM, SYSDATE, ROWNUM, sequences
-    - ✅ CTEs (WITH clause): Recursive and non-recursive with automatic RECURSIVE detection
-    - ✅ CONNECT BY: Hierarchical queries → recursive CTEs with LEVEL and SYS_CONNECT_BY_PATH
-    - ✅ Date/Time functions: ADD_MONTHS, MONTHS_BETWEEN, LAST_DAY, TRUNC, ROUND
-    - ✅ String functions: INSTR, LPAD, RPAD, TRANSLATE, REGEXP_REPLACE, REGEXP_SUBSTR
-    - ✅ Arithmetic, concatenation, subqueries, set operations, window functions
-    - ✅ FROM DUAL handling, outer joins (Oracle (+) syntax)
-    - ✅ CREATE OR REPLACE VIEW preserves dependencies (critical!)
-    - See [TRANSFORMATION.md](TRANSFORMATION.md) for detailed documentation
+    - ✅ Direct AST approach with 37 static visitor helpers
+    - ✅ Complete SELECT support, CTEs, CONNECT BY, Oracle-specific functions
+    - ✅ PostgresViewImplementationJob with CREATE OR REPLACE VIEW (preserves dependencies)
+    - **See [TRANSFORMATION.md](documentation/TRANSFORMATION.md) for detailed feature list and implementation history**
 
 12. **Type Inference System**: 🔄 **42% COMPLETE** - Two-pass type analysis for accurate PL/SQL transformation
     - ✅ Phase 1: Foundation - Literals and simple expressions (18/18 tests)
@@ -307,43 +299,18 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
     - 📋 Planned: Complex expressions (CASE), PL/SQL variables, collections, integration
     - **Purpose:** Enable accurate ROUND/TRUNC disambiguation, optimal type casting, function overload resolution
     - **Architecture:** TypeAnalysisVisitor (Pass 1) populates type cache → FullTypeEvaluator (Pass 2) queries cache
-    - See [TYPE_INFERENCE_IMPLEMENTATION_PLAN.md](TYPE_INFERENCE_IMPLEMENTATION_PLAN.md) for detailed documentation
+    - See [TYPE_INFERENCE_IMPLEMENTATION_PLAN.md](documentation/TYPE_INFERENCE_IMPLEMENTATION_PLAN.md) for detailed documentation
 
-13. **Function/Procedure Implementation (Unified)**: 🔄 **85-95% COMPLETE** - PL/SQL transformation actively working for both standalone and package functions
-    - ✅ Frontend: HTML row + JavaScript handlers (verification & creation)
-    - ✅ Backend Jobs:
-      - `PostgresFunctionImplementationJob` - Implementation job with PL/SQL transformation
-      - `PostgresFunctionImplementationVerificationJob` - Verification job (fully functional)
-    - ✅ Data Model: `FunctionImplementationResult` with implemented/skipped/errors tracking
-    - ✅ REST Endpoints:
-      - `POST /api/functions/postgres/standalone-implementation/create`
-      - `POST /api/functions/postgres/standalone-implementation/verify`
-    - ✅ Result Handling: JobResource integration with summary generators
+13. **Function/Procedure Implementation (Unified)**: 🔄 **85-95% COMPLETE** - PL/SQL→PL/pgSQL transformation
+    - ✅ **882 tests passing** (PL/SQL transformation validation tests)
     - ✅ Handles **both standalone and package functions** in single unified job
-    - ✅ **PL/SQL Transformation (20 visitors implemented):**
-      - Function/procedure signatures with IN/OUT/INOUT parameters
-      - **Critical Fix (2025-10-30):** All Oracle PROCEDUREs → PostgreSQL FUNCTIONs (correct RETURNS clause)
-      - Variable declarations (CONSTANT, NOT NULL, defaults)
-      - Assignment statements
-      - IF/ELSIF/ELSE statements (simple, nested, complex conditions)
-      - NULL statements, CASE statements (simple and searched)
-      - SELECT INTO statements (with STRICT for Oracle compatibility)
-      - Loop statements: Basic LOOP, WHILE, FOR (numeric + cursor), EXIT, CONTINUE (with labels)
-      - Named cursors (with parameters)
-      - Explicit cursor operations: OPEN, FETCH, CLOSE (with cursor attributes)
-      - Call statements (PERFORM with schema qualification, package flattening)
-      - RETURN statements
-      - Exception handling: EXCEPTION blocks, RAISE statements, user-defined exceptions
-    - ✅ **Package Variable Support** - COMPLETE (unified on-demand approach)
-      - Package specs parsed on-demand during transformation (maintains ANTLR-only-in-transformation pattern)
-      - Helper functions (initialize, getters, setters) generated and cached per job execution
-      - Package variables transformed to getter/setter calls
-      - No separate extraction/creation jobs, no StateService properties
-      - 26 tests passing (PackageContextExtractorTest, PackageHelperGeneratorTest, PackageVariableTransformationTest)
-      - See [PACKAGE_VARIABLE_IMPLEMENTATION_PLAN.md](documentation/PACKAGE_VARIABLE_IMPLEMENTATION_PLAN.md)
+    - ✅ **20 PL/SQL visitors**: Signatures, variables, control flow (IF/LOOP/FOR/WHILE/CASE), cursors, exceptions, DML
+    - ✅ **Critical Fix:** All Oracle PROCEDUREs → PostgreSQL FUNCTIONs with correct RETURNS clause
+    - ✅ **Package variables**: On-demand parsing, getter/setter generation (26 tests)
+    - ✅ **Package private functions**: Extracted from package bodies via ANTLR parsing
     - ⏳ **Missing (~5-15%)**: BULK COLLECT, OUT/INOUT in call statements, named parameters, collections
-    - Location: `function/job/`, `transformer/builder/`, `transformer/packagevariable/`, `core/job/model/function/`
-    - Step 25 in orchestration workflow
+    - **REST Endpoints:** `/api/functions/postgres/standalone-implementation/create` + `/verify`
+    - **See [STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md](documentation/STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md) for detailed status and feature list**
 
 14. **Type Method Logic**: Member method implementations (Planned - see Phase 3 roadmap)
 15. **Triggers**: Migration from Oracle to PostgreSQL (Planned - see Phase 3 roadmap)
@@ -351,26 +318,10 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
 
 ### 📋 Phase 3 Detailed Roadmap (Next Steps)
 1. ~~**Oracle Built-in Replacements**~~ ✅ **COMPLETE** - See item #10 above
-2. ~~**Function/Procedure Infrastructure**~~ ✅ **COMPLETE** - See item #13 above
-3. **Function/Procedure Transformation (Unified)**: 🔄 **85-95% COMPLETE** - PL/SQL→PL/pgSQL transformation for both standalone and package functions
-   - ✅ Extract Oracle function source from `ALL_SOURCE`
-   - ✅ Extended `PostgresCodeBuilder` with 20 PL/SQL statement visitors
-   - ✅ Transform control flow (IF/ELSIF/ELSE, all loop types, assignments, SELECT INTO, call statements, exceptions)
-   - ✅ Transform declarations (variables with CONSTANT, NOT NULL, defaults)
-   - ✅ Oracle PROCEDURE → PostgreSQL FUNCTION with correct RETURNS clause (Phase 1 fix 2025-10-30)
-   - ✅ Execute `CREATE OR REPLACE FUNCTION` in PostgreSQL (all procedures become functions)
-   - ✅ Handles both standalone and package functions in single job
-   - ✅ **Package variable support** (unified on-demand approach) - COMPLETE
-     - Package specs parsed on-demand during transformation (no separate extraction job)
-     - Helper functions (initialize, getters, setters) generated and cached per job execution
-     - Package variables transformed to getter/setter calls
-     - Maintains ANTLR-only-in-transformation architectural pattern
-     - 26 tests passing across 3 test classes
-     - See [PACKAGE_VARIABLE_IMPLEMENTATION_PLAN.md](documentation/PACKAGE_VARIABLE_IMPLEMENTATION_PLAN.md)
-   - 📋 Missing: BULK COLLECT, OUT/INOUT in call statements, named parameters, collections
-4. **Type Method Implementation**: Transform type member methods using ANTLR (extend PostgresCodeBuilder)
-5. **Trigger Migration**: Extract and transform Oracle triggers
-6. **REST Layer** (Optional): Auto-generate REST endpoints for testing and incremental cutover
+2. ~~**Function/Procedure Transformation**~~ 🔄 **85-95% COMPLETE** - See item #13 above
+3. **Type Method Implementation**: Transform type member methods using ANTLR (extend PostgresCodeBuilder)
+4. **Trigger Migration**: Extract and transform Oracle triggers
+5. **REST Layer** (Optional): Auto-generate REST endpoints for testing and incremental cutover
 
 ## Database Configuration
 
@@ -828,141 +779,51 @@ Oracle synonyms provide alternative names. PostgreSQL doesn't have synonyms, so 
 
 ## SQL/PL-SQL Transformation Module
 
-**Status:** 90% Real-World View Coverage - 662+ tests passing ✅
+**Status:** View SQL 90% complete (662+ tests), PL/SQL 85-95% complete (882 tests) ✅
 
-The transformation module converts Oracle SQL and PL/SQL code to PostgreSQL-compatible equivalents using ANTLR-based direct AST transformation (no intermediate semantic tree). View SQL transformation is nearly complete with comprehensive support for Oracle-specific features.
+The transformation module converts Oracle SQL and PL/SQL to PostgreSQL using ANTLR-based direct AST transformation.
 
 ### Architecture Overview
 
 **Core Pipeline:**
 ```
-Oracle SQL → ANTLR Parser → Direct Visitor → PostgreSQL SQL
-                  ↓              ↓                 ↓
-             PlSqlParser   PostgresCodeBuilder   String
+Oracle SQL/PL-SQL → ANTLR Parser → PostgresCodeBuilder → PostgreSQL SQL/PL/pgSQL
+                        ↓                  ↓                        ↓
+                   PlSqlParser    Static Visitor Helpers         String
 ```
 
 **Key Design Principles:**
-1. **Direct transformation**: Visitor returns PostgreSQL SQL strings directly (no intermediate tree)
-2. **Static helper pattern**: Each ANTLR rule has a static helper class (37 helpers)
-3. **Metadata-driven**: Uses pre-built TransformationIndices for O(1) lookups
-4. **Dependency boundaries**: TransformationContext passed as parameter (not CDI injected into visitor)
-5. **Incremental development**: Start simple, add complexity progressively
-6. **Test-driven**: 662+ tests passing across 42+ test classes
-7. **Quarkus-native**: Service layer uses CDI, visitor layer stays pure
+- **Direct transformation**: Visitor returns PostgreSQL strings directly (no intermediate semantic tree)
+- **Static helper pattern**: Each ANTLR rule has a static helper class (37+ helpers for SQL, 20+ for PL/SQL)
+- **Metadata-driven**: Uses pre-built TransformationIndices for O(1) lookups
+- **Dependency boundaries**: TransformationContext passed as parameter (not CDI-injected)
+- **Quarkus-native**: Service layer uses CDI, visitor layer stays pure
 
 ### Metadata Strategy
 
 **Two types of metadata required:**
-1. **Synonym resolution** (already in StateService)
-   - Resolves Oracle synonyms to actual object names
-   - PostgreSQL has no synonyms, so resolution is essential
-
-2. **Structural indices** (built from StateService)
-   - Table → Column → Type mappings
-   - Type → Method mappings (for type method disambiguation)
-   - Package → Function mappings
-   - Built once at transformation session start for fast O(1) lookups
+1. **Synonym resolution** (StateService) - Resolves Oracle synonyms to actual object names
+2. **Structural indices** (built from StateService) - Table/Column/Type mappings for disambiguation
 
 **Why metadata is needed:**
 - Disambiguate `emp.address.get_street()` (type method) vs `emp_pkg.get_salary()` (package function)
 - Both use dot notation in Oracle, different syntax in PostgreSQL
-- Type methods: `(emp.address).get_street()` (instance method call)
-- Package functions: `emp_pkg__get_salary()` (flattened naming)
 
-**Architecture benefits:**
+**Benefits:**
 - ✅ No database queries during transformation (fast, offline-capable)
-- ✅ Uses existing metadata from StateService
 - ✅ Clean separation: Parse → Index → Transform
 - ✅ Testable with mocked metadata
-
-### Implementation Phases
-
-See `TRANSFORMATION.md` for detailed implementation plan.
-
-**✅ Phase 1-4: SQL Views** (COMPLETE - 90% real-world coverage)
-- ✅ Foundation: Infrastructure, ANTLR parser, PostgresCodeBuilder with 37 static visitor helpers
-- ✅ Basic SELECT: WHERE, ORDER BY, GROUP BY, HAVING, expressions (11-level hierarchy)
-- ✅ Oracle-specific: NVL→COALESCE, DECODE→CASE, ROWNUM→LIMIT, FROM DUAL, sequences
-- ✅ Advanced: All JOIN types, subqueries, set operations, aggregation, window functions
-- ✅ CTEs: WITH clause support (recursive and non-recursive)
-- ✅ CONNECT BY: Hierarchical queries → recursive CTEs
-- ✅ Date/Time functions: ADD_MONTHS, MONTHS_BETWEEN, LAST_DAY, TRUNC, ROUND
-- ✅ String functions: INSTR, LPAD, RPAD, TRANSLATE, REGEXP_REPLACE, REGEXP_SUBSTR
-- ✅ Outer joins: Oracle (+) → ANSI LEFT/RIGHT JOIN
-- ✅ 662+ tests passing across 42+ test classes
-
-**✅ Phase 5: Integration** (COMPLETE)
-- ✅ PostgresViewImplementationJob integrated with SqlTransformationService
-- ✅ CREATE OR REPLACE VIEW preserves dependencies
-- ✅ Error reporting and transformation success metrics
-
-**📋 Next: PL/SQL Transformation**
-1. Oracle built-in replacements (DBMS_OUTPUT, DBMS_UTILITY, etc.)
-2. Package analysis (variables, state management)
-3. Type method implementation (extend PostgresCodeBuilder with PL/SQL visitors)
-4. Function/procedure implementation (PL/SQL→PL/pgSQL)
-5. Trigger migration
 
 ### Module Location
 
 **Package:** `me.christianrobert.orapgsync.transformation`
 
 **Key Classes:**
+- `AntlrParser` - ANTLR wrapper for parsing Oracle SQL/PL-SQL
+- `PostgresCodeBuilder` - Main visitor with 57+ static helper classes
 - `TransformationContext` - Metadata indices and resolution logic
-- `MetadataIndexBuilder` - Builds indices from StateService
-- `SemanticNode` - Base interface for all syntax tree nodes
-- `AntlrParser` - Thin wrapper around PlSqlParser
-- `SqlTransformationService` - High-level API for job integration
+- `SqlTransformationService` - High-level transformation API
 
-### Current Status (October 2025)
-
-**View SQL Transformation:** ✅ 90% REAL-WORLD COVERAGE ACHIEVED
-- ✅ 662+ tests passing across 42+ test classes
-- ✅ All SQL views phases (1-5) complete
-- ✅ Production-ready for most Oracle SQL views
-
-**Key Accomplishments:**
-
-**Foundation & Core SELECT:** ✅ COMPLETE
-- ANTLR parser integration (PlSqlParser.g4)
-- PostgresCodeBuilder with 37 static visitor helpers
-- TransformationContext and TransformationIndices
-- Full expression hierarchy (11 levels)
-- Complete SELECT support: columns, *, qualified, aliases
-- WHERE, ORDER BY, GROUP BY, HAVING clauses
-- All JOIN types (INNER, LEFT, RIGHT, FULL, CROSS)
-- Arithmetic operators, string concatenation (|| → CONCAT for NULL safety)
-
-**Oracle-Specific Transformations:** ✅ COMPLETE
-- NVL → COALESCE, SYSDATE → CURRENT_TIMESTAMP
-- DECODE → CASE WHEN
-- TO_CHAR (format code transformations)
-- TO_DATE → TO_TIMESTAMP, SUBSTR → SUBSTRING
-- TRIM, CASE expressions (END CASE → END)
-- FROM DUAL (omit FROM clause)
-- ROWNUM: WHERE ROWNUM → LIMIT, SELECT ROWNUM → row_number()
-- Sequences (seq.NEXTVAL → nextval('schema.seq'))
-- Type member methods (emp.address.get_street() → flattened function)
-- Package functions (pkg.func() → pkg__func())
-
-**Advanced Features:** ✅ COMPLETE
-- **CTEs (WITH clause):** Recursive and non-recursive (38 tests)
-- **CONNECT BY:** Hierarchical queries → recursive CTEs with LEVEL and SYS_CONNECT_BY_PATH (24 tests)
-- **Date/Time functions:** ADD_MONTHS, MONTHS_BETWEEN, LAST_DAY, TRUNC, ROUND (27 tests)
-- **String functions:** INSTR, LPAD, RPAD, TRANSLATE, REGEXP_REPLACE, REGEXP_SUBSTR (47 tests)
-- **Subqueries:** FROM, SELECT list, WHERE IN/EXISTS/scalar/ANY/ALL
-- **Set operations:** UNION, UNION ALL, INTERSECT, MINUS → EXCEPT
-- **Window functions:** OVER clause with ROW_NUMBER, RANK, LEAD, LAG, aggregates
-- **Outer joins:** Oracle (+) → ANSI LEFT/RIGHT JOIN
-
-**Integration:** ✅ COMPLETE
-- PostgresViewImplementationJob replaces view stubs with transformed SQL
-- CREATE OR REPLACE VIEW preserves dependencies
-- SqlTransformationService API for job integration
-
-**Next: PL/SQL Transformation**
-1. Oracle built-in replacements (DBMS_OUTPUT, DBMS_UTILITY, etc.)
-2. Package analysis (variables, state management)
-3. Type method implementation (extend PostgresCodeBuilder with PL/SQL statement visitors)
-4. Function/procedure implementation (PL/SQL→PL/pgSQL)
-5. Trigger migration
+**For detailed implementation status:**
+- **SQL Views**: See [TRANSFORMATION.md](documentation/TRANSFORMATION.md)
+- **PL/SQL Functions**: See [STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md](documentation/STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md)

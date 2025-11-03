@@ -53,9 +53,9 @@ import java.util.stream.Collectors;
  *
  * <h3>Phase 1 Limitations:</h3>
  * <ul>
- *   <li>RETURNING clause not yet supported (deferred to Phase 2)</li>
+ *   <li>RETURNING clause not yet supported - throws UnsupportedOperationException (deferred to Phase 2)</li>
  *   <li>error_logging_clause ignored (Oracle-specific)</li>
- *   <li>VALUE clause for object types not yet supported (rare usage)</li>
+ *   <li>VALUE clause for object types not yet supported - throws UnsupportedOperationException (rare usage)</li>
  * </ul>
  *
  * <h3>Notes:</h3>
@@ -103,9 +103,13 @@ public class VisitUpdate_statement {
             result.append(" ").append(whereClause);
         }
 
-        // Phase 1: Ignore RETURNING clause (deferred to Phase 2)
+        // Phase 1: RETURNING clause not supported - throw explicit error
         if (ctx.static_returning_clause() != null) {
-            result.append(" /* RETURNING clause not yet supported */");
+            throw new UnsupportedOperationException(
+                "UPDATE with RETURNING clause is not yet supported. " +
+                "The RETURNING clause requires special handling to capture returned values into variables. " +
+                "Workaround: Use a separate SELECT statement after UPDATE to retrieve the updated values, " +
+                "or wait for Phase 2 implementation of RETURNING clause support.");
         }
 
         // Ignore error_logging_clause (Oracle-specific feature not in PostgreSQL)

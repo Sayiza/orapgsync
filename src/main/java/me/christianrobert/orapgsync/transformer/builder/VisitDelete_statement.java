@@ -37,7 +37,7 @@ import me.christianrobert.orapgsync.transformer.builder.tablereference.TableRefe
  *
  * <h3>Phase 1 Limitations:</h3>
  * <ul>
- *   <li>RETURNING clause not yet supported (deferred to Phase 2)</li>
+ *   <li>RETURNING clause not yet supported - throws UnsupportedOperationException (deferred to Phase 2)</li>
  *   <li>error_logging_clause ignored (Oracle-specific)</li>
  * </ul>
  *
@@ -79,15 +79,16 @@ public class VisitDelete_statement {
             result.append(" ").append(whereClause);
         }
 
-        // Phase 1: Ignore RETURNING clause (deferred to Phase 2)
+        // Phase 1: RETURNING clause not supported - throw explicit error
         if (ctx.static_returning_clause() != null) {
-            // For now, just add a comment indicating it was ignored
-            // In Phase 2, we'll implement proper RETURNING transformation
-            result.append(" /* RETURNING clause not yet supported */");
+            throw new UnsupportedOperationException(
+                "DELETE with RETURNING clause is not yet supported. " +
+                "The RETURNING clause requires special handling to capture returned values into variables. " +
+                "Workaround: Use a separate SELECT statement before DELETE to retrieve the values, " +
+                "or wait for Phase 2 implementation of RETURNING clause support.");
         }
 
         // Ignore error_logging_clause (Oracle-specific feature not in PostgreSQL)
-        // No need to comment this out as it's rarely used
 
         return result.toString();
     }

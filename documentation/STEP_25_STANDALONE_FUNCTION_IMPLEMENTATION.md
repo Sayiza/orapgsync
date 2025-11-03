@@ -1,4 +1,4 @@
-# Step 25: Standalone Function/Procedure Implementation
+# Step 25: Function/Procedure Implementation
 
 **Status:** 🔄 **90-98%+ COMPLETE** - Core PL/SQL features + exception handling + cursor operations + DML statements working, advanced features pending
 **Last Updated:** 2025-11-02 (DML statements Phase 1 completed)
@@ -154,10 +154,9 @@ END;
 
 ## Overview
 
-Transforms Oracle standalone functions/procedures (NOT package members) to PostgreSQL using PL/SQL→PL/pgSQL via ANTLR.
+Transforms Oracle functions/procedures to PostgreSQL using PL/SQL→PL/pgSQL via ANTLR.
 
 **Scope:**
-- ✅ Standalone functions/procedures only (excludes package members with `__`)
 - ✅ All Oracle PROCEDUREs → PostgreSQL FUNCTIONs (best practice)
 - ✅ Full SQL support (662+ view transformation tests passing)
 
@@ -338,7 +337,7 @@ END;
 - Oracle source extracted from `ALL_SOURCE`
 - REST endpoints: `/api/functions/postgres/standalone-implementation/create` + `/verify`
 - Frontend: HTML row in orchestration UI with ⟳ verification + "Create" button
-- Results tracked in `StandaloneFunctionImplementationResult`
+- Results tracked in `FunctionImplementationResult`
 
 ---
 
@@ -658,9 +657,9 @@ END;
 ## Files
 
 ### Created
-- `PostgresStandaloneFunctionImplementationJob.java` - Implementation job
-- `PostgresStandaloneFunctionImplementationVerificationJob.java` - Verification
-- `StandaloneFunctionImplementationResult.java` - Result tracking
+- `PostgresFunctionImplementationJob.java` - Implementation job
+- `PostgresFunctionImplementationVerificationJob.java` - Verification
+- `FunctionImplementationResult.java` - Result tracking
 - `ExceptionHandlingImpl.java` - oracle_compat.sqlcode() compatibility function (Phase 2)
 - 20 PL/SQL visitor classes (`transformer/builder/`):
   - `VisitFunctionBody.java`, `VisitProcedureBody.java`, `VisitBody.java`
@@ -715,11 +714,11 @@ END;
 2. Create function stubs: Click button on "Functions/Procedures stubbed" (PostgreSQL side)
 
 **Verification (⟳ button):**
-- Verifies X standalone functions/procedures exist in PostgreSQL
+- Verifies X  functions/procedures exist in PostgreSQL
 - Does NOT execute transformation - just counts
 
-**Creation ("Create Standalone Functions" button):**
-- Transforms all standalone functions
+**Creation ("Create  Functions" button):**
+- Transforms all functions
 - Shows: X implemented, Y skipped (missing features), Z errors
 - Detailed error messages for debugging
 

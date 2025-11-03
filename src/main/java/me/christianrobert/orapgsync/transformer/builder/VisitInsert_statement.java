@@ -54,10 +54,10 @@ import java.util.stream.Collectors;
  *
  * <h3>Phase 1 Limitations:</h3>
  * <ul>
- *   <li>RETURNING clause not yet supported (deferred to Phase 2)</li>
+ *   <li>RETURNING clause not yet supported - throws UnsupportedOperationException (deferred to Phase 2)</li>
  *   <li>error_logging_clause ignored (Oracle-specific)</li>
- *   <li>multi_table_insert not yet supported (Oracle-specific, deferred to Phase 3)</li>
- *   <li>collection_expression in VALUES not yet supported (rare usage)</li>
+ *   <li>multi_table_insert not yet supported - throws UnsupportedOperationException (Oracle-specific, deferred to Phase 3)</li>
+ *   <li>collection_expression in VALUES not yet supported - throws UnsupportedOperationException (rare usage)</li>
  * </ul>
  *
  * <h3>Notes:</h3>
@@ -133,7 +133,11 @@ public class VisitInsert_statement {
 
             // Check for RETURNING clause (only applies to VALUES, not SELECT)
             if (ctx.static_returning_clause() != null) {
-                result.append(" /* RETURNING clause not yet supported */");
+                throw new UnsupportedOperationException(
+                    "INSERT with RETURNING clause is not yet supported. " +
+                    "The RETURNING clause requires special handling to capture returned values into variables. " +
+                    "Workaround: Use a separate SELECT statement after INSERT to retrieve the values, " +
+                    "or wait for Phase 2 implementation of RETURNING clause support.");
             }
         } else if (ctx.select_statement() != null) {
             String selectStatement = b.visit(ctx.select_statement());
