@@ -1093,4 +1093,21 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
     public String visitRaise_statement(PlSqlParser.Raise_statementContext ctx) {
         return VisitRaise_statement.v(ctx, this);
     }
+
+    // ========== DML STATEMENTS (Phase 1) ==========
+
+    @Override
+    public String visitInsert_statement(PlSqlParser.Insert_statementContext ctx) {
+        return VisitInsert_statement.v(ctx, this);
+    }
+
+    @Override
+    public String visitUpdate_statement(PlSqlParser.Update_statementContext ctx) {
+        return VisitUpdate_statement.v(ctx, this);
+    }
+
+    @Override
+    public String visitDelete_statement(PlSqlParser.Delete_statementContext ctx) {
+        return VisitDelete_statement.v(ctx, this);
+    }
 }

@@ -1,7 +1,7 @@
 # Step 25: Standalone Function/Procedure Implementation
 
-**Status:** 🔄 **85-95%+ COMPLETE** - Core PL/SQL features + exception handling + cursor operations working, advanced features pending
-**Last Updated:** 2025-10-31 (Cursor attributes infrastructure completed)
+**Status:** 🔄 **90-98%+ COMPLETE** - Core PL/SQL features + exception handling + cursor operations + DML statements working, advanced features pending
+**Last Updated:** 2025-11-02 (DML statements Phase 1 completed)
 **Workflow Position:** Step 25 in orchestration sequence (after View Implementation)
 
 ---
@@ -239,6 +239,17 @@ Transforms Oracle standalone functions/procedures (NOT package members) to Postg
     - Stack-based scoping: Exception context per function/procedure block
     - Lazy code assignment: Prevents wasted auto-codes when PRAGMA overrides
     - Mixed handlers: User-defined and standard exceptions in same EXCEPTION block
+- **DML statements** (Phase 1 - Completed 2025-11-02):
+  - **INSERT statements**: `INSERT INTO table (col1, col2) VALUES (val1, val2)`
+  - **UPDATE statements**: `UPDATE table SET col1 = val1 WHERE condition`
+  - **DELETE statements**: `DELETE FROM table WHERE condition`
+  - Schema qualification for table names
+  - Expression transformation for VALUES, SET, and WHERE clauses
+  - INSERT with SELECT: `INSERT INTO table SELECT ... FROM ...`
+  - Subqueries in UPDATE SET clause: `SET col = (SELECT ...)`
+  - SQL% cursor tracking integration (GET DIAGNOSTICS injection)
+  - **Test Coverage:** 5 tests enabled (SQL%ROWCOUNT, SQL%FOUND, SQL%NOTFOUND after DML)
+  - **Phase 1 Limitations:** RETURNING clause not yet supported (deferred to Phase 2)
 
 **Example Working Procedure:**
 ```sql
@@ -268,15 +279,13 @@ END;$$;
 -- Callable as: SELECT hr.divide_numbers(100, 3) AS quotient;
 ```
 
-### ❌ Not Yet Supported (~10-25% remaining)
+### ❌ Not Yet Supported (~5-10% remaining)
 
 **Missing PL/SQL Features:**
-1. **Explicit cursor operations** - OPEN, FETCH, CLOSE (FOR loops work)
-2. **Cursor attributes** - `%NOTFOUND`, `%FOUND`, `%ROWCOUNT`, `%ISOPEN`
-3. **BULK COLLECT** - Array operations
-4. **OUT/INOUT in call statements** - Calling procedures with OUT params: `proc(in_val, out_val)`
-5. **Named parameters** - `func(param_name => value)` syntax
-6. **Collections** - VARRAY, nested tables, associative arrays
+1. **BULK COLLECT** - Array operations
+2. **OUT/INOUT in call statements** - Calling procedures with OUT params: `proc(in_val, out_val)`
+3. **Named parameters** - `func(param_name => value)` syntax
+4. **Collections** - VARRAY, nested tables, associative arrays
 
 **Example Currently Fails:**
 ```sql

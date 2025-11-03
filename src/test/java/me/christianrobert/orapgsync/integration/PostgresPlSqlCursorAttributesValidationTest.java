@@ -428,7 +428,6 @@ public class PostgresPlSqlCursorAttributesValidationTest extends PostgresSqlVali
      * Tests: SQL%ROWCOUNT tracking with GET DIAGNOSTICS after UPDATE
      */
     @Test
-    @org.junit.jupiter.api.Disabled("DML statements in PL/SQL not yet implemented")
     void testSqlRowCountAfterUpdate() throws SQLException {
         String oracle = """
             FUNCTION update_salaries RETURN NUMBER IS
@@ -476,7 +475,6 @@ public class PostgresPlSqlCursorAttributesValidationTest extends PostgresSqlVali
      * Tests: SQL%FOUND → (sql__rowcount > 0)
      */
     @Test
-    @org.junit.jupiter.api.Disabled("DML statements in PL/SQL not yet implemented")
     void testSqlFoundAfterDelete() throws SQLException {
         String oracle = """
             FUNCTION delete_employee(p_empno NUMBER) RETURN NUMBER IS
@@ -530,7 +528,6 @@ public class PostgresPlSqlCursorAttributesValidationTest extends PostgresSqlVali
      * Tests: SQL%NOTFOUND → (sql__rowcount = 0)
      */
     @Test
-    @org.junit.jupiter.api.Disabled("DML statements in PL/SQL not yet implemented")
     void testSqlNotFoundAfterInsert() throws SQLException {
         String oracle = """
             FUNCTION insert_if_not_exists(p_empno NUMBER, p_ename VARCHAR2) RETURN VARCHAR2 IS
@@ -634,7 +631,6 @@ public class PostgresPlSqlCursorAttributesValidationTest extends PostgresSqlVali
      * Tests: SQL%ISOPEN → FALSE (constant)
      */
     @Test
-    @org.junit.jupiter.api.Disabled("DML statements in PL/SQL not yet implemented")
     void testSqlIsOpenAlwaysFalse() throws SQLException{
         String oracle = """
             FUNCTION check_sql_isopen RETURN NUMBER IS
@@ -679,7 +675,6 @@ public class PostgresPlSqlCursorAttributesValidationTest extends PostgresSqlVali
      * Tests: Combined SQL%FOUND and SQL%ROWCOUNT
      */
     @Test
-    @org.junit.jupiter.api.Disabled("DML statements in PL/SQL not yet implemented")
     void testMultipleSqlAttributes() throws SQLException {
         String oracle = """
             FUNCTION update_and_check RETURN VARCHAR2 IS
