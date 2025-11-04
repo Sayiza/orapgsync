@@ -1,5 +1,6 @@
 package me.christianrobert.orapgsync.transformer.context;
 
+import me.christianrobert.orapgsync.transformer.inline.InlineTypeDefinition;
 import me.christianrobert.orapgsync.transformer.packagevariable.PackageContext;
 import me.christianrobert.orapgsync.transformer.type.TypeEvaluator;
 

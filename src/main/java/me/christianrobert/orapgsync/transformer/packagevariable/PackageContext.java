@@ -1,12 +1,13 @@
 package me.christianrobert.orapgsync.transformer.packagevariable;
 
 import me.christianrobert.orapgsync.antlr.PlSqlParser;
+import me.christianrobert.orapgsync.transformer.inline.InlineTypeDefinition;
 
 import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Ephemeral package context holding variable declarations from package spec
+ * Ephemeral package context holding variable declarations and type definitions from package spec
  * and parsed package body AST for function source extraction.
  *
  * <p>This context exists only during transformation job execution and is cached in-memory
@@ -15,7 +16,7 @@ import java.util.Map;
  * <p>Lifecycle:
  * <ul>
  *   <li>Created when first function from a package is encountered during transformation</li>
- *   <li>Package spec parsed → variables extracted</li>
+ *   <li>Package spec parsed → variables and types extracted</li>
  *   <li>Package body parsed → AST cached (for multi-function extraction efficiency)</li>
  *   <li>Cached in-memory for job execution duration</li>
  *   <li>Garbage collected when job completes</li>
@@ -28,6 +29,7 @@ public class PackageContext {
     private final String schema;
     private final String packageName;
     private final Map<String, PackageVariable> variables;
+    private final Map<String, InlineTypeDefinition> types;
     private boolean helpersCreated;
 
     // Package body cache (for efficient multi-function extraction)
@@ -45,6 +47,7 @@ public class PackageContext {
         this.schema = schema;
         this.packageName = packageName;
         this.variables = new HashMap<>();
+        this.types = new HashMap<>();
         this.helpersCreated = false;
     }
 
@@ -78,6 +81,35 @@ public class PackageContext {
     }
 
     /**
+     * Adds a type to this package context.
+     *
+     * @param type The inline type definition to add
+     */
+    public void addType(InlineTypeDefinition type) {
+        this.types.put(type.getTypeName().toLowerCase(), type);
+    }
+
+    /**
+     * Gets a type by name (case-insensitive).
+     *
+     * @param typeName Type name
+     * @return InlineTypeDefinition or null if not found
+     */
+    public InlineTypeDefinition getType(String typeName) {
+        return types.get(typeName.toLowerCase());
+    }
+
+    /**
+     * Checks if a type exists in this package (case-insensitive).
+     *
+     * @param typeName Type name
+     * @return true if type exists
+     */
+    public boolean hasType(String typeName) {
+        return types.containsKey(typeName.toLowerCase());
+    }
+
+    /**
      * Gets the cache key for this package context.
      * Format: "schema.packagename" (lowercase)
      *
@@ -99,6 +131,10 @@ public class PackageContext {
 
     public Map<String, PackageVariable> getVariables() {
         return variables;
+    }
+
+    public Map<String, InlineTypeDefinition> getTypes() {
+        return types;
     }
 
     public boolean isHelpersCreated() {
@@ -200,6 +236,7 @@ public class PackageContext {
                 "schema='" + schema + '\'' +
                 ", packageName='" + packageName + '\'' +
                 ", variables=" + variables.size() +
+                ", types=" + types.size() +
                 ", helpersCreated=" + helpersCreated +
                 ", hasPackageBody=" + (packageBodyAst != null) +
                 '}';
