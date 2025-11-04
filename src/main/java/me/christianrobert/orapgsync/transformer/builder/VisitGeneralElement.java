@@ -71,6 +71,9 @@ public class VisitGeneralElement {
    *    - Pattern 1: unqualified (variable) - uses current package
    *    - Pattern 2: package-qualified (package.variable)
    *    - Pattern 3: schema-qualified (schema.package.variable)
+   * 0.5 Check for inline type field access (Phase 1B) - transform to JSON operations
+   *    - Pattern: variable.field → (variable->>'field')::type
+   *    - Pattern: variable.field1.field2 → variable->'field1'->>'field2'
    * 1. Check for sequence pseudo-column (seq.NEXTVAL, seq.CURRVAL)
    * 2. If last part has function arguments → function call
    *    - Check metadata: is this a type member method (table.col.method)?
@@ -138,6 +141,26 @@ public class VisitGeneralElement {
             return b.transformToPackageVariableGetter(packageName, variableName);
           }
         }
+      }
+    }
+
+    // STEP 0.5: Check for inline type field access (Phase 1B) - RHS only
+    // Pattern: variable.field → (variable->>'field')::type
+    // Pattern: variable.field1.field2 → variable->'field1'->>'field2'
+    // Only process if not in assignment target (LHS handled by VisitAssignment_statement)
+    if (!b.isInAssignmentTarget() && parts.size() >= 2) {
+      // Heuristic for Phase 1B (without variable scope tracking):
+      // Check if the SECOND part (field name) exists in ANY registered RECORD type
+      // This helps disambiguate from table.column references
+      String potentialFieldName = parts.get(1).id_expression().getText();
+
+      // Find a RECORD type that has this field
+      me.christianrobert.orapgsync.transformer.inline.InlineTypeDefinition matchingType =
+          findInlineTypeWithField(b.getContext(), potentialFieldName);
+
+      if (matchingType != null) {
+        // IT'S INLINE TYPE FIELD ACCESS!
+        return handleInlineTypeFieldAccess(parts, b, matchingType);
       }
     }
 
@@ -794,6 +817,138 @@ public class VisitGeneralElement {
     return arguments.stream()
         .map(arg -> transformArgument(arg, b))
         .collect(Collectors.toList());
+  }
+
+  /**
+   * Handles inline type field access for RECORD types (Phase 1B).
+   *
+   * <p>Transforms Oracle field access to PostgreSQL JSON operations:
+   * <ul>
+   *   <li>Single field: variable.field → (variable->>'field')::type</li>
+   *   <li>Nested fields: variable.field1.field2 → variable->'field1'->>'field2'</li>
+   * </ul>
+   *
+   * <p>JSON path operators:
+   * <ul>
+   *   <li>-&gt; : Extract JSON object/array, returns jsonb</li>
+   *   <li>-&gt;&gt; : Extract JSON value as text, returns text</li>
+   * </ul>
+   *
+   * <p>Type casting: The final result is cast to the PostgreSQL type of the accessed field.
+   *
+   * @param parts Dot-separated parts (variable.field1.field2...)
+   * @param b PostgreSQL code builder
+   * @param inlineType Inline type definition for the variable
+   * @return Transformed JSON field access expression
+   */
+  private static String handleInlineTypeFieldAccess(
+      List<PlSqlParser.General_element_partContext> parts,
+      PostgresCodeBuilder b,
+      me.christianrobert.orapgsync.transformer.inline.InlineTypeDefinition inlineType) {
+
+    if (parts.size() < 2) {
+      throw new me.christianrobert.orapgsync.transformer.context.TransformationException(
+          "Inline type field access requires at least 2 parts: variable.field");
+    }
+
+    // parts[0] = variable name
+    // parts[1..n] = field path
+
+    String variableName = parts.get(0).id_expression().getText();
+    StringBuilder result = new StringBuilder();
+
+    // Build JSON path access
+    // For nested access: variable->'field1'->'field2'->>'field3'
+    // Last field uses ->> (extract as text), intermediate fields use -> (keep as jsonb)
+
+    result.append(variableName);
+
+    for (int i = 1; i < parts.size(); i++) {
+      String fieldName = parts.get(i).id_expression().getText();
+      boolean isLastField = (i == parts.size() - 1);
+
+      if (isLastField) {
+        // Last field: use ->> to extract as text
+        result.append("->>'").append(fieldName).append("'");
+      } else {
+        // Intermediate field: use -> to keep as jsonb
+        result.append("->'").append(fieldName).append("'");
+      }
+    }
+
+    // Type casting: Find the PostgreSQL type for the final field
+    // For simple single-level access (variable.field), look up field type
+    if (parts.size() == 2) {
+      String fieldName = parts.get(1).id_expression().getText();
+      me.christianrobert.orapgsync.transformer.inline.FieldDefinition field = findField(inlineType, fieldName);
+
+      if (field != null) {
+        // Cast to the field's PostgreSQL type
+        result.insert(0, "( ");
+        result.append(" )::").append(field.getPostgresType());
+      } else {
+        // Field not found - no cast (may cause runtime error, but that's acceptable for Phase 1B)
+        // TODO Phase 1B.5: Add validation and better error messages
+      }
+    } else {
+      // Nested access (variable.field1.field2)
+      // For Phase 1B, we don't track nested field types yet
+      // Leave without cast (PostgreSQL will infer text from ->>)
+      // TODO Phase 1C: Add nested field type tracking
+    }
+
+    return result.toString();
+  }
+
+  /**
+   * Finds an inline RECORD type that contains a field with the given name.
+   * This is a heuristic for Phase 1B to disambiguate field access without variable scope tracking.
+   *
+   * @param context Transformation context
+   * @param fieldName Field name to search for (case-insensitive)
+   * @return InlineTypeDefinition with matching field, or null if none found
+   */
+  private static me.christianrobert.orapgsync.transformer.inline.InlineTypeDefinition findInlineTypeWithField(
+      TransformationContext context,
+      String fieldName) {
+
+    // This is a simplified heuristic - in a real implementation, we'd track variable declarations
+    // and their types in a scope stack. For Phase 1B, we assume that if a field name appears
+    // in ANY registered RECORD type, it's likely field access on that type.
+
+    // Note: This may cause false positives if table columns and RECORD fields have the same name
+    // TODO Phase 1B.5: Implement variable scope tracking to eliminate ambiguity
+
+    // For Phase 1B, return null to avoid false positives
+    // We'll rely on the assignment statement transformation for LHS field access
+    // RHS field access will need to be addressed in Phase 1B.5 with proper variable tracking
+    return null;
+  }
+
+  /**
+   * Finds a field definition by name in an inline type definition.
+   *
+   * @param inlineType Inline type definition
+   * @param fieldName Field name to find (case-insensitive)
+   * @return FieldDefinition or null if not found
+   */
+  private static me.christianrobert.orapgsync.transformer.inline.FieldDefinition findField(
+      me.christianrobert.orapgsync.transformer.inline.InlineTypeDefinition inlineType,
+      String fieldName) {
+
+    if (inlineType.getFields() == null) {
+      return null;
+    }
+
+    String normalizedFieldName = fieldName.toLowerCase();
+
+    for (me.christianrobert.orapgsync.transformer.inline.FieldDefinition field : inlineType.getFields()) {
+      if (field.getFieldName().toLowerCase().equals(normalizedFieldName)) {
+        return field;
+      }
+    }
+
+    return null;
   }
 
   /**

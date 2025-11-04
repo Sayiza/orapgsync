@@ -2,6 +2,7 @@ package me.christianrobert.orapgsync.transformer.builder;
 
 import me.christianrobert.orapgsync.antlr.PlSqlParser;
 import me.christianrobert.orapgsync.core.tools.TypeConverter;
+import me.christianrobert.orapgsync.transformer.inline.InlineTypeDefinition;
 
 /**
  * Static helper for visiting PL/SQL variable declarations.
@@ -40,6 +41,15 @@ import me.christianrobert.orapgsync.core.tools.TypeConverter;
  *   <li>Default value expressions transformed</li>
  *   <li>Semicolon terminator</li>
  * </ul>
+ *
+ * <h3>Inline Type Support (Phase 1B):</h3>
+ * <ul>
+ *   <li>If variable type is an inline type (RECORD, TABLE OF, etc.), emit jsonb</li>
+ *   <li>Automatic initialization with appropriate jsonb literal</li>
+ *   <li>RECORD → '{}'::jsonb (empty object)</li>
+ *   <li>TABLE OF/VARRAY → '[]'::jsonb (empty array)</li>
+ *   <li>INDEX BY → '{}'::jsonb (empty object)</li>
+ * </ul>
  */
 public class VisitVariable_declaration {
 
@@ -62,9 +72,26 @@ public class VisitVariable_declaration {
             result.append("CONSTANT ");
         }
 
-        // STEP 3: Convert type from Oracle to PostgreSQL
+        // STEP 3: Check if this is an inline type (RECORD, TABLE OF, VARRAY, INDEX BY)
         String oracleType = ctx.type_spec().getText();
-        String postgresType = TypeConverter.toPostgre(oracleType);
+        InlineTypeDefinition inlineType = b.getContext().getInlineType(oracleType);
+
+        String postgresType;
+        String autoInitializer = null;
+
+        if (inlineType != null) {
+            // INLINE TYPE: Use jsonb and prepare automatic initialization
+            postgresType = "jsonb";
+
+            // Only add automatic initialization if there's no explicit default value
+            if (ctx.default_value_part() == null) {
+                autoInitializer = inlineType.getInitializer();
+            }
+        } else {
+            // REGULAR TYPE: Convert using TypeConverter
+            postgresType = TypeConverter.toPostgre(oracleType);
+        }
+
         result.append(postgresType);
 
         // STEP 4: Handle NOT NULL constraint (optional)
@@ -81,6 +108,9 @@ public class VisitVariable_declaration {
 
             // PostgreSQL uses := for default values (same as Oracle)
             result.append(" := ").append(defaultValue);
+        } else if (autoInitializer != null) {
+            // STEP 5b: Add automatic initialization for inline types (if no explicit default)
+            result.append(" := ").append(autoInitializer);
         }
 
         // STEP 6: Semicolon terminator with newline

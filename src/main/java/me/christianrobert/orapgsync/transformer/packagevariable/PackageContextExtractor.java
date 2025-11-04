@@ -1,21 +1,35 @@
 package me.christianrobert.orapgsync.transformer.packagevariable;
 
 import me.christianrobert.orapgsync.antlr.PlSqlParser;
+import me.christianrobert.orapgsync.core.tools.TypeConverter;
 import me.christianrobert.orapgsync.transformer.context.TransformationException;
+import me.christianrobert.orapgsync.transformer.inline.ConversionStrategy;
+import me.christianrobert.orapgsync.transformer.inline.FieldDefinition;
+import me.christianrobert.orapgsync.transformer.inline.InlineTypeDefinition;
+import me.christianrobert.orapgsync.transformer.inline.TypeCategory;
 import me.christianrobert.orapgsync.transformer.parser.AntlrParser;
 import me.christianrobert.orapgsync.transformer.parser.ParseResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
- * Extracts package variable declarations from Oracle package specifications.
+ * Extracts package variable declarations and type definitions from Oracle package specifications.
  *
  * <p>This class parses package specs using ANTLR and extracts:
  * <ul>
- *   <li>Variable names</li>
- *   <li>Data types</li>
- *   <li>Default values</li>
- *   <li>CONSTANT keyword</li>
+ *   <li><strong>Variables:</strong> Variable names, data types, default values, CONSTANT keyword</li>
+ *   <li><strong>Types:</strong> Package-level type definitions (RECORD, TABLE OF, VARRAY, INDEX BY)</li>
+ * </ul>
+ *
+ * <p><strong>Supported Type Categories:</strong>
+ * <ul>
+ *   <li>RECORD - Composite structures with named fields</li>
+ *   <li>TABLE OF - Dynamic arrays</li>
+ *   <li>VARRAY - Fixed-size arrays</li>
+ *   <li>INDEX BY - Associative arrays (key-value maps)</li>
  * </ul>
  *
  * <p><strong>Usage Pattern:</strong>
@@ -62,18 +76,23 @@ public class PackageContextExtractor {
         // Create context
         PackageContext context = new PackageContext(schema, packageName);
 
-        // Extract variable declarations from spec
+        // Extract variable declarations and type definitions from spec
         PlSqlParser.Create_packageContext packageCtx = (PlSqlParser.Create_packageContext) parseResult.getTree();
         if (packageCtx != null && packageCtx.package_obj_spec() != null) {
             for (PlSqlParser.Package_obj_specContext specCtx : packageCtx.package_obj_spec()) {
+                // Extract variables
                 if (specCtx.variable_declaration() != null) {
                     extractVariableDeclaration(specCtx.variable_declaration(), context);
+                }
+                // Extract types
+                if (specCtx.type_declaration() != null) {
+                    extractTypeDeclaration(specCtx.type_declaration(), context);
                 }
             }
         }
 
-        log.debug("Extracted {} variables from package spec {}.{}",
-                  context.getVariables().size(), schema, packageName);
+        log.debug("Extracted {} variables and {} types from package spec {}.{}",
+                  context.getVariables().size(), context.getTypes().size(), schema, packageName);
         return context;
     }
 
@@ -166,5 +185,156 @@ public class PackageContextExtractor {
         // Get the full text of the default value expression
         // This could be a literal (0, 'ACTIVE'), function call (SYSDATE), etc.
         return defaultCtx.expression().getText();
+    }
+
+    /**
+     * Extracts a single type declaration and adds it to the context.
+     *
+     * <p>Supported type categories:
+     * <ul>
+     *   <li>RECORD - Composite structures</li>
+     *   <li>TABLE OF - Dynamic arrays</li>
+     *   <li>VARRAY - Fixed-size arrays</li>
+     *   <li>INDEX BY - Associative arrays</li>
+     * </ul>
+     *
+     * @param typeCtx Type declaration context from ANTLR
+     * @param context PackageContext to add type to
+     */
+    private void extractTypeDeclaration(PlSqlParser.Type_declarationContext typeCtx, PackageContext context) {
+        // Extract type name
+        String typeName = typeCtx.identifier().getText();
+
+        InlineTypeDefinition typeDefinition = null;
+
+        // Determine type category and extract accordingly
+        if (typeCtx.record_type_def() != null) {
+            typeDefinition = extractRecordType(typeName, typeCtx.record_type_def());
+        } else if (typeCtx.table_type_def() != null) {
+            typeDefinition = extractTableType(typeName, typeCtx.table_type_def());
+        } else if (typeCtx.varray_type_def() != null) {
+            typeDefinition = extractVarrayType(typeName, typeCtx.varray_type_def());
+        } else if (typeCtx.ref_cursor_type_def() != null) {
+            // REF CURSOR types are not supported in Phase 1A
+            log.debug("Skipping REF CURSOR type: {}", typeName);
+            return;
+        } else if (typeCtx.type_spec() != null) {
+            // TYPE alias (e.g., TYPE t IS VARCHAR2(100)) - not supported in Phase 1A
+            log.debug("Skipping TYPE alias: {}", typeName);
+            return;
+        }
+
+        if (typeDefinition != null) {
+            context.addType(typeDefinition);
+            log.trace("Extracted type: {} ({})", typeName, typeDefinition.getCategory());
+        }
+    }
+
+    /**
+     * Extracts a RECORD type definition.
+     *
+     * <p>Oracle example: TYPE salary_range_t IS RECORD (min_sal NUMBER, max_sal NUMBER);
+     *
+     * @param typeName Type name
+     * @param recordCtx RECORD type context
+     * @return InlineTypeDefinition for RECORD
+     */
+    private InlineTypeDefinition extractRecordType(String typeName, PlSqlParser.Record_type_defContext recordCtx) {
+        List<FieldDefinition> fields = new ArrayList<>();
+
+        // Extract field specifications
+        for (PlSqlParser.Field_specContext fieldSpec : recordCtx.field_spec()) {
+            String fieldName = fieldSpec.column_name().getText();
+            String oracleType = extractDataType(fieldSpec.type_spec());
+            String postgresType = TypeConverter.toPostgre(oracleType);
+
+            fields.add(new FieldDefinition(fieldName, oracleType, postgresType));
+        }
+
+        return new InlineTypeDefinition(
+                typeName,
+                TypeCategory.RECORD,
+                null,  // No element type for RECORD
+                fields,
+                ConversionStrategy.JSONB,  // Phase 1: Always JSONB
+                null   // No size limit
+        );
+    }
+
+    /**
+     * Extracts a TABLE OF type definition (with or without INDEX BY).
+     *
+     * <p>Oracle examples:
+     * <ul>
+     *   <li>TYPE num_list_t IS TABLE OF NUMBER;</li>
+     *   <li>TYPE dept_map_t IS TABLE OF VARCHAR2(100) INDEX BY VARCHAR2(50);</li>
+     * </ul>
+     *
+     * @param typeName Type name
+     * @param tableCtx TABLE OF type context
+     * @return InlineTypeDefinition for TABLE_OF or INDEX_BY
+     */
+    private InlineTypeDefinition extractTableType(String typeName, PlSqlParser.Table_type_defContext tableCtx) {
+        // Extract element type
+        String elementType = extractDataType(tableCtx.type_spec());
+
+        // Check if INDEX BY (associative array)
+        if (tableCtx.table_indexed_by_part() != null) {
+            String indexKeyType = extractDataType(tableCtx.table_indexed_by_part().type_spec());
+
+            return new InlineTypeDefinition(
+                    typeName,
+                    TypeCategory.INDEX_BY,
+                    elementType,  // Value type
+                    null,         // No fields for INDEX BY
+                    ConversionStrategy.JSONB,  // Phase 1: Always JSONB
+                    null,         // No size limit
+                    indexKeyType  // Index key type
+            );
+        }
+
+        // Regular TABLE OF (nested table)
+        return new InlineTypeDefinition(
+                typeName,
+                TypeCategory.TABLE_OF,
+                elementType,
+                null,  // No fields for TABLE OF
+                ConversionStrategy.JSONB,  // Phase 1: Always JSONB
+                null   // No size limit
+        );
+    }
+
+    /**
+     * Extracts a VARRAY type definition.
+     *
+     * <p>Oracle example: TYPE codes_t IS VARRAY(10) OF VARCHAR2(10);
+     *
+     * @param typeName Type name
+     * @param varrayCtx VARRAY type context
+     * @return InlineTypeDefinition for VARRAY
+     */
+    private InlineTypeDefinition extractVarrayType(String typeName, PlSqlParser.Varray_type_defContext varrayCtx) {
+        // Extract element type
+        String elementType = extractDataType(varrayCtx.type_spec());
+
+        // Extract size limit from expression (e.g., VARRAY(10))
+        Integer sizeLimit = null;
+        if (varrayCtx.expression() != null) {
+            try {
+                String sizeLimitText = varrayCtx.expression().getText();
+                sizeLimit = Integer.parseInt(sizeLimitText);
+            } catch (NumberFormatException e) {
+                log.warn("Could not parse VARRAY size limit: {}", varrayCtx.expression().getText());
+            }
+        }
+
+        return new InlineTypeDefinition(
+                typeName,
+                TypeCategory.VARRAY,
+                elementType,
+                null,  // No fields for VARRAY
+                ConversionStrategy.JSONB,  // Phase 1: Always JSONB
+                sizeLimit
+        );
     }
 }

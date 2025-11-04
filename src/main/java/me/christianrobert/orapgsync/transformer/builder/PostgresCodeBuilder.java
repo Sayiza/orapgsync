@@ -990,6 +990,11 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
     }
 
     @Override
+    public String visitType_declaration(PlSqlParser.Type_declarationContext ctx) {
+        return VisitType_declaration.v(ctx, this);
+    }
+
+    @Override
     public String visitCursor_declaration(PlSqlParser.Cursor_declarationContext ctx) {
         return VisitCursor_declaration.v(ctx, this);
     }
