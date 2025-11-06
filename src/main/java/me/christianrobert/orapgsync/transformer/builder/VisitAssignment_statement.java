@@ -157,6 +157,11 @@ public class VisitAssignment_statement {
         // Transform RHS expression
         String rightSide = b.visit(assignCtx.expression());
 
+        // PostgreSQL Bug Fix: String literals need explicit casting for to_jsonb()
+        // PostgreSQL's to_jsonb() is polymorphic and cannot determine type from "unknown" literals
+        // Example: to_jsonb('text') fails, but to_jsonb('text'::text) works
+        String castedValue = addExplicitCastForLiterals(rightSide);
+
         // Build jsonb_set call
         // Syntax: variable := jsonb_set(variable, '{field}', to_jsonb(value), true)
         // The 'true' flag creates missing intermediate keys for nested paths
@@ -167,7 +172,7 @@ public class VisitAssignment_statement {
         result.append(" , ");
         result.append(fieldPath);
         result.append(" , to_jsonb( ");
-        result.append(rightSide);
+        result.append(castedValue);
         result.append(" ) ");
 
         // Add 'true' flag for nested paths (creates missing intermediate objects)
@@ -201,5 +206,45 @@ public class VisitAssignment_statement {
         }
 
         return parts;
+    }
+
+    /**
+     * Adds explicit type casting for literals to fix PostgreSQL polymorphic type resolution.
+     *
+     * <p>PostgreSQL's to_jsonb() function is polymorphic and cannot determine the type of
+     * "unknown" literals (string literals without explicit type). This causes errors like:
+     * "ERROR: could not determine polymorphic type because input has type unknown"</p>
+     *
+     * <p><b>Examples:</b></p>
+     * <pre>
+     * Input: 'Hello'       Output: 'Hello'::text
+     * Input: 123           Output: 123 (unchanged - numeric literals are typed)
+     * Input: v_variable    Output: v_variable (unchanged - variables have types)
+     * Input: NULL          Output: NULL (unchanged - NULL is handled by to_jsonb)
+     * </pre>
+     *
+     * @param value The expression value to potentially cast
+     * @return The value with explicit cast if needed, or original value
+     */
+    private static String addExplicitCastForLiterals(String value) {
+        if (value == null) {
+            return value;
+        }
+
+        String trimmed = value.trim();
+
+        // Check if it's a string literal (starts and ends with quotes)
+        if ((trimmed.startsWith("'") && trimmed.endsWith("'")) ||
+            (trimmed.startsWith("\"") && trimmed.endsWith("\""))) {
+            // Add ::text cast for string literals
+            return trimmed + "::text";
+        }
+
+        // For all other cases (variables, numbers, NULL, expressions), return unchanged
+        // - Numeric literals: Already typed (e.g., 123 is integer, 12.5 is numeric)
+        // - Variables: Have declared types
+        // - NULL: Handled by to_jsonb()
+        // - Expressions: Type inference determines type
+        return value;
     }
 }

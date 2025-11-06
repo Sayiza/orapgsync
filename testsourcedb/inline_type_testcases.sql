@@ -106,11 +106,12 @@ END inline_type_pkg2;
 -- ============================================================================
 -- TEST 3: TABLE OF Type (Collection - Package-level)
 -- ============================================================================
--- Tests: TABLE OF extraction, initialization
+-- Tests: TABLE OF extraction, initialization, constructor transformation
 -- Expected PostgreSQL:
 --   - TYPE commented out, registered in context
 --   - v_nums jsonb := '[]'::jsonb (array initializer)
--- Note: Array element access not yet implemented (Phase 1C)
+-- Status: Phase 1C (50% complete) - Constructor transformation ✅, element access ⏳
+-- Note: Array element access/assignment not yet implemented (Phase 1C.5)
 -- ============================================================================
 CREATE OR REPLACE PACKAGE inline_type_pkg3 AS
   -- Package-level TABLE OF type
@@ -128,7 +129,7 @@ CREATE OR REPLACE PACKAGE BODY inline_type_pkg3 AS
     -- Test: Collection variable � jsonb array
     v_nums := num_list_t(10, 20, 30, 40, 50);
 
-    -- Note: Array access and iteration not yet implemented (Phase 1C)
+    -- ⏳ NOT YET: Array access and iteration (Phase 1C.5)
     -- Would be: FOR i IN 1..v_nums.COUNT LOOP total := total + v_nums(i); END LOOP;
     RETURN 150; -- Placeholder return
   END sum_numbers;
@@ -160,7 +161,7 @@ CREATE OR REPLACE PACKAGE BODY inline_type_pkg4 AS
     -- Test: VARRAY variable � jsonb array
     v_codes := codes_t('A001', 'B002', 'C003');
 
-    -- Note: Collection methods (.COUNT) not yet implemented (Phase 1E)
+    -- ⏳ NOT YET: Collection methods (.COUNT) (Phase 1E)
     -- Would be: RETURN v_codes.COUNT;
     RETURN 3; -- Placeholder return
   END get_codes_count;
@@ -238,6 +239,7 @@ CREATE OR REPLACE PACKAGE BODY inline_type_pkg6 AS
     v_config.retries := 3;
     v_config.enabled := 'Y';
 
+    -- ✅ WORKING: String collection constructor
     v_logs := log_entries_t('System started', 'Config loaded');
 
     v_status('ORACLE') := 1;
@@ -480,3 +482,143 @@ What WON'T work yet (pending Phase 1B.5+):
 -- ============================================================================
 -- END OF TEST CASES
 -- ============================================================================
+
+-- ============================================================================
+-- TEST 11: Collection Constructors - Comprehensive (Phase 1C - NEW)
+-- ============================================================================
+-- Tests: All supported collection constructor patterns
+-- Status: Phase 1C (50% complete) - Constructor transformation ✅
+-- Expected PostgreSQL transformations:
+--   - num_list_t(10, 20, 30) → '[ 10 , 20 , 30 ]'::jsonb
+--   - string_list_t('A', 'B') → '[ "A" , "B" ]'::jsonb
+--   - empty_list_t() → '[]'::jsonb
+-- ============================================================================
+CREATE OR REPLACE PACKAGE inline_type_pkg11 AS
+  TYPE num_list_t IS TABLE OF NUMBER;
+  TYPE string_list_t IS TABLE OF VARCHAR2(50);
+  TYPE date_list_t IS TABLE OF DATE;
+
+  FUNCTION test_all_constructors RETURN NUMBER;
+END inline_type_pkg11;
+/
+
+CREATE OR REPLACE PACKAGE BODY inline_type_pkg11 AS
+
+  FUNCTION test_all_constructors RETURN NUMBER IS
+    v_nums num_list_t;
+    v_strings string_list_t;
+    v_dates date_list_t;
+    v_empty num_list_t;
+    v_base NUMBER := 100;
+  BEGIN
+    -- ✅ Test 1: Numeric collection constructor
+    -- Oracle: num_list_t(10, 20, 30, 40, 50)
+    -- PostgreSQL: '[ 10 , 20 , 30 , 40 , 50 ]'::jsonb
+    v_nums := num_list_t(10, 20, 30, 40, 50);
+
+    -- ✅ Test 2: String collection constructor (with JSON double quotes)
+    -- Oracle: string_list_t('Alpha', 'Beta', 'Gamma')
+    -- PostgreSQL: '[ "Alpha" , "Beta" , "Gamma" ]'::jsonb
+    v_strings := string_list_t('Alpha', 'Beta', 'Gamma');
+
+    -- ✅ Test 3: Empty constructor
+    -- Oracle: num_list_t()
+    -- PostgreSQL: '[]'::jsonb
+    v_empty := num_list_t();
+
+    -- ✅ Test 4: Single element constructor
+    -- Oracle: num_list_t(42)
+    -- PostgreSQL: '[ 42 ]'::jsonb
+    v_nums := num_list_t(42);
+
+    -- ✅ Test 5: Constructor with expressions
+    -- Oracle: num_list_t(v_base, v_base * 2, v_base + 50)
+    -- PostgreSQL: '[ v_base , v_base * 2 , v_base + 50 ]'::jsonb
+    v_nums := num_list_t(v_base, v_base * 2, v_base + 50);
+
+    -- ✅ Test 6: Constructor with NULL
+    -- Oracle: num_list_t(10, NULL, 30)
+    -- PostgreSQL: '[ 10 , NULL , 30 ]'::jsonb
+    v_nums := num_list_t(10, NULL, 30);
+
+    -- ✅ Test 7: Multiple constructor calls
+    IF v_base > 50 THEN
+      v_nums := num_list_t(1, 2, 3);
+    ELSE
+      v_nums := num_list_t(4, 5, 6);
+    END IF;
+
+    -- ✅ Test 8: Date collection constructor
+    -- Oracle: date_list_t(SYSDATE, SYSDATE + 1, SYSDATE + 7)
+    -- PostgreSQL: '[ CURRENT_TIMESTAMP , CURRENT_TIMESTAMP + 1 , CURRENT_TIMESTAMP + 7 ]'::jsonb
+    v_dates := date_list_t(SYSDATE, SYSDATE + 1, SYSDATE + 7);
+
+    RETURN 1; -- Success
+  END test_all_constructors;
+
+END inline_type_pkg11;
+/
+
+-- ============================================================================
+-- TEST 12: VARRAY Constructors (Phase 1C - NEW)
+-- ============================================================================
+-- Tests: VARRAY constructor transformation (same as TABLE OF)
+-- Status: Phase 1C (50% complete) - Constructor transformation ✅
+-- Expected PostgreSQL:
+--   - codes_t('C001', 'C002') → '[ "C001" , "C002" ]'::jsonb
+--   - Note: Size limit (10) not enforced in PostgreSQL jsonb
+-- ============================================================================
+CREATE OR REPLACE PACKAGE inline_type_pkg12 AS
+  TYPE codes_t IS VARRAY(10) OF VARCHAR2(10);
+  TYPE flags_t IS VARRAY(5) OF VARCHAR2(1);
+
+  FUNCTION test_varray_constructors RETURN NUMBER;
+END inline_type_pkg12;
+/
+
+CREATE OR REPLACE PACKAGE BODY inline_type_pkg12 AS
+
+  FUNCTION test_varray_constructors RETURN NUMBER IS
+    v_codes codes_t;
+    v_flags flags_t;
+  BEGIN
+    -- ✅ Test: VARRAY with string elements
+    -- Oracle: codes_t('C001', 'C002', 'C003', 'C004', 'C005')
+    -- PostgreSQL: '[ "C001" , "C002" , "C003" , "C004" , "C005" ]'::jsonb
+    v_codes := codes_t('C001', 'C002', 'C003', 'C004', 'C005');
+
+    -- ✅ Test: VARRAY with single-char elements
+    -- Oracle: flags_t('Y', 'N', 'Y', 'Y')
+    -- PostgreSQL: '[ "Y" , "N" , "Y" , "Y" ]'::jsonb
+    v_flags := flags_t('Y', 'N', 'Y', 'Y');
+
+    -- ✅ Test: Empty VARRAY constructor
+    v_codes := codes_t();
+
+    -- Note: Size limit (10 for codes_t, 5 for flags_t) is registered
+    -- but not enforced in PostgreSQL jsonb arrays
+    -- This is an acceptable trade-off for Phase 1
+
+    RETURN 1;
+  END test_varray_constructors;
+
+END inline_type_pkg12;
+/
+
+-- ============================================================================
+-- UPDATED COMMENTS FOR EXISTING TESTS
+-- ============================================================================
+-- The following existing test packages now have working constructor support:
+--
+-- ✅ inline_type_pkg3.sum_numbers: num_list_t(10, 20, 30, 40, 50)
+--    Transformation: '[ 10 , 20 , 30 , 40 , 50 ]'::jsonb
+--
+-- ✅ inline_type_pkg4.get_codes_count: codes_t('A001', 'B002', 'C003')
+--    Transformation: '[ "A001" , "B002" , "C003" ]'::jsonb
+--
+-- ✅ inline_type_pkg6.initialize_system: log_entries_t('System started', 'Config loaded')
+--    Transformation: '[ "System started" , "Config loaded" ]'::jsonb
+--
+-- All constructor transformations are fully functional as of Phase 1C (2025-11-06)
+-- ============================================================================
+

@@ -494,11 +494,26 @@ public class VisitGeneralElement {
       PlSqlParser.General_element_partContext partCtx,
       PostgresCodeBuilder b) {
 
+    // Get transformation context for use throughout this method
+    TransformationContext context = b.getContext();
+
     // Check if this is a function call (has function_argument*)
     if (partCtx.function_argument() != null && !partCtx.function_argument().isEmpty()) {
       // Simple function call: function(args)
       String functionName = getFunctionName(partCtx);
       String upperFunctionName = functionName.toUpperCase();
+
+      // PHASE 1C: Check if this is a collection constructor (TABLE OF or VARRAY)
+      // Oracle: num_list_t(10, 20, 30) → PostgreSQL: '[10, 20, 30]'::jsonb
+      if (context != null) {
+        me.christianrobert.orapgsync.transformer.inline.InlineTypeDefinition inlineType =
+            context.resolveInlineType(functionName);
+
+        if (inlineType != null && inlineType.isIndexedCollection()) {
+          // IT'S A COLLECTION CONSTRUCTOR!
+          return transformCollectionConstructor(partCtx, b, inlineType);
+        }
+      }
 
       // Check if this is a date/time function that needs transformation
       switch (upperFunctionName) {
@@ -526,7 +541,7 @@ public class VisitGeneralElement {
       // Apply schema qualification if context available
       // Oracle implicit schema resolution: unqualified function → current schema
       // PostgreSQL uses search_path which may not include the current schema
-      TransformationContext context = b.getContext();
+      // Reuse context from above (line 505)
       if (context != null && !functionName.contains(".")) {
         // Unqualified function → qualify with current schema
         // Note: Built-in PostgreSQL functions (like COALESCE, UPPER, etc.) are in pg_catalog
@@ -553,7 +568,7 @@ public class VisitGeneralElement {
     // Oracle: RETURN g_counter;  (not counter_pkg.g_counter)
     // PostgreSQL: RETURN hr.counter_pkg__get_g_counter();
     // Note: Oracle identifiers are case-insensitive, so we normalize to lowercase
-    TransformationContext context = b.getContext();
+    // Reuse context from method start (line 498)
     if (!b.isInAssignmentTarget() && context != null && context.isInPackageMember()) {
       String currentPackageName = context.getCurrentPackageName();
       String identifierLower = identifier.toLowerCase();  // Case-insensitive match
@@ -966,5 +981,95 @@ public class VisitGeneralElement {
 
     // Otherwise, prepend current schema
     return context.getCurrentSchema().toLowerCase() + "." + tableName.toLowerCase();
+  }
+
+  /**
+   * Transforms collection constructor calls to JSON array literals (Phase 1C).
+   *
+   * <p>Oracle collection constructors:
+   * <pre>
+   * num_list_t(10, 20, 30)           → '[10, 20, 30]'::jsonb
+   * codes_t('A001', 'B002', 'C003')  → '["A001", "B002", "C003"]'::jsonb
+   * empty_list_t()                   → '[]'::jsonb
+   * </pre>
+   *
+   * <p>Transformation logic:
+   * <ol>
+   *   <li>Extract all constructor arguments</li>
+   *   <li>Transform each argument expression</li>
+   *   <li>Build JSON array literal</li>
+   *   <li>Add ::jsonb cast</li>
+   * </ol>
+   *
+   * @param partCtx General element part context (contains constructor call)
+   * @param b PostgreSQL code builder
+   * @param inlineType Inline type definition for the collection
+   * @return JSON array literal with jsonb cast
+   */
+  private static String transformCollectionConstructor(
+      PlSqlParser.General_element_partContext partCtx,
+      PostgresCodeBuilder b,
+      me.christianrobert.orapgsync.transformer.inline.InlineTypeDefinition inlineType) {
+
+    // Extract constructor arguments
+    List<PlSqlParser.Function_argumentContext> funcArgCtxList = partCtx.function_argument();
+    if (funcArgCtxList == null || funcArgCtxList.isEmpty()) {
+      // Empty constructor: num_list_t() → '[]'::jsonb
+      return "'[]'::jsonb";
+    }
+
+    PlSqlParser.Function_argumentContext funcArgCtx = funcArgCtxList.get(0);
+    List<PlSqlParser.ArgumentContext> arguments = funcArgCtx.argument();
+    if (arguments == null || arguments.isEmpty()) {
+      // Empty constructor
+      return "'[]'::jsonb";
+    }
+
+    // Transform each argument and build JSON array
+    StringBuilder jsonArray = new StringBuilder();
+    jsonArray.append("'[ ");
+
+    for (int i = 0; i < arguments.size(); i++) {
+      if (i > 0) {
+        jsonArray.append(" , ");
+      }
+
+      // Transform the argument expression
+      PlSqlParser.ArgumentContext argCtx = arguments.get(i);
+      if (argCtx.expression() != null) {
+        String argValue = b.visit(argCtx.expression());
+
+        // Check if argument is a string literal (needs quotes in JSON)
+        // String literals in SQL are enclosed in single quotes
+        if (isStringLiteral(argValue)) {
+          // String literal: 'value' → "value" (JSON double quotes)
+          // Remove SQL quotes and add JSON quotes
+          String unquoted = argValue.substring(1, argValue.length() - 1);
+          jsonArray.append("\"").append(unquoted).append("\"");
+        } else {
+          // Numeric or other: pass through
+          jsonArray.append(argValue);
+        }
+      }
+    }
+
+    jsonArray.append(" ]'::jsonb");
+
+    return jsonArray.toString();
+  }
+
+  /**
+   * Checks if a value is a string literal (enclosed in single quotes).
+   *
+   * @param value Value to check
+   * @return true if value is a string literal
+   */
+  private static boolean isStringLiteral(String value) {
+    if (value == null || value.length() < 2) {
+      return false;
+    }
+
+    String trimmed = value.trim();
+    return trimmed.startsWith("'") && trimmed.endsWith("'");
   }
 }
