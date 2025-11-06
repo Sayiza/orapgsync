@@ -73,8 +73,9 @@ public class VisitVariable_declaration {
         }
 
         // STEP 3: Check if this is an inline type (RECORD, TABLE OF, VARRAY, INDEX BY)
+        // Use three-level resolution cascade: block-level → package-level → schema-level
         String oracleType = ctx.type_spec().getText();
-        InlineTypeDefinition inlineType = b.getContext().getInlineType(oracleType);
+        InlineTypeDefinition inlineType = b.getContext().resolveInlineType(oracleType);
 
         String postgresType;
         String autoInitializer = null;

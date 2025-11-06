@@ -4,11 +4,14 @@ import me.christianrobert.orapgsync.transformer.inline.ConversionStrategy;
 import me.christianrobert.orapgsync.transformer.inline.FieldDefinition;
 import me.christianrobert.orapgsync.transformer.inline.InlineTypeDefinition;
 import me.christianrobert.orapgsync.transformer.inline.TypeCategory;
+import me.christianrobert.orapgsync.transformer.packagevariable.PackageContext;
 import me.christianrobert.orapgsync.transformer.type.SimpleTypeEvaluator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -269,5 +272,154 @@ class TransformationContextInlineTypeTest {
         InlineTypeDefinition retrieved = context.getInlineType("emp_row_t");
         assertTrue(retrieved.isRecord());
         assertEquals(2, retrieved.getFields().size());
+    }
+
+    // ========== Three-Level Resolution Cascade Tests (Phase 1G Task 4) ==========
+
+    @Test
+    void resolveInlineType_blockLevelOnly() {
+        // Register a block-level type
+        InlineTypeDefinition blockType = new InlineTypeDefinition(
+                "local_type_t",
+                TypeCategory.RECORD,
+                null,
+                List.of(new FieldDefinition("field1", "NUMBER", "numeric")),
+                ConversionStrategy.JSONB,
+                null
+        );
+        context.registerInlineType("local_type_t", blockType);
+
+        // Should resolve from block level (Level 1)
+        InlineTypeDefinition resolved = context.resolveInlineType("local_type_t");
+        assertNotNull(resolved);
+        assertEquals("local_type_t", resolved.getTypeName());
+        assertEquals(TypeCategory.RECORD, resolved.getCategory());
+    }
+
+    @Test
+    void resolveInlineType_packageLevelOnly() {
+        // Create a package context with a type
+        PackageContext packageContext = new PackageContext("hr", "test_pkg");
+        InlineTypeDefinition packageType = new InlineTypeDefinition(
+                "salary_range_t",
+                TypeCategory.RECORD,
+                null,
+                List.of(
+                        new FieldDefinition("min_sal", "NUMBER", "numeric"),
+                        new FieldDefinition("max_sal", "NUMBER", "numeric")
+                ),
+                ConversionStrategy.JSONB,
+                null
+        );
+        packageContext.addType(packageType);
+
+        // Create a new context with package context
+        Map<String, PackageContext> packageContextCache = new HashMap<>();
+        packageContextCache.put("hr.test_pkg", packageContext);
+
+        TransformationContext contextWithPackage = new TransformationContext(
+                "hr",
+                indices,
+                new SimpleTypeEvaluator("hr", indices),
+                packageContextCache,
+                null,  // functionName
+                "test_pkg"  // packageName
+        );
+
+        // Should resolve from package level (Level 2)
+        InlineTypeDefinition resolved = contextWithPackage.resolveInlineType("salary_range_t");
+        assertNotNull(resolved);
+        assertEquals("salary_range_t", resolved.getTypeName());
+        assertEquals(TypeCategory.RECORD, resolved.getCategory());
+    }
+
+    @Test
+    void resolveInlineType_blockLevelOverridesPackageLevel() {
+        // Create a package context with a type
+        PackageContext packageContext = new PackageContext("hr", "test_pkg");
+        InlineTypeDefinition packageType = new InlineTypeDefinition(
+                "my_type_t",
+                TypeCategory.TABLE_OF,
+                "NUMBER",
+                null,
+                ConversionStrategy.JSONB,
+                null
+        );
+        packageContext.addType(packageType);
+
+        // Create context with package context
+        Map<String, PackageContext> packageContextCache = new HashMap<>();
+        packageContextCache.put("hr.test_pkg", packageContext);
+
+        TransformationContext contextWithPackage = new TransformationContext(
+                "hr",
+                indices,
+                new SimpleTypeEvaluator("hr", indices),
+                packageContextCache,
+                null,  // functionName
+                "test_pkg"  // packageName
+        );
+
+        // Register a block-level type with the same name
+        InlineTypeDefinition blockType = new InlineTypeDefinition(
+                "my_type_t",
+                TypeCategory.RECORD,
+                null,
+                List.of(new FieldDefinition("field1", "VARCHAR2", "text")),
+                ConversionStrategy.JSONB,
+                null
+        );
+        contextWithPackage.registerInlineType("my_type_t", blockType);
+
+        // Should resolve block-level type (Level 1) even though package-level exists
+        InlineTypeDefinition resolved = contextWithPackage.resolveInlineType("my_type_t");
+        assertNotNull(resolved);
+        assertEquals(TypeCategory.RECORD, resolved.getCategory()); // Block-level is RECORD
+        assertFalse(resolved.isCollection()); // Block-level is not a collection
+    }
+
+    @Test
+    void resolveInlineType_caseInsensitive() {
+        // Create package context with a type
+        PackageContext packageContext = new PackageContext("hr", "test_pkg");
+        InlineTypeDefinition packageType = new InlineTypeDefinition(
+                "Config_Type_T",
+                TypeCategory.RECORD,
+                null,
+                List.of(new FieldDefinition("setting", "VARCHAR2", "text")),
+                ConversionStrategy.JSONB,
+                null
+        );
+        packageContext.addType(packageType);
+
+        // Create context with package context
+        Map<String, PackageContext> packageContextCache = new HashMap<>();
+        packageContextCache.put("hr.test_pkg", packageContext);
+
+        TransformationContext contextWithPackage = new TransformationContext(
+                "hr",
+                indices,
+                new SimpleTypeEvaluator("hr", indices),
+                packageContextCache,
+                null,  // functionName
+                "test_pkg"  // packageName
+        );
+
+        // Should find with different case variations
+        assertNotNull(contextWithPackage.resolveInlineType("config_type_t"));
+        assertNotNull(contextWithPackage.resolveInlineType("CONFIG_TYPE_T"));
+        assertNotNull(contextWithPackage.resolveInlineType("Config_Type_T"));
+    }
+
+    @Test
+    void resolveInlineType_notFound() {
+        InlineTypeDefinition resolved = context.resolveInlineType("nonexistent_type");
+        assertNull(resolved);
+    }
+
+    @Test
+    void resolveInlineType_nullTypeName() {
+        InlineTypeDefinition resolved = context.resolveInlineType(null);
+        assertNull(resolved);
     }
 }

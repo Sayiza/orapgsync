@@ -573,7 +573,7 @@ async function createPostgresStandaloneFunctionImplementation() {
         // Re-enable button
         if (button) {
             button.disabled = false;
-            button.innerHTML = 'Create Standalone Functions';
+            button.innerHTML = 'Create Functions';
         }
     }
 }
@@ -614,7 +614,7 @@ async function pollStandaloneFunctionImplementationJobStatus(jobId, database) {
                     const button = document.querySelector(`#${database}-standalone-function-implementation .action-btn`);
                     if (button) {
                         button.disabled = false;
-                        button.innerHTML = 'Create Standalone Functions';
+                        button.innerHTML = 'Create Functions';
                     }
 
                     // Resolve the promise to signal completion
@@ -631,7 +631,7 @@ async function pollStandaloneFunctionImplementationJobStatus(jobId, database) {
                 const button = document.querySelector(`#${database}-standalone-function-implementation .action-btn`);
                 if (button) {
                     button.disabled = false;
-                    button.innerHTML = 'Create Standalone Functions';
+                    button.innerHTML = 'Create Functions';
                 }
                 // Reject the promise to signal error
                 reject(error);
@@ -1132,7 +1132,7 @@ async function verifyAllPostgresFunctions() {
         // Re-enable button
         if (button) {
             button.disabled = false;
-            button.innerHTML = '⟳ Verify All Functions';
+            button.innerHTML = '⟳';
         }
     }
 }
@@ -1181,7 +1181,7 @@ async function pollUnifiedFunctionVerificationJobStatus(jobId) {
             const button = document.querySelector('#postgres-standalone-function-implementation .verify-all-btn');
             if (button) {
                 button.disabled = false;
-                button.innerHTML = '⟳ Verify All Functions';
+                button.innerHTML = '⟳';
             }
         } else {
             // Continue polling
@@ -1197,7 +1197,7 @@ async function pollUnifiedFunctionVerificationJobStatus(jobId) {
         const button = document.querySelector('#postgres-standalone-function-implementation .verify-all-btn');
         if (button) {
             button.disabled = false;
-            button.innerHTML = '⟳ Verify All Functions';
+            button.innerHTML = '⟳';
         }
     }
 }

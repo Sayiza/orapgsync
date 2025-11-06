@@ -311,6 +311,49 @@ public class TransformationContext {
         return inlineTypes.get(typeName.toLowerCase());
     }
 
+    /**
+     * Resolves an inline type definition using the three-level resolution cascade.
+     *
+     * <p>Resolution order (INLINE_TYPE_IMPLEMENTATION_PLAN.md:210-226):</p>
+     * <ol>
+     *   <li><b>Level 1:</b> Block-level (function-local inline types)</li>
+     *   <li><b>Level 2:</b> Package-level (from PackageContext)</li>
+     *   <li><b>Level 3:</b> Schema-level (from TransformationIndices) - FUTURE</li>
+     * </ol>
+     *
+     * <p><b>Phase 1G Task 4:</b> Implements full type resolution cascade for package-level types.</p>
+     *
+     * <p><b>Implementation Status:</b> Level 1 + Level 2 complete (Phase 1B + Phase 1G Task 4).
+     * Level 3 (schema-level) deferred to future work.</p>
+     *
+     * @param typeName Type name to resolve (e.g., "salary_range_t")
+     * @return InlineTypeDefinition or null if not found at any level
+     */
+    public InlineTypeDefinition resolveInlineType(String typeName) {
+        if (typeName == null) {
+            return null;
+        }
+
+        // Level 1: Block-level (function-local inline types)
+        InlineTypeDefinition blockLevelType = getInlineType(typeName);
+        if (blockLevelType != null) {
+            return blockLevelType;
+        }
+
+        // Level 2: Package-level (from PackageContext)
+        if (currentPackageName != null) {
+            PackageContext pkgCtx = getPackageContext(currentPackageName);
+            if (pkgCtx != null && pkgCtx.hasType(typeName)) {
+                return pkgCtx.getType(typeName);
+            }
+        }
+
+        // Level 3: Schema-level (from TransformationIndices) - FUTURE
+        // TODO: Implement when schema-level type support is added
+
+        return null;
+    }
+
     // ========== Synonym Resolution ==========
 
     /**
