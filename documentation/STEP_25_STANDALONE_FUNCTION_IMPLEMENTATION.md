@@ -776,19 +776,30 @@ END;
 - 🔄 **Explicit cursor operations**: OPEN, FETCH, CLOSE (infrastructure complete, testing in progress)
 
 **Next Step Priority Recommendations:**
-1. **Variable Scope Tracking Infrastructure** - 🔥 CRITICAL PRIORITY
-   - See: [VARIABLE_SCOPE_TRACKING_PLAN.md](VARIABLE_SCOPE_TRACKING_PLAN.md)
-   - Unblocks: RECORD RHS field access, collection element access fixes
-   - Fixes: Function call misidentification bugs (2 failing tests in `PostgresPlSqlCallStatementValidationTest`)
-   - Replaces heuristic detection with deterministic scope lookups
-   - Estimated effort: 2-3 days (13-18 hours)
-   - **Impact:** Foundational for all variable-dependent features (RECORD access, collections, nested blocks)
+1. ✅ **Variable Scope Tracking Infrastructure** - **COMPLETE** (2025-11-07)
+   - See: [VARIABLE_SCOPE_TRACKING_PLAN.md](completed/VARIABLE_SCOPE_TRACKING_PLAN.md)
+   - ✅ **Unblocked:** RECORD RHS field access, collection element access fixes
+   - ✅ **Fixed:** Function call misidentification bugs (all tests passing in `PostgresPlSqlCallStatementValidationTest`)
+   - ✅ **Replaced** heuristic detection with deterministic scope lookups
+   - **Actual effort:** 4 hours (0.5 days) - Much faster than estimated!
+   - **Impact:** Foundational infrastructure for all variable-dependent features now in place
 
-2. **Finish cursor attributes testing** - HIGH PRIORITY, infrastructure complete
-3. **OUT/INOUT in call statements** - HIGH IMPACT, very common pattern
-4. **Nested blocks** (anonymous DECLARE...BEGIN...END) - LOW IMPACT, rare usage, needed for Exception Phase 3.2
-5. **Named parameters** in function calls - MEDIUM IMPACT, moderate usage
+2. ✅ **RECORD RHS Field Access** (Phase 1B.5) - **COMPLETE** (2025-11-07)
+   - See: [INLINE_TYPE_IMPLEMENTATION_PLAN.md](INLINE_TYPE_IMPLEMENTATION_PLAN.md) Phase 1B.5
+   - ✅ **Implemented:** `x := v.field` transformations for inline RECORD types
+   - ✅ Uses deterministic variable lookup via `context.lookupVariable()`
+   - ✅ All 7 integration tests passing (previously 3 failed due to missing RHS)
+   - **Actual effort:** ~2 hours - As estimated!
+   - **Impact:** Complete RECORD type support (both LHS assignment and RHS reading)
 
-**Recommendation:** **CRITICAL:** Implement variable scope tracking first (fixes critical bugs + unblocks multiple features), then complete cursor attributes testing, then prioritize OUT/INOUT call parameters
+3. **Finish cursor attributes testing** - HIGH PRIORITY, infrastructure complete
+
+4. **OUT/INOUT in call statements** - HIGH IMPACT, very common pattern
+
+5. **Nested blocks** (anonymous DECLARE...BEGIN...END) - MEDIUM IMPACT, scope stack already supports it
+
+6. **Named parameters** in function calls - MEDIUM IMPACT, moderate usage
+
+**Recommendation:** Complete cursor attributes testing, then prioritize OUT/INOUT call parameters
 
 **Long-term Goal:** 95%+ coverage with proper variable scope foundation, cursor features complete, call statement improvements, and collections

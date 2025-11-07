@@ -1,7 +1,7 @@
 # Oracle to PostgreSQL SQL Transformation
 
-**Last Updated:** 2025-11-01
-**Status:** ✅ **90% REAL-WORLD COVERAGE ACHIEVED** - 662+ tests passing (SQL views), 85-95% PL/SQL functions
+**Last Updated:** 2025-11-07
+**Status:** ✅ **90% REAL-WORLD COVERAGE ACHIEVED** - 662+ tests passing (SQL views), 85-95% PL/SQL functions, Phase 1F inline types complete
 **Implementation Time:** ~1.5 days actual (vs. 16-21 days estimated)
 
 This document describes the ANTLR-based transformation module that converts Oracle SQL to PostgreSQL-compatible SQL using a direct AST-to-code approach.
@@ -265,6 +265,31 @@ This document describes the ANTLR-based transformation module that converts Orac
 - DBMS_SCHEDULER (job scheduling)
 
 ### 🔄 Phase 5: PL/SQL Functions/Procedures - 85-95% COMPLETE
+
+**✅ Variable Scope Tracking** (Completed 2025-11-07):
+- Deterministic variable resolution replacing heuristic detection
+- Scope stack pattern for nested blocks (function → block → loop)
+- Type-aware variable definitions with inline type support
+- **Fixed:** Function call misidentification bugs (functions with underscores)
+- See [VARIABLE_SCOPE_TRACKING_PLAN.md](completed/VARIABLE_SCOPE_TRACKING_PLAN.md) for details
+
+**✅ Inline Type RECORD RHS Field Access** (Phase 1B.5 - Completed 2025-11-07):
+- Reading from RECORD fields: `x := v.field` → `x := (v->>'field')::type`
+- Nested field access: `x := v.addr.city` → `x := (v->'addr'->>'city')::type`
+- Uses deterministic variable scope tracking for RECORD detection
+- Complete support for inline RECORD types (both LHS assignment and RHS reading)
+- See [INLINE_TYPE_IMPLEMENTATION_PLAN.md](INLINE_TYPE_IMPLEMENTATION_PLAN.md) Phase 1B.5
+
+**✅ %ROWTYPE and %TYPE Support** (Phase 1F - Completed 2025-11-07):
+- %ROWTYPE declarations: `v_emp employees%ROWTYPE` → `v_emp jsonb := '{}'::jsonb;`
+- %ROWTYPE field access: Works via Phase 1B field access (jsonb_set for assignments, ->> for reads)
+- %TYPE column references: `v_sal employees.salary%TYPE` → `v_sal numeric;`
+- %TYPE variable references: `v_copy v_sal%TYPE` → `v_copy numeric;` (inherits type)
+- %TYPE chaining: `v1 NUMBER; v2 v1%TYPE; v3 v2%TYPE;` → all become `numeric`
+- Metadata resolution: Uses TransformationIndices for table column type lookup
+- Circular reference detection: `v_x v_x%TYPE` → IllegalStateException
+- **Test Coverage:** 12/12 tests passing, zero regressions (1064 total tests)
+- See [INLINE_TYPE_IMPLEMENTATION_PLAN.md](INLINE_TYPE_IMPLEMENTATION_PLAN.md) Phase 1F
 
 PostgresCodeBuilder extended with 20 PL/SQL visitors:
 - ✅ VisitFunctionBody, VisitProcedureBody, VisitBody

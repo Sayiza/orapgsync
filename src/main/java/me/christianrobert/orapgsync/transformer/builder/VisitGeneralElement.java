@@ -144,23 +144,29 @@ public class VisitGeneralElement {
       }
     }
 
-    // STEP 0.5: Check for inline type field access (Phase 1B) - RHS only
+    // STEP 0.5: Check for inline type field access (Phase 1B.5) - RHS only
     // Pattern: variable.field → (variable->>'field')::type
     // Pattern: variable.field1.field2 → variable->'field1'->>'field2'
     // Only process if not in assignment target (LHS handled by VisitAssignment_statement)
     if (!b.isInAssignmentTarget() && parts.size() >= 2) {
-      // Heuristic for Phase 1B (without variable scope tracking):
-      // Check if the SECOND part (field name) exists in ANY registered RECORD type
-      // This helps disambiguate from table.column references
-      String potentialFieldName = parts.get(1).id_expression().getText();
+      // DETERMINISTIC LOOKUP (Phase 1B.5 - uses variable scope tracking)
+      // Check if first part is a local RECORD variable
+      String variableName = parts.get(0).id_expression().getText();
+      TransformationContext context = b.getContext();
 
-      // Find a RECORD type that has this field
-      me.christianrobert.orapgsync.transformer.inline.InlineTypeDefinition matchingType =
-          findInlineTypeWithField(b.getContext(), potentialFieldName);
+      // Context can be null in SQL-only transformations (no PL/SQL)
+      if (context != null) {
+        me.christianrobert.orapgsync.transformer.context.TransformationContext.VariableDefinition varDef =
+            context.lookupVariable(variableName);
 
-      if (matchingType != null) {
-        // IT'S INLINE TYPE FIELD ACCESS!
-        return handleInlineTypeFieldAccess(parts, b, matchingType);
+        if (varDef != null && varDef.isRecord()) {
+          // IT'S INLINE TYPE FIELD ACCESS!
+          // We have definitive knowledge:
+          // - It's a registered variable (not a table)
+          // - It has a RECORD inline type
+          // - We can safely transform as field access
+          return handleInlineTypeFieldAccess(parts, b, varDef);
+        }
       }
     }
 
@@ -846,31 +852,25 @@ public class VisitGeneralElement {
   }
 
   /**
-   * Handles inline type field access for RECORD types (Phase 1B).
+   * Handles RECORD field access on RHS (Phase 1B.5).
    *
-   * <p>Transforms Oracle field access to PostgreSQL JSON operations:
+   * <p>Transforms RECORD field access to PostgreSQL jsonb operations:
    * <ul>
-   *   <li>Single field: variable.field → (variable->>'field')::type</li>
-   *   <li>Nested fields: variable.field1.field2 → variable->'field1'->>'field2'</li>
+   *   <li>Simple: {@code v.field} → {@code (v->>'field')::type}</li>
+   *   <li>Nested: {@code v.addr.city} → {@code (v->'addr'->>'city')::type}</li>
    * </ul>
    *
-   * <p>JSON path operators:
-   * <ul>
-   *   <li>-&gt; : Extract JSON object/array, returns jsonb</li>
-   *   <li>-&gt;&gt; : Extract JSON value as text, returns text</li>
-   * </ul>
+   * <p>Uses deterministic variable scope lookup to identify RECORD variables.
    *
-   * <p>Type casting: The final result is cast to the PostgreSQL type of the accessed field.
-   *
-   * @param parts Dot-separated parts (variable.field1.field2...)
+   * @param parts All dot-separated parts [variable, field1, field2, ...]
    * @param b PostgreSQL code builder
-   * @param inlineType Inline type definition for the variable
-   * @return Transformed JSON field access expression
+   * @param varDef Variable definition (KNOWN to be RECORD type)
+   * @return Transformed jsonb field access expression with type cast
    */
   private static String handleInlineTypeFieldAccess(
       List<PlSqlParser.General_element_partContext> parts,
       PostgresCodeBuilder b,
-      me.christianrobert.orapgsync.transformer.inline.InlineTypeDefinition inlineType) {
+      me.christianrobert.orapgsync.transformer.context.TransformationContext.VariableDefinition varDef) {
 
     if (parts.size() < 2) {
       throw new me.christianrobert.orapgsync.transformer.context.TransformationException(
@@ -881,6 +881,8 @@ public class VisitGeneralElement {
     // parts[1..n] = field path
 
     String variableName = parts.get(0).id_expression().getText();
+    me.christianrobert.orapgsync.transformer.inline.InlineTypeDefinition inlineType = varDef.getInlineType();
+
     StringBuilder result = new StringBuilder();
 
     // Build JSON path access
@@ -889,6 +891,10 @@ public class VisitGeneralElement {
 
     result.append(variableName);
 
+    // Track current type as we navigate nested fields
+    me.christianrobert.orapgsync.transformer.inline.InlineTypeDefinition currentType = inlineType;
+    me.christianrobert.orapgsync.transformer.inline.FieldDefinition finalField = null;
+
     for (int i = 1; i < parts.size(); i++) {
       String fieldName = parts.get(i).id_expression().getText();
       boolean isLastField = (i == parts.size() - 1);
@@ -896,31 +902,48 @@ public class VisitGeneralElement {
       if (isLastField) {
         // Last field: use ->> to extract as text
         result.append("->>'").append(fieldName).append("'");
+
+        // Look up final field for type casting
+        if (currentType != null) {
+          finalField = findField(currentType, fieldName);
+        }
       } else {
         // Intermediate field: use -> to keep as jsonb
         result.append("->'").append(fieldName).append("'");
+
+        // Try to resolve nested type for next iteration
+        // (This enables proper type resolution for deeply nested access)
+        if (currentType != null) {
+          me.christianrobert.orapgsync.transformer.inline.FieldDefinition field = findField(currentType, fieldName);
+          if (field != null && field.getOracleType() != null) {
+            // Check if this field is itself a RECORD type
+            // For Phase 1B.5, we support nested RECORD field access
+            TransformationContext context = b.getContext();
+            me.christianrobert.orapgsync.transformer.inline.InlineTypeDefinition nestedType =
+                context.resolveInlineType(field.getOracleType());
+            if (nestedType != null && nestedType.isRecord()) {
+              currentType = nestedType;
+            } else {
+              // Not a nested RECORD - can't navigate further
+              currentType = null;
+            }
+          } else {
+            currentType = null;
+          }
+        }
       }
     }
 
-    // Type casting: Find the PostgreSQL type for the final field
-    // For simple single-level access (variable.field), look up field type
-    if (parts.size() == 2) {
-      String fieldName = parts.get(1).id_expression().getText();
-      me.christianrobert.orapgsync.transformer.inline.FieldDefinition field = findField(inlineType, fieldName);
-
-      if (field != null) {
-        // Cast to the field's PostgreSQL type
-        result.insert(0, "( ");
-        result.append(" )::").append(field.getPostgresType());
-      } else {
-        // Field not found - no cast (may cause runtime error, but that's acceptable for Phase 1B)
-        // TODO Phase 1B.5: Add validation and better error messages
-      }
+    // Type casting: Cast to the final field's PostgreSQL type
+    if (finalField != null) {
+      // We know the field type - add cast
+      result.insert(0, "( ");
+      result.append(" )::").append(finalField.getPostgresType());
     } else {
-      // Nested access (variable.field1.field2)
-      // For Phase 1B, we don't track nested field types yet
-      // Leave without cast (PostgreSQL will infer text from ->>)
-      // TODO Phase 1C: Add nested field type tracking
+      // Field type unknown - wrap in parentheses but no cast
+      // PostgreSQL will infer text type from ->> operator
+      result.insert(0, "( ");
+      result.append(" )");
     }
 
     return result.toString();
