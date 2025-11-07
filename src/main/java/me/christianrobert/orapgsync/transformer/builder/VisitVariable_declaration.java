@@ -2,6 +2,7 @@ package me.christianrobert.orapgsync.transformer.builder;
 
 import me.christianrobert.orapgsync.antlr.PlSqlParser;
 import me.christianrobert.orapgsync.core.tools.TypeConverter;
+import me.christianrobert.orapgsync.transformer.context.TransformationContext;
 import me.christianrobert.orapgsync.transformer.inline.InlineTypeDefinition;
 
 /**
@@ -117,6 +118,47 @@ public class VisitVariable_declaration {
         // STEP 6: Semicolon terminator with newline
         result.append(";\n");
 
+        // STEP 7: Register variable in scope for deterministic lookup
+        // This enables accurate disambiguation between variables and functions in expressions
+        registerVariableInScope(b.getContext(), varName, oracleType, postgresType,
+                               ctx.CONSTANT() != null,
+                               ctx.default_value_part() != null ? ctx.default_value_part().expression().getText() : null,
+                               inlineType);
+
         return result.toString();
+    }
+
+    /**
+     * Registers a variable in the current scope for deterministic lookup.
+     *
+     * <p>This replaces heuristic variable detection with explicit registration.
+     * When transforming expressions later, we can definitively know if an identifier
+     * refers to a local variable or a function call.</p>
+     *
+     * @param context Transformation context
+     * @param varName Variable name
+     * @param oracleType Original Oracle type
+     * @param postgresType Transformed PostgreSQL type
+     * @param isConstant Whether the variable is declared as CONSTANT
+     * @param defaultValue Default value expression (null if none)
+     * @param inlineType Inline type definition (null if not an inline type)
+     */
+    private static void registerVariableInScope(TransformationContext context,
+                                                String varName,
+                                                String oracleType,
+                                                String postgresType,
+                                                boolean isConstant,
+                                                String defaultValue,
+                                                InlineTypeDefinition inlineType) {
+        TransformationContext.VariableDefinition varDef = new TransformationContext.VariableDefinition(
+            varName,
+            oracleType,
+            postgresType,
+            isConstant,
+            defaultValue,
+            inlineType
+        );
+
+        context.registerVariable(varName, varDef);
     }
 }

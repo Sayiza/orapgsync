@@ -2,6 +2,7 @@ package me.christianrobert.orapgsync.transformer.builder;
 
 import me.christianrobert.orapgsync.antlr.PlSqlParser;
 import me.christianrobert.orapgsync.core.tools.TypeConverter;
+import me.christianrobert.orapgsync.transformer.context.TransformationContext;
 
 import java.util.Set;
 
@@ -117,6 +118,18 @@ public class VisitFunctionBody {
         // Tracks user-defined exceptions declared in this function's DECLARE section
         b.pushExceptionContext();
 
+        // Push variable scope for this function
+        // All parameters and DECLARE variables will be registered in this scope
+        b.getContext().pushVariableScope("function:" + functionName);
+
+        // Register function parameters in scope
+        // This enables deterministic variable vs function disambiguation
+        if (ctx.parameter() != null && !ctx.parameter().isEmpty()) {
+            for (PlSqlParser.ParameterContext paramCtx : ctx.parameter()) {
+                registerParameterInScope(paramCtx, b);
+            }
+        }
+
         // Pre-scan body for cursor attributes BEFORE transformation
         // This ensures FETCH/OPEN/CLOSE statements can inject tracking code correctly
         // (cursor attributes are encountered during traversal, but FETCH may come before first attribute)
@@ -149,6 +162,10 @@ public class VisitFunctionBody {
                 }
             }
         }
+
+        // Pop variable scope when leaving function
+        // Variables go out of scope
+        b.getContext().popVariableScope();
 
         // Pop loop RECORD variables context to get variables for this block
         Set<String> loopVariables = b.popLoopRecordVariablesContext();
@@ -242,6 +259,38 @@ public class VisitFunctionBody {
         result.append(bodyCode.substring(endOfLineIndex + 1)); // Rest of body
 
         return result.toString();
+    }
+
+    /**
+     * Registers a function parameter in the current variable scope.
+     *
+     * <p>Parameters are treated as variables for scope lookup purposes.
+     * This enables deterministic disambiguation: if an identifier matches a parameter,
+     * it's a variable reference, not a function call.</p>
+     *
+     * @param paramCtx Parameter parse tree context
+     * @param b PostgresCodeBuilder instance (for context access)
+     */
+    private static void registerParameterInScope(PlSqlParser.ParameterContext paramCtx, PostgresCodeBuilder b) {
+        // Extract parameter name
+        String paramName = paramCtx.parameter_name().getText().toLowerCase();
+
+        // Extract parameter type
+        String oracleType = paramCtx.type_spec().getText();
+        String postgresType = TypeConverter.toPostgre(oracleType);
+
+        // Parameters are never CONSTANT in the DECLARE sense (though they may be IN parameters)
+        // Parameters typically don't have default values in the body scope (default values are in signature)
+        TransformationContext.VariableDefinition paramDef = new TransformationContext.VariableDefinition(
+            paramName,
+            oracleType,
+            postgresType,
+            false,  // not constant
+            null,   // no default value in body scope
+            null    // parameters are simple types, not inline types
+        );
+
+        b.getContext().registerVariable(paramName, paramDef);
     }
 }
 

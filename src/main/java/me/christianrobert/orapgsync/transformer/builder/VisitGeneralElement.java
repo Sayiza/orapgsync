@@ -515,6 +515,17 @@ public class VisitGeneralElement {
         }
       }
 
+      // PHASE 1C.5 + 1D: Check if this is collection element access (array or map)
+      // Oracle: v_nums(1) → PostgreSQL: (v_nums->0)::numeric (array, 1-based → 0-based)
+      // Oracle: v_map('key') → PostgreSQL: (v_map->>'key')::text (map)
+      // NOTE: This must be checked BEFORE treating it as a regular function call
+      if (context != null && !b.isInAssignmentTarget()) {
+        String elementAccess = tryTransformCollectionElementAccess(partCtx, b, context);
+        if (elementAccess != null) {
+          return elementAccess;
+        }
+      }
+
       // Check if this is a date/time function that needs transformation
       switch (upperFunctionName) {
         case "ADD_MONTHS":
@@ -1071,5 +1082,327 @@ public class VisitGeneralElement {
 
     String trimmed = value.trim();
     return trimmed.startsWith("'") && trimmed.endsWith("'");
+  }
+
+  /**
+   * Checks if the INDEX BY key type is string-based.
+   *
+   * <p>Oracle associative arrays (INDEX BY) can be keyed by either:</p>
+   * <ul>
+   *   <li><strong>String types:</strong> VARCHAR2, VARCHAR, STRING, CHAR</li>
+   *   <li><strong>Numeric types:</strong> PLS_INTEGER, BINARY_INTEGER, NUMBER</li>
+   * </ul>
+   *
+   * <p>This determines the PostgreSQL jsonb access operator:</p>
+   * <ul>
+   *   <li>String keys → {@code ->>} (map access, returns text)</li>
+   *   <li>Numeric keys → {@code ->} (array access with 1-based to 0-based conversion)</li>
+   * </ul>
+   *
+   * @param indexKeyType Index key type from InlineTypeDefinition (e.g., "VARCHAR2", "PLS_INTEGER")
+   * @return true if string-based key type
+   */
+  private static boolean isStringIndexKeyType(String indexKeyType) {
+    if (indexKeyType == null) {
+      // Default to numeric if not specified
+      return false;
+    }
+
+    String upperType = indexKeyType.toUpperCase();
+
+    // String-based INDEX BY key types
+    return upperType.startsWith("VARCHAR2") ||
+           upperType.startsWith("VARCHAR") ||
+           upperType.startsWith("STRING") ||
+           upperType.startsWith("CHAR");
+
+    // Numeric types (PLS_INTEGER, BINARY_INTEGER, NUMBER) return false
+  }
+
+  /**
+   * Builds PostgreSQL jsonb array access expression with 1-based to 0-based index conversion.
+   *
+   * <p>Oracle uses 1-based indexing, PostgreSQL jsonb uses 0-based indexing.</p>
+   *
+   * <h3>Transformations:</h3>
+   * <ul>
+   *   <li>Numeric literal: {@code v_nums(1)} → {@code (v_nums->0)}</li>
+   *   <li>Variable: {@code v_nums(i)} → {@code (v_nums->(i-1))}</li>
+   *   <li>Expression: {@code v_nums(i+5)} → {@code (v_nums->((i+5)-1))}</li>
+   *   <li>String literal: {@code v_nums('10')} → {@code (v_nums->9)} (converted to int)</li>
+   * </ul>
+   *
+   * @param variableName Collection variable name
+   * @param argValue Index argument expression (already transformed)
+   * @return PostgreSQL jsonb array access expression
+   */
+  private static String buildNumericArrayAccess(String variableName, String argValue) {
+    // Check if argument is a simple numeric literal
+    boolean isNumericLiteral = argValue.matches("\\d+");
+
+    String indexExpression;
+    if (isNumericLiteral) {
+      // Simple numeric literal: v_nums(1) → v_nums->0
+      int oracleIndex = Integer.parseInt(argValue);
+      int postgresIndex = oracleIndex - 1;
+      indexExpression = String.valueOf(postgresIndex);
+    } else {
+      // Variable, expression, or string literal: v_nums(i) → v_nums->(i - 1)
+      // Note: String literals like '10' will be converted to int by PostgreSQL
+      indexExpression = "( " + argValue + " - 1 )";
+    }
+
+    // Build array access: (variable->index)
+    // Use -> operator which returns jsonb (will be cast to element type later)
+    return "( " + variableName + "->" + indexExpression + " )";
+  }
+
+  /**
+   * DEPRECATED: No longer used. Replaced with deterministic variable scope lookup.
+   *
+   * <p>This heuristic-based approach was error-prone and caused bugs like:
+   * <ul>
+   *   <li>Function calls with underscores (e.g., calculate_bonus) misidentified as variables</li>
+   *   <li>Package functions (e.g., emp_pkg__function) misidentified as variables</li>
+   * </ul>
+   *
+   * <p>Replaced by: {@link TransformationContext#isLocalVariable(String)}
+   * which uses deterministic scope-based lookup.
+   *
+   * @deprecated Use context.isLocalVariable() instead (deterministic, scope-based)
+   * @param identifier Identifier to check
+   * @return true if it looks like a variable name
+   */
+  @Deprecated
+  private static boolean looksLikeVariable(String identifier) {
+    if (identifier == null || identifier.isEmpty()) {
+      return false;
+    }
+
+    // Common Oracle variable naming patterns:
+    // 1. Starts with v_ (very common): v_nums, v_map, v_result
+    if (identifier.toLowerCase().startsWith("v_")) {
+      return true;
+    }
+
+    // 2. Contains underscore (common for multi-word variables): emp_list, dept_map, my_var
+    if (identifier.contains("_")) {
+      return true;
+    }
+
+    // 3. Starts with lowercase (common for simple variables): nums, map, result
+    // But exclude single character (often parameters like 'i', 'x')
+    if (identifier.length() > 1 && Character.isLowerCase(identifier.charAt(0))) {
+      return true;
+    }
+
+    // If none of the above, likely NOT a variable (probably a function)
+    return false;
+  }
+
+  /**
+   * Checks if a function name is a known Oracle/PostgreSQL built-in function.
+   * This prevents false positives where built-in functions are mistaken for collection element access.
+   *
+   * @param upperFunctionName Function name in uppercase
+   * @return true if it's a known built-in function
+   */
+  private static boolean isKnownBuiltinFunction(String upperFunctionName) {
+    // Common Oracle/PostgreSQL string functions
+    switch (upperFunctionName) {
+      // String functions
+      case "TRIM":
+      case "LTRIM":
+      case "RTRIM":
+      case "UPPER":
+      case "LOWER":
+      case "INITCAP":
+      case "LENGTH":
+      case "SUBSTR":
+      case "SUBSTRING":
+      case "REPLACE":
+      case "TRANSLATE":
+      case "INSTR":
+      case "LPAD":
+      case "RPAD":
+      case "CHR":
+      case "ASCII":
+      case "CONCAT":
+      // Numeric functions
+      case "ABS":
+      case "CEIL":
+      case "FLOOR":
+      case "ROUND":
+      case "TRUNC":
+      case "MOD":
+      case "POWER":
+      case "SQRT":
+      case "EXP":
+      case "LN":
+      case "LOG":
+      // Date functions
+      case "SYSDATE":
+      case "SYSTIMESTAMP":
+      case "CURRENT_DATE":
+      case "CURRENT_TIMESTAMP":
+      case "ADD_MONTHS":
+      case "MONTHS_BETWEEN":
+      case "LAST_DAY":
+      case "NEXT_DAY":
+      case "EXTRACT":
+      // Conversion functions
+      case "TO_CHAR":
+      case "TO_NUMBER":
+      case "TO_DATE":
+      case "TO_TIMESTAMP":
+      case "CAST":
+      // Null handling
+      case "NVL":
+      case "NVL2":
+      case "COALESCE":
+      case "NULLIF":
+      // Conditional
+      case "DECODE":
+      case "GREATEST":
+      case "LEAST":
+      // Aggregate functions
+      case "COUNT":
+      case "SUM":
+      case "AVG":
+      case "MIN":
+      case "MAX":
+      case "STDDEV":
+      case "VARIANCE":
+      // Regexp functions
+      case "REGEXP_LIKE":
+      case "REGEXP_REPLACE":
+      case "REGEXP_SUBSTR":
+      case "REGEXP_INSTR":
+      case "REGEXP_COUNT":
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  /**
+   * Tries to transform collection element access (Phase 1C.5 + 1D).
+   *
+   * <p>Detects and transforms array/map element access patterns:
+   * <ul>
+   *   <li>Array (TABLE OF/VARRAY): v_nums(1) → (v_nums->0)::numeric (1-based → 0-based)</li>
+   *   <li>Map (INDEX BY): v_map('key') → (v_map->>'key')::text</li>
+   * </ul>
+   *
+   * <p>Detection logic:
+   * <ol>
+   *   <li>Check if identifier is a variable (not a type constructor)</li>
+   *   <li>Check if it has exactly ONE argument (not multiple like constructor)</li>
+   *   <li>Look up variable type in context</li>
+   *   <li>Check if type is a collection (TABLE OF, VARRAY, INDEX BY)</li>
+   * </ol>
+   *
+   * @param partCtx General element part context with function_argument
+   * @param b PostgreSQL code builder
+   * @param context Transformation context
+   * @return Transformed element access, or null if not a collection element access
+   */
+  private static String tryTransformCollectionElementAccess(
+      PlSqlParser.General_element_partContext partCtx,
+      PostgresCodeBuilder b,
+      TransformationContext context) {
+
+    // Must have exactly ONE argument (multiple arguments = constructor or function call)
+    List<PlSqlParser.Function_argumentContext> funcArgCtxList = partCtx.function_argument();
+    if (funcArgCtxList == null || funcArgCtxList.isEmpty()) {
+      return null;
+    }
+
+    PlSqlParser.Function_argumentContext funcArgCtx = funcArgCtxList.get(0);
+    List<PlSqlParser.ArgumentContext> arguments = funcArgCtx.argument();
+    if (arguments == null || arguments.size() != 1) {
+      return null; // Must be exactly one argument for element access
+    }
+
+    // Get variable name
+    String variableName = partCtx.id_expression().getText();
+    String upperName = variableName.toUpperCase();
+
+    // Exclude known Oracle/PostgreSQL built-in functions
+    // This prevents false positives where TRIM('text'), UPPER('text'), etc. are treated as collection access
+    if (isKnownBuiltinFunction(upperName)) {
+      return null;
+    }
+
+    // DETERMINISTIC VARIABLE LOOKUP (replaces heuristic detection)
+    // Check if this identifier is a registered local variable
+    me.christianrobert.orapgsync.transformer.context.TransformationContext.VariableDefinition varDef =
+        context.lookupVariable(variableName);
+
+    if (varDef == null) {
+      // Not a local variable → Must be a function call or type constructor
+      return null;
+    }
+
+    // Variable found! Check if it's a collection type
+    if (!varDef.isCollection()) {
+      // Variable exists but not a collection → Not element access
+      // This could be a simple variable used in an expression
+      return null;
+    }
+
+    // COLLECTION VARIABLE CONFIRMED
+    // We now have definitive knowledge:
+    // - It's a registered variable (not a function)
+    // - It has a collection inline type
+    // - We can safely transform as element access
+    me.christianrobert.orapgsync.transformer.inline.InlineTypeDefinition inlineType = varDef.getInlineType();
+
+    // Check argument pattern
+    PlSqlParser.ArgumentContext arg = arguments.get(0);
+    if (arg.expression() == null) {
+      return null;
+    }
+
+    String argValue = b.visit(arg.expression());
+
+    // TYPE-AWARE RESOLUTION (Phase 4 - Variable Scope Tracking)
+    // Use actual collection type information instead of argument heuristics
+    // This correctly handles:
+    // - INDEX BY VARCHAR2 with variable keys: v_map(v_key) → map access
+    // - INDEX BY PLS_INTEGER with string literals: v_array('10') → array access
+
+    if (inlineType.isAssociativeArray()) {
+      // INDEX BY collection - check key type to determine access pattern
+      String indexKeyType = inlineType.getIndexKeyType();
+
+      if (isStringIndexKeyType(indexKeyType)) {
+        // INDEX BY VARCHAR2/STRING/CHAR → use ->> (map access, returns text)
+        // No index conversion needed for string-keyed maps
+        // Examples:
+        //   v_map('key') → (v_map->>'key')
+        //   v_map(v_key) → (v_map->>v_key)
+
+        // Build map access expression
+        return "( " + variableName + " ->> " + argValue + " )";
+      } else {
+        // INDEX BY PLS_INTEGER/BINARY_INTEGER → use -> (array access, returns jsonb)
+        // Apply 1-based → 0-based index conversion
+        // Examples:
+        //   v_array(1) → (v_array->0)
+        //   v_array(i) → (v_array->(i-1))
+        //   v_array('10') → (v_array->9)  -- string literal converted to int
+
+        return buildNumericArrayAccess(variableName, argValue);
+      }
+    } else {
+      // TABLE OF or VARRAY - always numeric array access
+      // Apply 1-based → 0-based index conversion
+      // Examples:
+      //   v_nums(1) → (v_nums->0)
+      //   v_nums(i) → (v_nums->(i-1))
+
+      return buildNumericArrayAccess(variableName, argValue);
+    }
   }
 }

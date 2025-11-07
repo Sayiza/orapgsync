@@ -93,7 +93,18 @@ public class VisitAssignment_statement {
             }
         }
 
-        // STEP 4: Normal assignment (not a package variable, not an inline type field)
+        // STEP 3.5: Check if LHS is a collection element assignment (Phase 1C.5 + 1D)
+        // Pattern: v_nums(1) := value (array) or v_map('key') := value (map)
+        // Transform: v_nums := jsonb_set(v_nums, '{0}', to_jsonb(value)) (1-based → 0-based for arrays)
+        // Transform: v_map := jsonb_set(v_map, '{key}', to_jsonb(value)) (no index adjustment for maps)
+        if (ctx.general_element() != null) {
+            String collectionAssignment = tryTransformCollectionElementAssignment(ctx.general_element(), ctx, b);
+            if (collectionAssignment != null) {
+                return collectionAssignment;
+            }
+        }
+
+        // STEP 4: Normal assignment (not a package variable, not an inline type field, not a collection element)
         StringBuilder result = new StringBuilder();
         result.append(leftSide);
         result.append(" := ");
@@ -246,5 +257,136 @@ public class VisitAssignment_statement {
         // - NULL: Handled by to_jsonb()
         // - Expressions: Type inference determines type
         return value;
+    }
+
+    /**
+     * Tries to transform a collection element assignment to jsonb_set call (Phase 1C.5 + 1D).
+     *
+     * <p>Detects and transforms collection element assignment patterns:
+     * <ul>
+     *   <li>Array (TABLE OF/VARRAY): v_nums(1) := 100 → v_nums := jsonb_set(v_nums, '{0}', to_jsonb(100))</li>
+     *   <li>Map (INDEX BY): v_map('dept10') := 'Eng' → v_map := jsonb_set(v_map, '{dept10}', to_jsonb('Eng'))</li>
+     * </ul>
+     *
+     * <p>Detection logic:
+     * <ol>
+     *   <li>Check if general_element is a simple part (no dot navigation)</li>
+     *   <li>Check if it has exactly ONE argument (collection element access)</li>
+     *   <li>Determine if argument is string literal (map) or numeric (array)</li>
+     *   <li>Build jsonb_set call with appropriate path</li>
+     * </ol>
+     *
+     * @param elemCtx General element context (LHS)
+     * @param assignCtx Assignment statement context (for RHS)
+     * @param b PostgreSQL code builder
+     * @return Transformed jsonb_set call, or null if not a collection element assignment
+     */
+    private static String tryTransformCollectionElementAssignment(
+            PlSqlParser.General_elementContext elemCtx,
+            PlSqlParser.Assignment_statementContext assignCtx,
+            PostgresCodeBuilder b) {
+
+        // Check if this is a simple element (no nested general_element = no dot navigation)
+        if (elemCtx.general_element() != null) {
+            return null; // Dotted access, not a simple collection element
+        }
+
+        // Get the parts
+        java.util.List<PlSqlParser.General_element_partContext> parts = elemCtx.general_element_part();
+        if (parts == null || parts.size() != 1) {
+            return null; // Must be exactly one part
+        }
+
+        PlSqlParser.General_element_partContext part = parts.get(0);
+
+        // Must have exactly ONE argument (collection element access)
+        java.util.List<PlSqlParser.Function_argumentContext> funcArgCtxList = part.function_argument();
+        if (funcArgCtxList == null || funcArgCtxList.isEmpty()) {
+            return null; // No arguments
+        }
+
+        PlSqlParser.Function_argumentContext funcArgCtx = funcArgCtxList.get(0);
+        java.util.List<PlSqlParser.ArgumentContext> arguments = funcArgCtx.argument();
+        if (arguments == null || arguments.size() != 1) {
+            return null; // Must be exactly one argument for element access
+        }
+
+        // Get variable name
+        String variableName = part.id_expression().getText();
+
+        // Transform argument expression
+        PlSqlParser.ArgumentContext arg = arguments.get(0);
+        if (arg.expression() == null) {
+            return null;
+        }
+
+        String argValue = b.visit(arg.expression());
+
+        // Transform RHS expression
+        String rightSide = b.visit(assignCtx.expression());
+        String castedValue = addExplicitCastForLiterals(rightSide);
+
+        // Determine if this is array or map access based on argument type
+        boolean isStringKey = isStringLiteral(argValue);
+
+        String pathExpression;
+        if (isStringKey) {
+            // MAP ACCESS: v_map('dept10') := value → v_map := jsonb_set(v_map, '{dept10}', to_jsonb(value))
+            // Extract string value (remove quotes)
+            String keyValue = argValue.substring(1, argValue.length() - 1);
+            pathExpression = "'{ " + keyValue + " }'";
+        } else {
+            // ARRAY ACCESS: v_nums(1) := value → v_nums := jsonb_set(v_nums, '{0}', to_jsonb(value))
+            // Apply 1-based → 0-based index conversion
+
+            // Check if argument is a simple numeric literal
+            boolean isNumericLiteral = argValue.matches("\\d+");
+
+            String indexExpression;
+            if (isNumericLiteral) {
+                // Simple numeric literal: v_nums(1) → '{0}'
+                int oracleIndex = Integer.parseInt(argValue);
+                int postgresIndex = oracleIndex - 1;
+                indexExpression = String.valueOf(postgresIndex);
+            } else {
+                // Variable or expression: v_nums(i) → '{' || (i - 1) || '}'
+                // Use PostgreSQL concatenation to build dynamic path
+                // Note: jsonb_set requires text array for path, so we use text[] constructor
+                // Actually, jsonb_set accepts text path like '{0}' so we need to build it dynamically
+                // For Phase 1C.5, we'll use a simpler approach with array notation
+                indexExpression = "' || ( " + argValue + " - 1 ) || '";
+            }
+
+            pathExpression = "'{ " + indexExpression + " }'";
+        }
+
+        // Build jsonb_set call
+        // Syntax: variable := jsonb_set(variable, path, to_jsonb(value))
+        StringBuilder result = new StringBuilder();
+        result.append(variableName);
+        result.append(" := jsonb_set( ");
+        result.append(variableName);
+        result.append(" , ");
+        result.append(pathExpression);
+        result.append(" , to_jsonb( ");
+        result.append(castedValue);
+        result.append(" ) )");
+
+        return result.toString();
+    }
+
+    /**
+     * Checks if a value is a string literal (enclosed in single quotes).
+     *
+     * @param value Value to check
+     * @return true if value is a string literal
+     */
+    private static boolean isStringLiteral(String value) {
+        if (value == null || value.length() < 2) {
+            return false;
+        }
+
+        String trimmed = value.trim();
+        return trimmed.startsWith("'") && trimmed.endsWith("'");
     }
 }

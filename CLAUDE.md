@@ -621,6 +621,20 @@ Each step is unambiguous and the progression from stub to implementation is clea
 - **State management**: Jobs update StateService directly via injected dependency
 - **Naming**: Follow the two-phase naming conventions documented above
 
+### Design Philosophy
+
+**Prefer Rigorous Solutions Over Heuristics:**
+- When planning new features, always think about rigorous, deterministic solutions first
+- Avoid heuristic-based detection or pattern matching when proper type information is available
+- Invest in proper infrastructure (scope tracking, type analysis, metadata indices) rather than quick heuristic shortcuts
+- Heuristics lead to bugs and maintenance burden - deterministic logic is worth the upfront investment
+- **Example:** Variable scope tracking replaced heuristic variable detection, fixing critical function call misidentification bugs
+
+**Manual Tracking Tools:**
+- `TODO.md` is for manual tracking by the user only - **DO NOT update it automatically**
+- Use the TodoWrite tool for temporary session-based task tracking during implementation
+- User maintains TODO.md for long-term project planning and feature requests
+
 ### Documentation Policy
 
 **CRITICAL: Always update documentation when completing implementation steps**

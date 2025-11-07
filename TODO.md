@@ -25,4 +25,4 @@
 [x] evaluate usage of s/get_config for package variable replacement!
 [x] insert update delete migration, basics are ok
 [ ] complex types to json - sync with package needs
-[ ] 
+[ ] test failures - compare to plan inline

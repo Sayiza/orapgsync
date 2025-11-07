@@ -1,9 +1,12 @@
 package me.christianrobert.orapgsync.transformer.context;
 
 import me.christianrobert.orapgsync.transformer.inline.InlineTypeDefinition;
+import me.christianrobert.orapgsync.transformer.inline.TypeCategory;
 import me.christianrobert.orapgsync.transformer.packagevariable.PackageContext;
 import me.christianrobert.orapgsync.transformer.type.TypeEvaluator;
 
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -64,6 +67,153 @@ import java.util.Set;
  */
 public class TransformationContext {
 
+    // ========== Variable Scope Tracking (Inner Classes) ==========
+
+    /**
+     * Represents a single scope level for local variables.
+     *
+     * <p>Scopes are organized in a stack: function scope → nested block → loop, etc.
+     * Each scope has its own set of variable definitions.</p>
+     *
+     * <p><strong>Example scope hierarchy:</strong></p>
+     * <pre>
+     * Function scope: v_total, v_count
+     *   ↳ IF block scope: v_temp
+     *     ↳ Loop scope: i (loop variable)
+     * </pre>
+     */
+    public static class VariableScope {
+        private final Map<String, VariableDefinition> variables = new HashMap<>();
+        private final String scopeName;
+
+        public VariableScope(String scopeName) {
+            this.scopeName = scopeName;
+        }
+
+        public void addVariable(String name, VariableDefinition definition) {
+            variables.put(name.toLowerCase(), definition);
+        }
+
+        public VariableDefinition getVariable(String name) {
+            return variables.get(name.toLowerCase());
+        }
+
+        public boolean hasVariable(String name) {
+            return variables.containsKey(name.toLowerCase());
+        }
+
+        public String getScopeName() {
+            return scopeName;
+        }
+
+        public Map<String, VariableDefinition> getVariables() {
+            return variables;
+        }
+
+        @Override
+        public String toString() {
+            return "VariableScope{" +
+                    "scopeName='" + scopeName + '\'' +
+                    ", variables=" + variables.size() +
+                    '}';
+        }
+    }
+
+    /**
+     * Metadata about a local variable declaration.
+     *
+     * <p>Stores type information, inline type references, and other metadata
+     * needed for accurate transformation of variable references.</p>
+     *
+     * <p><strong>Examples:</strong></p>
+     * <ul>
+     *   <li>Simple variable: {@code v_count NUMBER} → postgresType="numeric", inlineType=null</li>
+     *   <li>RECORD variable: {@code v_emp employee_rec} → inlineType=InlineTypeDefinition(RECORD)</li>
+     *   <li>Collection: {@code v_nums num_array_t} → inlineType=InlineTypeDefinition(TABLE OF)</li>
+     * </ul>
+     */
+    public static class VariableDefinition {
+        private final String variableName;
+        private final String oracleType;
+        private final String postgresType;
+        private final boolean isConstant;
+        private final String defaultValue;
+        private final InlineTypeDefinition inlineType;  // null if not an inline type
+
+        public VariableDefinition(String variableName,
+                                   String oracleType,
+                                   String postgresType,
+                                   boolean isConstant,
+                                   String defaultValue,
+                                   InlineTypeDefinition inlineType) {
+            this.variableName = variableName;
+            this.oracleType = oracleType;
+            this.postgresType = postgresType;
+            this.isConstant = isConstant;
+            this.defaultValue = defaultValue;
+            this.inlineType = inlineType;
+        }
+
+        public String getVariableName() {
+            return variableName;
+        }
+
+        public String getOracleType() {
+            return oracleType;
+        }
+
+        public String getPostgresType() {
+            return postgresType;
+        }
+
+        public boolean isConstant() {
+            return isConstant;
+        }
+
+        public String getDefaultValue() {
+            return defaultValue;
+        }
+
+        public InlineTypeDefinition getInlineType() {
+            return inlineType;
+        }
+
+        public boolean hasInlineType() {
+            return inlineType != null;
+        }
+
+        /**
+         * Checks if this variable is a RECORD type (inline or global).
+         */
+        public boolean isRecord() {
+            return inlineType != null && inlineType.getCategory() == TypeCategory.RECORD;
+        }
+
+        /**
+         * Checks if this variable is a collection (TABLE OF, VARRAY, INDEX BY).
+         */
+        public boolean isCollection() {
+            if (inlineType == null) {
+                return false;
+            }
+            TypeCategory category = inlineType.getCategory();
+            return category == TypeCategory.TABLE_OF ||
+                   category == TypeCategory.VARRAY ||
+                   category == TypeCategory.INDEX_BY;
+        }
+
+        @Override
+        public String toString() {
+            return "VariableDefinition{" +
+                    "variableName='" + variableName + '\'' +
+                    ", oracleType='" + oracleType + '\'' +
+                    ", postgresType='" + postgresType + '\'' +
+                    ", isConstant=" + isConstant +
+                    ", inlineType=" + (inlineType != null ? inlineType.getCategory() : "null") +
+                    '}';
+        }
+    }
+
     // ========== Layer 1: Immutable Global Context ==========
 
     private final String currentSchema;
@@ -103,12 +253,28 @@ public class TransformationContext {
     private final Map<String, String> tableAliases;  // alias → table name (per query)
     private final Set<String> cteNames;  // CTE names (from WITH clause)
 
-    // Future: Nested block context for exception handling, variable scoping
-    // When implementing nested blocks (DECLARE...BEGIN...END inside functions), add:
-    // - private final Deque<BlockContext> blockStack;  // Stack of nested blocks
-    // - public void enterBlock(BlockContext block);
-    // - public void exitBlock();
-    // This will enable proper scoping for variables, exceptions, and labels.
+    // ========== Variable Scope Stack (Implemented) ==========
+
+    /**
+     * Stack of variable scopes for tracking local variables during transformation.
+     *
+     * <p><strong>Scope hierarchy (bottom to top):</strong></p>
+     * <ol>
+     *   <li>Function scope (parameters + DECLARE variables)</li>
+     *   <li>Nested block scopes (IF, LOOP, anonymous DECLARE blocks)</li>
+     *   <li>Loop scopes (FOR loop variables)</li>
+     * </ol>
+     *
+     * <p><strong>Lifecycle:</strong></p>
+     * <ul>
+     *   <li>Push function scope when starting function transformation</li>
+     *   <li>Push/pop nested scopes as entering/exiting blocks</li>
+     *   <li>Lookup searches from top to bottom (innermost to outermost)</li>
+     * </ul>
+     *
+     * <p>See VARIABLE_SCOPE_TRACKING_PLAN.md for full architecture.</p>
+     */
+    private final Deque<VariableScope> variableScopeStack;
 
     /**
      * Creates context with minimal parameters (for SQL views without package context).
@@ -168,6 +334,7 @@ public class TransformationContext {
         // Layer 3: Query-level context (mutable during transformation)
         this.tableAliases = new HashMap<>();
         this.cteNames = new HashSet<>();
+        this.variableScopeStack = new ArrayDeque<>();
     }
 
     // ========== Layer 1: Global Context Accessors ==========
@@ -494,5 +661,172 @@ public class TransformationContext {
         // TODO: Implement type conversion
         // For now, pass through as-is
         return oracleType;
+    }
+
+    // ========== Variable Scope Management ==========
+
+    /**
+     * Pushes a new variable scope onto the stack.
+     *
+     * <p><strong>Usage:</strong></p>
+     * <ul>
+     *   <li>Call when entering a function: {@code pushVariableScope("function:calculate_salary")}</li>
+     *   <li>Call when entering a nested block: {@code pushVariableScope("if-block")}</li>
+     *   <li>Call when entering a loop: {@code pushVariableScope("for-loop")}</li>
+     * </ul>
+     *
+     * <p><strong>Example:</strong></p>
+     * <pre>
+     * // At function start
+     * context.pushVariableScope("function:" + functionName);
+     * // Register parameters and DECLARE variables
+     * context.registerVariable("p_salary", new VariableDefinition(...));
+     * context.registerVariable("v_bonus", new VariableDefinition(...));
+     * </pre>
+     *
+     * @param scopeName Descriptive name for this scope (for debugging)
+     */
+    public void pushVariableScope(String scopeName) {
+        variableScopeStack.push(new VariableScope(scopeName));
+    }
+
+    /**
+     * Pops the current variable scope from the stack.
+     *
+     * <p>Call when exiting a block, loop, or function. Ensures proper
+     * variable scoping and cleanup.</p>
+     *
+     * <p><strong>Usage:</strong></p>
+     * <pre>
+     * try {
+     *     context.pushVariableScope("if-block");
+     *     // ... transform block contents ...
+     * } finally {
+     *     context.popVariableScope();  // Always pop in finally
+     * }
+     * </pre>
+     *
+     * @throws IllegalStateException if scope stack is empty
+     */
+    public void popVariableScope() {
+        if (variableScopeStack.isEmpty()) {
+            throw new IllegalStateException("Cannot pop variable scope: stack is empty");
+        }
+        variableScopeStack.pop();
+    }
+
+    /**
+     * Registers a variable in the current scope.
+     *
+     * <p><strong>Usage:</strong></p>
+     * <pre>
+     * // Simple variable: v_count NUMBER := 0;
+     * context.registerVariable("v_count", new VariableDefinition(
+     *     "v_count", "NUMBER", "numeric", false, "0", null
+     * ));
+     *
+     * // RECORD variable: v_emp employee_rec;
+     * InlineTypeDefinition recordType = context.resolveInlineType("employee_rec");
+     * context.registerVariable("v_emp", new VariableDefinition(
+     *     "v_emp", "employee_rec", "jsonb", false, null, recordType
+     * ));
+     *
+     * // Collection: v_nums num_array_t;
+     * InlineTypeDefinition arrayType = context.resolveInlineType("num_array_t");
+     * context.registerVariable("v_nums", new VariableDefinition(
+     *     "v_nums", "num_array_t", "jsonb", false, null, arrayType
+     * ));
+     * </pre>
+     *
+     * @param name Variable name
+     * @param definition Variable metadata
+     * @throws IllegalStateException if no scope is active
+     */
+    public void registerVariable(String name, VariableDefinition definition) {
+        if (variableScopeStack.isEmpty()) {
+            throw new IllegalStateException("Cannot register variable: no active scope. Call pushVariableScope() first.");
+        }
+        variableScopeStack.peek().addVariable(name, definition);
+    }
+
+    /**
+     * Looks up a variable in the scope chain (innermost to outermost).
+     *
+     * <p>Searches from the top of the stack (current scope) down to the bottom
+     * (function scope). Returns the first match found.</p>
+     *
+     * <p><strong>Example scope chain lookup:</strong></p>
+     * <pre>
+     * Stack (top to bottom):
+     *   Loop scope: i
+     *   IF block scope: v_temp
+     *   Function scope: v_count, v_total
+     *
+     * lookupVariable("i") → Loop scope (found in innermost scope)
+     * lookupVariable("v_temp") → IF block scope
+     * lookupVariable("v_count") → Function scope
+     * lookupVariable("v_missing") → null (not found in any scope)
+     * </pre>
+     *
+     * @param name Variable name to look up
+     * @return VariableDefinition or null if not found in any scope
+     */
+    public VariableDefinition lookupVariable(String name) {
+        if (name == null) {
+            return null;
+        }
+
+        // Search from innermost to outermost scope
+        for (VariableScope scope : variableScopeStack) {
+            VariableDefinition varDef = scope.getVariable(name);
+            if (varDef != null) {
+                return varDef;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Checks if a name is a local variable in any active scope.
+     *
+     * <p>This is the key method that replaces heuristic detection.
+     * Instead of guessing based on naming patterns, we now have
+     * deterministic knowledge of all local variables.</p>
+     *
+     * <p><strong>Usage in transformation:</strong></p>
+     * <pre>
+     * // OLD APPROACH (heuristic - WRONG):
+     * if (looksLikeVariable(identifier)) {
+     *     // Treat as variable - but might be a function!
+     * }
+     *
+     * // NEW APPROACH (deterministic - CORRECT):
+     * if (context.isLocalVariable(identifier)) {
+     *     VariableDefinition varDef = context.lookupVariable(identifier);
+     *     if (varDef.isCollection()) {
+     *         // Transform as collection element access
+     *     }
+     * } else {
+     *     // Transform as function call
+     * }
+     * </pre>
+     *
+     * @param name Name to check
+     * @return true if this is a registered local variable
+     */
+    public boolean isLocalVariable(String name) {
+        return lookupVariable(name) != null;
+    }
+
+    /**
+     * Gets the current variable scope stack depth.
+     *
+     * <p>Useful for debugging and validation. Depth 0 means no scopes active.</p>
+     *
+     * @return Number of active scopes
+     */
+    public int getVariableScopeDepth() {
+        return variableScopeStack.size();
     }
 }

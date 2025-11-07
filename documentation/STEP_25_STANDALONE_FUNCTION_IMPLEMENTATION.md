@@ -776,11 +776,19 @@ END;
 - 🔄 **Explicit cursor operations**: OPEN, FETCH, CLOSE (infrastructure complete, testing in progress)
 
 **Next Step Priority Recommendations:**
-1. **Finish cursor attributes testing** - HIGH PRIORITY, infrastructure complete
-2. **OUT/INOUT in call statements** - HIGH IMPACT, very common pattern
-3. **Nested blocks** (anonymous DECLARE...BEGIN...END) - LOW IMPACT, rare usage, needed for Exception Phase 3.2
-4. **Named parameters** in function calls - MEDIUM IMPACT, moderate usage
+1. **Variable Scope Tracking Infrastructure** - 🔥 CRITICAL PRIORITY
+   - See: [VARIABLE_SCOPE_TRACKING_PLAN.md](VARIABLE_SCOPE_TRACKING_PLAN.md)
+   - Unblocks: RECORD RHS field access, collection element access fixes
+   - Fixes: Function call misidentification bugs (2 failing tests in `PostgresPlSqlCallStatementValidationTest`)
+   - Replaces heuristic detection with deterministic scope lookups
+   - Estimated effort: 2-3 days (13-18 hours)
+   - **Impact:** Foundational for all variable-dependent features (RECORD access, collections, nested blocks)
 
-**Recommendation:** Complete cursor attributes testing, then prioritize OUT/INOUT call parameters
+2. **Finish cursor attributes testing** - HIGH PRIORITY, infrastructure complete
+3. **OUT/INOUT in call statements** - HIGH IMPACT, very common pattern
+4. **Nested blocks** (anonymous DECLARE...BEGIN...END) - LOW IMPACT, rare usage, needed for Exception Phase 3.2
+5. **Named parameters** in function calls - MEDIUM IMPACT, moderate usage
 
-**Long-term Goal:** 95%+ coverage with cursor features complete, call statement improvements, and collections
+**Recommendation:** **CRITICAL:** Implement variable scope tracking first (fixes critical bugs + unblocks multiple features), then complete cursor attributes testing, then prioritize OUT/INOUT call parameters
+
+**Long-term Goal:** 95%+ coverage with proper variable scope foundation, cursor features complete, call statement improvements, and collections
