@@ -170,6 +170,37 @@ public class VisitGeneralElement {
       }
     }
 
+    // STEP 0.7: Check for collection method calls (Phase 1E) - RHS only
+    // Pattern: variable.COUNT, variable.EXISTS(i), variable.FIRST, variable.LAST, variable.DELETE(i)
+    // Only process if not in assignment target (collections methods are read-only operations)
+    if (!b.isInAssignmentTarget() && parts.size() == 2) {
+      // DETERMINISTIC LOOKUP (Phase 1E - uses variable scope tracking)
+      // Check if first part is a local collection variable
+      String variableName = parts.get(0).id_expression().getText();
+      TransformationContext context = b.getContext();
+
+      // Context can be null in SQL-only transformations (no PL/SQL)
+      if (context != null) {
+        me.christianrobert.orapgsync.transformer.context.TransformationContext.VariableDefinition varDef =
+            context.lookupVariable(variableName);
+
+        if (varDef != null && varDef.isCollection()) {
+          // IT'S A COLLECTION METHOD CALL!
+          // We have definitive knowledge:
+          // - It's a registered variable (not a table)
+          // - It has a collection inline type (TABLE OF, VARRAY, or INDEX BY)
+          // - We can safely check for collection methods
+          String methodName = parts.get(1).id_expression().getText().toUpperCase();
+          PlSqlParser.General_element_partContext methodPart = parts.get(1);
+          boolean hasArguments = methodPart.function_argument() != null && !methodPart.function_argument().isEmpty();
+
+          if (isCollectionMethod(methodName, hasArguments)) {
+            return handleCollectionMethod(variableName, methodName, methodPart, b);
+          }
+        }
+      }
+    }
+
     // Check for sequence NEXTVAL/CURRVAL calls (before function call check)
     // Pattern: sequence_name.NEXTVAL or schema.sequence_name.NEXTVAL
     if (isSequenceCall(parts)) {
@@ -1159,7 +1190,8 @@ public class VisitGeneralElement {
    * @param argValue Index argument expression (already transformed)
    * @return PostgreSQL jsonb array access expression
    */
-  private static String buildNumericArrayAccess(String variableName, String argValue) {
+  private static String buildNumericArrayAccess(String variableName, String argValue,
+                                                 me.christianrobert.orapgsync.transformer.inline.InlineTypeDefinition inlineType) {
     // Check if argument is a simple numeric literal
     boolean isNumericLiteral = argValue.matches("\\d+");
 
@@ -1170,14 +1202,30 @@ public class VisitGeneralElement {
       int postgresIndex = oracleIndex - 1;
       indexExpression = String.valueOf(postgresIndex);
     } else {
-      // Variable, expression, or string literal: v_nums(i) → v_nums->(i - 1)
-      // Note: String literals like '10' will be converted to int by PostgreSQL
-      indexExpression = "( " + argValue + " - 1 )";
+      // Variable, expression, or string literal: v_nums(i) → v_nums->((i - 1)::int)
+      // Cast to int because -> operator requires integer index
+      indexExpression = "( " + argValue + " - 1 )::int";
     }
 
-    // Build array access: (variable->index)
-    // Use -> operator which returns jsonb (will be cast to element type later)
-    return "( " + variableName + "->" + indexExpression + " )";
+    // Get PostgreSQL element type for casting
+    String oracleElementType = inlineType.getElementType();
+    String pgElementType;
+    if (oracleElementType != null) {
+      // Convert Oracle type to PostgreSQL type (NUMBER → numeric, VARCHAR2 → text, etc.)
+      pgElementType = me.christianrobert.orapgsync.core.tools.TypeConverter.toPostgre(oracleElementType);
+    } else {
+      // Fallback to text if element type unknown
+      pgElementType = "text";
+    }
+
+    // Build array access with proper type casting:
+    // Use ->> operator (returns text) and cast to element type
+    // This ensures the result can be used in arithmetic operations, comparisons, etc.
+    // Examples:
+    //   v_nums(1) → (v_nums->>0)::numeric
+    //   v_nums(i) → (v_nums->>((i - 1)::int))::numeric
+    //   v_items(1) → (v_items->>0)::text
+    return "( " + variableName + "->>" + indexExpression + " )::" + pgElementType;
   }
 
   /**
@@ -1416,7 +1464,7 @@ public class VisitGeneralElement {
         //   v_array(i) → (v_array->(i-1))
         //   v_array('10') → (v_array->9)  -- string literal converted to int
 
-        return buildNumericArrayAccess(variableName, argValue);
+        return buildNumericArrayAccess(variableName, argValue, inlineType);
       }
     } else {
       // TABLE OF or VARRAY - always numeric array access
@@ -1425,7 +1473,150 @@ public class VisitGeneralElement {
       //   v_nums(1) → (v_nums->0)
       //   v_nums(i) → (v_nums->(i-1))
 
-      return buildNumericArrayAccess(variableName, argValue);
+      return buildNumericArrayAccess(variableName, argValue, inlineType);
+    }
+  }
+
+  /**
+   * Checks if a method name is a valid Oracle collection method.
+   *
+   * <p>Oracle collection methods supported:
+   * - COUNT (no args) - Returns number of elements
+   * - EXISTS(n) (with args) - Checks if element at index n exists
+   * - FIRST (no args) - Returns first index (always 1 for Oracle)
+   * - LAST (no args) - Returns last index (same as COUNT)
+   * - DELETE(n) (with args) - Deletes element at index n
+   *
+   * @param methodName The method name (uppercase)
+   * @param hasArguments Whether the method call has arguments
+   * @return true if this is a recognized collection method with correct argument pattern
+   */
+  private static boolean isCollectionMethod(String methodName, boolean hasArguments) {
+    switch (methodName) {
+      case "COUNT":
+      case "FIRST":
+      case "LAST":
+        // These methods never have arguments
+        return !hasArguments;
+
+      case "EXISTS":
+      case "DELETE":
+        // These methods always have arguments
+        return hasArguments;
+
+      default:
+        return false;
+    }
+  }
+
+  /**
+   * Handles Oracle collection method calls and transforms them to PostgreSQL equivalents.
+   *
+   * <p>Transformations (for jsonb collections):
+   * - v.COUNT → jsonb_array_length(v)
+   * - v.EXISTS(i) → jsonb_typeof(v->(i-1)) IS NOT NULL
+   * - v.FIRST → 1 (constant - Oracle arrays always start at 1)
+   * - v.LAST → jsonb_array_length(v)
+   * - v.DELETE(i) → v - (i-1) (remove element by index)
+   *
+   * @param variableName The collection variable name
+   * @param methodName The collection method name (uppercase)
+   * @param methodPart The AST part containing method call details
+   * @param b PostgreSQL code builder
+   * @return Transformed PostgreSQL expression
+   */
+  private static String handleCollectionMethod(
+      String variableName,
+      String methodName,
+      PlSqlParser.General_element_partContext methodPart,
+      PostgresCodeBuilder b) {
+
+    switch (methodName) {
+      case "COUNT":
+        // v_nums.COUNT → jsonb_array_length(v_nums)
+        return "jsonb_array_length( " + variableName + " )";
+
+      case "FIRST":
+        // v_nums.FIRST → 1 (Oracle collections always start at index 1)
+        return "1";
+
+      case "LAST":
+        // v_nums.LAST → jsonb_array_length(v_nums)
+        // Last index is same as count (1-based indexing)
+        return "jsonb_array_length( " + variableName + " )";
+
+      case "EXISTS":
+        // v_nums.EXISTS(i) → jsonb_typeof(v_nums->(i-1)) IS NOT NULL
+        // Extract argument and apply 1-based → 0-based conversion
+        String existsArg = extractFirstArgument(methodPart, b);
+        String zeroBasedIndex = convertToZeroBasedIndex(existsArg);
+        return "jsonb_typeof( " + variableName + " -> " + zeroBasedIndex + " ) IS NOT NULL";
+
+      case "DELETE":
+        // v_nums.DELETE(i) → v_nums - (i-1)
+        // PostgreSQL jsonb - operator removes element by index (0-based)
+        String deleteArg = extractFirstArgument(methodPart, b);
+        String deleteIndex = convertToZeroBasedIndex(deleteArg);
+        return variableName + " - " + deleteIndex;
+
+      default:
+        throw new TransformationException("Unsupported collection method: " + methodName);
+    }
+  }
+
+  /**
+   * Extracts the first argument from a function call.
+   *
+   * @param methodPart The method part with arguments
+   * @param b PostgreSQL code builder
+   * @return Transformed argument expression
+   */
+  private static String extractFirstArgument(
+      PlSqlParser.General_element_partContext methodPart,
+      PostgresCodeBuilder b) {
+    List<PlSqlParser.Function_argumentContext> funcArgList = methodPart.function_argument();
+    if (funcArgList == null || funcArgList.isEmpty()) {
+      throw new TransformationException("Collection method requires an argument");
+    }
+
+    // function_argument contains all arguments: '(' (argument (',' argument)*)? ')'
+    PlSqlParser.Function_argumentContext funcArgCtx = funcArgList.get(0);
+    List<PlSqlParser.ArgumentContext> arguments = funcArgCtx.argument();
+
+    if (arguments == null || arguments.isEmpty()) {
+      throw new TransformationException("Collection method requires an argument");
+    }
+
+    // Get first argument and transform its expression
+    PlSqlParser.ArgumentContext firstArg = arguments.get(0);
+    if (firstArg.expression() != null) {
+      return b.visit(firstArg.expression());
+    }
+
+    throw new TransformationException("Invalid argument in collection method call");
+  }
+
+  /**
+   * Converts a 1-based Oracle index to 0-based PostgreSQL index.
+   *
+   * <p>Transformation rules:
+   * - Numeric literal: subtract 1 directly (e.g., "1" → "0", "5" → "4")
+   * - Variable/expression: wrap in parentheses and subtract 1 (e.g., "i" → "(i-1)")
+   *
+   * @param indexExpr The 1-based index expression
+   * @return The 0-based index expression
+   */
+  private static String convertToZeroBasedIndex(String indexExpr) {
+    // Try to parse as integer literal
+    try {
+      int oracleIndex = Integer.parseInt(indexExpr.trim());
+      int pgIndex = oracleIndex - 1;
+      return String.valueOf(pgIndex);
+    } catch (NumberFormatException e) {
+      // Not a literal - it's a variable or expression
+      // Wrap in parentheses for safe arithmetic and cast to integer
+      // (-> operator requires integer index, not numeric)
+      return "( " + indexExpr + " - 1 )::int";
     }
   }
 }

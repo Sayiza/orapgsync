@@ -95,10 +95,10 @@ public class PostgresInlineTypeCollectionElementTest {
         String result = transform(oracleSql);
         String normalized = result.replaceAll("\\s+", " ");
 
-        // Array element access: v_nums(1) → (v_nums->0)
-        // Oracle 1-based → PostgreSQL 0-based
-        assertTrue(normalized.contains("v_result := ( v_nums->0 )"),
-            "Array access should convert 1-based to 0-based: " + result);
+        // Array element access: v_nums(1) → (v_nums->>0)::numeric
+        // Oracle 1-based → PostgreSQL 0-based with type casting
+        assertTrue(normalized.contains("v_result := ( v_nums->>0 )::numeric"),
+            "Array access should convert 1-based to 0-based with type cast: " + result);
     }
 
     @Test
@@ -118,9 +118,9 @@ public class PostgresInlineTypeCollectionElementTest {
         String result = transform(oracleSql);
         String normalized = result.replaceAll("\\s+", " ");
 
-        // Array element access with variable: v_nums(i) → (v_nums->(i - 1))
-        assertTrue(normalized.contains("v_result := ( v_nums->( i - 1 ) )"),
-            "Array access with variable should subtract 1: " + result);
+        // Array element access with variable: v_nums(i) → (v_nums->>((i - 1)::int))::numeric
+        assertTrue(normalized.contains("v_result := ( v_nums->>( i - 1 )::int )::numeric"),
+            "Array access with variable should subtract 1 and cast index to int: " + result);
     }
 
     @Test
@@ -139,13 +139,13 @@ public class PostgresInlineTypeCollectionElementTest {
         String result = transform(oracleSql);
         String normalized = result.replaceAll("\\s+", " ");
 
-        // Multiple array accesses in expression
-        assertTrue(normalized.contains("( v_nums->0 )"),
-            "First array access should be 0-based");
-        assertTrue(normalized.contains("( v_nums->1 )"),
-            "Second array access should be 1-based");
-        assertTrue(normalized.contains("( v_nums->2 )"),
-            "Third array access should be 2-based");
+        // Multiple array accesses in expression (with type casts for arithmetic)
+        assertTrue(normalized.contains("( v_nums->>0 )::numeric"),
+            "First array access should be 0-based with type cast");
+        assertTrue(normalized.contains("( v_nums->>1 )::numeric"),
+            "Second array access should be 1-based with type cast");
+        assertTrue(normalized.contains("( v_nums->>2 )::numeric"),
+            "Third array access should be 2-based with type cast");
     }
 
     // ========================================================================
@@ -349,8 +349,8 @@ public class PostgresInlineTypeCollectionElementTest {
             "Array assignment should work");
         assertTrue(normalized.contains("jsonb_set( v_map , '{ total }' , to_jsonb( 'Total: 100'::text ) )"),
             "Map assignment should work");
-        assertTrue(normalized.contains("v_result := ( v_nums->0 )"),
-            "Array access should work");
+        assertTrue(normalized.contains("v_result := ( v_nums->>0 )::numeric"),
+            "Array access should work with type cast");
     }
 
     @Test
@@ -370,12 +370,12 @@ public class PostgresInlineTypeCollectionElementTest {
         String result = transform(oracleSql);
         String normalized = result.replaceAll("\\s+", " ");
 
-        // Array access in IF condition
-        assertTrue(normalized.contains("IF ( v_nums->0 ) > 5 THEN"),
-            "Array access in condition should work");
+        // Array access in IF condition (with type cast for numeric comparison)
+        assertTrue(normalized.contains("IF ( v_nums->>0 )::numeric > 5 THEN"),
+            "Array access in condition should work with type cast");
 
-        // Array assignment in IF body
-        assertTrue(normalized.contains("jsonb_set( v_nums , '{ 1 }' , to_jsonb( ( v_nums->0 ) * 2 ) )"),
-            "Array assignment in IF body should work");
+        // Array assignment in IF body (with type cast for arithmetic)
+        assertTrue(normalized.contains("jsonb_set( v_nums , '{ 1 }' , to_jsonb( ( v_nums->>0 )::numeric * 2 ) )"),
+            "Array assignment in IF body should work with type cast");
     }
 }
