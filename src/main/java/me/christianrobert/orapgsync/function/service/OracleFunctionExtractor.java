@@ -2,6 +2,8 @@ package me.christianrobert.orapgsync.function.service;
 
 import me.christianrobert.orapgsync.core.job.model.function.FunctionMetadata;
 import me.christianrobert.orapgsync.core.job.model.function.FunctionParameter;
+import me.christianrobert.orapgsync.core.tools.DetailedMemoryMonitor;
+import me.christianrobert.orapgsync.core.tools.MemoryMonitor;
 import me.christianrobert.orapgsync.core.tools.UserExcluder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,10 +38,14 @@ public class OracleFunctionExtractor {
     public static List<FunctionMetadata> extractAllFunctions(Connection oracleConn, List<String> schemas) throws SQLException {
         List<FunctionMetadata> functionMetadataList = new ArrayList<>();
 
+        MemoryMonitor.logMemoryUsage("Starting function extraction");
+
         for (String schema : schemas) {
             if (UserExcluder.is2BeExclueded(schema)) {
                 continue;
             }
+
+            long beforeSchema = MemoryMonitor.logAndGetUsedMemory("Before schema: " + schema);
 
             // Step 1: Extract public functions (from ALL_PROCEDURES + ALL_ARGUMENTS)
             List<FunctionMetadata> publicFunctions = fetchFunctionsForSchema(oracleConn, schema);
@@ -50,8 +56,13 @@ public class OracleFunctionExtractor {
             List<FunctionMetadata> privateFunctions = extractPrivateFunctionsForSchema(oracleConn, schema, publicFunctions);
             functionMetadataList.addAll(privateFunctions);
             log.info("Extracted {} private functions/procedures from Oracle schema {}", privateFunctions.size(), schema);
+
+            long afterSchema = MemoryMonitor.logAndGetUsedMemory("After schema: " + schema);
+            MemoryMonitor.logMemoryDelta(beforeSchema, afterSchema, "Schema " + schema);
+            MemoryMonitor.warnIfMemoryHigh(75, "After schema: " + schema);
         }
 
+        MemoryMonitor.logMemoryUsage("Completed function extraction");
         return functionMetadataList;
     }
 
@@ -233,6 +244,8 @@ public class OracleFunctionExtractor {
      * Extracts package-private functions/procedures by parsing package bodies with ANTLR.
      * Private functions are those declared only in the package body, not in the package spec.
      *
+     * Uses streaming approach to process one package at a time to minimize memory usage.
+     *
      * @param oracleConn Oracle database connection
      * @param schema Schema name
      * @param publicFunctions List of public functions already extracted (for filtering)
@@ -264,7 +277,10 @@ public class OracleFunctionExtractor {
             ORDER BY name, line
             """;
 
-        Map<String, StringBuilder> packageBodies = new HashMap<>();
+        // Stream packages one at a time to minimize memory usage
+        String currentPackageName = null;
+        StringBuilder currentPackageBody = null;
+        int packageCount = 0;
 
         try (PreparedStatement ps = oracleConn.prepareStatement(sql)) {
             ps.setString(1, schema.toUpperCase());
@@ -274,58 +290,116 @@ public class OracleFunctionExtractor {
                     String packageName = rs.getString("name");
                     String line = rs.getString("text");
 
-                    packageBodies.computeIfAbsent(packageName, k -> new StringBuilder()).append(line);
+                    // New package detected?
+                    if (!packageName.equals(currentPackageName)) {
+                        // Process the previous package if exists
+                        if (currentPackageName != null && currentPackageBody != null) {
+                            List<FunctionMetadata> packageFunctions = parseAndExtractPackageFunctions(
+                                currentPackageName, currentPackageBody.toString(), schema, publicFunctionKeys
+                            );
+                            privateFunctions.addAll(packageFunctions);
+                            packageCount++;
+
+                            log.debug("Processed package {}.{} ({} private functions, total packages: {})",
+                                     schema, currentPackageName, packageFunctions.size(), packageCount);
+
+                            // Clear for GC
+                            currentPackageBody = null;
+
+                            // Detailed memory monitoring every 10 packages
+                            DetailedMemoryMonitor.logPeriodicStats(packageCount);
+                        }
+
+                        // Start new package
+                        currentPackageName = packageName;
+                        currentPackageBody = new StringBuilder();
+                    }
+
+                    // Append current line
+                    currentPackageBody.append(line);
+                }
+
+                // Process last package
+                if (currentPackageName != null && currentPackageBody != null) {
+                    List<FunctionMetadata> packageFunctions = parseAndExtractPackageFunctions(
+                        currentPackageName, currentPackageBody.toString(), schema, publicFunctionKeys
+                    );
+                    privateFunctions.addAll(packageFunctions);
+                    packageCount++;
+
+                    log.debug("Processed package {}.{} ({} private functions, total packages: {})",
+                             schema, currentPackageName, packageFunctions.size(), packageCount);
                 }
             }
         }
 
-        log.debug("Found {} package bodies in schema {}", packageBodies.size(), schema);
+        log.info("Completed processing {} package bodies in schema {}", packageCount, schema);
 
-        // Parse each package body and extract function declarations
-        for (Map.Entry<String, StringBuilder> entry : packageBodies.entrySet()) {
-            String packageName = entry.getKey();
-            String bodySource = entry.getValue().toString().trim();
-
-            if (bodySource.isEmpty()) {
-                continue;
-            }
-
-            // Prepend CREATE OR REPLACE for ANTLR parsing (Oracle doesn't store it)
-            String fullSource = "CREATE OR REPLACE " + bodySource;
-
-            try {
-                // Parse package body with ANTLR
-                me.christianrobert.orapgsync.transformer.parser.AntlrParser parser =
-                    new me.christianrobert.orapgsync.transformer.parser.AntlrParser();
-
-                me.christianrobert.orapgsync.transformer.parser.ParseResult parseResult =
-                    parser.parsePackageBody(fullSource);
-
-                if (parseResult.hasErrors()) {
-                    log.warn("Failed to parse package body {}.{}: {}",
-                            schema, packageName, parseResult.getErrorMessage());
-                    continue;
-                }
-
-                me.christianrobert.orapgsync.antlr.PlSqlParser.Create_package_bodyContext bodyCtx =
-                    (me.christianrobert.orapgsync.antlr.PlSqlParser.Create_package_bodyContext) parseResult.getTree();
-
-                // Extract all function/procedure declarations from package body
-                List<FunctionMetadata> bodyFunctions = extractFunctionsFromPackageBody(
-                    bodyCtx, schema, packageName, publicFunctionKeys
-                );
-
-                privateFunctions.addAll(bodyFunctions);
-
-                log.debug("Found {} private functions in package {}.{}",
-                         bodyFunctions.size(), schema, packageName);
-
-            } catch (Exception e) {
-                log.error("Error parsing package body {}.{}: {}", schema, packageName, e.getMessage(), e);
-            }
-        }
+        // Final detailed memory report
+        DetailedMemoryMonitor.logDetailedMemory("After processing all packages in schema " + schema);
+        DetailedMemoryMonitor.forceGCAndLog("End of schema " + schema);
 
         return privateFunctions;
+    }
+
+    /**
+     * Parses a single package body and extracts private functions.
+     * Separated into its own method to enable streaming and improve GC.
+     *
+     * @param packageName Name of the package
+     * @param bodySource Package body source code (without CREATE OR REPLACE)
+     * @param schema Schema name
+     * @param publicFunctionKeys Set of public function keys for filtering
+     * @return List of FunctionMetadata for private functions in this package
+     */
+    private static List<FunctionMetadata> parseAndExtractPackageFunctions(
+            String packageName, String bodySource, String schema, Set<String> publicFunctionKeys) {
+
+        List<FunctionMetadata> functions = new ArrayList<>();
+
+        if (bodySource == null || bodySource.trim().isEmpty()) {
+            return functions;
+        }
+
+        long beforeParse = MemoryMonitor.logAndGetUsedMemory("Before parsing package: " + schema + "." + packageName);
+
+        // Prepend CREATE OR REPLACE for ANTLR parsing (Oracle doesn't store it)
+        String fullSource = "CREATE OR REPLACE " + bodySource.trim();
+
+        try {
+            // Parse package body with ANTLR (creates fresh parser instance)
+            me.christianrobert.orapgsync.transformer.parser.AntlrParser parser =
+                new me.christianrobert.orapgsync.transformer.parser.AntlrParser();
+
+            me.christianrobert.orapgsync.transformer.parser.ParseResult parseResult =
+                parser.parsePackageBody(fullSource);
+
+            if (parseResult.hasErrors()) {
+                log.warn("Failed to parse package body {}.{}: {}",
+                        schema, packageName, parseResult.getErrorMessage());
+                return functions;
+            }
+
+            me.christianrobert.orapgsync.antlr.PlSqlParser.Create_package_bodyContext bodyCtx =
+                (me.christianrobert.orapgsync.antlr.PlSqlParser.Create_package_bodyContext) parseResult.getTree();
+
+            // Extract all function/procedure declarations from package body
+            List<FunctionMetadata> bodyFunctions = extractFunctionsFromPackageBody(
+                bodyCtx, schema, packageName, publicFunctionKeys
+            );
+
+            functions.addAll(bodyFunctions);
+
+            log.trace("Found {} private functions in package {}.{}", bodyFunctions.size(), schema, packageName);
+
+            long afterParse = MemoryMonitor.logAndGetUsedMemory("After parsing package: " + schema + "." + packageName);
+            MemoryMonitor.logMemoryDelta(beforeParse, afterParse, "Package parse: " + schema + "." + packageName);
+
+        } catch (Exception e) {
+            log.error("Error parsing package body {}.{}: {}", schema, packageName, e.getMessage(), e);
+        }
+
+        return functions;
     }
 
     /**

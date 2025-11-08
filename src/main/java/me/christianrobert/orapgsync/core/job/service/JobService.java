@@ -149,4 +149,18 @@ public class JobService {
     public Map<String, JobExecution<?>> getAllJobExecutions() {
         return Map.copyOf(jobExecutions);
     }
+
+    /**
+     * Clears all job executions from memory.
+     * This should be called when resetting application state to prevent memory leaks.
+     *
+     * Warning: This will clear job history and results. Only use when intentionally
+     * resetting the application state (e.g., before starting a new migration run).
+     */
+    public void resetJobs() {
+        int count = jobExecutions.size();
+        log.info("Clearing {} job executions from memory", count);
+        jobExecutions.clear();
+        log.debug("Job execution history cleared successfully");
+    }
 }

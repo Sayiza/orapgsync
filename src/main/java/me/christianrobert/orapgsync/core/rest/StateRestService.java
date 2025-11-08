@@ -6,6 +6,7 @@ import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import me.christianrobert.orapgsync.core.job.service.JobService;
 import me.christianrobert.orapgsync.core.service.StateService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,6 +21,9 @@ public class StateRestService {
 
     @Inject
     StateService stateService;
+
+    @Inject
+    JobService jobService;
 
     @GET
     public Response getCurrentState() {
@@ -52,8 +56,15 @@ public class StateRestService {
     @GET
     @Path("/reset")
     public Response resetState() {
-        log.info("Resetting application state");
+        log.info("Resetting application state and job history");
+
+        // Clear metadata state
         stateService.resetState();
-        return Response.ok(Map.of("message", "State reset successfully")).build();
+
+        // Clear job execution history (critical for preventing memory leaks)
+        jobService.resetJobs();
+
+        log.info("State and job history reset completed successfully");
+        return Response.ok(Map.of("message", "State and job history reset successfully")).build();
     }
 }
