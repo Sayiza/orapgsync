@@ -92,7 +92,7 @@ public class OracleFunctionExtractionJob extends AbstractDatabaseExtractionJob<F
 
                 try {
                     List<FunctionMetadata> schemaFunctionMetadata =
-                            OracleFunctionExtractor.extractAllFunctions(oracleConnection, List.of(schema));
+                            OracleFunctionExtractor.extractAllFunctions(oracleConnection, List.of(schema), stateService);
 
                     allFunctionMetadata.addAll(schemaFunctionMetadata);
 

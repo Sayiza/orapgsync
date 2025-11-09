@@ -2,9 +2,15 @@ package me.christianrobert.orapgsync.function.service;
 
 import me.christianrobert.orapgsync.core.job.model.function.FunctionMetadata;
 import me.christianrobert.orapgsync.core.job.model.function.FunctionParameter;
+import me.christianrobert.orapgsync.core.service.StateService;
+import me.christianrobert.orapgsync.core.tools.CodeCleaner;
 import me.christianrobert.orapgsync.core.tools.DetailedMemoryMonitor;
 import me.christianrobert.orapgsync.core.tools.MemoryMonitor;
 import me.christianrobert.orapgsync.core.tools.UserExcluder;
+import me.christianrobert.orapgsync.transformer.parser.FunctionBoundaryScanner;
+import me.christianrobert.orapgsync.transformer.parser.FunctionStubGenerator;
+import me.christianrobert.orapgsync.transformer.parser.PackageBodyReducer;
+import me.christianrobert.orapgsync.transformer.parser.PackageSegments;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -32,10 +38,11 @@ public class OracleFunctionExtractor {
      *
      * @param oracleConn Oracle database connection
      * @param schemas List of schema names to extract functions from
+     * @param stateService State service for storing segmented package functions
      * @return List of FunctionMetadata objects
      * @throws SQLException if database operations fail
      */
-    public static List<FunctionMetadata> extractAllFunctions(Connection oracleConn, List<String> schemas) throws SQLException {
+    public static List<FunctionMetadata> extractAllFunctions(Connection oracleConn, List<String> schemas, StateService stateService) throws SQLException {
         List<FunctionMetadata> functionMetadataList = new ArrayList<>();
 
         MemoryMonitor.logMemoryUsage("Starting function extraction");
@@ -52,8 +59,8 @@ public class OracleFunctionExtractor {
             functionMetadataList.addAll(publicFunctions);
             log.info("Extracted {} public functions/procedures from Oracle schema {}", publicFunctions.size(), schema);
 
-            // Step 2: Extract private functions (from package bodies via ANTLR parsing)
-            List<FunctionMetadata> privateFunctions = extractPrivateFunctionsForSchema(oracleConn, schema, publicFunctions);
+            // Step 2: Extract private functions (from package bodies via lightweight scanner)
+            List<FunctionMetadata> privateFunctions = extractPrivateFunctionsForSchema(oracleConn, schema, publicFunctions, stateService);
             functionMetadataList.addAll(privateFunctions);
             log.info("Extracted {} private functions/procedures from Oracle schema {}", privateFunctions.size(), schema);
 
@@ -241,19 +248,21 @@ public class OracleFunctionExtractor {
     }
 
     /**
-     * Extracts package-private functions/procedures by parsing package bodies with ANTLR.
+     * Extracts package-private functions/procedures by scanning package bodies with lightweight scanner.
      * Private functions are those declared only in the package body, not in the package spec.
      *
      * Uses streaming approach to process one package at a time to minimize memory usage.
+     * Stores segmented package functions (full/stub/reduced) in StateService for later use.
      *
      * @param oracleConn Oracle database connection
      * @param schema Schema name
      * @param publicFunctions List of public functions already extracted (for filtering)
+     * @param stateService State service for storing segmented package functions
      * @return List of FunctionMetadata for package-private functions
      * @throws SQLException if database operations fail
      */
     private static List<FunctionMetadata> extractPrivateFunctionsForSchema(
-            Connection oracleConn, String schema, List<FunctionMetadata> publicFunctions) throws SQLException {
+            Connection oracleConn, String schema, List<FunctionMetadata> publicFunctions, StateService stateService) throws SQLException {
 
         List<FunctionMetadata> privateFunctions = new ArrayList<>();
 
@@ -295,7 +304,7 @@ public class OracleFunctionExtractor {
                         // Process the previous package if exists
                         if (currentPackageName != null && currentPackageBody != null) {
                             List<FunctionMetadata> packageFunctions = parseAndExtractPackageFunctions(
-                                currentPackageName, currentPackageBody.toString(), schema, publicFunctionKeys
+                                currentPackageName, currentPackageBody.toString(), schema, publicFunctionKeys, stateService
                             );
                             privateFunctions.addAll(packageFunctions);
                             packageCount++;
@@ -322,7 +331,7 @@ public class OracleFunctionExtractor {
                 // Process last package
                 if (currentPackageName != null && currentPackageBody != null) {
                     List<FunctionMetadata> packageFunctions = parseAndExtractPackageFunctions(
-                        currentPackageName, currentPackageBody.toString(), schema, publicFunctionKeys
+                        currentPackageName, currentPackageBody.toString(), schema, publicFunctionKeys, stateService
                     );
                     privateFunctions.addAll(packageFunctions);
                     packageCount++;
@@ -343,17 +352,27 @@ public class OracleFunctionExtractor {
     }
 
     /**
-     * Parses a single package body and extracts private functions.
+     * Scans a single package body and extracts private functions using lightweight scanner.
+     * Stores segmented package data (full/stub/reduced) in StateService for later use.
      * Separated into its own method to enable streaming and improve GC.
+     *
+     * NEW APPROACH (Package Segmentation):
+     * 1. Clean source (remove comments)
+     * 2. Scan function boundaries (FunctionBoundaryScanner)
+     * 3. Extract full functions + generate stubs + generate reduced body
+     * 4. Store in StateService (for transformation job)
+     * 5. Parse stubs (tiny, fast) to extract metadata
+     * 6. Return only private functions
      *
      * @param packageName Name of the package
      * @param bodySource Package body source code (without CREATE OR REPLACE)
      * @param schema Schema name
      * @param publicFunctionKeys Set of public function keys for filtering
+     * @param stateService State service for storing segmented package data
      * @return List of FunctionMetadata for private functions in this package
      */
     private static List<FunctionMetadata> parseAndExtractPackageFunctions(
-            String packageName, String bodySource, String schema, Set<String> publicFunctionKeys) {
+            String packageName, String bodySource, String schema, Set<String> publicFunctionKeys, StateService stateService) {
 
         List<FunctionMetadata> functions = new ArrayList<>();
 
@@ -361,116 +380,170 @@ public class OracleFunctionExtractor {
             return functions;
         }
 
-        long beforeParse = MemoryMonitor.logAndGetUsedMemory("Before parsing package: " + schema + "." + packageName);
+        long beforeScan = MemoryMonitor.logAndGetUsedMemory("Before scanning package: " + schema + "." + packageName);
 
-        // Prepend CREATE OR REPLACE for ANTLR parsing (Oracle doesn't store it)
+        // Prepend CREATE OR REPLACE for parsing (Oracle doesn't store it in ALL_SOURCE)
         String fullSource = "CREATE OR REPLACE " + bodySource.trim();
 
         try {
-            // Parse package body with ANTLR (creates fresh parser instance)
-            me.christianrobert.orapgsync.transformer.parser.AntlrParser parser =
-                new me.christianrobert.orapgsync.transformer.parser.AntlrParser();
+            // STEP 1: Clean source (remove comments)
+            String cleanedSource = CodeCleaner.removeComments(fullSource);
+            log.trace("Cleaned package {}.{} ({} chars -> {} chars)",
+                     schema, packageName, fullSource.length(), cleanedSource.length());
 
-            me.christianrobert.orapgsync.transformer.parser.ParseResult parseResult =
-                parser.parsePackageBody(fullSource);
+            // STEP 2: Scan function boundaries (fast, lightweight)
+            FunctionBoundaryScanner scanner = new FunctionBoundaryScanner();
+            PackageSegments segments = scanner.scanPackageBody(cleanedSource);
 
-            if (parseResult.hasErrors()) {
-                log.warn("Failed to parse package body {}.{}: {}",
-                        schema, packageName, parseResult.getErrorMessage());
+            log.debug("Scanned package {}.{}: found {} functions/procedures",
+                     schema, packageName, segments.getFunctionCount());
+
+            if (segments.getFunctionCount() == 0) {
+                // No functions in this package
                 return functions;
             }
 
-            me.christianrobert.orapgsync.antlr.PlSqlParser.Create_package_bodyContext bodyCtx =
-                (me.christianrobert.orapgsync.antlr.PlSqlParser.Create_package_bodyContext) parseResult.getTree();
+            // STEP 3: Extract full functions and generate stubs
+            Map<String, String> fullSources = new HashMap<>();
+            Map<String, String> stubSources = new HashMap<>();
+            FunctionStubGenerator stubGenerator = new FunctionStubGenerator();
 
-            // Extract all function/procedure declarations from package body
-            List<FunctionMetadata> bodyFunctions = extractFunctionsFromPackageBody(
-                bodyCtx, schema, packageName, publicFunctionKeys
-            );
+            for (PackageSegments.FunctionSegment segment : segments.getFunctions()) {
+                // Extract full function source
+                String fullFunctionSource = cleanedSource.substring(segment.getStartPos(), segment.getEndPos());
+                fullSources.put(segment.getName().toLowerCase(), fullFunctionSource);
 
-            functions.addAll(bodyFunctions);
+                // Generate stub
+                String stubSource = stubGenerator.generateStub(fullFunctionSource, segment);
+                stubSources.put(segment.getName().toLowerCase(), stubSource);
 
-            log.trace("Found {} private functions in package {}.{}", bodyFunctions.size(), schema, packageName);
+                log.trace("Extracted function {}.{}.{} (full: {} chars, stub: {} chars)",
+                         schema, packageName, segment.getName(),
+                         fullFunctionSource.length(), stubSource.length());
+            }
 
-            long afterParse = MemoryMonitor.logAndGetUsedMemory("After parsing package: " + schema + "." + packageName);
-            MemoryMonitor.logMemoryDelta(beforeParse, afterParse, "Package parse: " + schema + "." + packageName);
+            // STEP 4: Generate reduced package body (all functions removed)
+            PackageBodyReducer reducer = new PackageBodyReducer();
+            String reducedBody = reducer.removeAllFunctions(cleanedSource, segments);
+
+            log.debug("Generated reduced package body for {}.{} ({} chars -> {} chars, {} functions removed)",
+                     schema, packageName, cleanedSource.length(), reducedBody.length(), segments.getFunctionCount());
+
+            // STEP 5: Store in StateService (for transformation job later)
+            stateService.storePackageFunctions(schema, packageName, fullSources, stubSources, reducedBody);
+
+            log.debug("Stored {} functions in StateService for package {}.{}",
+                     fullSources.size(), schema, packageName);
+
+            // STEP 6: Parse stubs to extract metadata (fast, tiny memory footprint)
+            me.christianrobert.orapgsync.transformer.parser.AntlrParser parser =
+                new me.christianrobert.orapgsync.transformer.parser.AntlrParser();
+
+            for (Map.Entry<String, String> stubEntry : stubSources.entrySet()) {
+                String functionName = stubEntry.getKey();
+                String stubSource = stubEntry.getValue();
+
+                // Wrap stub for parsing
+                String wrappedStub = "CREATE OR REPLACE " + stubSource;
+
+                try {
+                    // Parse stub (tiny, <1ms per stub)
+                    me.christianrobert.orapgsync.transformer.parser.ParseResult stubParseResult =
+                        parser.parseFunctionBody(wrappedStub);
+
+                    if (stubParseResult.hasErrors()) {
+                        log.warn("Failed to parse stub for {}.{}.{}: {}",
+                                schema, packageName, functionName, stubParseResult.getErrorMessage());
+                        continue;
+                    }
+
+                    // Check if this is a private function (not in public list)
+                    String key = schema.toLowerCase() + "." + packageName.toLowerCase() + "." + functionName;
+                    if (!publicFunctionKeys.contains(key)) {
+                        // Extract metadata from stub
+                        FunctionMetadata metadata = extractMetadataFromFunctionStub(
+                            stubParseResult.getTree(), schema, packageName);
+                        if (metadata != null) {
+                            metadata.setPackagePrivate(true);
+                            functions.add(metadata);
+                            log.trace("Extracted private function metadata: {}.{}.{}", schema, packageName, functionName);
+                        }
+                    }
+
+                } catch (Exception e) {
+                    log.warn("Error parsing stub for {}.{}.{}: {}", schema, packageName, functionName, e.getMessage());
+                }
+            }
+
+            long afterScan = MemoryMonitor.logAndGetUsedMemory("After scanning package: " + schema + "." + packageName);
+            MemoryMonitor.logMemoryDelta(beforeScan, afterScan, "Package scan: " + schema + "." + packageName);
 
         } catch (Exception e) {
-            log.error("Error parsing package body {}.{}: {}", schema, packageName, e.getMessage(), e);
+            log.error("Error scanning package body {}.{}: {}", schema, packageName, e.getMessage(), e);
         }
 
         return functions;
     }
 
     /**
-     * Extracts function/procedure metadata from a parsed package body AST.
-     * Only returns functions that are NOT in the public function set (i.e., package-private).
+     * Extracts function/procedure metadata from a parsed stub AST.
+     * Used for package-private functions after scanning.
      *
-     * @param bodyCtx Parsed package body AST
+     * Handles both CREATE FUNCTION and CREATE PROCEDURE stubs.
+     *
+     * @param parseTree Parsed stub AST (can be function or procedure)
      * @param schema Schema name
      * @param packageName Package name
-     * @param publicFunctionKeys Set of public function keys (schema.package.function)
-     * @return List of FunctionMetadata for private functions only
+     * @return FunctionMetadata or null if extraction fails
      */
-    private static List<FunctionMetadata> extractFunctionsFromPackageBody(
-            me.christianrobert.orapgsync.antlr.PlSqlParser.Create_package_bodyContext bodyCtx,
-            String schema, String packageName, Set<String> publicFunctionKeys) {
+    private static FunctionMetadata extractMetadataFromFunctionStub(
+            org.antlr.v4.runtime.tree.ParseTree parseTree,
+            String schema, String packageName) {
 
-        List<FunctionMetadata> functions = new ArrayList<>();
-
-        if (bodyCtx == null || bodyCtx.package_obj_body() == null) {
-            return functions;
+        if (parseTree == null) {
+            return null;
         }
 
-        // Iterate through all objects in package body
-        for (me.christianrobert.orapgsync.antlr.PlSqlParser.Package_obj_bodyContext objCtx : bodyCtx.package_obj_body()) {
+        // Try as function first
+        if (parseTree instanceof me.christianrobert.orapgsync.antlr.PlSqlParser.Create_function_bodyContext) {
+            me.christianrobert.orapgsync.antlr.PlSqlParser.Create_function_bodyContext funcCtx =
+                (me.christianrobert.orapgsync.antlr.PlSqlParser.Create_function_bodyContext) parseTree;
 
-            // Check for function_body
-            if (objCtx.function_body() != null) {
-                me.christianrobert.orapgsync.antlr.PlSqlParser.Function_bodyContext funcCtx = objCtx.function_body();
-                String functionName = funcCtx.identifier().getText().toLowerCase();
+            // Extract function name from function_name rule
+            String functionName = funcCtx.function_name().getText().toLowerCase();
 
-                // Check if this is a private function (not in public list)
-                String key = schema.toLowerCase() + "." + packageName.toLowerCase() + "." + functionName;
-                if (!publicFunctionKeys.contains(key)) {
-                    // This is a private function
-                    FunctionMetadata metadata = new FunctionMetadata(schema.toLowerCase(), functionName, "FUNCTION");
-                    metadata.setPackageName(packageName.toLowerCase());
-                    metadata.setPackagePrivate(true);
+            // Create metadata
+            FunctionMetadata metadata = new FunctionMetadata(schema.toLowerCase(), functionName, "FUNCTION");
+            metadata.setPackageName(packageName.toLowerCase());
 
-                    // Extract return type from AST
-                    if (funcCtx.type_spec() != null) {
-                        String returnType = extractTypeFromTypeSpec(funcCtx.type_spec());
-                        metadata.setReturnDataType(returnType);
-                        log.trace("Extracted return type '{}' for private function: {}.{}.{}",
-                                 returnType, schema, packageName, functionName);
-                    }
-
-                    functions.add(metadata);
-                    log.trace("Found private function: {}.{}.{}", schema, packageName, functionName);
-                }
+            // Extract return type
+            if (funcCtx.type_spec() != null) {
+                String returnType = extractTypeFromTypeSpec(funcCtx.type_spec());
+                metadata.setReturnDataType(returnType);
+                log.trace("Extracted return type '{}' for private function: {}.{}.{}",
+                         returnType, schema, packageName, functionName);
             }
 
-            // Check for procedure_body
-            if (objCtx.procedure_body() != null) {
-                me.christianrobert.orapgsync.antlr.PlSqlParser.Procedure_bodyContext procCtx = objCtx.procedure_body();
-                String procedureName = procCtx.identifier().getText().toLowerCase();
-
-                // Check if this is a private procedure (not in public list)
-                String key = schema.toLowerCase() + "." + packageName.toLowerCase() + "." + procedureName;
-                if (!publicFunctionKeys.contains(key)) {
-                    // This is a private procedure
-                    FunctionMetadata metadata = new FunctionMetadata(schema.toLowerCase(), procedureName, "PROCEDURE");
-                    metadata.setPackageName(packageName.toLowerCase());
-                    metadata.setPackagePrivate(true);
-
-                    functions.add(metadata);
-                    log.trace("Found private procedure: {}.{}.{}", schema, packageName, procedureName);
-                }
-            }
+            return metadata;
         }
 
-        return functions;
+        // Try as procedure
+        if (parseTree instanceof me.christianrobert.orapgsync.antlr.PlSqlParser.Create_procedure_bodyContext) {
+            me.christianrobert.orapgsync.antlr.PlSqlParser.Create_procedure_bodyContext procCtx =
+                (me.christianrobert.orapgsync.antlr.PlSqlParser.Create_procedure_bodyContext) parseTree;
+
+            // Extract procedure name from procedure_name rule
+            String procedureName = procCtx.procedure_name().getText().toLowerCase();
+
+            // Create metadata
+            FunctionMetadata metadata = new FunctionMetadata(schema.toLowerCase(), procedureName, "PROCEDURE");
+            metadata.setPackageName(packageName.toLowerCase());
+
+            return metadata;
+        }
+
+        log.warn("Unknown stub parse tree type: {}", parseTree.getClass().getName());
+        return null;
     }
 
     /**

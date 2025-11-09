@@ -91,6 +91,29 @@ public class StateService {
 
     DataTransferResult dataTransferResult;
 
+    // ========== Package Function Storage (NEW - for segmentation optimization) ==========
+
+    /**
+     * Full function sources for transformation.
+     * Key: "schema.packagename" (lowercase)
+     * Value: Map of "functionname" (lowercase) -> full source code
+     */
+    Map<String, Map<String, String>> oraclePackageFunctionSourcesFull = new HashMap<>();
+
+    /**
+     * Stub function sources for extraction.
+     * Key: "schema.packagename" (lowercase)
+     * Value: Map of "functionname" (lowercase) -> stub source code (signature + RETURN NULL)
+     */
+    Map<String, Map<String, String>> oraclePackageFunctionSourcesStub = new HashMap<>();
+
+    /**
+     * Reduced package bodies for variable extraction.
+     * Key: "schema.packagename" (lowercase)
+     * Value: Package body with all functions removed
+     */
+    Map<String, String> oracleReducedPackageBodies = new HashMap<>();
+
     public List<String> getOracleSchemaNames() {
         return oracleSchemaNames;
     }
@@ -381,6 +404,83 @@ public class StateService {
         this.fkIndexCreationResult = fkIndexCreationResult;
     }
 
+    // ========== Package Function Storage Methods ==========
+
+    /**
+     * Stores segmented package functions and reduced body.
+     *
+     * @param schema Schema name
+     * @param packageName Package name
+     * @param fullSources Map of function name (lowercase) → full source
+     * @param stubSources Map of function name (lowercase) → stub source
+     * @param reducedBody Package body with all functions removed
+     */
+    public void storePackageFunctions(String schema, String packageName,
+                                      Map<String, String> fullSources,
+                                      Map<String, String> stubSources,
+                                      String reducedBody) {
+        String key = (schema + "." + packageName).toLowerCase();
+        oraclePackageFunctionSourcesFull.put(key, fullSources);
+        oraclePackageFunctionSourcesStub.put(key, stubSources);
+        oracleReducedPackageBodies.put(key, reducedBody);
+        log.debug("Stored {} functions for package {}.{}", fullSources.size(), schema, packageName);
+    }
+
+    /**
+     * Retrieves full source for a specific package function.
+     *
+     * @param schema Schema name
+     * @param packageName Package name
+     * @param functionName Function name
+     * @return Full function source, or null if not found
+     */
+    public String getPackageFunctionSource(String schema, String packageName, String functionName) {
+        String packageKey = (schema + "." + packageName).toLowerCase();
+        Map<String, String> functions = oraclePackageFunctionSourcesFull.get(packageKey);
+        return functions != null ? functions.get(functionName.toLowerCase()) : null;
+    }
+
+    /**
+     * Retrieves all stub sources for a package.
+     *
+     * @param schema Schema name
+     * @param packageName Package name
+     * @return Map of function name (lowercase) → stub source, or empty map if not found
+     */
+    public Map<String, String> getAllPackageFunctionStubs(String schema, String packageName) {
+        String key = (schema + "." + packageName).toLowerCase();
+        return oraclePackageFunctionSourcesStub.getOrDefault(key, new HashMap<>());
+    }
+
+    /**
+     * Retrieves reduced package body (all functions removed).
+     *
+     * @param schema Schema name
+     * @param packageName Package name
+     * @return Reduced package body, or null if not found
+     */
+    public String getReducedPackageBody(String schema, String packageName) {
+        String key = (schema + "." + packageName).toLowerCase();
+        return oracleReducedPackageBodies.get(key);
+    }
+
+    /**
+     * Clears package function storage (called after transformation complete).
+     * Keeps only metadata (FunctionMetadata).
+     */
+    public void clearPackageFunctionStorage() {
+        log.info("Clearing package function storage from StateService");
+        int fullCount = oraclePackageFunctionSourcesFull.values().stream().mapToInt(Map::size).sum();
+        int stubCount = oraclePackageFunctionSourcesStub.values().stream().mapToInt(Map::size).sum();
+        int reducedCount = oracleReducedPackageBodies.size();
+
+        oraclePackageFunctionSourcesFull.clear();
+        oraclePackageFunctionSourcesStub.clear();
+        oracleReducedPackageBodies.clear();
+
+        log.info("Cleared {} full sources, {} stubs, {} reduced bodies", fullCount, stubCount, reducedCount);
+    }
+
     public void resetState() {
         log.info("Resetting all state to default values");
         this.oracleSchemaNames = new ArrayList<>();
@@ -414,5 +514,10 @@ public class StateService {
         this.constraintCreationResult = null;
         this.fkIndexCreationResult = null;
         this.dataTransferResult = null;
+
+        // Clear package function storage
+        this.oraclePackageFunctionSourcesFull = new HashMap<>();
+        this.oraclePackageFunctionSourcesStub = new HashMap<>();
+        this.oracleReducedPackageBodies = new HashMap<>();
     }
 }
