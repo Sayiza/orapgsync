@@ -131,10 +131,22 @@ Each database element type is completely independent:
 - `OracleTypeMethodExtractionJob`: Extracts Oracle type method signatures from ALL_TYPE_METHODS
 - `PostgresTypeMethodStubCreationJob`: Creates PostgreSQL type method stubs (flattened functions)
 - `PostgresTypeMethodStubVerificationJob`: Verifies created type method stubs
+- `PostgresTypeMethodImplementationJob`: ✅ Shell job ready for PL/SQL transformation implementation
 - `TypeMethodStubCreationResult`: Tracks created/skipped/failed type method stubs
+- `TypeMethodImplementationResult`: Tracks implemented/skipped/failed type method implementations
 - `OracleTypeMethodExtractor`: Database-specific extraction logic for type methods
 - Naming convention: Type members use `typename__methodname` (double underscore)
 - Method stubs return NULL for functions, empty body for procedures
+
+**Triggers** (`trigger/`):
+- `TriggerMetadata`: Data model for Oracle trigger definitions (timing, event, level, body)
+- `OracleTriggerExtractionJob`: ✅ Shell job ready for extraction from ALL_TRIGGERS
+- `PostgresTriggerImplementationJob`: ✅ Shell job ready for PL/SQL to PL/pgSQL transformation
+- `PostgresTriggerVerificationJob`: ✅ Shell job ready for trigger verification
+- `TriggerImplementationResult`: Tracks implemented/skipped/failed trigger implementations
+- `TriggerResource`: REST endpoints for trigger operations
+- Trigger types supported: BEFORE/AFTER/INSTEAD OF, INSERT/UPDATE/DELETE, ROW/STATEMENT level
+- Note: :NEW/:OLD transformation (remove colons) to be implemented
 
 **Oracle Compatibility Layer** (`oraclecompat/`):
 - `OracleBuiltinCatalog`: Central registry of Oracle built-in package equivalents
@@ -278,7 +290,7 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
     - ✅ Three-tier support system: FULL, PARTIAL, STUB
     - ✅ Installed into `oracle_compat` schema with flattened naming (e.g., `dbms_output__put_line`)
     - ✅ Extensible catalog system for future additions
-    - ✅ Integrated as Step 23/24 in orchestration workflow
+    - ✅ Integrated as Step 23/28 in orchestration workflow
     - See `oraclecompat/` module and [TRANSFORMATION.md](documentation/TRANSFORMATION.md) Phase 4.5
 
 11. **View SQL Transformation**: ✅ **90% COMPLETE** - ANTLR-based Oracle→PostgreSQL SQL conversion
@@ -312,15 +324,31 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
     - **REST Endpoints:** `/api/functions/postgres/standalone-implementation/create` + `/verify`
     - **See [STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md](documentation/STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md) for detailed status and feature list**
 
-14. **Type Method Logic**: Member method implementations (Planned - see Phase 3 roadmap)
-15. **Triggers**: Migration from Oracle to PostgreSQL (Planned - see Phase 3 roadmap)
+14. **Type Method Implementation**: ✅ **FRAMEWORK COMPLETE** - Ready for PL/SQL transformation
+    - ✅ Shell jobs created: `PostgresTypeMethodImplementationJob`, `PostgresTypeMethodVerificationJob`
+    - ✅ Frontend integration: UI row, buttons, polling, result display
+    - ✅ REST endpoints: `/api/type-methods/postgres/implementation/create`, `/verify`
+    - ✅ State management: `TypeMethodImplementationResult`
+    - ✅ Integrated as Step 26/28 in orchestration workflow
+    - 📋 **Next:** Transform type member methods using ANTLR (extend PostgresCodeBuilder, handle SELF parameter)
+
+15. **Triggers**: ✅ **FRAMEWORK COMPLETE** - Ready for extraction and transformation
+    - ✅ Shell jobs created: `OracleTriggerExtractionJob`, `PostgresTriggerImplementationJob`, `PostgresTriggerVerificationJob`
+    - ✅ Frontend integration: UI row, Oracle extraction button, PostgreSQL implementation buttons
+    - ✅ REST endpoints: `/api/triggers/oracle/extract`, `/postgres/implementation/create`, `/verify`
+    - ✅ State management: `TriggerMetadata`, `TriggerImplementationResult`
+    - ✅ Integrated as Steps 27-28/28 in orchestration workflow
+    - 📋 **Next:** Extract Oracle trigger metadata, transform PL/SQL trigger bodies, handle :NEW/:OLD → NEW/OLD
+
 16. **Indexes**: Extraction and creation (Future)
 
 ### 📋 Phase 3 Detailed Roadmap (Next Steps)
 1. ~~**Oracle Built-in Replacements**~~ ✅ **COMPLETE** - See item #10 above
 2. ~~**Function/Procedure Transformation**~~ 🔄 **85-95% COMPLETE** - See item #13 above
-3. **Type Method Implementation**: Transform type member methods using ANTLR (extend PostgresCodeBuilder)
-4. **Trigger Migration**: Extract and transform Oracle triggers
+3. **Type Method Implementation** - ✅ **Framework Complete** (Step 26/28) - See item #14 above
+   - 📋 Next: Transform type member methods using ANTLR (extend PostgresCodeBuilder, handle SELF parameter)
+4. **Trigger Migration** - ✅ **Framework Complete** (Steps 27-28/28) - See item #15 above
+   - 📋 Next: Extract Oracle trigger metadata, transform PL/SQL trigger bodies to PL/pgSQL
 5. **REST Layer** (Optional): Auto-generate REST endpoints for testing and incremental cutover
 
 ## Database Configuration

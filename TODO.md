@@ -29,6 +29,8 @@
 [ ] data transfer step: CLOB size 24586928 characters exceeds limit 20971520 in column response, skipping (will insert NULL)
 [ ] Unknown complex type anydata for column ... meldung anderes log level
 [ ] Stubs for type members are very bad
+[ ] type member jobs
+[ ] trigger jobs
 [ ] broken views: co_loc_bew.la_master_v, co_slc_xm_legacy.dp_ex_exams_v, co_slc_xm_legacy.dp_xm_candidates_v, co_loc_bwst.bwst_v_ant
 [x] co_gpr memory
 [x] full job run 2025-11-10: 8 hour total duration, 8% of functions implemented, 30% of views implemented, most views with functions do not work. Datatransfer 99% working 10GB in 1 hour 

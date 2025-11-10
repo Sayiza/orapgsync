@@ -613,6 +613,51 @@
             </div>
           </td>
         </tr>
+        <tr class="trigger-row">
+          <td class="source-cell">
+            <div class="component-info" id="oracle-triggers">
+              <span class="count-badge">-</span>
+              <span class="component-text">Triggers found</span>
+              <button class="refresh-btn" onclick="extractOracleTriggers()" title="Extract Oracle triggers">⟳</button>
+              <div class="table-list" id="oracle-trigger-list" style="display: none;">
+                <div class="table-list-header" onclick="toggleTriggerList('oracle')">
+                  <span class="toggle-indicator">▼</span> Triggers by Schema
+                </div>
+                <div class="table-items" id="oracle-trigger-items">
+                  <!-- Trigger metadata will be populated here -->
+                </div>
+              </div>
+            </div>
+          </td>
+          <td class="target-cell">
+            <div class="component-info" id="postgres-triggers">
+              <span class="count-badge">-</span>
+              <span class="component-text">Triggers implemented</span>
+              <button class="verify-all-btn refresh-btn" onclick="verifyAllPostgresTriggers()" title="Verify all PostgreSQL triggers" style="margin-left: 4px;">⟳</button>
+              <button class="action-btn" onclick="createPostgresTriggers()" title="Create PostgreSQL triggers with PL/pgSQL logic">Create Triggers</button>
+
+              <!-- UNIFIED TRIGGER VERIFICATION RESULTS (from ⟳ Verify All Triggers button) -->
+              <div class="table-creation-results" id="postgres-unified-trigger-verification-results" style="display: none;">
+                <div class="table-creation-header" onclick="toggleUnifiedTriggerVerificationResults()">
+                  <span class="toggle-indicator">▼</span> Trigger Verification Results (All Triggers)
+                </div>
+                <div class="table-creation-details" id="postgres-unified-trigger-verification-details">
+                  <!-- Unified trigger verification results will be populated here -->
+                </div>
+              </div>
+
+              <!-- TRIGGER IMPLEMENTATION CREATION RESULTS (from Create Triggers button) -->
+              <div class="table-creation-results" id="postgres-trigger-implementation-results" style="display: none;">
+                <div class="table-creation-header" onclick="toggleTriggerImplementationResults('postgres')">
+                  <span class="toggle-indicator">▼</span>Trigger Implementation Creation Results
+                </div>
+                <div class="table-creation-details" id="postgres-trigger-implementation-details">
+                  <!-- Trigger implementation creation results will be populated here -->
+                </div>
+              </div>
+            </div>
+          </td>
+        </tr>
       </tbody>
     </table>
   </div>
@@ -730,6 +775,7 @@
 <script src="view-service.js"></script>
 <script src="function-service.js"></script>
 <script src="type-method-service.js"></script>
+<script src="trigger-service.js"></script>
 <script src="oracle-compat-service.js"></script>
 
 <!-- Orchestration Script -->

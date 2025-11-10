@@ -22,6 +22,8 @@ import me.christianrobert.orapgsync.core.job.model.function.FunctionStubCreation
 import me.christianrobert.orapgsync.core.job.model.typemethod.TypeMethodMetadata;
 import me.christianrobert.orapgsync.core.job.model.typemethod.TypeMethodStubCreationResult;
 import me.christianrobert.orapgsync.core.job.model.typemethod.TypeMethodImplementationResult;
+import me.christianrobert.orapgsync.core.job.model.trigger.TriggerMetadata;
+import me.christianrobert.orapgsync.core.job.model.trigger.TriggerImplementationResult;
 import me.christianrobert.orapgsync.oraclecompat.model.OracleCompatInstallationResult;
 import me.christianrobert.orapgsync.oraclecompat.model.OracleCompatVerificationResult;
 import org.slf4j.Logger;
@@ -82,6 +84,10 @@ public class StateService {
     List<TypeMethodMetadata> postgresTypeMethodMetadata = new ArrayList<>();
     TypeMethodStubCreationResult typeMethodStubCreationResult;
     TypeMethodImplementationResult typeMethodImplementationResult;
+
+    List<TriggerMetadata> oracleTriggerMetadata = new ArrayList<>();
+    List<TriggerMetadata> postgresTriggerMetadata = new ArrayList<>();
+    TriggerImplementationResult triggerImplementationResult;
 
     // Oracle Compatibility Layer
     OracleCompatInstallationResult oracleCompatInstallationResult;
@@ -382,6 +388,30 @@ public class StateService {
         this.typeMethodImplementationResult = typeMethodImplementationResult;
     }
 
+    public List<TriggerMetadata> getOracleTriggerMetadata() {
+        return oracleTriggerMetadata;
+    }
+
+    public void setOracleTriggerMetadata(List<TriggerMetadata> oracleTriggerMetadata) {
+        this.oracleTriggerMetadata = oracleTriggerMetadata;
+    }
+
+    public List<TriggerMetadata> getPostgresTriggerMetadata() {
+        return postgresTriggerMetadata;
+    }
+
+    public void setPostgresTriggerMetadata(List<TriggerMetadata> postgresTriggerMetadata) {
+        this.postgresTriggerMetadata = postgresTriggerMetadata;
+    }
+
+    public TriggerImplementationResult getTriggerImplementationResult() {
+        return triggerImplementationResult;
+    }
+
+    public void setTriggerImplementationResult(TriggerImplementationResult triggerImplementationResult) {
+        this.triggerImplementationResult = triggerImplementationResult;
+    }
+
     public OracleCompatInstallationResult getOracleCompatInstallationResult() {
         return oracleCompatInstallationResult;
     }
@@ -520,6 +550,9 @@ public class StateService {
         this.postgresTypeMethodMetadata = new ArrayList<>();
         this.typeMethodStubCreationResult = null;
         this.typeMethodImplementationResult = null;
+        this.oracleTriggerMetadata = new ArrayList<>();
+        this.postgresTriggerMetadata = new ArrayList<>();
+        this.triggerImplementationResult = null;
         this.oracleCompatInstallationResult = null;
         this.oracleCompatVerificationResult = null;
         this.constraintCreationResult = null;

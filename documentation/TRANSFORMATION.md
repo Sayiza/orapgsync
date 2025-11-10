@@ -249,7 +249,7 @@ This document describes the ANTLR-based transformation module that converts Orac
 - `POST /api/oracle-compat/postgres/verify` - Verify installation
 
 **Frontend Integration:**
-- Oracle compatibility layer installed as **Step 23/24** in orchestration workflow
+- Oracle compatibility layer installed as **Step 23/28** in orchestration workflow
 - Executed after type method stubs, before view implementation
 
 **Benefits:**
@@ -794,16 +794,28 @@ Detailed implementation documentation:
 - Replace function/procedure stubs with actual implementations
 - See [STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md](STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md) for detailed status
 
-**3. Type Method Implementation**
-- Transform Oracle type member methods to PostgreSQL functions
-- Extend PostgresCodeBuilder with PL/SQL statement visitors
-- Handle SELF parameter transformation
-- Replace type method stubs with actual implementations
+**3. Type Method Implementation** 🔄 **Framework Complete - Ready for Implementation**
+- ✅ **Shell jobs created** (Step 26/28 in orchestration workflow)
+- ✅ Backend: `PostgresTypeMethodImplementationJob`, `PostgresTypeMethodVerificationJob` (shell implementations)
+- ✅ Frontend: UI row with buttons, polling, result display
+- ✅ REST endpoints: `/api/type-methods/postgres/implementation/create`, `/verify`
+- ✅ State management: `TypeMethodImplementationResult` with error tracking
+- 📋 **Next:** Transform Oracle type member methods to PostgreSQL functions
+  - Extend PostgresCodeBuilder with PL/SQL statement visitors (reuse from Step 25)
+  - Handle SELF parameter transformation
+  - Replace type method stubs with actual implementations
 
-**4. Trigger Migration**
-- Extract Oracle trigger definitions
-- Transform to PostgreSQL trigger functions
-- Handle :NEW/:OLD, timing, events, row/statement level
+**4. Trigger Migration** 🔄 **Framework Complete - Ready for Implementation**
+- ✅ **Shell jobs created** (Steps 27-28/28 in orchestration workflow)
+- ✅ Backend: `OracleTriggerExtractionJob`, `PostgresTriggerImplementationJob`, `PostgresTriggerVerificationJob` (shell implementations)
+- ✅ Frontend: UI row with Oracle extraction button, PostgreSQL implementation buttons
+- ✅ REST endpoints: `/api/triggers/oracle/extract`, `/postgres/implementation/create`, `/verify`
+- ✅ State management: `TriggerMetadata`, `TriggerImplementationResult`
+- 📋 **Next:** Extract Oracle trigger definitions and transform to PostgreSQL
+  - Extract trigger metadata: timing (BEFORE/AFTER/INSTEAD OF), events (INSERT/UPDATE/DELETE), level (ROW/STATEMENT)
+  - Transform PL/SQL trigger body to PL/pgSQL
+  - Handle :NEW/:OLD → NEW/OLD (remove colons)
+  - Generate PostgreSQL trigger function + CREATE TRIGGER statement
 
 **5. REST Layer Generation (Optional Future)**
 - Auto-generate REST endpoints for migrated functions
