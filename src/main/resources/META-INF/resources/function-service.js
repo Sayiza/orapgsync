@@ -1305,7 +1305,7 @@ function displayUnifiedFunctionVerificationResults(verificationResult) {
             const packageIndicator = func.isPackageMember ? '📦 Package' : 'Standalone';
 
             html += `<div class="table-item ${statusClass}">`;
-            html += `<div class="view-header" onclick="toggleFunctionDdl('${funcId}')">`;
+            html += `<div class="view-header" onclick="toggleFunctionDdlLazy('${funcId}', '${schemaName}', '${func.functionName}')">`;
             html += `<span class="toggle-indicator" id="${funcId}-indicator">▶</span> `;
             html += `<strong>${func.functionName}</strong> `;
             html += `<span class="status-badge">[${typeBadge}]</span> `;
@@ -1313,16 +1313,14 @@ function displayUnifiedFunctionVerificationResults(verificationResult) {
             html += `<span class="status-badge">[${statusBadge}]</span>`;
             html += '</div>';
 
-            // DDL section (collapsible, starts collapsed)
-            html += `<div class="view-ddl-section" id="${funcId}" style="display: none;">`;
-            if (func.functionDdl) {
-                html += '<pre class="sql-statement">';
-                html += escapeHtml(func.functionDdl);
-                html += '</pre>';
-            } else if (func.errorMessage) {
+            // DDL section (collapsible, starts collapsed, will be loaded on demand)
+            html += `<div class="view-ddl-section" id="${funcId}" style="display: none;" data-schema="${schemaName}" data-function-name="${func.functionName}" data-loaded="false">`;
+            if (func.errorMessage) {
+                // Show error immediately if function has an error
                 html += `<div class="error-message">Error: ${escapeHtml(func.errorMessage)}</div>`;
             } else {
-                html += '<div class="error-message">No DDL available</div>';
+                // Placeholder for lazy-loaded content
+                html += '<div class="loading-message">Loading...</div>';
             }
             html += '</div>';
             html += '</div>';
@@ -1339,7 +1337,56 @@ function displayUnifiedFunctionVerificationResults(verificationResult) {
 }
 
 /**
- * Toggle function DDL visibility.
+ * Toggle function DDL visibility with lazy loading.
+ */
+async function toggleFunctionDdlLazy(funcId, schema, functionName) {
+    const ddlSection = document.getElementById(funcId);
+    const indicator = document.getElementById(`${funcId}-indicator`);
+
+    if (!ddlSection) {
+        console.warn(`Function DDL section not found: ${funcId}`);
+        return;
+    }
+
+    // If already visible, just collapse it
+    if (ddlSection.style.display === 'block') {
+        ddlSection.style.display = 'none';
+        if (indicator) indicator.textContent = '▶';
+        return;
+    }
+
+    // Show the section
+    ddlSection.style.display = 'block';
+    if (indicator) indicator.textContent = '▼';
+
+    // Check if content is already loaded
+    const isLoaded = ddlSection.getAttribute('data-loaded') === 'true';
+    if (isLoaded) {
+        // Already loaded, just show it
+        return;
+    }
+
+    // Fetch DDL from backend
+    try {
+        const response = await fetch(`/api/functions/postgres/source/${encodeURIComponent(schema)}/${encodeURIComponent(functionName)}`);
+        const result = await response.json();
+
+        if (result.status === 'success' && result.postgresSql) {
+            // Replace loading message with actual DDL
+            ddlSection.innerHTML = '<pre class="sql-statement">' + escapeHtml(result.postgresSql) + '</pre>';
+            ddlSection.setAttribute('data-loaded', 'true');
+        } else {
+            // Show error
+            ddlSection.innerHTML = '<div class="error-message">Failed to load DDL: ' + escapeHtml(result.message || 'Unknown error') + '</div>';
+        }
+    } catch (error) {
+        console.error('Error fetching function DDL:', error);
+        ddlSection.innerHTML = '<div class="error-message">Failed to load DDL: ' + escapeHtml(error.message) + '</div>';
+    }
+}
+
+/**
+ * Toggle function DDL visibility (legacy function for backward compatibility).
  */
 function toggleFunctionDdl(funcId) {
     const ddlSection = document.getElementById(funcId);

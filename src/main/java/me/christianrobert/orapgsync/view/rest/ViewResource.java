@@ -38,10 +38,64 @@ public class ViewResource {
     @Inject
     JobRegistry jobRegistry;
 
+    @Inject
+    me.christianrobert.orapgsync.database.service.PostgresConnectionService postgresConnectionService;
+
     @POST
     @Path("/oracle/extract")
     public Response extractOracleViews() {
         return startJob("ORACLE", "VIEW", "Oracle view extraction");
+    }
+
+    /**
+     * Get view DDL on demand for a specific view.
+     * This endpoint is used for lazy-loading view source code in the frontend.
+     *
+     * @param schema the schema name
+     * @param viewName the view name
+     * @return JSON with oracleSql (if available) and postgresSql
+     */
+    @GET
+    @Path("/postgres/source/{schema}/{viewName}")
+    public Response getViewSource(@PathParam("schema") String schema,
+                                  @PathParam("viewName") String viewName) {
+        log.info("Fetching view source for: {}.{}", schema, viewName);
+
+        try (java.sql.Connection conn = postgresConnectionService.getConnection()) {
+            // Get PostgreSQL view definition
+            String sql = "SELECT pg_get_viewdef(quote_ident(?) || '.' || quote_ident(?), true) AS viewdef";
+            try (java.sql.PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setString(1, schema);
+                ps.setString(2, viewName);
+                try (java.sql.ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        String postgresSql = rs.getString("viewdef");
+
+                        Map<String, Object> result = Map.of(
+                                "status", "success",
+                                "schema", schema,
+                                "viewName", viewName,
+                                "postgresSql", postgresSql != null ? postgresSql : "-- View definition not available"
+                        );
+
+                        return Response.ok(result).build();
+                    } else {
+                        throw new IllegalArgumentException("View not found: " + schema + "." + viewName);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.error("Failed to fetch view source for {}.{}", schema, viewName, e);
+
+            Map<String, Object> errorResult = Map.of(
+                    "status", "error",
+                    "message", "Failed to fetch view source: " + e.getMessage()
+            );
+
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                    .entity(errorResult)
+                    .build();
+        }
     }
 
     @POST
@@ -289,9 +343,7 @@ public class ViewResource {
                         Map<String, Object> viewMap = new HashMap<>();
                         viewMap.put("viewName", view.getViewName());
                         viewMap.put("status", view.getStatus().toString());
-                        if (view.getViewDdl() != null) {
-                            viewMap.put("viewDdl", view.getViewDdl());
-                        }
+                        // DDL excluded for performance - fetch on demand via /api/views/postgres/source/{schema}/{viewName}
                         if (view.getErrorMessage() != null) {
                             viewMap.put("errorMessage", view.getErrorMessage());
                         }

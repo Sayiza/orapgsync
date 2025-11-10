@@ -1356,21 +1356,19 @@ function displayUnifiedViewVerificationResults(verificationResult) {
                                view.status === 'STUB' ? '⚠ STUB' : '✗ ERROR';
 
             html += `<div class="table-item ${statusClass}">`;
-            html += `<div class="view-header" onclick="toggleViewDdl('${viewId}')">`;
+            html += `<div class="view-header" onclick="toggleViewDdlLazy('${viewId}', '${schemaName}', '${view.viewName}')">`;
             html += `<span class="toggle-indicator" id="${viewId}-indicator">▶</span> `;
             html += `<strong>${view.viewName}</strong> <span class="status-badge">[${statusBadge}]</span>`;
             html += '</div>';
 
-            // DDL section (collapsible, starts collapsed)
-            html += `<div class="view-ddl-section" id="${viewId}" style="display: none;">`;
-            if (view.viewDdl) {
-                html += '<pre class="sql-statement">';
-                html += escapeHtml(view.viewDdl);
-                html += '</pre>';
-            } else if (view.errorMessage) {
+            // DDL section (collapsible, starts collapsed, will be loaded on demand)
+            html += `<div class="view-ddl-section" id="${viewId}" style="display: none;" data-schema="${schemaName}" data-view-name="${view.viewName}" data-loaded="false">`;
+            if (view.errorMessage) {
+                // Show error immediately if view has an error
                 html += `<div class="error-message">Error: ${escapeHtml(view.errorMessage)}</div>`;
             } else {
-                html += '<div class="error-message">No DDL available</div>';
+                // Placeholder for lazy-loaded content
+                html += '<div class="loading-message">Loading...</div>';
             }
             html += '</div>';
             html += '</div>';
@@ -1387,7 +1385,56 @@ function displayUnifiedViewVerificationResults(verificationResult) {
 }
 
 /**
- * Toggle view DDL visibility.
+ * Toggle view DDL visibility with lazy loading.
+ */
+async function toggleViewDdlLazy(viewId, schema, viewName) {
+    const ddlSection = document.getElementById(viewId);
+    const indicator = document.getElementById(`${viewId}-indicator`);
+
+    if (!ddlSection) {
+        console.warn(`View DDL section not found: ${viewId}`);
+        return;
+    }
+
+    // If already visible, just collapse it
+    if (ddlSection.style.display === 'block') {
+        ddlSection.style.display = 'none';
+        if (indicator) indicator.textContent = '▶';
+        return;
+    }
+
+    // Show the section
+    ddlSection.style.display = 'block';
+    if (indicator) indicator.textContent = '▼';
+
+    // Check if content is already loaded
+    const isLoaded = ddlSection.getAttribute('data-loaded') === 'true';
+    if (isLoaded) {
+        // Already loaded, just show it
+        return;
+    }
+
+    // Fetch DDL from backend
+    try {
+        const response = await fetch(`/api/views/postgres/source/${encodeURIComponent(schema)}/${encodeURIComponent(viewName)}`);
+        const result = await response.json();
+
+        if (result.status === 'success' && result.postgresSql) {
+            // Replace loading message with actual DDL
+            ddlSection.innerHTML = '<pre class="sql-statement">' + escapeHtml(result.postgresSql) + '</pre>';
+            ddlSection.setAttribute('data-loaded', 'true');
+        } else {
+            // Show error
+            ddlSection.innerHTML = '<div class="error-message">Failed to load DDL: ' + escapeHtml(result.message || 'Unknown error') + '</div>';
+        }
+    } catch (error) {
+        console.error('Error fetching view DDL:', error);
+        ddlSection.innerHTML = '<div class="error-message">Failed to load DDL: ' + escapeHtml(error.message) + '</div>';
+    }
+}
+
+/**
+ * Toggle view DDL visibility (legacy function for backward compatibility).
  */
 function toggleViewDdl(viewId) {
     const ddlSection = document.getElementById(viewId);

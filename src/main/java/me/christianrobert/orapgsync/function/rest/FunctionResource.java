@@ -37,10 +37,70 @@ public class FunctionResource {
     @Inject
     JobRegistry jobRegistry;
 
+    @Inject
+    me.christianrobert.orapgsync.database.service.PostgresConnectionService postgresConnectionService;
+
     @POST
     @Path("/oracle/extract")
     public Response extractOracleFunctions() {
         return startJob("ORACLE", "FUNCTION", "Oracle function/procedure extraction");
+    }
+
+    /**
+     * Get function/procedure DDL on demand for a specific function.
+     * This endpoint is used for lazy-loading function source code in the frontend.
+     *
+     * @param schema the schema name
+     * @param functionName the function name
+     * @return JSON with postgresSql (function definition)
+     */
+    @GET
+    @Path("/postgres/source/{schema}/{functionName}")
+    public Response getFunctionSource(@PathParam("schema") String schema,
+                                      @PathParam("functionName") String functionName) {
+        log.info("Fetching function source for: {}.{}", schema, functionName);
+
+        try (java.sql.Connection conn = postgresConnectionService.getConnection()) {
+            // Get PostgreSQL function definition
+            String sql = """
+                SELECT pg_get_functiondef(p.oid) AS functiondef
+                FROM pg_proc p
+                JOIN pg_namespace n ON p.pronamespace = n.oid
+                WHERE n.nspname = ? AND p.proname = ?
+                """;
+
+            try (java.sql.PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setString(1, schema);
+                ps.setString(2, functionName);
+                try (java.sql.ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        String postgresSql = rs.getString("functiondef");
+
+                        Map<String, Object> result = Map.of(
+                                "status", "success",
+                                "schema", schema,
+                                "functionName", functionName,
+                                "postgresSql", postgresSql != null ? postgresSql : "-- Function definition not available"
+                        );
+
+                        return Response.ok(result).build();
+                    } else {
+                        throw new IllegalArgumentException("Function not found: " + schema + "." + functionName);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.error("Failed to fetch function source for {}.{}", schema, functionName, e);
+
+            Map<String, Object> errorResult = Map.of(
+                    "status", "error",
+                    "message", "Failed to fetch function source: " + e.getMessage()
+            );
+
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                    .entity(errorResult)
+                    .build();
+        }
     }
 
     @POST
@@ -274,9 +334,7 @@ public class FunctionResource {
                         functionMap.put("functionType", function.getFunctionType());
                         functionMap.put("isPackageMember", function.isPackageMember());
                         functionMap.put("status", function.getStatus().toString());
-                        if (function.getFunctionDdl() != null) {
-                            functionMap.put("functionDdl", function.getFunctionDdl());
-                        }
+                        // DDL excluded for performance - fetch on demand via /api/functions/postgres/source/{schema}/{functionName}
                         if (function.getErrorMessage() != null) {
                             functionMap.put("errorMessage", function.getErrorMessage());
                         }
