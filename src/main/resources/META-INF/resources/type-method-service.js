@@ -525,4 +525,430 @@ function toggleTypeMethodCreationResults() {
     }
 }
 
+// ===== TYPE METHOD IMPLEMENTATION FUNCTIONS =====
+
+async function createPostgresTypeMethodImplementation() {
+    console.log('Starting PostgreSQL type method implementation job...');
+
+    updateComponentCount("postgres-type-method-implementation", "-");
+
+    const button = document.querySelector('#postgres-type-method-implementation .action-btn');
+    if (button) {
+        button.disabled = true;
+        button.innerHTML = '⏳';
+    }
+
+    updateMessage('Starting PostgreSQL type method implementation...');
+    updateProgress(0, 'Starting PostgreSQL type method implementation');
+
+    try {
+        const response = await fetch('/api/type-methods/postgres/implementation/create', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+
+        const result = await response.json();
+        if (result.status === 'success') {
+            console.log('PostgreSQL type method implementation job started:', result.jobId);
+            updateMessage('PostgreSQL type method implementation job started successfully');
+            // Start polling for progress and AWAIT completion
+            await pollTypeMethodImplementationJobStatus(result.jobId);
+        } else {
+            throw new Error(result.message || 'Failed to start PostgreSQL type method implementation job');
+        }
+    } catch (error) {
+        console.error('Error starting PostgreSQL type method implementation job:', error);
+        updateMessage('Failed to start PostgreSQL type method implementation: ' + error.message);
+        updateProgress(0, 'Failed to start PostgreSQL type method implementation');
+        // Re-enable button
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = 'Create Type Methods';
+        }
+    }
+}
+
+async function verifyAllPostgresTypeMethods() {
+    console.log('Starting PostgreSQL type method verification (unified - stubs + implementations)...');
+
+    const button = document.querySelector('#postgres-type-method-implementation .verify-all-btn');
+    if (button) {
+        button.disabled = true;
+        button.innerHTML = '⏳';
+    }
+
+    updateMessage('Starting PostgreSQL type method verification...');
+    updateProgress(0, 'Starting PostgreSQL type method verification');
+
+    try {
+        const response = await fetch('/api/type-methods/postgres/stubs/verify', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+
+        const result = await response.json();
+        if (result.status === 'success') {
+            console.log('PostgreSQL type method verification job started:', result.jobId);
+            updateMessage('PostgreSQL type method verification job started successfully');
+            // Start polling for progress
+            await pollTypeMethodVerificationJobStatus(result.jobId);
+        } else {
+            throw new Error(result.message || 'Failed to start PostgreSQL type method verification job');
+        }
+    } catch (error) {
+        console.error('Error starting PostgreSQL type method verification job:', error);
+        updateMessage('Failed to start PostgreSQL type method verification: ' + error.message);
+        updateProgress(0, 'Failed to start PostgreSQL type method verification');
+        // Re-enable button
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = '⟳';
+        }
+    }
+}
+
+async function pollTypeMethodImplementationJobStatus(jobId) {
+    console.log('Polling type method implementation job status:', jobId);
+
+    return new Promise((resolve, reject) => {
+        const pollOnce = async () => {
+            try {
+                const response = await fetch(`/api/jobs/${jobId}/status`);
+                const status = await response.json();
+
+                console.log('Type method implementation job status:', status);
+
+                // Update progress bar
+                if (status.progress !== undefined) {
+                    updateProgress(status.progress.percentage, status.progress.currentTask || 'Processing...');
+                }
+
+                if (status.status === 'COMPLETED') {
+                    console.log('Type method implementation completed:', status);
+                    updateProgress(100, 'PostgreSQL type method implementation completed');
+
+                    // Get job results and display
+                    await getTypeMethodImplementationResults(jobId);
+
+                    // Re-enable button
+                    const button = document.querySelector('#postgres-type-method-implementation .action-btn');
+                    if (button) {
+                        button.disabled = false;
+                        button.innerHTML = 'Create Type Methods';
+                    }
+
+                    resolve(status);
+                } else if (status.status === 'FAILED') {
+                    updateProgress(-1, 'PostgreSQL type method implementation failed');
+                    updateMessage('PostgreSQL type method implementation failed: ' + (status.error || 'Unknown error'));
+
+                    // Re-enable button
+                    const button = document.querySelector('#postgres-type-method-implementation .action-btn');
+                    if (button) {
+                        button.disabled = false;
+                        button.innerHTML = 'Create Type Methods';
+                    }
+
+                    reject(new Error(status.error || 'Type method implementation failed'));
+                } else {
+                    // Still processing
+                    setTimeout(pollOnce, 1000);
+                }
+            } catch (error) {
+                console.error('Error polling type method implementation job status:', error);
+                reject(error);
+            }
+        };
+
+        pollOnce();
+    });
+}
+
+async function pollTypeMethodVerificationJobStatus(jobId) {
+    console.log('Polling type method verification job status:', jobId);
+
+    return new Promise((resolve, reject) => {
+        const pollOnce = async () => {
+            try {
+                const response = await fetch(`/api/jobs/${jobId}/status`);
+                const status = await response.json();
+
+                console.log('Type method verification job status:', status);
+
+                // Update progress bar
+                if (status.progress !== undefined) {
+                    updateProgress(status.progress.percentage, status.progress.currentTask || 'Processing...');
+                }
+
+                if (status.status === 'COMPLETED') {
+                    console.log('Type method verification completed:', status);
+                    updateProgress(100, 'PostgreSQL type method verification completed');
+
+                    // Get job results and display
+                    await getTypeMethodVerificationResults(jobId);
+
+                    // Re-enable button
+                    const button = document.querySelector('#postgres-type-method-implementation .verify-all-btn');
+                    if (button) {
+                        button.disabled = false;
+                        button.innerHTML = '⟳';
+                    }
+
+                    resolve(status);
+                } else if (status.status === 'FAILED') {
+                    updateProgress(-1, 'PostgreSQL type method verification failed');
+                    updateMessage('PostgreSQL type method verification failed: ' + (status.error || 'Unknown error'));
+
+                    // Re-enable button
+                    const button = document.querySelector('#postgres-type-method-implementation .verify-all-btn');
+                    if (button) {
+                        button.disabled = false;
+                        button.innerHTML = '⟳';
+                    }
+
+                    reject(new Error(status.error || 'Type method verification failed'));
+                } else {
+                    // Still processing
+                    setTimeout(pollOnce, 1000);
+                }
+            } catch (error) {
+                console.error('Error polling type method verification job status:', error);
+                reject(error);
+            }
+        };
+
+        pollOnce();
+    });
+}
+
+async function getTypeMethodImplementationResults(jobId) {
+    console.log('Getting type method implementation job results for:', jobId);
+
+    try {
+        const response = await fetch(`/api/jobs/${jobId}/result`);
+        const result = await response.json();
+
+        if (result.status === 'success') {
+            console.log('Type method implementation job results:', result);
+
+            // Display the implementation results
+            displayTypeMethodImplementationResults(result);
+
+            // Update badge count
+            const implementedCount = result.implementedCount || 0;
+            updateComponentCount("postgres-type-method-implementation", implementedCount);
+
+            // Show success message
+            updateMessage(`PostgreSQL: Implemented ${result.implementedCount} type methods, skipped ${result.skippedCount}, ${result.errorCount} errors`);
+
+        } else {
+            throw new Error(result.message || 'Failed to get type method implementation results');
+        }
+
+    } catch (error) {
+        console.error('Error getting type method implementation results:', error);
+        updateMessage('Error getting type method implementation results: ' + error.message);
+    }
+}
+
+async function getTypeMethodVerificationResults(jobId) {
+    console.log('Getting type method verification job results for:', jobId);
+
+    try {
+        const response = await fetch(`/api/jobs/${jobId}/result`);
+        const result = await response.json();
+
+        if (result.status === 'success') {
+            console.log('Type method verification job results:', result);
+
+            // Display the verification results
+            displayTypeMethodVerificationResults(result);
+
+            // Update badge count
+            const verifiedCount = result.typeMethodCount || 0;
+            updateComponentCount("postgres-type-method-implementation", verifiedCount);
+
+            // Show success message
+            updateMessage(`PostgreSQL: Verified ${verifiedCount} type methods`);
+
+        } else {
+            throw new Error(result.message || 'Failed to get type method verification results');
+        }
+
+    } catch (error) {
+        console.error('Error getting type method verification results:', error);
+        updateMessage('Error getting type method verification results: ' + error.message);
+    }
+}
+
+function displayTypeMethodImplementationResults(result) {
+    const resultsDiv = document.getElementById('postgres-type-method-implementation-results');
+    const detailsDiv = document.getElementById('postgres-type-method-implementation-details');
+
+    if (!resultsDiv || !detailsDiv) {
+        console.error('Type method implementation results container not found');
+        return;
+    }
+
+    let html = '';
+
+    if (result.summary) {
+        const summary = result.summary;
+
+        html += '<div class="table-creation-summary">';
+        html += `<div class="summary-stats">`;
+        html += `<span class="stat-item created">Implemented: ${summary.implementedCount}</span>`;
+        html += `<span class="stat-item skipped">Skipped: ${summary.skippedCount}</span>`;
+        html += `<span class="stat-item errors">Errors: ${summary.errorCount}</span>`;
+        html += `</div>`;
+        html += '</div>';
+
+        // Show implemented type methods
+        if (summary.implementedCount > 0 && summary.implementedMethods) {
+            html += '<div class="created-tables-section">';
+            html += '<h4>Implemented Type Methods:</h4>';
+            html += '<div class="table-items">';
+            Object.values(summary.implementedMethods).forEach(method => {
+                html += `<div class="table-item created">${method.methodName} ✓</div>`;
+            });
+            html += '</div>';
+            html += '</div>';
+        }
+
+        // Show skipped type methods
+        if (summary.skippedCount > 0 && summary.skippedMethods) {
+            html += '<div class="skipped-tables-section">';
+            html += '<h4>Skipped Type Methods:</h4>';
+            html += '<div class="table-items">';
+            Object.values(summary.skippedMethods).forEach(method => {
+                html += `<div class="table-item skipped">${method.methodName} (skipped)</div>`;
+            });
+            html += '</div>';
+            html += '</div>';
+        }
+
+        // Show errors
+        if (summary.errorCount > 0 && summary.errors) {
+            html += '<div class="error-tables-section">';
+            html += '<h4>Failed Type Methods:</h4>';
+            html += '<div class="table-items">';
+            Object.values(summary.errors).forEach(error => {
+                html += `<div class="table-item error">`;
+                html += `<strong>${error.typeMethodName}</strong>: ${error.error}`;
+                if (error.sql) {
+                    html += `<div class="sql-statement"><pre>${error.sql}</pre></div>`;
+                }
+                html += `</div>`;
+            });
+            html += '</div>';
+            html += '</div>';
+        }
+    }
+
+    detailsDiv.innerHTML = html;
+    resultsDiv.style.display = 'block';
+}
+
+function displayTypeMethodVerificationResults(result) {
+    const resultsDiv = document.getElementById('postgres-unified-type-method-verification-results');
+    const detailsDiv = document.getElementById('postgres-unified-type-method-verification-details');
+
+    if (!resultsDiv || !detailsDiv) {
+        console.error('Type method verification results container not found');
+        return;
+    }
+
+    let html = '';
+
+    // Get type methods from result
+    const typeMethods = result.result || [];
+    const typeMethodCount = typeMethods.length;
+
+    html += '<div class="table-creation-summary">';
+    html += `<div class="summary-stats">`;
+    html += `<span class="stat-item">Total Type Methods: ${typeMethodCount}</span>`;
+    html += `</div>`;
+    html += '</div>';
+
+    if (typeMethodCount > 0) {
+        // Group by schema
+        const schemaGroups = {};
+        typeMethods.forEach(method => {
+            const schema = method.schema || 'unknown';
+            if (!schemaGroups[schema]) {
+                schemaGroups[schema] = [];
+            }
+            schemaGroups[schema].push(method);
+        });
+
+        html += '<div class="created-tables-section">';
+        html += '<h4>Verified Type Methods:</h4>';
+
+        Object.entries(schemaGroups).forEach(([schemaName, schemaMethods]) => {
+            html += `<div class="table-schema-group">`;
+            html += `<div class="table-schema-header"><strong>${schemaName}</strong> (${schemaMethods.length} type methods)</div>`;
+            html += '<div class="table-items">';
+            schemaMethods.forEach(method => {
+                const displayName = `${method.typeName}.${method.methodName}`;
+                const memberIndicator = method.instantiable === 'YES' ? 'M' : 'S';
+                const typeIndicator = method.methodType === 'FUNCTION' ? '𝑓' : 'ₚ';
+                html += `<div class="table-item created"><span class="type-method-indicator">${memberIndicator}${typeIndicator}</span> ${displayName} ✓</div>`;
+            });
+            html += '</div>';
+            html += '</div>';
+        });
+
+        html += '</div>';
+    } else {
+        html += '<div class="table-items"><div class="table-item">No type methods found in PostgreSQL</div></div>';
+    }
+
+    detailsDiv.innerHTML = html;
+    resultsDiv.style.display = 'block';
+}
+
+function toggleTypeMethodImplementationResults(database) {
+    const resultsDiv = document.getElementById(`${database}-type-method-implementation-results`);
+    const detailsDiv = document.getElementById(`${database}-type-method-implementation-details`);
+
+    if (!resultsDiv || !detailsDiv) {
+        console.warn('Type method implementation results elements not found for database:', database);
+        return;
+    }
+
+    const toggleIndicator = resultsDiv.querySelector('.toggle-indicator');
+
+    if (detailsDiv.style.display === 'none' || !detailsDiv.style.display) {
+        detailsDiv.style.display = 'block';
+        if (toggleIndicator) toggleIndicator.textContent = '▲';
+    } else {
+        detailsDiv.style.display = 'none';
+        if (toggleIndicator) toggleIndicator.textContent = '▼';
+    }
+}
+
+function toggleUnifiedTypeMethodVerificationResults() {
+    const resultsDiv = document.getElementById('postgres-unified-type-method-verification-results');
+    const detailsDiv = document.getElementById('postgres-unified-type-method-verification-details');
+
+    if (!resultsDiv || !detailsDiv) {
+        console.warn('Unified type method verification results elements not found');
+        return;
+    }
+
+    const toggleIndicator = resultsDiv.querySelector('.toggle-indicator');
+
+    if (detailsDiv.style.display === 'none' || !detailsDiv.style.display) {
+        detailsDiv.style.display = 'block';
+        if (toggleIndicator) toggleIndicator.textContent = '▲';
+    } else {
+        detailsDiv.style.display = 'none';
+        if (toggleIndicator) toggleIndicator.textContent = '▼';
+    }
+}
+
 // ===== END TYPE METHOD FUNCTIONS =====

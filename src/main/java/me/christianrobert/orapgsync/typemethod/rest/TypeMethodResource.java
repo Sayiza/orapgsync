@@ -8,6 +8,7 @@ import jakarta.ws.rs.core.Response;
 import me.christianrobert.orapgsync.core.job.Job;
 import me.christianrobert.orapgsync.core.job.model.typemethod.TypeMethodMetadata;
 import me.christianrobert.orapgsync.core.job.model.typemethod.TypeMethodStubCreationResult;
+import me.christianrobert.orapgsync.core.job.model.typemethod.TypeMethodImplementationResult;
 import me.christianrobert.orapgsync.core.job.service.JobRegistry;
 import me.christianrobert.orapgsync.core.job.service.JobService;
 import org.slf4j.Logger;
@@ -51,6 +52,20 @@ public class TypeMethodResource {
     @Path("/postgres/stubs/verify")
     public Response verifyPostgresTypeMethodStubs() {
         return startJob("POSTGRES", "TYPE_METHOD_STUB_VERIFICATION", "PostgreSQL type method stub verification");
+    }
+
+    @POST
+    @Path("/postgres/implementation/create")
+    public Response createTypeMethodImplementation() {
+        return startJob("POSTGRES", "TYPE_METHOD_IMPLEMENTATION",
+            "PostgreSQL type method implementation");
+    }
+
+    @POST
+    @Path("/postgres/implementation/verify")
+    public Response verifyTypeMethodImplementation() {
+        return startJob("POSTGRES", "TYPE_METHOD_IMPLEMENTATION_VERIFICATION",
+            "PostgreSQL type method implementation verification");
     }
 
     /**
@@ -181,6 +196,59 @@ public class TypeMethodResource {
                 "isSuccessful", !typeMethodStubResult.hasErrors(),
                 "executionTimestamp", java.time.LocalDateTime.now().toString(),
                 "createdMethods", createdDetails,
+                "skippedMethods", skippedDetails,
+                "errors", errorDetails
+        );
+    }
+
+    /**
+     * Generate summary for type method implementation results.
+     */
+    public static Map<String, Object> generateTypeMethodImplementationSummary(
+            TypeMethodImplementationResult typeMethodImplResult) {
+        Map<String, Object> implementedDetails = new HashMap<>();
+        Map<String, Object> skippedDetails = new HashMap<>();
+        Map<String, Object> errorDetails = new HashMap<>();
+
+        // Implemented type methods details
+        for (Map.Entry<String, TypeMethodMetadata> entry : typeMethodImplResult.getImplementedTypeMethods().entrySet()) {
+            TypeMethodMetadata method = entry.getValue();
+            implementedDetails.put(entry.getKey(), Map.of(
+                    "methodName", method.getQualifiedName(),
+                    "status", "implemented"
+            ));
+        }
+
+        // Skipped type methods details
+        for (Map.Entry<String, TypeMethodMetadata> entry : typeMethodImplResult.getSkippedTypeMethods().entrySet()) {
+            TypeMethodMetadata method = entry.getValue();
+            skippedDetails.put(entry.getKey(), Map.of(
+                    "methodName", method.getQualifiedName(),
+                    "status", "skipped",
+                    "reason", "PL/SQL transformation not yet implemented"
+            ));
+        }
+
+        // Error details
+        for (Map.Entry<String, TypeMethodImplementationResult.ErrorInfo> entry :
+                typeMethodImplResult.getErrors().entrySet()) {
+            TypeMethodImplementationResult.ErrorInfo error = entry.getValue();
+            Map<String, Object> errorMap = new HashMap<>();
+            errorMap.put("typeMethodName", error.getTypeMethodName());
+            errorMap.put("status", "error");
+            errorMap.put("error", error.getError());
+            if (error.getSql() != null) {
+                errorMap.put("sql", error.getSql());
+            }
+            errorDetails.put(entry.getKey(), errorMap);
+        }
+
+        return Map.of(
+                "implementedCount", typeMethodImplResult.getImplementedCount(),
+                "skippedCount", typeMethodImplResult.getSkippedCount(),
+                "errorCount", typeMethodImplResult.getErrorCount(),
+                "isSuccessful", typeMethodImplResult.isSuccessful(),
+                "implementedMethods", implementedDetails,
                 "skippedMethods", skippedDetails,
                 "errors", errorDetails
         );

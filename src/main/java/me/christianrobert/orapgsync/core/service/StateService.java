@@ -21,6 +21,7 @@ import me.christianrobert.orapgsync.core.job.model.function.FunctionMetadata;
 import me.christianrobert.orapgsync.core.job.model.function.FunctionStubCreationResult;
 import me.christianrobert.orapgsync.core.job.model.typemethod.TypeMethodMetadata;
 import me.christianrobert.orapgsync.core.job.model.typemethod.TypeMethodStubCreationResult;
+import me.christianrobert.orapgsync.core.job.model.typemethod.TypeMethodImplementationResult;
 import me.christianrobert.orapgsync.oraclecompat.model.OracleCompatInstallationResult;
 import me.christianrobert.orapgsync.oraclecompat.model.OracleCompatVerificationResult;
 import org.slf4j.Logger;
@@ -80,6 +81,7 @@ public class StateService {
     List<TypeMethodMetadata> oracleTypeMethodMetadata = new ArrayList<>();
     List<TypeMethodMetadata> postgresTypeMethodMetadata = new ArrayList<>();
     TypeMethodStubCreationResult typeMethodStubCreationResult;
+    TypeMethodImplementationResult typeMethodImplementationResult;
 
     // Oracle Compatibility Layer
     OracleCompatInstallationResult oracleCompatInstallationResult;
@@ -372,6 +374,14 @@ public class StateService {
         this.typeMethodStubCreationResult = typeMethodStubCreationResult;
     }
 
+    public TypeMethodImplementationResult getTypeMethodImplementationResult() {
+        return typeMethodImplementationResult;
+    }
+
+    public void setTypeMethodImplementationResult(TypeMethodImplementationResult typeMethodImplementationResult) {
+        this.typeMethodImplementationResult = typeMethodImplementationResult;
+    }
+
     public OracleCompatInstallationResult getOracleCompatInstallationResult() {
         return oracleCompatInstallationResult;
     }
@@ -509,6 +519,7 @@ public class StateService {
         this.oracleTypeMethodMetadata = new ArrayList<>();
         this.postgresTypeMethodMetadata = new ArrayList<>();
         this.typeMethodStubCreationResult = null;
+        this.typeMethodImplementationResult = null;
         this.oracleCompatInstallationResult = null;
         this.oracleCompatVerificationResult = null;
         this.constraintCreationResult = null;

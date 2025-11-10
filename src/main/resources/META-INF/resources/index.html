@@ -577,6 +577,42 @@
             </div>
           </td>
         </tr>
+        <tr class="type-method-implementation-row">
+          <td class="source-cell">
+            <div class="component-info" id="oracle-type-method-implementation">
+              <span class="count-badge">-</span>
+              <span class="component-text">N/A - see Type Methods above</span>
+            </div>
+          </td>
+          <td class="target-cell">
+            <div class="component-info" id="postgres-type-method-implementation">
+              <span class="count-badge">-</span>
+              <span class="component-text">Type methods implemented</span>
+              <button class="verify-all-btn refresh-btn" onclick="verifyAllPostgresTypeMethods()" title="Verify all PostgreSQL type methods (stubs and implementations)" style="margin-left: 4px;">⟳</button>
+              <button class="action-btn" onclick="createPostgresTypeMethodImplementation()" title="Create PostgreSQL type methods with PL/pgSQL logic">Create Type Methods</button>
+
+              <!-- UNIFIED TYPE METHOD VERIFICATION RESULTS (from ⟳ Verify All Type Methods button) -->
+              <div class="table-creation-results" id="postgres-unified-type-method-verification-results" style="display: none;">
+                <div class="table-creation-header" onclick="toggleUnifiedTypeMethodVerificationResults()">
+                  <span class="toggle-indicator">▼</span> Type Method Verification Results (All Type Methods)
+                </div>
+                <div class="table-creation-details" id="postgres-unified-type-method-verification-details">
+                  <!-- Unified type method verification results will be populated here -->
+                </div>
+              </div>
+
+              <!-- TYPE METHOD IMPLEMENTATION CREATION RESULTS (from Create Type Methods button) -->
+              <div class="table-creation-results" id="postgres-type-method-implementation-results" style="display: none;">
+                <div class="table-creation-header" onclick="toggleTypeMethodImplementationResults('postgres')">
+                  <span class="toggle-indicator">▼</span>Type Method Implementation Creation Results
+                </div>
+                <div class="table-creation-details" id="postgres-type-method-implementation-details">
+                  <!-- Type method implementation creation results will be populated here -->
+                </div>
+              </div>
+            </div>
+          </td>
+        </tr>
       </tbody>
     </table>
   </div>
