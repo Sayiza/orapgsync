@@ -1,0 +1,325 @@
+================================================================================
+RESET STATE FUNCTIONALITY - COMPLETE ANALYSIS
+================================================================================
+
+INVESTIGATION DATE: 2025-11-09
+CODEBASE: /home/hoeflechner/dev/orapgsync
+
+================================================================================
+PART 1: STATE SERVICE RESET (StateService.resetState - Lines 484-522)
+================================================================================
+
+CLEARED BY StateService.resetState():
+==================================================
+
+1. Schema Lists:
+   - oracleSchemaNames → new ArrayList<>()
+   - postgresSchemaNames → new ArrayList<>()
+   - schemaCreationResult → null
+
+2. Synonym State:
+   - oracleSynonymsByOwnerAndName → new HashMap<>()
+
+3. Object Type State:
+   - oracleObjectDataTypeMetaData → new ArrayList<>()
+   - postgresObjectDataTypeMetaData → new ArrayList<>()
+   - objectTypeCreationResult → null
+
+4. Row Count State:
+   - oracleRowCountMetadata → new ArrayList<>()
+   - postgresRowCountMetadata → new ArrayList<>()
+
+5. Table State:
+   - oracleTableMetadata → new ArrayList<>()
+   - postgresTableMetadata → new ArrayList<>()
+   - tableCreationResult → null
+
+6. Sequence State:
+   - oracleSequenceMetadata → new ArrayList<>()
+   - postgresSequenceMetadata → new ArrayList<>()
+   - sequenceCreationResult → null
+
+7. View State:
+   - oracleViewMetadata → new ArrayList<>()
+   - postgresViewMetadata → new ArrayList<>()
+   - viewStubCreationResult → null
+   - viewImplementationResult → null
+
+8. Function State:
+   - oracleFunctionMetadata → new ArrayList<>()
+   - postgresFunctionMetadata → new ArrayList<>()
+   - functionStubCreationResult → null
+   - functionImplementationResult → null
+
+9. Type Method State:
+   - oracleTypeMethodMetadata → new ArrayList<>()
+   - postgresTypeMethodMetadata → new ArrayList<>()
+   - typeMethodStubCreationResult → null
+
+10. Oracle Compatibility State:
+    - oracleCompatInstallationResult → null
+    - oracleCompatVerificationResult → null
+
+11. Constraint State:
+    - constraintCreationResult → null
+    - fkIndexCreationResult → null
+
+12. Data Transfer State:
+    - dataTransferResult → null
+
+13. Package Function Storage:
+    - oraclePackageFunctionSourcesFull → new HashMap<>()
+    - oraclePackageFunctionSourcesStub → new HashMap<>()
+    - oracleReducedPackageBodies → new HashMap<>()
+
+================================================================================
+PART 2: JOB SERVICE RESET (JobService.resetJobs - Lines 160-165)
+================================================================================
+
+CLEARED BY JobService.resetJobs():
+==================================================
+
+1. Job Execution History:
+   - jobExecutions.clear() → removes all job execution records
+   - Clears: Job status, progress, results, errors, timestamps
+
+NOT CLEARED BY JobService.resetJobs() (CRITICAL):
+==================================================
+
+1. ExecutorService Thread Pools:
+   - Created in submitJob() line 91: Executors.newCachedThreadPool()
+   - NEVER SHUT DOWN in resetJobs()
+   - ThreadPool references held by CompletableFuture objects
+   - When jobExecutions.clear() is called, CompletableFuture refs are lost
+   - BUT ExecutorService instances and their threads persist in memory
+   
+   IMPACT:
+   - Each job creates a new thread pool
+   - Each pool holds threads for 60 seconds after job completes
+   - Accumulation: 100 jobs → 100 thread pools with potentially 500+ threads
+   - Memory leak: Threads retained until 60-second timeout expires
+   - Risk Level: CRITICAL
+   
+   EXAMPLE LEAK SCENARIO:
+   ```
+   Reset Iteration #1:
+   - Run 20 jobs → creates ExecutorService #1-20
+   - resetJobs() clears jobExecutions map
+   - But ExecutorService #1-20 still active with threads
+   
+   Reset Iteration #2:
+   - Run 20 jobs → creates ExecutorService #21-40
+   - resetJobs() clears jobExecutions map again
+   - Now: ExecutorService #1-40 active in memory
+   
+   After 10 iterations:
+   - 200 ExecutorService instances still active
+   - Potentially 1000+ threads consuming memory
+   - CPU wasted on context switches between idle threads
+   ```
+
+================================================================================
+PART 3: INFRASTRUCTURE STATE NOT RESET
+================================================================================
+
+3A. TYPE EVALUATOR CACHES (HIGH RISK)
+==========================================
+
+Location: /src/main/java/me/christianrobert/orapgsync/transformer/type/SimpleTypeEvaluator.java
+
+Issue:
+  - Line 33: private final Map<String, TypeInfo> typeCache = new HashMap<>()
+  - Each transformation creates new SimpleTypeEvaluator instance
+  - Instance caches type information (token position → TypeInfo)
+  
+  - Line 80-81: Public method clearCache() EXISTS
+  - BUT: No code calls clearCache() after transformation
+  - NOT reset by StateService.resetState()
+  - NOT reset by JobService.resetJobs()
+
+Impact:
+  - Per-query caches accumulate during large view transformations
+  - Multiple queries in single transformation → cache grows
+  - Cache never cleared until SimpleTypeEvaluator garbage collected
+  - Memory accumulates for duration of transformation job
+
+Memory Impact: MEDIUM (depends on transformation complexity)
+Risk Level: HIGH (cumulative during long transformations)
+
+Where Caches Are Created:
+  - TransformationService.transformSql() line 137
+  - TransformationService.transformFunction() line 249
+  - TransformationService.transformFunction() (overload) line 250
+
+Fix Location: TransformationService.java - add clearCache() calls
+
+
+3B. TRANSFORMATION CONTEXT MUTABLE STATE (MEDIUM RISK)
+=========================================================
+
+Location: /src/main/java/me/christianrobert/orapgsync/transformer/context/TransformationContext.java
+
+Mutable State:
+  - Line 253: private final Map<String, String> tableAliases
+  - Line 254: private final Set<String> cteNames
+  - Line 277: private final Deque<VariableScope> variableScopeStack
+
+Methods Available:
+  - clearAliases() (line 606-613)
+  - clearCTEs() (line 647-649)
+  - popVariableScope() (line 711-716)
+
+Issue:
+  - State persists within a single transformation
+  - Methods exist to clear state between queries
+  - BUT methods are only called within single transformation
+  - NOT called during reset
+  - NOT reset by StateService.resetState()
+
+Current Risk: LOW (state is ephemeral per transformation, garbage collected after)
+Future Risk: MEDIUM (if TransformationContext instances are cached/reused)
+
+Recommendation: Document assumption that context is ephemeral
+Add: Assertions to verify scope stack is empty on completion
+
+
+3C. PACKAGE CONTEXT AST CACHES (MEDIUM RISK)
+===============================================
+
+Location: /src/main/java/me/christianrobert/orapgsync/transformer/packagevariable/PackageContext.java
+
+Cached Objects:
+  - Line 37: private String packageBodySource (entire package body source)
+  - Line 38: private PlSqlParser.Create_package_bodyContext packageBodyAst
+
+Purpose:
+  - Avoid re-parsing package body for multi-function extraction
+  - Parse once, extract multiple functions from cached AST
+
+Lifecycle:
+  - Created: When first function from package encountered
+  - Used: To extract function source for all package functions
+  - Cleared: When extraction job completes (garbage collected)
+
+Size Impact:
+  - Large Oracle packages: 100KB-500KB source + large ANTLR AST
+  - Typical Oracle package: 50-200KB
+
+Current Risk: MEDIUM (should be ephemeral, but verify)
+Future Risk: HIGH (if cached beyond job lifetime)
+
+Recommendation: Verify packageContextCache is truly ephemeral
+Add: Lifecycle documentation and assertions
+
+
+3D. ANTLR PARSER STATIC CACHES (LOW RISK - PROPERLY CLEARED)
+==============================================================
+
+Location: /src/main/java/me/christianrobert/orapgsync/transformer/parser/AntlrParser.java
+
+Status: PROPERLY HANDLED - No action needed
+
+Static Caches:
+  - ANTLR DFA cache (decision states)
+  - ANTLR PredictionContextCache (ATN simulation contexts)
+
+Clearing Mechanism:
+  - Line 172: parser.getInterpreter().clearDFA()
+  - Line 176-177: clearPredictionContextCache(sharedCache) via reflection
+  - Called in finally block (lines 166-181)
+  - Called AFTER EVERY PARSE (not just on reset)
+
+Why This Works:
+  - Clearing happens immediately after each parse
+  - No accumulation across transformations
+  - Reflection hack handles protected cache field
+
+Assessment: CORRECT - No changes needed
+
+================================================================================
+PART 4: CONFIGURATION STATE (INTENTIONALLY NOT RESET)
+================================================================================
+
+Location: /src/main/java/me/christianrobert/orapgsync/config/service/ConfigService.java
+
+State:
+  - Line 20: private final Map<String, Object> configuration (ConcurrentHashMap)
+  - Holds: Database URLs, credentials, feature flags, paths
+
+Reset Behavior:
+  - NOT cleared by StateService.resetState()
+  - NOT cleared by JobService.resetJobs()
+  - Method exists: resetToDefaults() (line 109-113)
+  - But NOT called during state reset
+
+Rationale: INTENTIONAL
+- Configuration should persist across resets
+- User may want to run multiple migrations with same config
+- Resetting config would lose database connection parameters
+
+Assessment: CORRECT - No changes needed
+
+================================================================================
+PART 5: CONNECTION SERVICES (STATELESS)
+================================================================================
+
+Files:
+  - OracleConnectionService.java
+  - PostgresConnectionService.java
+
+State: NONE (stateless)
+- Both services create connections on-demand
+- No connection pooling
+- No persistent state
+
+Assessment: CORRECT - No issues
+
+================================================================================
+PART 6: COMPREHENSIVE SUMMARY TABLE
+================================================================================
+
+Component                              | Cleared? | Risk Level | Notes
+---------------------------------------|----------|-----------|------------------------------------------
+StateService Metadata                  | YES      | N/A       | All properly cleared
+JobService.jobExecutions               | YES      | N/A       | Map cleared correctly
+Thread Pools (ExecutorService)          | NO       | CRITICAL  | MUST FIX: 100+ pools accumulate
+SimpleTypeEvaluator.typeCache          | NO       | HIGH      | SHOULD FIX: Cache method exists
+TransformationContext.tableAliases     | NO       | MEDIUM    | Ephemeral, OK for now
+TransformationContext.cteNames         | NO       | MEDIUM    | Ephemeral, OK for now
+TransformationContext.variableScopeStack| NO      | MEDIUM    | Ephemeral, OK for now
+PackageContext.packageBodySource       | NO       | MEDIUM    | Ephemeral, needs verification
+PackageContext.packageBodyAst          | NO       | MEDIUM    | Ephemeral, needs verification
+ANTLR DFA Cache                        | PER-PARSE| LOW       | Correctly cleared per-parse
+ANTLR PredictionContextCache           | PER-PARSE| LOW       | Correctly cleared per-parse
+ConfigService.configuration            | NO       | N/A       | Intentional (config should persist)
+Connection Pools                       | N/A      | N/A       | No pooling (stateless)
+
+================================================================================
+PRIORITY ACTION ITEMS
+================================================================================
+
+CRITICAL (Must Fix):
+1. Fix JobService thread pool leak
+   File: /src/main/java/me/christianrobert/orapgsync/core/job/service/JobService.java
+   Line: 91
+   Action: Either store ExecutorService or shutdown pools in resetJobs()
+   
+HIGH (Should Fix):
+1. Clear SimpleTypeEvaluator caches after transformations
+   Files: 
+     - /src/main/java/me/christianrobert/orapgsync/transformer/type/SimpleTypeEvaluator.java
+     - /src/main/java/me/christianrobert/orapgsync/transformer/service/TransformationService.java
+   Action: Call clearCache() after each transformation completes
+   
+MEDIUM (Verify/Document):
+1. Verify PackageContext lifecycle is ephemeral
+   File: /src/main/java/me/christianrobert/orapgsync/transformer/packagevariable/PackageContext.java
+   Action: Add documentation and assertions
+   
+2. Document TransformationContext ephemeral assumptions
+   File: /src/main/java/me/christianrobert/orapgsync/transformer/context/TransformationContext.java
+   Action: Add Javadoc explaining scope
+
+================================================================================
+END OF ANALYSIS
+================================================================================

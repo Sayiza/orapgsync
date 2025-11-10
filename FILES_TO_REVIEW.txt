@@ -1,0 +1,119 @@
+FILES REQUIRING ATTENTION FOR MEMORY LEAK FIXES
+
+================================================================================
+CRITICAL - MUST FIX
+================================================================================
+
+1. JobService - Thread Pool Leak
+   Absolute Path: /home/hoeflechner/dev/orapgsync/src/main/java/me/christianrobert/orapgsync/core/job/service/JobService.java
+   Issue: Line 91 - Creates Executors.newCachedThreadPool() per job
+   Issue: Line 160-165 - resetJobs() doesn't shutdown ExecutorService
+   Fix: Store ExecutorService as field and shutdown/recreate on reset
+
+
+================================================================================
+HIGH - SHOULD FIX
+================================================================================
+
+1. SimpleTypeEvaluator - Type Cache Not Cleared
+   Absolute Path: /home/hoeflechner/dev/orapgsync/src/main/java/me/christianrobert/orapgsync/transformer/type/SimpleTypeEvaluator.java
+   Issue: Line 33 - Private HashMap typeCache
+   Issue: Line 80-81 - clearCache() method exists but never called
+   Fix: Call clearCache() after each transformation
+
+2. TransformationService - No Cache Cleanup
+   Absolute Path: /home/hoeflechner/dev/orapgsync/src/main/java/me/christianrobert/orapgsync/transformer/service/TransformationService.java
+   Issue: Lines 137, 249, 250 - Creates SimpleTypeEvaluator instances
+   Issue: No clearCache() calls after transformations
+   Fix: Add try-finally with typeEvaluator.clearCache() calls
+
+
+================================================================================
+MEDIUM - VERIFY/DOCUMENT
+================================================================================
+
+1. PackageContext - AST Cache Lifecycle Verification
+   Absolute Path: /home/hoeflechner/dev/orapgsync/src/main/java/me/christianrobert/orapgsync/transformer/packagevariable/PackageContext.java
+   Issue: Lines 37-38 - Caches package body source and AST
+   Action: Verify lifecycle is truly ephemeral
+   Action: Add documentation and assertions
+
+2. TransformationContext - Mutable State Documentation
+   Absolute Path: /home/hoeflechner/dev/orapgsync/src/main/java/me/christianrobert/orapgsync/transformer/context/TransformationContext.java
+   Issue: Lines 253-254, 277 - Mutable state in context
+   Action: Document ephemeral nature assumption
+   Action: Add assertions for scope stack balance
+
+3. StateRestService - Reset Hook
+   Absolute Path: /home/hoeflechner/dev/orapgsync/src/main/java/me/christianrobert/orapgsync/core/rest/StateRestService.java
+   Issue: Line 62-65 - resetState() endpoint
+   Action: Add calls to reset TransformationService caches
+   Action: Document all reset operations
+
+
+================================================================================
+OPTIONAL - ALREADY CORRECT
+================================================================================
+
+1. AntlrParser - ANTLR Cache Clearing (Already Correct)
+   Absolute Path: /home/hoeflechner/dev/orapgsync/src/main/java/me/christianrobert/orapgsync/transformer/parser/AntlrParser.java
+   Status: CORRECTLY IMPLEMENTED - No action needed
+   Details: Lines 172, 176-177 properly clear DFA and PredictionContextCache
+
+2. OracleConnectionService - Stateless (Already Correct)
+   Absolute Path: /home/hoeflechner/dev/orapgsync/src/main/java/me/christianrobert/orapgsync/database/service/OracleConnectionService.java
+   Status: STATELESS - No issues
+
+3. PostgresConnectionService - Stateless (Already Correct)
+   Absolute Path: /home/hoeflechner/dev/orapgsync/src/main/java/me/christianrobert/orapgsync/database/service/PostgresConnectionService.java
+   Status: STATELESS - No issues
+
+4. ConfigService - Intentional Persistence (Already Correct)
+   Absolute Path: /home/hoeflechner/dev/orapgsync/src/main/java/me/christianrobert/orapgsync/config/service/ConfigService.java
+   Status: CORRECT - Configuration should persist across resets
+
+
+================================================================================
+SUPPORTING DOCUMENTATION
+================================================================================
+
+1. Full Investigation Report
+   Path: /home/hoeflechner/dev/orapgsync/documentation/MEMORY_LEAK_INVESTIGATION.md
+
+2. Quick Reference Guide
+   Path: /home/hoeflechner/dev/orapgsync/documentation/RESET_GAPS_QUICK_REFERENCE.md
+
+3. Complete State Analysis
+   Path: /home/hoeflechner/dev/orapgsync/RESET_STATE_ANALYSIS.txt
+
+
+================================================================================
+TESTING CHECKLIST
+================================================================================
+
+After fixes are implemented, verify:
+
+1. Thread Pool Test
+   [ ] Submit 100 jobs
+   [ ] Measure thread count before reset
+   [ ] Call resetState()
+   [ ] Measure thread count after reset
+   [ ] Verify return to baseline
+
+2. Type Cache Test
+   [ ] Transform 1000 views
+   [ ] Monitor memory usage
+   [ ] Verify no unbounded growth
+   [ ] Verify cache cleared properly
+
+3. Integration Test
+   [ ] Run multiple reset cycles
+   [ ] Monitor thread count stability
+   [ ] Monitor memory stability
+   [ ] Verify no accumulation
+
+4. Heap Analysis
+   [ ] Use jmap to analyze heap before/after reset
+   [ ] Verify no ExecutorService instances retained
+   [ ] Verify no SimpleTypeEvaluator instances retained
+

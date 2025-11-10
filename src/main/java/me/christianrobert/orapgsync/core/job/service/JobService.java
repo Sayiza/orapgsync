@@ -1,5 +1,7 @@
 package me.christianrobert.orapgsync.core.job.service;
 
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import me.christianrobert.orapgsync.core.job.Job;
 import me.christianrobert.orapgsync.core.job.model.JobProgress;
@@ -11,7 +13,9 @@ import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 @ApplicationScoped
 public class JobService {
@@ -19,6 +23,68 @@ public class JobService {
     private static final Logger log = LoggerFactory.getLogger(JobService.class);
 
     private final Map<String, JobExecution<?>> jobExecutions = new ConcurrentHashMap<>();
+
+    /**
+     * Shared thread pool for all job executions.
+     * Using a single pool prevents unbounded thread creation and memory leaks.
+     *
+     * CRITICAL FIX: Previously, each job created a new ExecutorService, leading to
+     * 100+ thread pools after 100 jobs, consuming 500MB-1.5GB memory.
+     *
+     * Now: Single shared pool, properly managed lifecycle.
+     */
+    private ExecutorService executorService;
+
+    /**
+     * Initializes the shared thread pool on application startup.
+     */
+    @PostConstruct
+    public void init() {
+        log.info("Initializing shared ExecutorService for job execution");
+        executorService = Executors.newCachedThreadPool();
+    }
+
+    /**
+     * Shuts down the thread pool on application shutdown.
+     * Waits up to 30 seconds for running jobs to complete.
+     */
+    @PreDestroy
+    public void shutdown() {
+        log.info("Shutting down ExecutorService");
+        shutdownExecutorService(executorService, 30);
+    }
+
+    /**
+     * Shuts down an ExecutorService gracefully.
+     *
+     * @param executor ExecutorService to shut down
+     * @param timeoutSeconds Maximum time to wait for shutdown
+     */
+    private void shutdownExecutorService(ExecutorService executor, int timeoutSeconds) {
+        if (executor == null || executor.isShutdown()) {
+            return;
+        }
+
+        try {
+            log.debug("Shutting down executor service (timeout: {}s)", timeoutSeconds);
+            executor.shutdown();
+
+            if (!executor.awaitTermination(timeoutSeconds, TimeUnit.SECONDS)) {
+                log.warn("Executor did not terminate in {}s, forcing shutdown", timeoutSeconds);
+                executor.shutdownNow();
+
+                if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
+                    log.error("Executor did not terminate after forced shutdown");
+                }
+            }
+
+            log.debug("Executor service shut down successfully");
+        } catch (InterruptedException e) {
+            log.error("Interrupted while shutting down executor service", e);
+            executor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+    }
 
     public static class JobExecution<T> {
         private final Job<T> job;
@@ -88,7 +154,7 @@ public class JobService {
                 log.error("Job failed: " + jobId, e);
                 throw new RuntimeException("Job execution failed: " + e.getMessage(), e);
             }
-        }, Executors.newCachedThreadPool());
+        }, executorService);
 
         execution.setFuture(future);
         return jobId;
@@ -151,16 +217,28 @@ public class JobService {
     }
 
     /**
-     * Clears all job executions from memory.
+     * Clears all job executions from memory and resets the thread pool.
      * This should be called when resetting application state to prevent memory leaks.
+     *
+     * CRITICAL FIX: Now properly shuts down the old ExecutorService and creates a new one.
+     * This prevents thread pool accumulation that was causing 500MB-1.5GB memory leaks.
      *
      * Warning: This will clear job history and results. Only use when intentionally
      * resetting the application state (e.g., before starting a new migration run).
      */
     public void resetJobs() {
         int count = jobExecutions.size();
-        log.info("Clearing {} job executions from memory", count);
+        log.info("Clearing {} job executions from memory and resetting thread pool", count);
+
+        // Shut down old executor service
+        shutdownExecutorService(executorService, 30);
+
+        // Clear job history
         jobExecutions.clear();
-        log.debug("Job execution history cleared successfully");
+
+        // Create new executor service
+        executorService = Executors.newCachedThreadPool();
+
+        log.info("Job execution history cleared and thread pool reset successfully");
     }
 }

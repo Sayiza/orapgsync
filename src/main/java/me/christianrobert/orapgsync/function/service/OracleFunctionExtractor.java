@@ -443,13 +443,11 @@ public class OracleFunctionExtractor {
                 String functionName = stubEntry.getKey();
                 String stubSource = stubEntry.getValue();
 
-                // Wrap stub for parsing
-                String wrappedStub = "CREATE OR REPLACE " + stubSource;
-
                 try {
                     // Parse stub (tiny, <1ms per stub)
+                    // Note: Stub already starts with FUNCTION/PROCEDURE keyword (no CREATE OR REPLACE needed)
                     me.christianrobert.orapgsync.transformer.parser.ParseResult stubParseResult =
-                        parser.parseFunctionBody(wrappedStub);
+                        parser.parseFunctionBody(stubSource);
 
                     if (stubParseResult.hasErrors()) {
                         log.warn("Failed to parse stub for {}.{}.{}: {}",

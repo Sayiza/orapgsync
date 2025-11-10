@@ -42,6 +42,15 @@ import java.util.Set;
  * <ul>
  *   <li>{@link #tableAliases} - Table aliases for current query</li>
  *   <li>{@link #cteNames} - CTE names from WITH clause</li>
+ *   <li>{@link #variableScopeStack} - Variable scope stack for local variable tracking</li>
+ * </ul>
+ *
+ * <p><strong>Lifecycle and Memory Safety:</strong></p>
+ * <ul>
+ *   <li><strong>Ephemeral instances:</strong> Each transformation creates a fresh TransformationContext</li>
+ *   <li><strong>No caching:</strong> Context is never stored in StateService or static fields</li>
+ *   <li><strong>Automatic cleanup:</strong> Garbage collected when transformation completes</li>
+ *   <li><strong>Thread-safe by design:</strong> No shared state between transformations</li>
  * </ul>
  *
  * <p><strong>Benefits of Unified Context:</strong></p>
