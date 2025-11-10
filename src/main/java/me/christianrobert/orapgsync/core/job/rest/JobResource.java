@@ -29,6 +29,8 @@ import me.christianrobert.orapgsync.core.job.model.function.FunctionMetadata;
 import me.christianrobert.orapgsync.core.job.model.function.FunctionStubCreationResult;
 import me.christianrobert.orapgsync.core.job.model.typemethod.TypeMethodMetadata;
 import me.christianrobert.orapgsync.core.job.model.typemethod.TypeMethodStubCreationResult;
+import me.christianrobert.orapgsync.core.job.model.trigger.TriggerMetadata;
+import me.christianrobert.orapgsync.core.job.model.trigger.TriggerImplementationResult;
 import me.christianrobert.orapgsync.core.job.service.JobService;
 import me.christianrobert.orapgsync.function.rest.FunctionResource;
 import me.christianrobert.orapgsync.objectdatatype.rest.ObjectTypeResource;
@@ -38,6 +40,7 @@ import me.christianrobert.orapgsync.schema.rest.SchemaResource;
 import me.christianrobert.orapgsync.sequence.rest.SequenceResource;
 import me.christianrobert.orapgsync.table.rest.TableResource;
 import me.christianrobert.orapgsync.transfer.rest.DataTransferResource;
+import me.christianrobert.orapgsync.trigger.rest.TriggerResource;
 import me.christianrobert.orapgsync.typemethod.rest.TypeMethodResource;
 import me.christianrobert.orapgsync.view.rest.ViewResource;
 import me.christianrobert.orapgsync.core.job.model.view.ViewVerificationResult;
@@ -274,6 +277,15 @@ public class JobResource {
                 response.put("errorCount", funcImplResult.getErrorCount());
                 response.put("isSuccessful", funcImplResult.isSuccessful());
                 response.put("result", result);
+            } else if (result instanceof TriggerImplementationResult) {
+                TriggerImplementationResult triggerImplResult = (TriggerImplementationResult) result;
+                Map<String, Object> summary = TriggerResource.generateTriggerImplementationSummary(triggerImplResult);
+                response.put("summary", summary);
+                response.put("implementedCount", triggerImplResult.getImplementedCount());
+                response.put("skippedCount", triggerImplResult.getSkippedCount());
+                response.put("errorCount", triggerImplResult.getErrorCount());
+                response.put("isSuccessful", triggerImplResult.isSuccessful());
+                response.put("result", result);
             } else if (result instanceof TypeMethodStubCreationResult) {
                 TypeMethodStubCreationResult typeMethodStubResult = (TypeMethodStubCreationResult) result;
                 Map<String, Object> summary = TypeMethodResource.generateTypeMethodStubCreationSummary(typeMethodStubResult);
@@ -469,6 +481,15 @@ public class JobResource {
                     Map<String, Object> summary = TypeMethodResource.generateTypeMethodSummary(typeMethods);
                     response.put("summary", summary);
                     response.put("typeMethodCount", typeMethods.size());
+                    response.put("result", result);
+                } else if (jobType.contains("TRIGGER")
+                        && !jobType.contains("TRIGGER_IMPLEMENTATION")
+                        && !jobType.contains("TRIGGER_VERIFICATION")) {
+                    @SuppressWarnings("unchecked")
+                    List<TriggerMetadata> triggers = (List<TriggerMetadata>) result;
+                    Map<String, Object> summary = TriggerResource.generateTriggerSummary(triggers);
+                    response.put("summary", summary);
+                    response.put("triggerCount", triggers.size());
                     response.put("result", result);
                 } else {
                     // Generic list result
