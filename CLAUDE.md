@@ -340,16 +340,7 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
     - ✅ Integrated as Steps 27-28/28 in orchestration workflow
     - 📋 **Next:** Extract Oracle trigger metadata, transform PL/SQL trigger bodies, handle :NEW/:OLD → NEW/OLD
 
-16. **Indexes**: Extraction and creation (Future)
-
-### 📋 Phase 3 Detailed Roadmap (Next Steps)
-1. ~~**Oracle Built-in Replacements**~~ ✅ **COMPLETE** - See item #10 above
-2. ~~**Function/Procedure Transformation**~~ 🔄 **85-95% COMPLETE** - See item #13 above
-3. **Type Method Implementation** - ✅ **Framework Complete** (Step 26/28) - See item #14 above
-   - 📋 Next: Transform type member methods using ANTLR (extend PostgresCodeBuilder, handle SELF parameter)
-4. **Trigger Migration** - ✅ **Framework Complete** (Steps 27-28/28) - See item #15 above
-   - 📋 Next: Extract Oracle trigger metadata, transform PL/SQL trigger bodies to PL/pgSQL
-5. **REST Layer** (Optional): Auto-generate REST endpoints for testing and incremental cutover
+16. **Other aspects**: Extraction and creation (Future)
 
 ## Database Configuration
 
@@ -653,15 +644,11 @@ Each step is unambiguous and the progression from stub to implementation is clea
 
 **Prefer Rigorous Solutions Over Heuristics:**
 - When planning new features, always think about rigorous, deterministic solutions first
-- Avoid heuristic-based detection or pattern matching when proper type information is available
 - Invest in proper infrastructure (scope tracking, type analysis, metadata indices) rather than quick heuristic shortcuts
-- Heuristics lead to bugs and maintenance burden - deterministic logic is worth the upfront investment
 - **Example:** Variable scope tracking replaced heuristic variable detection, fixing critical function call misidentification bugs
 
 **Manual Tracking Tools:**
 - `TODO.md` is for manual tracking by the user only - **DO NOT update it automatically**
-- Use the TodoWrite tool for temporary session-based task tracking during implementation
-- User maintains TODO.md for long-term project planning and feature requests
 
 ### Documentation Policy
 
@@ -671,15 +658,13 @@ To prevent divergence between code and documentation:
 
 1. **After completing ANY implementation step:**
    - Update CLAUDE.md with a summary of what was implemented
-   - Update TRANSFORMATION.md if it's a SQL/PL-SQL transformation feature
-   - Update relevant implementation plan files (e.g., CTE_IMPLEMENTATION_PLAN.md, CONNECT_BY_IMPLEMENTATION_PLAN.md)
+   - Update TRANSFORMATION.md if it's a SQL/PL-SQL transformation feature, or other plan file that is being work with
 
 2. **Document these aspects:**
    - What was implemented (module, classes, key features)
    - REST API endpoints (if any)
    - Integration points (orchestration workflow step number, dependencies)
    - Support levels or limitations (if applicable)
-   - Test coverage summary
 
 3. **Keep documentation synchronized:**
    - Mark completed phases with ✅ in both CLAUDE.md and TRANSFORMATION.md
@@ -691,16 +676,6 @@ To prevent divergence between code and documentation:
    - An implementation is not complete until documentation is updated
    - Documentation updates should happen in the same session as code completion
    - Review both code and docs together before considering task complete
-
-**Example workflow:**
-```
-1. Implement Oracle compatibility layer
-2. Test the implementation
-3. Update CLAUDE.md Phase 3 section ✅
-4. Update TRANSFORMATION.md with Phase 4.5 ✅
-5. Update "Next Steps" roadmap ✅
-6. NOW the task is complete
-```
 
 ### Testing Strategy
 - **Framework**: JUnit 5 with Mockito
@@ -716,50 +691,9 @@ To prevent divergence between code and documentation:
 
 ### Package Segmentation Optimization (2025-11-09)
 
-**Problem Solved:** Large Oracle packages (5000+ lines, 100+ functions) caused OutOfMemoryErrors during extraction and transformation jobs due to expensive ANTLR parsing (2GB AST, 3 minutes per package).
+**Problem Solved:** Large Oracle packages (5000+ lines, 100+ functions) caused OutOfMemoryErrors 
 
-**Solution:** Lightweight function boundary scanner replaces full ANTLR parse during extraction. Package bodies are segmented into:
-- Full function sources (stored for transformation)
-- Function stubs (parsed for metadata extraction)
-- Reduced body (package variables/types only, functions removed)
-
-**Architecture:**
-```
-Extraction Job (OracleFunctionExtractionJob):
-├─ Query ALL_SOURCE → Package body SQL
-├─ CodeCleaner.removeComments() → Clean source
-├─ FunctionBoundaryScanner.scan() → Find function boundaries (state machine)
-├─ Extract full functions + Generate stubs + Generate reduced body
-├─ StateService.storePackageFunctions() → Store all three
-└─ Parse stubs only → Extract metadata (fast, <1ms per stub)
-
-Transformation Job (PostgresFunctionImplementationJob):
-├─ StateService.getPackageFunctionSource() → Get full function (O(1) lookup)
-├─ StateService.getReducedPackageBody() → Get variables (parse reduced body)
-├─ Transform function → PL/pgSQL
-└─ StateService.clearPackageFunctionStorage() → Free memory
-```
-
-**Key Components:**
-- `FunctionBoundaryScanner` (330 lines) - 6-state machine for package-level functions
-  - States: PACKAGE_LEVEL, IN_KEYWORD, IN_SIGNATURE, IN_SIGNATURE_PAREN, IN_FUNCTION_BODY, IN_STRING
-  - Handles: Forward declarations, nested BEGIN/END, string literals, IS/AS keywords
-  - Uses bodyDepth tracking only (simplified after user feedback)
-- `PackageSegments` (138 lines) - Data model for function boundaries
-- `FunctionStubGenerator` (99 lines) - Generates minimal function signatures
-- `PackageBodyReducer` (92 lines) - Removes all functions, keeps variables/types
-- `StateService` extensions (75 lines) - Storage with 3 maps (full/stub/reduced)
-
-**Performance Impact:**
-- Extraction: **180x faster** (3 min → 1 sec per package)
-- Transformation: **18,000x faster** package body parsing (3 min → 10ms)
-- Memory: **20,000x less** (2GB → 100KB AST per package)
-- Stub size: **70-80% reduction** vs full source
-- Total workflow: **10-20x speedup** for large packages
-
-**Test Coverage:** 41 tests (17 scanner + 5 stub + 7 reducer + 7 stateservice + 5 integration)
-
-**Forward Declaration Handling:** Scanner properly skips forward declarations (function signatures ending with `;` without IS/AS clause) and only captures full function definitions.
+**Solution:** Lightweight function boundary scanner replaces full ANTLR parse during extraction. 
 
 **Documentation:** See [PACKAGE_SEGMENTATION_IMPLEMENTATION_PLAN.md](documentation/PACKAGE_SEGMENTATION_IMPLEMENTATION_PLAN.md)
 
@@ -885,7 +819,7 @@ Oracle SQL/PL-SQL → ANTLR Parser → PostgresCodeBuilder → PostgreSQL SQL/PL
 
 **Key Design Principles:**
 - **Direct transformation**: Visitor returns PostgreSQL strings directly (no intermediate semantic tree)
-- **Static helper pattern**: Each ANTLR rule has a static helper class (37+ helpers for SQL, 20+ for PL/SQL)
+- **Static helper pattern**: Each ANTLR rule has a static helper class
 - **Metadata-driven**: Uses pre-built TransformationIndices for O(1) lookups
 - **Dependency boundaries**: TransformationContext passed as parameter (not CDI-injected)
 - **Quarkus-native**: Service layer uses CDI, visitor layer stays pure
@@ -901,7 +835,6 @@ Oracle SQL/PL-SQL → ANTLR Parser → PostgresCodeBuilder → PostgreSQL SQL/PL
 - Both use dot notation in Oracle, different syntax in PostgreSQL
 
 **Benefits:**
-- ✅ No database queries during transformation (fast, offline-capable)
 - ✅ Clean separation: Parse → Index → Transform
 - ✅ Testable with mocked metadata
 
