@@ -35,10 +35,80 @@ public class TriggerResource {
     @Inject
     JobRegistry jobRegistry;
 
+    @Inject
+    me.christianrobert.orapgsync.core.service.StateService stateService;
+
     @POST
     @Path("/oracle/extract")
     public Response extractOracleTriggers() {
         return startJob("ORACLE", "TRIGGER", "Oracle trigger extraction");
+    }
+
+    /**
+     * Get trigger DDL on demand for a specific trigger.
+     * This endpoint is used for lazy-loading trigger source code in the frontend.
+     *
+     * Returns both the trigger function DDL and the trigger definition DDL.
+     *
+     * @param schema the schema name
+     * @param triggerName the trigger name
+     * @return JSON with functionDdl and triggerDdl
+     */
+    @GET
+    @Path("/postgres/source/{schema}/{triggerName}")
+    public Response getTriggerSource(@PathParam("schema") String schema,
+                                     @PathParam("triggerName") String triggerName) {
+        log.info("Fetching trigger source for: {}.{}", schema, triggerName);
+
+        try {
+            // Search for the trigger in the PostgreSQL trigger metadata (from verification job)
+            List<TriggerMetadata> postgresTriggers = stateService.getPostgresTriggerMetadata();
+
+            if (postgresTriggers == null || postgresTriggers.isEmpty()) {
+                throw new IllegalStateException("No PostgreSQL trigger metadata available. Run verification job first.");
+            }
+
+            // Find the trigger by schema and name
+            TriggerMetadata triggerMetadata = postgresTriggers.stream()
+                    .filter(t -> schema.equalsIgnoreCase(t.getSchema()) && triggerName.equalsIgnoreCase(t.getTriggerName()))
+                    .findFirst()
+                    .orElseThrow(() -> new IllegalArgumentException(
+                            "Trigger not found: " + schema + "." + triggerName));
+
+            // Get the DDL from metadata
+            String functionDdl = triggerMetadata.getPostgresFunctionDdl();
+            String triggerDdl = triggerMetadata.getPostgresTriggerDdl();
+
+            if (functionDdl == null || triggerDdl == null) {
+                throw new IllegalStateException("Trigger DDL not available. Run verification job to extract DDL.");
+            }
+
+            // Combine function and trigger DDL
+            String combinedDdl = functionDdl + "\n\n" + triggerDdl;
+
+            Map<String, Object> result = Map.of(
+                    "status", "success",
+                    "schema", schema,
+                    "triggerName", triggerName,
+                    "functionDdl", functionDdl,
+                    "triggerDdl", triggerDdl,
+                    "postgresSql", combinedDdl
+            );
+
+            return Response.ok(result).build();
+
+        } catch (Exception e) {
+            log.error("Failed to fetch trigger source for {}.{}", schema, triggerName, e);
+
+            Map<String, Object> errorResult = Map.of(
+                    "status", "error",
+                    "message", "Failed to fetch trigger source: " + e.getMessage()
+            );
+
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                    .entity(errorResult)
+                    .build();
+        }
     }
 
     @POST

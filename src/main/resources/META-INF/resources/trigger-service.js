@@ -596,14 +596,26 @@ function displayTriggerVerificationResults(result) {
         });
 
         html += '<div class="created-tables-section">';
-        html += '<h4>Verified Triggers:</h4>';
+        html += '<h4>Verified Triggers (Click to view DDL):</h4>';
 
-        Object.entries(schemaGroups).forEach(([schemaName, schemaTriggers]) => {
-            html += `<div class="table-schema-group">`;
-            html += `<div class="table-schema-header"><strong>${schemaName}</strong> (${schemaTriggers.length} triggers)</div>`;
-            html += '<div class="table-items">';
+        Object.keys(schemaGroups).sort().forEach(schemaName => {
+            const schemaTriggers = schemaGroups[schemaName];
+            const schemaId = `trigger-verification-schema-${schemaName.replace(/[^a-z0-9]/gi, '_')}`;
+
+            html += '<div class="table-schema-group">';
+            html += `<div class="table-schema-header" onclick="toggleSchemaGroup('${schemaId}')">`;
+            html += `<span class="toggle-indicator" id="${schemaId}-indicator">▶</span> `;
+            html += `${schemaName} (${schemaTriggers.length} triggers)`;
+            html += '</div>';
+            html += `<div class="table-items-list" id="${schemaId}" style="display: none;">`;
+
+            // Sort triggers by name within schema
+            schemaTriggers.sort((a, b) => a.triggerName.localeCompare(b.triggerName));
+
             schemaTriggers.forEach(trigger => {
+                const triggerId = `trigger-ddl-${schemaName}-${trigger.triggerName}`.replace(/[^a-z0-9]/gi, '_');
                 const displayName = `${trigger.triggerName} ON ${trigger.tableName}`;
+
                 let typeIndicator = '';
                 if (trigger.triggerType) {
                     if (trigger.triggerType.includes('BEFORE')) typeIndicator += 'B';
@@ -612,8 +624,20 @@ function displayTriggerVerificationResults(result) {
                 }
                 if (trigger.triggerLevel === 'ROW') typeIndicator += 'R';
                 else if (trigger.triggerLevel === 'STATEMENT') typeIndicator += 'S';
-                html += `<div class="table-item created"><span class="trigger-indicator">${typeIndicator}</span> ${displayName} ✓</div>`;
+
+                html += `<div class="table-item created">`;
+                html += `<div class="view-header" onclick="toggleTriggerDdlLazy('${triggerId}', '${schemaName}', '${trigger.triggerName}')">`;
+                html += `<span class="toggle-indicator" id="${triggerId}-indicator">▶</span> `;
+                html += `<strong><span class="trigger-indicator">${typeIndicator}</span> ${displayName}</strong>`;
+                html += '</div>';
+
+                // DDL section (collapsible, starts collapsed, will be loaded on demand)
+                html += `<div class="view-ddl-section" id="${triggerId}" style="display: none;" data-schema="${schemaName}" data-trigger-name="${trigger.triggerName}" data-loaded="false">`;
+                html += '<div class="loading-message">Loading...</div>';
+                html += '</div>';
+                html += '</div>';
             });
+
             html += '</div>';
             html += '</div>';
         });
@@ -683,6 +707,85 @@ function toggleUnifiedTriggerVerificationResults() {
         detailsDiv.style.display = 'none';
         if (toggleIndicator) toggleIndicator.textContent = '▼';
     }
+}
+
+/**
+ * Toggle trigger DDL visibility with lazy loading.
+ */
+async function toggleTriggerDdlLazy(triggerId, schema, triggerName) {
+    const ddlSection = document.getElementById(triggerId);
+    const indicator = document.getElementById(`${triggerId}-indicator`);
+
+    if (!ddlSection) {
+        console.warn(`Trigger DDL section not found: ${triggerId}`);
+        return;
+    }
+
+    // If already visible, just collapse it
+    if (ddlSection.style.display === 'block') {
+        ddlSection.style.display = 'none';
+        if (indicator) indicator.textContent = '▶';
+        return;
+    }
+
+    // Show the section
+    ddlSection.style.display = 'block';
+    if (indicator) indicator.textContent = '▼';
+
+    // Check if content is already loaded
+    const isLoaded = ddlSection.getAttribute('data-loaded') === 'true';
+    if (isLoaded) {
+        // Already loaded, just show it
+        return;
+    }
+
+    // Fetch DDL from backend
+    try {
+        const response = await fetch(`/api/triggers/postgres/source/${encodeURIComponent(schema)}/${encodeURIComponent(triggerName)}`);
+        const result = await response.json();
+
+        if (result.status === 'success' && result.postgresSql) {
+            // Replace loading message with actual DDL
+            ddlSection.innerHTML = '<pre class="sql-statement">' + escapeHtml(result.postgresSql) + '</pre>';
+            ddlSection.setAttribute('data-loaded', 'true');
+        } else {
+            // Show error
+            ddlSection.innerHTML = '<div class="error-message">Failed to load trigger DDL: ' + escapeHtml(result.message || 'Unknown error') + '</div>';
+        }
+    } catch (error) {
+        console.error('Error fetching trigger DDL:', error);
+        ddlSection.innerHTML = '<div class="error-message">Failed to load trigger DDL: ' + escapeHtml(error.message) + '</div>';
+    }
+}
+
+/**
+ * Toggle schema group visibility (shared helper function).
+ */
+function toggleSchemaGroup(schemaId) {
+    const schemaItems = document.getElementById(schemaId);
+    const indicator = document.getElementById(`${schemaId}-indicator`);
+
+    if (!schemaItems) {
+        console.warn(`Schema group not found: ${schemaId}`);
+        return;
+    }
+
+    if (schemaItems.style.display === 'none') {
+        schemaItems.style.display = 'block';
+        if (indicator) indicator.textContent = '▼';
+    } else {
+        schemaItems.style.display = 'none';
+        if (indicator) indicator.textContent = '▶';
+    }
+}
+
+/**
+ * Escape HTML to prevent XSS attacks in DDL display.
+ */
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
 
 // ===== END TRIGGER FUNCTIONS =====

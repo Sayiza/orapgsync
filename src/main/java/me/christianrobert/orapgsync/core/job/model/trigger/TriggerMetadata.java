@@ -17,6 +17,10 @@ public class TriggerMetadata {
     private String triggerBody;   // PL/SQL or PL/pgSQL code
     private String status;        // ENABLED/DISABLED
 
+    // PostgreSQL-specific DDL (for verification and manual review)
+    private String postgresFunctionDdl;  // CREATE OR REPLACE FUNCTION ... (full function DDL)
+    private String postgresTriggerDdl;   // CREATE TRIGGER ... (trigger definition DDL)
+
     public TriggerMetadata() {
     }
 
@@ -97,6 +101,22 @@ public class TriggerMetadata {
 
     public void setStatus(String status) {
         this.status = status;
+    }
+
+    public String getPostgresFunctionDdl() {
+        return postgresFunctionDdl;
+    }
+
+    public void setPostgresFunctionDdl(String postgresFunctionDdl) {
+        this.postgresFunctionDdl = postgresFunctionDdl;
+    }
+
+    public String getPostgresTriggerDdl() {
+        return postgresTriggerDdl;
+    }
+
+    public void setPostgresTriggerDdl(String postgresTriggerDdl) {
+        this.postgresTriggerDdl = postgresTriggerDdl;
     }
 
     /**
