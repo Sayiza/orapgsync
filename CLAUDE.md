@@ -54,112 +54,27 @@ The application uses a centralized state management approach for storing metadat
 - Job classes: Extend `AbstractDatabaseExtractionJob<T>` with `@Dependent` scope
 
 #### 3. **Database Element Modules** (Independent & Extensible)
-Each database element type is completely independent:
+Each database element type is completely independent. Common pattern: `{Element}Metadata` (data model), `Oracle{Element}ExtractionJob` (CDI-managed), `Postgres{Element}CreationJob` (CDI-managed).
 
-**Tables** (`table/`):
-- `TableMetadata`, `ColumnMetadata`, `ConstraintMetadata`: Pure data models
-- `OracleTableMetadataExtractionJob`, `PostgresTableMetadataExtractionJob`: CDI-managed jobs
-- `TableExtractor`, `PostgresTableExtractor`: Database-specific extraction logic
-- Note: Constraint metadata is extracted as part of table metadata
+**Foundational Objects:**
+- **Schemas** - Schema discovery and creation
+- **Synonyms** - Oracle synonym resolution (current schema → PUBLIC fallback), used for type resolution
+- **Object Types** - Composite types with dependency ordering via `TypeDependencyAnalyzer`
+- **Sequences** - Full Oracle property extraction and PostgreSQL creation
 
-**Object Types** (`objectdatatype/`):
-- `ObjectDataTypeMetaData`, `ObjectDataTypeVariable`: Data models with proper constructors
-- `OracleObjectDataTypeExtractionJob`, `PostgresObjectDataTypeExtractionJob`: CDI-managed extraction jobs
-- `PostgresObjectTypeCreationJob`: Creates PostgreSQL composite types with dependency ordering
-- `TypeDependencyAnalyzer`: Topological sort with circular dependency detection
-- Service classes for REST endpoint compatibility
+**Data Structures:**
+- **Tables** - Structure creation with columns and type mapping
+- **Constraints** - Dependency-ordered creation (PK → UK → FK → CHECK) via `ConstraintDependencyAnalyzer`
+- **Data Transfer** - CSV-based bulk transfer via PostgreSQL COPY, supports all types (LOBs, user-defined, complex system types → jsonb)
 
-**Synonyms** (`core/job/model/synonym/`):
-- `SynonymMetadata`: Oracle synonym data model
-- `OracleSynonymExtractionJob`: Extracts Oracle synonyms (private and PUBLIC)
-- Synonym resolution follows Oracle rules: current schema → PUBLIC fallback
-- Used during object type creation to resolve type references
+**Code Objects (Two-Phase Migration: Stubs → Implementation):**
+- **Views** - Stub creation (`WHERE false` pattern), SQL transformation in progress (90% complete, 662+ tests)
+- **Functions/Procedures** - Stub creation, PL/SQL transformation 85-95% complete (882 tests), package segmentation optimization active
+- **Type Methods** - Stub creation, type method segmentation optimization ✅ complete (ready for Step 26 transformation)
+- **Triggers** - Framework complete, ready for extraction and PL/SQL transformation
 
-**Sequences** (`sequence/`):
-- `SequenceMetadata`: Data model for Oracle/PostgreSQL sequences
-- `OracleSequenceExtractionJob`, `PostgresSequenceExtractionJob`: Extract sequence definitions
-- `PostgresSequenceCreationJob`: Creates PostgreSQL sequences from Oracle metadata
-- `OracleSequenceExtractor`, `PostgresSequenceExtractor`: Database-specific extraction logic
-- `SequenceCreationResult`: Tracks created sequences and errors
-
-**Constraints** (`constraint/`):
-- Constraint metadata already extracted as part of `TableMetadata` (via `ConstraintMetadata`)
-- `PostgresConstraintCreationJob`: Creates constraints in PostgreSQL in dependency order (PK → UK → FK → CHECK)
-- `OracleConstraintSourceStateJob`: Display-only job that aggregates constraints from table metadata
-- `PostgresConstraintVerificationJob`: Verifies constraint creation results
-- `ConstraintDependencyAnalyzer`: Topological sort for foreign key dependencies
-- `ConstraintCreationResult`: Tracks created/skipped/failed constraints
-
-**Schemas** (`schema/`):
-- Schema discovery and management services
-- `PostgresSchemaCreationJob`: Creates schemas in PostgreSQL
-- REST endpoints for schema information
-
-**Data Transfer** (`transfer/`):
-- `DataTransferJob`: Main data transfer orchestration job
-- `CsvDataTransferService`: High-performance CSV-based data transfer using PostgreSQL COPY
-- `OracleComplexTypeSerializer`: Serialization for complex Oracle types (ANYDATA, BLOB/CLOB, user-defined types)
-- `RowCountService`: Row count comparison for transfer validation
-- Supports all data types: simple types, LOBs, user-defined object types, complex system types
-- Piped streaming architecture (producer-consumer) for memory-efficient transfer
-- Automatic table truncation and row count validation
-
-**Views** (`view/`):
-- `ViewMetadata`: Data model for view structure (columns only, not SQL definition)
-- `OracleViewExtractionJob`: Extracts Oracle view column metadata from ALL_TAB_COLUMNS
-- `PostgresViewExtractionJob`: Extracts PostgreSQL view column metadata
-- `PostgresViewStubCreationJob`: Creates PostgreSQL view stubs (empty result set views)
-- `PostgresViewStubVerificationJob`: Verifies created view stubs
-- `ViewStubCreationResult`: Tracks created/skipped/failed view stubs
-- View stubs enable dependency resolution for functions/procedures before full view migration
-- Note: Full view SQL transformation (replacing stubs) is in progress via `transformation/` module
-
-**Functions and Procedures** (`function/`):
-- `FunctionMetadata`: Data model for functions and procedures (standalone and package members)
-- `FunctionParameter`: Parameter metadata with IN/OUT/INOUT modes and custom type support
-- `OracleFunctionExtractionJob`: Extracts Oracle function/procedure signatures from ALL_ARGUMENTS
-- `PostgresFunctionStubCreationJob`: Creates PostgreSQL function/procedure stubs (empty implementations)
-- `PostgresFunctionStubVerificationJob`: Verifies created function/procedure stubs
-- `FunctionStubCreationResult`: Tracks created/skipped/failed function/procedure stubs
-- `OracleFunctionExtractor`: Database-specific extraction logic for functions/procedures
-- Naming convention: Package members use `packagename__functionname` (double underscore)
-- Function stubs return NULL, procedure stubs have empty body with comments indicating original Oracle location
-
-**Type Methods** (`typemethod/`):
-- `TypeMethodMetadata`: Data model for object type member methods (MEMBER and STATIC)
-- `TypeMethodParameter`: Parameter metadata with IN/OUT/INOUT modes and custom type support
-- `OracleTypeMethodExtractionJob`: Extracts Oracle type method signatures from ALL_TYPE_METHODS
-- `PostgresTypeMethodStubCreationJob`: Creates PostgreSQL type method stubs (flattened functions)
-- `PostgresTypeMethodStubVerificationJob`: Verifies created type method stubs
-- `PostgresTypeMethodImplementationJob`: ✅ Shell job ready for PL/SQL transformation implementation
-- `TypeMethodStubCreationResult`: Tracks created/skipped/failed type method stubs
-- `TypeMethodImplementationResult`: Tracks implemented/skipped/failed type method implementations
-- `OracleTypeMethodExtractor`: Database-specific extraction logic for type methods
-- Naming convention: Type members use `typename__methodname` (double underscore)
-- Method stubs return NULL for functions, empty body for procedures
-
-**Triggers** (`trigger/`):
-- `TriggerMetadata`: Data model for Oracle trigger definitions (timing, event, level, body)
-- `OracleTriggerExtractionJob`: ✅ Shell job ready for extraction from ALL_TRIGGERS
-- `PostgresTriggerImplementationJob`: ✅ Shell job ready for PL/SQL to PL/pgSQL transformation
-- `PostgresTriggerVerificationJob`: ✅ Shell job ready for trigger verification
-- `TriggerImplementationResult`: Tracks implemented/skipped/failed trigger implementations
-- `TriggerResource`: REST endpoints for trigger operations
-- Trigger types supported: BEFORE/AFTER/INSTEAD OF, INSERT/UPDATE/DELETE, ROW/STATEMENT level
-- Note: :NEW/:OLD transformation (remove colons) to be implemented
-
-**Oracle Compatibility Layer** (`oraclecompat/`):
-- `OracleBuiltinCatalog`: Central registry of Oracle built-in package equivalents
-- `OracleBuiltinFunction`: Data model for package function metadata
-- `SupportLevel`: Enum (FULL, PARTIAL, STUB, NONE) indicating implementation completeness
-- `PostgresOracleCompatInstallationJob`: Installs compatibility layer into `oracle_compat` schema
-- `PostgresOracleCompatVerificationJob`: Verifies installed functions
-- `OracleCompatInstallationResult`: Tracks installed/failed functions by support level
-- Implementation classes: `DbmsOutputImpl`, `DbmsUtilityImpl`, `UtlFileImpl`, `DbmsLobImpl`
-- Priority packages: DBMS_OUTPUT, DBMS_UTILITY, UTL_FILE, DBMS_LOB
-- Flattened naming convention: `oracle_compat.dbms_output__put_line` (double underscore)
-- Extensible catalog system for adding more packages/functions
-- Foundation for PL/SQL function/procedure migration
+**Support Layers:**
+- **Oracle Compatibility Layer** - PostgreSQL equivalents for Oracle built-in packages (DBMS_OUTPUT, DBMS_UTILITY, UTL_FILE, DBMS_LOB), three-tier support (FULL/PARTIAL/STUB), flattened naming (`oracle_compat.dbms_output__put_line`)
 
 #### 4. **Cross-Cutting Concerns** (`core/`)
 - `TypeConverter`: Oracle-to-PostgreSQL data type mapping
@@ -438,189 +353,31 @@ curl -X POST "http://localhost:8080/api/transformation/sql" \
 ## Naming Conventions and Module Organization
 
 ### Two-Phase Migration Strategy
+Complex database objects (views, functions, type methods) follow a two-phase pattern:
+1. **Stub Creation** - Structural placeholders with correct signatures, empty implementations
+2. **Implementation** - Replace stubs with actual SQL/PL/pgSQL logic via ANTLR transformation
 
-The application implements a **two-phase migration strategy** for complex database objects (views, functions/procedures, type methods):
+### Core Naming Patterns
 
-1. **Phase 1: Stub Creation** - Create structural placeholders with correct signatures but empty implementations
-2. **Phase 2: Full Implementation** (Future) - Replace stubs with actual SQL/PL/pgSQL logic using ANTLR parsing
+**Package Structure:** `{feature}/` (e.g., `view/`, `function/`, `typemethod/`)
+- Jobs: `Oracle{Feature}ExtractionJob`, `Postgres{Feature}StubCreationJob`, `Postgres{Feature}ImplementationJob`
+- Models: `{Feature}Metadata`, `{Feature}StubCreationResult`, `{Feature}ImplementationResult`
+- Services: `Oracle{Feature}Extractor` (if needed)
 
-This two-phase approach is reflected in all naming conventions to maintain clarity and prevent confusion.
+**ExtractionType Constants:** Phase-explicit strings
+- Extraction: `"VIEW"`, `"FUNCTION"`, `"TYPE_METHOD"`
+- Stub Creation: `"VIEW_STUB_CREATION"`, `"FUNCTION_STUB_CREATION"`, etc.
+- Verification: `"VIEW_STUB_VERIFICATION"`, `"FUNCTION_STUB_VERIFICATION"`, etc.
+- Implementation: `"VIEW_IMPLEMENTATION"`, `"FUNCTION_IMPLEMENTATION"`, etc.
 
-### Module and Package Naming
+**REST API:** `/api/jobs/{database}/{feature}-{phase}/{action}` (dash-separated)
+- Examples: `/api/jobs/oracle/view/extract`, `/api/jobs/postgres/view-stub/create`, `/api/jobs/postgres/view-implementation/create`
 
-**Standard Pattern:**
-```
-{feature}/                          # Top-level feature package (e.g., view/, function/, typemethod/)
-├── job/                           # Job implementations
-│   ├── Oracle{Feature}ExtractionJob.java
-│   ├── Postgres{Feature}StubCreationJob.java
-│   ├── Postgres{Feature}StubVerificationJob.java
-│   └── (future) Postgres{Feature}ImplementationJob.java
-├── service/                       # Helper services (if needed)
-│   └── Oracle{Feature}Extractor.java
-└── (stored in core/job/model/{feature}/)
-    ├── {Feature}Metadata.java     # Data model
-    ├── {Feature}StubCreationResult.java
-    └── (future) {Feature}ImplementationResult.java
-```
+**Frontend:** Dash-separated files (`view-service.js`), camelCase functions (`extractOracleViews()`), dash-separated IDs (`oracle-views`)
 
-**Examples:**
-- `view/` (not `viewdefinition/`) - Shorter, phase-neutral name
-- `function/` - Generic name covers both stubs and future implementations
-- `typemethod/` - Consistent with `function/`
+**StateService:** `{database}{Feature}Metadata` (e.g., `oracleViewMetadata`, `postgresFunctionMetadata`)
 
-### ExtractionType Constants
-
-Job classes must return phase-explicit extraction type strings:
-
-```java
-// Extraction jobs (Oracle source)
-"VIEW"                              // OracleViewExtractionJob
-"FUNCTION"                          // OracleFunctionExtractionJob
-"TYPE_METHOD"                       // OracleTypeMethodExtractionJob
-
-// Stub creation jobs (PostgreSQL target)
-"VIEW_STUB_CREATION"                // PostgresViewStubCreationJob
-"FUNCTION_STUB_CREATION"            // PostgresFunctionStubCreationJob
-"TYPE_METHOD_STUB_CREATION"         // PostgresTypeMethodStubCreationJob
-
-// Verification jobs (PostgreSQL target)
-"VIEW_STUB_VERIFICATION"            // PostgresViewStubVerificationJob
-"FUNCTION_STUB_VERIFICATION"        // PostgresFunctionStubVerificationJob
-"TYPE_METHOD_STUB_VERIFICATION"     // PostgresTypeMethodStubVerificationJob
-
-// Future: Full implementation jobs
-"VIEW_IMPLEMENTATION"               // (future) PostgresViewImplementationJob
-"FUNCTION_IMPLEMENTATION"           // (future) PostgresFunctionImplementationJob
-"TYPE_METHOD_IMPLEMENTATION"        // (future) PostgresTypeMethodImplementationJob
-```
-
-### REST API Endpoint Patterns
-
-**Standard Pattern:** `/api/jobs/{database}/{feature}-{phase}/{action}`
-
-Use **dash-separated naming** consistently (not underscores):
-
-```
-# Oracle Extraction (Phase-neutral, extracts metadata)
-POST /api/jobs/oracle/view/extract
-POST /api/jobs/oracle/function/extract
-POST /api/jobs/oracle/type-method/extract
-
-# PostgreSQL Stub Creation (Phase 1)
-POST /api/jobs/postgres/view-stub/create
-POST /api/jobs/postgres/function-stub/create
-POST /api/jobs/postgres/type-method-stub/create
-
-# PostgreSQL Stub Verification (Phase 1)
-POST /api/jobs/postgres/view-stub-verification/verify
-POST /api/jobs/postgres/function-stub-verification/verify
-POST /api/jobs/postgres/type-method-stub-verification/verify
-
-# Future: PostgreSQL Full Implementation (Phase 2)
-POST /api/jobs/postgres/view-implementation/create
-POST /api/jobs/postgres/function-implementation/create
-POST /api/jobs/postgres/type-method-implementation/create
-```
-
-**Benefits:**
-- ✅ Self-documenting: URL clearly indicates what phase is being executed
-- ✅ Consistent: All endpoints follow same pattern with dashes
-- ✅ Extensible: Adding Phase 2 implementation doesn't conflict with Phase 1 stubs
-- ✅ Clear: No ambiguity between stub and implementation operations
-
-### Frontend Naming
-
-**Service Files:** (dash-separated, singular)
-```
-view-service.js
-function-service.js
-type-method-service.js
-```
-
-**HTML Element IDs:** (dash-separated, plurals for collections)
-```
-oracle-views, postgres-views
-oracle-functions, postgres-functions
-oracle-type-methods, postgres-type-methods
-```
-
-**JavaScript Functions:** (camelCase with phase explicit)
-```javascript
-// Extraction
-extractOracleViews()
-extractOracleFunctions()
-extractOracleTypeMethods()
-
-// Stub Creation (Phase 1)
-createPostgresViewStubs()
-createPostgresFunctionStubs()
-createPostgresTypeMethodStubs()
-
-// Future: Full Implementation (Phase 2)
-createPostgresViewImplementations()
-createPostgresFunctionImplementations()
-createPostgresTypeMethodImplementations()
-```
-
-### StateService Property Naming
-
-**Pattern:** `{database}{Feature}Metadata` and `{feature}StubCreationResult`
-
-```java
-// View state
-List<ViewMetadata> oracleViewMetadata;
-List<ViewMetadata> postgresViewMetadata;
-ViewStubCreationResult viewStubCreationResult;
-// (future) ViewImplementationResult viewImplementationResult;
-
-// Function state
-List<FunctionMetadata> oracleFunctionMetadata;
-List<FunctionMetadata> postgresFunctionMetadata;
-FunctionStubCreationResult functionStubCreationResult;
-// (future) FunctionImplementationResult functionImplementationResult;
-
-// Type Method state
-List<TypeMethodMetadata> oracleTypeMethodMetadata;
-List<TypeMethodMetadata> postgresTypeMethodMetadata;
-TypeMethodStubCreationResult typeMethodStubCreationResult;
-// (future) TypeMethodImplementationResult typeMethodImplementationResult;
-```
-
-**Note:** Use `ViewMetadata` (not `ViewDefinitionMetadata`) - "definition" is implied, keeping names shorter and more consistent.
-
-### Class Naming Patterns
-
-```java
-// Data Models
-{Feature}Metadata.java              // ViewMetadata, FunctionMetadata, TypeMethodMetadata
-{Feature}Parameter.java             // (if applicable) FunctionParameter, TypeMethodParameter
-{Feature}StubCreationResult.java    // ViewStubCreationResult, FunctionStubCreationResult
-
-// Jobs
-Oracle{Feature}ExtractionJob.java   // OracleViewExtractionJob
-Postgres{Feature}StubCreationJob.java
-Postgres{Feature}StubVerificationJob.java
-// (future) Postgres{Feature}ImplementationJob.java
-
-// Services (if needed)
-Oracle{Feature}Extractor.java       // OracleFunctionExtractor, OracleTypeMethodExtractor
-```
-
-### Migration Workflow Clarity
-
-The naming conventions ensure the migration workflow is self-documenting:
-
-```
-1. Extract Oracle {feature} metadata        → OracleViewExtractionJob
-2. Create PostgreSQL {feature} stubs        → PostgresViewStubCreationJob
-3. Verify PostgreSQL {feature} stubs        → PostgresViewStubVerificationJob
-4. (Future) Create {feature} implementation → PostgresViewImplementationJob
-```
-
-Each step is unambiguous and the progression from stub to implementation is clear.
-
-### Recent Refactoring: Naming Standardization (Completed)
+### Recent Refactoring
 
 **Status:** ✅ Completed
 
@@ -689,13 +446,20 @@ To prevent divergence between code and documentation:
 - **Memory**: Efficient data structures for metadata storage
 - **Connection pooling**: Managed by Quarkus datasource configuration
 
-### Package Segmentation Optimization (2025-11-09)
+### Code Segmentation Optimizations
 
-**Problem Solved:** Large Oracle packages (5000+ lines, 100+ functions) caused OutOfMemoryErrors 
+**Package Segmentation (2025-11-09):**
+- **Problem:** Large Oracle packages (5000+ lines, 100+ functions) caused OutOfMemoryErrors
+- **Solution:** Lightweight function boundary scanner (FunctionBoundaryScanner) replaces full ANTLR parse during extraction
+- **Benefits:** 800x memory reduction, 42x speedup, 90% real-world coverage
+- **Documentation:** [PACKAGE_SEGMENTATION_IMPLEMENTATION_PLAN.md](documentation/PACKAGE_SEGMENTATION_IMPLEMENTATION_PLAN.md)
 
-**Solution:** Lightweight function boundary scanner replaces full ANTLR parse during extraction. 
-
-**Documentation:** See [PACKAGE_SEGMENTATION_IMPLEMENTATION_PLAN.md](documentation/PACKAGE_SEGMENTATION_IMPLEMENTATION_PLAN.md)
+**Type Method Segmentation (2025-11-11):**
+- **Problem:** Private type methods not visible in Oracle data dictionary (ALL_TYPE_METHODS only shows public methods from type spec)
+- **Solution:** Lightweight type method boundary scanner (TypeMethodBoundaryScanner) extracts all methods from type bodies
+- **Benefits:** Same performance as package segmentation (800x memory, 42x speed), simpler (no variables in type bodies)
+- **Status:** ✅ Complete (Phases 1-3) - Ready for use in Step 26
+- **Documentation:** [TYPE_METHOD_SEGMENTATION_IMPLEMENTATION_PLAN.md](documentation/TYPE_METHOD_SEGMENTATION_IMPLEMENTATION_PLAN.md)
 
 ## Type Mapping Strategy
 

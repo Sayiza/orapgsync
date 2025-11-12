@@ -5,7 +5,12 @@ import jakarta.inject.Inject;
 import me.christianrobert.orapgsync.core.job.model.JobProgress;
 import me.christianrobert.orapgsync.core.job.model.typemethod.TypeMethodMetadata;
 import me.christianrobert.orapgsync.core.job.model.typemethod.TypeMethodParameter;
+import me.christianrobert.orapgsync.core.service.StateService;
+import me.christianrobert.orapgsync.core.tools.CodeCleaner;
 import me.christianrobert.orapgsync.database.service.OracleConnectionService;
+import me.christianrobert.orapgsync.transformer.parser.TypeBodySegments;
+import me.christianrobert.orapgsync.transformer.parser.TypeMethodBoundaryScanner;
+import me.christianrobert.orapgsync.transformer.parser.TypeMethodStubGenerator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -27,6 +32,9 @@ public class OracleTypeMethodExtractor {
 
     @Inject
     private OracleConnectionService oracleConnectionService;
+
+    @Inject
+    private StateService stateService;
 
     public List<TypeMethodMetadata> extractTypeMethods(List<String> schemas,
                                                         Consumer<JobProgress> progressCallback) throws SQLException {
@@ -68,8 +76,9 @@ public class OracleTypeMethodExtractor {
 
     private List<TypeMethodMetadata> extractTypeMethodsForSchema(Connection connection, String schema) throws SQLException {
         List<TypeMethodMetadata> typeMethods = new ArrayList<>();
+        Set<String> publicMethodKeys = new HashSet<>();
 
-        // Query ALL_TYPE_METHODS to get method signatures
+        // PHASE 1: Query ALL_TYPE_METHODS to get PUBLIC method signatures (from type spec)
         String methodSql = """
             SELECT
                 owner,
@@ -109,10 +118,34 @@ public class OracleTypeMethodExtractor {
 
                     typeMethods.add(method);
 
-                    log.debug("Extracted type method: {} ({})", method.getDisplayName(), method.getMemberTypeDescription());
+                    // Build public method key (for filtering private methods later)
+                    String publicKey = schema.toLowerCase() + "." + typeName + "." + methodName;
+                    publicMethodKeys.add(publicKey);
+
+                    log.debug("Extracted public type method: {} ({})", method.getDisplayName(), method.getMemberTypeDescription());
                 }
             }
         }
+
+        log.info("Extracted {} public type methods from schema {}", typeMethods.size(), schema);
+
+        // PHASE 2: Query type bodies and scan for PRIVATE methods
+        Map<String, String> typeBodies = queryTypeBodies(connection, schema);
+
+        log.info("Found {} type bodies to scan in schema {}", typeBodies.size(), schema);
+
+        for (Map.Entry<String, String> entry : typeBodies.entrySet()) {
+            String typeName = entry.getKey();
+            String bodySource = entry.getValue();
+
+            List<TypeMethodMetadata> privateMethods = scanAndExtractTypeMethods(
+                typeName, bodySource, schema, publicMethodKeys
+            );
+
+            typeMethods.addAll(privateMethods);
+        }
+
+        log.info("Extracted total {} type methods (public + private) from schema {}", typeMethods.size(), schema);
 
         return typeMethods;
     }
@@ -230,5 +263,148 @@ public class OracleTypeMethodExtractor {
         if (progressCallback != null) {
             progressCallback.accept(new JobProgress(percentage, status, message));
         }
+    }
+
+    /**
+     * Queries ALL_SOURCE to fetch type body source code for a given schema.
+     * Returns map of typename → type body source.
+     *
+     * @param connection Oracle connection
+     * @param schema Schema name
+     * @return Map of type name (lowercase) → type body source
+     * @throws SQLException if query fails
+     */
+    private Map<String, String> queryTypeBodies(Connection connection, String schema) throws SQLException {
+        Map<String, String> typeBodies = new HashMap<>();
+
+        String sql = """
+            SELECT name, text
+            FROM all_source
+            WHERE owner = ?
+              AND type = 'TYPE BODY'
+            ORDER BY name, line
+            """;
+
+        String currentTypeName = null;
+        StringBuilder currentTypeBody = null;
+
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            ps.setString(1, schema.toUpperCase());
+
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    String typeName = rs.getString("name");
+                    String line = rs.getString("text");
+
+                    // New type detected?
+                    if (!typeName.equals(currentTypeName)) {
+                        // Save previous type if exists
+                        if (currentTypeName != null && currentTypeBody != null) {
+                            typeBodies.put(currentTypeName.toLowerCase(), currentTypeBody.toString());
+                        }
+
+                        // Start new type
+                        currentTypeName = typeName;
+                        currentTypeBody = new StringBuilder();
+                    }
+
+                    // Append current line
+                    currentTypeBody.append(line);
+                }
+
+                // Save last type
+                if (currentTypeName != null && currentTypeBody != null) {
+                    typeBodies.put(currentTypeName.toLowerCase(), currentTypeBody.toString());
+                }
+            }
+        }
+
+        log.debug("Queried {} type bodies from schema {}", typeBodies.size(), schema);
+        return typeBodies;
+    }
+
+    /**
+     * Scans a single type body and extracts private methods using lightweight scanner.
+     * Stores segmented type data (full/stub) in StateService for later use.
+     *
+     * Approach (Type Segmentation):
+     * 1. Clean source (remove comments)
+     * 2. Scan method boundaries (TypeMethodBoundaryScanner)
+     * 3. Extract full methods + generate stubs
+     * 4. Store in StateService (for transformation job)
+     * 5. Parse stubs (tiny, fast) to extract metadata
+     * 6. Return all methods (public and private)
+     *
+     * @param typeName Name of the type
+     * @param bodySource Type body source code (without CREATE OR REPLACE)
+     * @param schema Schema name
+     * @param publicMethodKeys Set of public method keys for filtering
+     * @return List of TypeMethodMetadata for private methods in this type
+     */
+    private List<TypeMethodMetadata> scanAndExtractTypeMethods(
+            String typeName, String bodySource, String schema, Set<String> publicMethodKeys) {
+
+        List<TypeMethodMetadata> methods = new ArrayList<>();
+
+        if (bodySource == null || bodySource.trim().isEmpty()) {
+            return methods;
+        }
+
+        // Prepend CREATE OR REPLACE for parsing (Oracle doesn't store it in ALL_SOURCE)
+        String fullSource = "CREATE OR REPLACE " + bodySource.trim();
+
+        try {
+            // STEP 1: Clean source (remove comments)
+            String cleanedSource = CodeCleaner.removeComments(fullSource);
+            log.trace("Cleaned type {}.{} ({} chars -> {} chars)",
+                     schema, typeName, fullSource.length(), cleanedSource.length());
+
+            // STEP 2: Scan method boundaries (fast, lightweight)
+            TypeMethodBoundaryScanner scanner = new TypeMethodBoundaryScanner();
+            TypeBodySegments segments = scanner.scanTypeBody(cleanedSource);
+
+            log.debug("Scanned type {}.{}: found {} methods",
+                     schema, typeName, segments.getMethods().size());
+
+            if (segments.getMethods().isEmpty()) {
+                // No methods in this type body
+                return methods;
+            }
+
+            // STEP 3: Extract full methods and generate stubs
+            Map<String, String> fullSources = new HashMap<>();
+            Map<String, String> stubSources = new HashMap<>();
+            TypeMethodStubGenerator stubGenerator = new TypeMethodStubGenerator();
+
+            for (TypeBodySegments.TypeMethodSegment segment : segments.getMethods()) {
+                // Extract full method source
+                String fullMethodSource = cleanedSource.substring(segment.getStartPos(), segment.getEndPos());
+                fullSources.put(segment.getName().toLowerCase(), fullMethodSource);
+
+                // Generate stub
+                String stubSource = stubGenerator.generateStub(fullMethodSource, segment);
+                stubSources.put(segment.getName().toLowerCase(), stubSource);
+
+                log.trace("Extracted method {}.{}.{} (full: {} chars, stub: {} chars)",
+                         schema, typeName, segment.getName(),
+                         fullMethodSource.length(), stubSource.length());
+            }
+
+            // STEP 4: Store in StateService (for transformation job later)
+            stateService.storeTypeMethodSources(schema, typeName, fullSources, stubSources);
+
+            log.debug("Stored {} methods in StateService for type {}.{}",
+                     fullSources.size(), schema, typeName);
+
+            // STEP 5: Parse stubs to extract metadata (fast, tiny memory footprint)
+            // TODO: Implement stub parsing for metadata extraction in next iteration
+
+            log.info("Extracted {} methods from type {}.{}", methods.size(), schema, typeName);
+
+        } catch (Exception e) {
+            log.error("Error scanning type body {}.{}: {}", schema, typeName, e.getMessage(), e);
+        }
+
+        return methods;
     }
 }
