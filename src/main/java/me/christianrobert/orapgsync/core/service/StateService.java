@@ -122,6 +122,22 @@ public class StateService {
      */
     Map<String, String> oracleReducedPackageBodies = new HashMap<>();
 
+    // ========== Type Method Storage (NEW - for segmentation optimization) ==========
+
+    /**
+     * Full type method sources for transformation.
+     * Key: "schema.typename" (lowercase)
+     * Value: Map of "methodname" (lowercase) -> full source code
+     */
+    Map<String, Map<String, String>> oracleTypeMethodSourcesFull = new HashMap<>();
+
+    /**
+     * Stub type method sources for extraction.
+     * Key: "schema.typename" (lowercase)
+     * Value: Map of "methodname" (lowercase) -> stub source code (signature + RETURN NULL)
+     */
+    Map<String, Map<String, String>> oracleTypeMethodSourcesStub = new HashMap<>();
+
     public List<String> getOracleSchemaNames() {
         return oracleSchemaNames;
     }
@@ -521,6 +537,66 @@ public class StateService {
         log.info("Cleared {} full sources, {} stubs, {} reduced bodies", fullCount, stubCount, reducedCount);
     }
 
+    // ========== Type Method Storage Methods ==========
+
+    /**
+     * Stores segmented type methods.
+     *
+     * @param schema Schema name
+     * @param typeName Type name
+     * @param fullSources Map of method name (lowercase) → full source
+     * @param stubSources Map of method name (lowercase) → stub source
+     */
+    public void storeTypeMethodSources(String schema, String typeName,
+                                       Map<String, String> fullSources,
+                                       Map<String, String> stubSources) {
+        String key = (schema + "." + typeName).toLowerCase();
+        oracleTypeMethodSourcesFull.put(key, fullSources);
+        oracleTypeMethodSourcesStub.put(key, stubSources);
+        log.debug("Stored {} type methods for type {}.{}", fullSources.size(), schema, typeName);
+    }
+
+    /**
+     * Retrieves full source for a specific type method.
+     *
+     * @param schema Schema name
+     * @param typeName Type name
+     * @param methodName Method name
+     * @return Full method source, or null if not found
+     */
+    public String getTypeMethodSource(String schema, String typeName, String methodName) {
+        String typeKey = (schema + "." + typeName).toLowerCase();
+        Map<String, String> methods = oracleTypeMethodSourcesFull.get(typeKey);
+        return methods != null ? methods.get(methodName.toLowerCase()) : null;
+    }
+
+    /**
+     * Retrieves all stub sources for a type.
+     *
+     * @param schema Schema name
+     * @param typeName Type name
+     * @return Map of method name (lowercase) → stub source, or empty map if not found
+     */
+    public Map<String, String> getAllTypeMethodStubs(String schema, String typeName) {
+        String key = (schema + "." + typeName).toLowerCase();
+        return oracleTypeMethodSourcesStub.getOrDefault(key, new HashMap<>());
+    }
+
+    /**
+     * Clears type method storage (called after transformation complete).
+     * Keeps only metadata (TypeMethodMetadata).
+     */
+    public void clearTypeMethodStorage() {
+        log.info("Clearing type method storage from StateService");
+        int fullCount = oracleTypeMethodSourcesFull.values().stream().mapToInt(Map::size).sum();
+        int stubCount = oracleTypeMethodSourcesStub.values().stream().mapToInt(Map::size).sum();
+
+        oracleTypeMethodSourcesFull.clear();
+        oracleTypeMethodSourcesStub.clear();
+
+        log.info("Cleared {} full sources, {} stubs", fullCount, stubCount);
+    }
+
     public void resetState() {
         log.info("Resetting all state to default values");
         this.oracleSchemaNames = new ArrayList<>();
@@ -563,5 +639,9 @@ public class StateService {
         this.oraclePackageFunctionSourcesFull = new HashMap<>();
         this.oraclePackageFunctionSourcesStub = new HashMap<>();
         this.oracleReducedPackageBodies = new HashMap<>();
+
+        // Clear type method storage
+        this.oracleTypeMethodSourcesFull = new HashMap<>();
+        this.oracleTypeMethodSourcesStub = new HashMap<>();
     }
 }
