@@ -12,6 +12,7 @@ import org.slf4j.LoggerFactory;
 
 import java.sql.Connection;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -101,6 +102,13 @@ public class PostgresRowCountExtractionJob extends AbstractDatabaseExtractionJob
 
                 processedTables++;
             }
+
+            // Sort results by schema and table name for deterministic ordering
+            allRowCounts.sort(Comparator
+                .comparing(RowCountMetadata::getSchema)
+                .thenComparing(RowCountMetadata::getTableName));
+
+            log.debug("Sorted {} row counts for deterministic ordering", allRowCounts.size());
 
             updateProgress(progressCallback, 95, "Finalizing", "Row count extraction completed for " + allRowCounts.size() + " tables");
 

@@ -408,6 +408,9 @@ Complex database objects (views, functions, type methods) follow a two-phase pat
 - Invest in proper infrastructure (scope tracking, type analysis, metadata indices) rather than quick heuristic shortcuts
 - **Example:** Variable scope tracking replaced heuristic variable detection, fixing critical function call misidentification bugs
 
+**Result Set Ordering (2025-11-13):**
+- **Design principle**: Always sort extraction results before returning, even if SQL query has ORDER BY, to ensure deterministic ordering across different execution plans
+
 **Manual Tracking Tools:**
 - `TODO.md` is for manual tracking by the user only - **DO NOT update it automatically**
 

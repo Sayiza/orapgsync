@@ -125,6 +125,7 @@ public class PostgresTypeMethodStubVerificationJob extends AbstractDatabaseExtra
             FROM pg_proc p
             JOIN pg_namespace n ON p.pronamespace = n.oid
             WHERE n.nspname NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
+            ORDER BY n.nspname, p.proname
             """;
 
         try (PreparedStatement stmt = connection.prepareStatement(sql);

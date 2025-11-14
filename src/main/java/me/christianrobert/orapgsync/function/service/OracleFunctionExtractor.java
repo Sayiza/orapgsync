@@ -69,6 +69,16 @@ public class OracleFunctionExtractor {
             MemoryMonitor.warnIfMemoryHigh(75, "After schema: " + schema);
         }
 
+        // Sort all functions for deterministic ordering (schema, package, function name)
+        // This ensures consistent ordering between runs, especially for private functions
+        // which are extracted from package bodies and can vary in encounter order
+        functionMetadataList.sort(Comparator
+            .comparing(FunctionMetadata::getSchema)
+            .thenComparing(f -> f.getPackageName() != null ? f.getPackageName() : "")
+            .thenComparing(FunctionMetadata::getObjectName));
+
+        log.info("Sorted {} functions/procedures for deterministic ordering", functionMetadataList.size());
+
         MemoryMonitor.logMemoryUsage("Completed function extraction");
         return functionMetadataList;
     }
