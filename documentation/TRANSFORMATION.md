@@ -204,6 +204,10 @@ This document describes the ANTLR-based transformation module that converts Orac
 
 - **PostgresViewImplementationJob** replaces view stubs with transformed SQL
 - Uses CREATE OR REPLACE VIEW (preserves dependencies - critical for two-phase architecture)
+- **Includes explicit column list** from metadata to handle Oracle views with column renaming
+  - Oracle views can define columns separately from SELECT aliases: `CREATE VIEW v (id, name) AS SELECT empno, ename...`
+  - ALL_VIEWS.TEXT doesn't include the explicit column list, so it's reconstructed from ALL_TAB_COLUMNS
+  - Ensures column names match between stub and implementation phases
 - SqlTransformationService extracts Oracle view SQL from ALL_VIEWS.TEXT
 - **Success rate:** ~90% real-world views
 

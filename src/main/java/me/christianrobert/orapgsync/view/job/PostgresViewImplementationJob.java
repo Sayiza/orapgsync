@@ -6,6 +6,7 @@ import me.christianrobert.orapgsync.core.job.AbstractDatabaseWriteJob;
 import me.christianrobert.orapgsync.core.job.model.JobProgress;
 import me.christianrobert.orapgsync.core.job.model.view.ViewImplementationResult;
 import me.christianrobert.orapgsync.core.job.model.view.ViewMetadata;
+import me.christianrobert.orapgsync.core.tools.PostgresIdentifierNormalizer;
 import me.christianrobert.orapgsync.database.service.PostgresConnectionService;
 import me.christianrobert.orapgsync.transformer.context.MetadataIndexBuilder;
 import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
@@ -199,7 +200,7 @@ public class PostgresViewImplementationJob extends AbstractDatabaseWriteJob<View
         // IMPORTANT: Use CREATE OR REPLACE to preserve dependencies (functions/procedures)
         // This is the whole point of the two-phase stub architecture!
         try {
-            replaceView(pgConnection, schema, viewName, postgresSql);
+            replaceView(pgConnection, schema, viewName, postgresSql, view);
             result.addImplementedView(qualifiedName);
             log.info("Successfully implemented view: {}", qualifiedName);
         } catch (SQLException e) {
@@ -221,17 +222,46 @@ public class PostgresViewImplementationJob extends AbstractDatabaseWriteJob<View
      * This is critical for the two-phase architecture:
      * - Phase 1: Stubs allow functions/procedures to be created with references to views
      * - Phase 2: Replace stubs WITHOUT breaking those dependencies
+     *
+     * IMPORTANT: Includes explicit column list to handle Oracle views with column renaming.
+     * Oracle views can have explicit column lists that override SELECT aliases:
+     *   CREATE VIEW v (col1, col2) AS SELECT a AS x, b AS y FROM t
+     * The view columns are col1, col2 (not x, y). ALL_VIEWS.TEXT doesn't include the
+     * explicit column list, so we must reconstruct it from ALL_TAB_COLUMNS metadata.
      */
     private void replaceView(Connection pgConnection, String schema, String viewName,
-                            String selectSql) throws SQLException {
-        String createOrReplaceSql = String.format("CREATE OR REPLACE VIEW %s.%s AS %s",
-                schema.toLowerCase(), viewName.toLowerCase(), selectSql);
+                            String selectSql, ViewMetadata view) throws SQLException {
+        // Generate explicit column list from metadata (same source as stub creation)
+        String columnList = generateColumnList(view);
+
+        String createOrReplaceSql = String.format("CREATE OR REPLACE VIEW %s.%s%s AS %s",
+                schema.toLowerCase(), viewName.toLowerCase(), columnList, selectSql);
 
         log.debug("Replacing view with SQL: {}", createOrReplaceSql);
 
         try (PreparedStatement ps = pgConnection.prepareStatement(createOrReplaceSql)) {
             ps.executeUpdate();
         }
+    }
+
+    /**
+     * Generates explicit column list for view creation.
+     * This ensures view column names match the stub, even when Oracle view has
+     * explicit column renaming (e.g., CREATE VIEW v (id, name) AS SELECT empno, ename...).
+     *
+     * @param view View metadata containing column definitions
+     * @return Column list in format " (col1, col2, ...)" or empty string if no columns
+     */
+    private String generateColumnList(ViewMetadata view) {
+        if (view.getColumns().isEmpty()) {
+            return "";  // No explicit column list
+        }
+
+        List<String> columnNames = view.getColumns().stream()
+                .map(col -> PostgresIdentifierNormalizer.normalizeIdentifier(col.getColumnName()))
+                .toList();
+
+        return " (" + String.join(", ", columnNames) + ")";
     }
 
     /**

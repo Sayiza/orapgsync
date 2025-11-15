@@ -214,6 +214,11 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
     - ✅ Direct AST approach with 37 static visitor helpers
     - ✅ Complete SELECT support, CTEs, CONNECT BY, Oracle-specific functions
     - ✅ PostgresViewImplementationJob with CREATE OR REPLACE VIEW (preserves dependencies)
+    - ✅ **Explicit column list support** (2025-11-15) - Handles Oracle views with column renaming
+      - Oracle: `CREATE VIEW v (id, name) AS SELECT empno, ename...` (columns are id, name)
+      - ALL_VIEWS.TEXT only contains `SELECT empno, ename...` (no column list)
+      - Fix: Reconstruct column list from ALL_TAB_COLUMNS metadata to match stub columns
+      - Prevents PostgreSQL "cannot change name of view column" errors
     - **See [TRANSFORMATION.md](documentation/TRANSFORMATION.md) for detailed feature list and implementation history**
 
 12. **Type Inference System**: 🔄 **42% COMPLETE** - Two-pass type analysis for accurate PL/SQL transformation
@@ -251,13 +256,21 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
     - 📋 **Remaining**: Handle SELF parameter transformation (if needed), test with real Oracle types
     - See [TYPE_METHOD_SEGMENTATION_IMPLEMENTATION_PLAN.md](documentation/TYPE_METHOD_SEGMENTATION_IMPLEMENTATION_PLAN.md) for segmentation details
 
-15. **Triggers**: ✅ **FRAMEWORK COMPLETE** - Ready for extraction and transformation
-    - ✅ Shell jobs created: `OracleTriggerExtractionJob`, `PostgresTriggerImplementationJob`, `PostgresTriggerVerificationJob`
-    - ✅ Frontend integration: UI row, Oracle extraction button, PostgreSQL implementation buttons
+15. **Triggers**: ✅ **COMPLETE** - Full extraction and transformation with idempotent implementation
+    - ✅ Oracle extraction: `OracleTriggerExtractionJob` extracts metadata and trigger bodies
+    - ✅ PostgreSQL transformation: Converts Oracle triggers to PostgreSQL triggers + functions
+      - :NEW/:OLD → NEW/OLD (removes colons)
+      - Automatic RETURN statement injection (BEFORE ROW → RETURN NEW, etc.)
+      - Two-part PostgreSQL pattern: trigger function + trigger definition
+    - ✅ **Idempotent implementation** (2025-11-15): Always drop and recreate
+      - `DROP TRIGGER IF EXISTS` before creation (no errors on re-run)
+      - `CREATE OR REPLACE FUNCTION` for trigger functions
+      - `CREATE TRIGGER` after drop (safe, no conflicts)
+      - Ensures Oracle is always source of truth, handles trigger updates
+    - ✅ Frontend integration: UI row, buttons, polling, result display
     - ✅ REST endpoints: `/api/triggers/oracle/extract`, `/postgres/implementation/create`, `/verify`
     - ✅ State management: `TriggerMetadata`, `TriggerImplementationResult`
     - ✅ Integrated as Steps 27-28/28 in orchestration workflow
-    - 📋 **Next:** Extract Oracle trigger metadata, transform PL/SQL trigger bodies, handle :NEW/:OLD → NEW/OLD
 
 16. **Other aspects**: Extraction and creation (Future)
 

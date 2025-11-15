@@ -24,6 +24,7 @@ import java.util.function.Consumer;
  * PostgreSQL Trigger Implementation Job.
  *
  * This job transforms Oracle triggers to PostgreSQL triggers and creates them.
+ * The implementation is IDEMPOTENT - it can be run multiple times without errors.
  *
  * The job:
  * 1. Retrieves Oracle trigger metadata from state
@@ -31,8 +32,9 @@ import java.util.function.Consumer;
  *    a. Transforms Oracle PL/SQL trigger body to PostgreSQL PL/pgSQL
  *    b. Removes colons from :NEW/:OLD references
  *    c. Injects appropriate RETURN statement
- *    d. Creates trigger function (PL/pgSQL)
- *    e. Creates trigger definition (CREATE TRIGGER)
+ *    d. **Drops existing trigger (if exists)** - ensures idempotency
+ *    e. Creates or replaces trigger function (PL/pgSQL)
+ *    f. Creates trigger definition (CREATE TRIGGER)
  * 3. Returns results tracking success/skipped/errors
  *
  * Key transformations:
@@ -41,6 +43,12 @@ import java.util.function.Consumer;
  * - BEFORE/AFTER/INSTEAD OF timing preserved
  * - ROW/STATEMENT level preserved
  * - Trigger function returns NEW/NULL as appropriate
+ *
+ * Idempotency strategy (2025-11-15):
+ * - DROP TRIGGER IF EXISTS before creation (no error if trigger doesn't exist)
+ * - CREATE OR REPLACE FUNCTION for trigger functions (already idempotent)
+ * - CREATE TRIGGER after drop (safe, no conflicts)
+ * - This ensures Oracle is always the source of truth, and job re-runs update changed triggers
  */
 @Dependent
 public class PostgresTriggerImplementationJob extends AbstractDatabaseWriteJob<TriggerImplementationResult> {
@@ -165,6 +173,12 @@ public class PostgresTriggerImplementationJob extends AbstractDatabaseWriteJob<T
 
     /**
      * Implements a single trigger by transforming and creating it in PostgreSQL.
+     *
+     * This method ensures idempotency by dropping existing triggers before recreation.
+     * The implementation follows a three-step process:
+     * 1. Drop existing trigger (if exists) - ensures no conflicts
+     * 2. Create or replace trigger function - contains the PL/pgSQL logic
+     * 3. Create trigger - binds function to table events
      */
     private void implementTrigger(Connection pgConnection, TriggerMetadata trigger,
                                    TransformationIndices indices,
@@ -186,16 +200,21 @@ public class PostgresTriggerImplementationJob extends AbstractDatabaseWriteJob<T
             TriggerTransformer.TriggerDdlPair ddl =
                 triggerTransformer.transformTrigger(trigger, indices);
 
+            // Step 1: Drop existing trigger (if exists)
+            // This ensures idempotency - job can be run multiple times without errors
+            dropTriggerIfExists(pgConnection, trigger);
+
+            // Step 2: Create or replace function DDL
+            // Functions are already idempotent (CREATE OR REPLACE), but we drop trigger first
+            // to avoid any edge cases where trigger references old function signature
             log.debug("Executing function DDL for {}", qualifiedName);
             log.trace("Function DDL: {}", ddl.getFunctionDdl());
-
-            // Execute function DDL first
             executeDdl(pgConnection, ddl.getFunctionDdl());
 
+            // Step 3: Create trigger DDL
+            // Safe to execute because we dropped any existing trigger in Step 1
             log.debug("Executing trigger DDL for {}", qualifiedName);
             log.trace("Trigger DDL: {}", ddl.getTriggerDdl());
-
-            // Execute trigger DDL second
             executeDdl(pgConnection, ddl.getTriggerDdl());
 
             result.addImplementedTrigger(trigger);
@@ -217,6 +236,35 @@ public class PostgresTriggerImplementationJob extends AbstractDatabaseWriteJob<T
             result.addError(qualifiedName, "Unexpected error: " + e.getMessage(),
                     trigger.getTriggerBody());
         }
+    }
+
+    /**
+     * Drops an existing trigger if it exists.
+     *
+     * This ensures idempotency - the job can be run multiple times without errors.
+     * Uses DROP TRIGGER IF EXISTS which is safe (no error if trigger doesn't exist).
+     *
+     * This is necessary because PostgreSQL does not support CREATE OR REPLACE TRIGGER,
+     * unlike functions which support CREATE OR REPLACE.
+     *
+     * @param pgConnection PostgreSQL database connection
+     * @param trigger Trigger metadata containing schema, trigger name, and table name
+     * @throws SQLException if drop operation fails
+     */
+    private void dropTriggerIfExists(Connection pgConnection, TriggerMetadata trigger)
+            throws SQLException {
+        String dropSql = String.format(
+            "DROP TRIGGER IF EXISTS %s ON %s.%s",
+            trigger.getTriggerName(),
+            trigger.getSchema(),
+            trigger.getTableName()
+        );
+
+        log.debug("Dropping existing trigger (if exists): {} on {}.{}",
+            trigger.getTriggerName(), trigger.getSchema(), trigger.getTableName());
+        log.trace("Drop SQL: {}", dropSql);
+
+        executeDdl(pgConnection, dropSql);
     }
 
     /**
