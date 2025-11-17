@@ -194,7 +194,7 @@ public class JobService {
 
     public boolean isJobComplete(String jobId) {
         JobStatus status = getJobStatus(jobId);
-        return status == JobStatus.COMPLETED || status == JobStatus.FAILED;
+        return status == JobStatus.COMPLETED || status == JobStatus.FAILED || status == JobStatus.CANCELLED;
     }
 
     public void cleanupOldJobs(int maxAgeHours) {
@@ -223,12 +223,40 @@ public class JobService {
      * CRITICAL FIX: Now properly shuts down the old ExecutorService and creates a new one.
      * This prevents thread pool accumulation that was causing 500MB-1.5GB memory leaks.
      *
+     * ENHANCED FIX: Explicitly cancels all running jobs before shutdown to ensure proper cleanup.
+     * This prevents orphaned CompletableFutures and provides clear audit trail of cancelled jobs.
+     *
      * Warning: This will clear job history and results. Only use when intentionally
      * resetting the application state (e.g., before starting a new migration run).
      */
     public void resetJobs() {
         int count = jobExecutions.size();
         log.info("Clearing {} job executions from memory and resetting thread pool", count);
+
+        // Cancel all running jobs explicitly
+        int cancelledCount = 0;
+        for (JobExecution<?> execution : jobExecutions.values()) {
+            if (execution.getStatus() == JobStatus.RUNNING) {
+                CompletableFuture<?> future = execution.getFuture();
+                if (future != null && !future.isDone()) {
+                    log.info("Cancelling running job: {} ({})",
+                        execution.getJob().getJobId(),
+                        execution.getJob().getJobType());
+
+                    future.cancel(true);  // Interrupt if running
+                    execution.setStatus(JobStatus.CANCELLED);
+                    execution.setError(new Exception("Job cancelled during state reset"));
+                    execution.setEndTime(LocalDateTime.now());
+                    cancelledCount++;
+                }
+            }
+        }
+
+        if (cancelledCount > 0) {
+            log.warn("Cancelled {} running jobs during state reset", cancelledCount);
+        } else {
+            log.info("No running jobs to cancel");
+        }
 
         // Shut down old executor service
         shutdownExecutorService(executorService, 30);
