@@ -179,10 +179,9 @@ public class PostgresTypeMethodImplementationJob extends AbstractDatabaseWriteJo
             log.info("Type method implementation complete: {} implemented, {} skipped, {} errors",
                     result.getImplementedCount(), result.getSkippedCount(), result.getErrorCount());
 
-            // Clear type method storage from StateService (free memory)
-            // Segmentation optimization: Sources/stubs no longer needed
-            stateService.clearTypeMethodStorage();
-            log.info("Cleared type method storage from StateService (memory released)");
+            // NOTE: Type method sources remain in StateService for re-runs
+            // They will be cleared only when user manually resets state
+            // (Memory optimization must not compromise re-run capability)
 
             return result;
         } catch (Exception e) {

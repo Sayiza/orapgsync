@@ -693,9 +693,16 @@ function displayStandaloneFunctionImplementationResults(result, database) {
             html += '<div class="created-tables-section">';
             html += '<h4>Implemented Functions/Procedures:</h4>';
             html += '<div class="table-items">';
-            Object.values(summary.implementedFunctions).forEach(func => {
-                html += `<div class="table-item created">${func.functionName} ✓</div>`;
-            });
+            Object.values(summary.implementedFunctions)
+                .sort((a, b) => {
+                    // Sort by schema first, then by function name
+                    const schemaCompare = (a.schema || '').localeCompare(b.schema || '');
+                    if (schemaCompare !== 0) return schemaCompare;
+                    return (a.functionName || '').localeCompare(b.functionName || '');
+                })
+                .forEach(func => {
+                    html += `<div class="table-item created">${func.functionName} ✓</div>`;
+                });
             html += '</div>';
             html += '</div>';
         }
@@ -705,9 +712,16 @@ function displayStandaloneFunctionImplementationResults(result, database) {
             html += '<div class="skipped-tables-section">';
             html += '<h4>Skipped Functions/Procedures:</h4>';
             html += '<div class="table-items">';
-            Object.values(summary.skippedFunctions).forEach(func => {
-                html += `<div class="table-item skipped">${func.functionName}</div>`;
-            });
+            Object.values(summary.skippedFunctions)
+                .sort((a, b) => {
+                    // Sort by schema first, then by function name
+                    const schemaCompare = (a.schema || '').localeCompare(b.schema || '');
+                    if (schemaCompare !== 0) return schemaCompare;
+                    return (a.functionName || '').localeCompare(b.functionName || '');
+                })
+                .forEach(func => {
+                    html += `<div class="table-item skipped">${func.functionName}</div>`;
+                });
             html += '</div>';
             html += '</div>';
         }
@@ -717,14 +731,19 @@ function displayStandaloneFunctionImplementationResults(result, database) {
             html += '<div class="error-tables-section">';
             html += '<h4>Failed Functions/Procedures:</h4>';
             html += '<div class="table-items">';
-            Object.values(summary.errors).forEach(error => {
-                html += `<div class="table-item error">`;
-                html += `<strong>${error.functionName}</strong>: ${error.error}`;
-                if (error.sql) {
-                    html += `<div class="sql-statement"><pre>${error.sql}</pre></div>`;
-                }
-                html += `</div>`;
-            });
+            Object.values(summary.errors)
+                .sort((a, b) => {
+                    // Sort by function name (errors don't have schema property, parse from functionName)
+                    return (a.functionName || '').localeCompare(b.functionName || '');
+                })
+                .forEach(error => {
+                    html += `<div class="table-item error">`;
+                    html += `<strong>${error.functionName}</strong>: ${error.error}`;
+                    if (error.sql) {
+                        html += `<div class="sql-statement"><pre>${error.sql}</pre></div>`;
+                    }
+                    html += `</div>`;
+                });
             html += '</div>';
             html += '</div>';
         }

@@ -221,10 +221,9 @@ public class PostgresFunctionImplementationJob extends AbstractDatabaseWriteJob<
                 log.info("Function implementation complete: {} implemented, {} skipped, {} errors",
                         result.getImplementedCount(), result.getSkippedCount(), result.getErrorCount());
 
-                // Clear package function storage from StateService (free memory)
-                // Package segmentation optimization: Sources/stubs/reduced bodies no longer needed
-                stateService.clearPackageFunctionStorage();
-                log.info("Cleared package function storage from StateService (memory released)");
+                // NOTE: Package function sources remain in StateService for re-runs
+                // They will be cleared only when user manually resets state
+                // (Memory optimization must not compromise re-run capability)
 
                 return result;
             }
