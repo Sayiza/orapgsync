@@ -3,6 +3,7 @@ package me.christianrobert.orapgsync.transformer.builder;
 import me.christianrobert.orapgsync.antlr.PlSqlParser;
 import me.christianrobert.orapgsync.transformer.builder.functions.DateFunctionTransformer;
 import me.christianrobert.orapgsync.transformer.builder.functions.StringFunctionTransformer;
+import me.christianrobert.orapgsync.transformer.builder.objectfield.ObjectFieldAccessTransformer;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
 import me.christianrobert.orapgsync.transformer.context.TransformationException;
 import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
@@ -205,6 +206,29 @@ public class VisitGeneralElement {
     // Pattern: sequence_name.NEXTVAL or schema.sequence_name.NEXTVAL
     if (isSequenceCall(parts)) {
       return handleSequenceCall(parts, b);
+    }
+
+    // STEP 1: Check for object type field access (before function call check)
+    // Pattern: table.column.field or table.column.field1.field2
+    // PostgreSQL requires parentheses: (table.column).field or ((table.column).field1).field2
+    // This must come BEFORE function call check because:
+    //   - Field access has no parentheses: table.col.field
+    //   - Method calls have parentheses: table.col.method()
+    TransformationContext transformContext = b.getContext();
+    if (transformContext != null && parts.size() >= 3) {
+      // Build full identifier chain from parts
+      String identifierChain = parts.stream()
+          .map(p -> p.id_expression().getText())
+          .collect(Collectors.joining("."));
+
+      // Attempt object field access transformation
+      ObjectFieldAccessTransformer fieldTransformer = new ObjectFieldAccessTransformer(transformContext);
+      String fieldAccessResult = fieldTransformer.transform(identifierChain);
+
+      if (fieldAccessResult != null) {
+        // Successfully transformed as object field access!
+        return fieldAccessResult;
+      }
     }
 
     // Get the last part to check if it's a function call

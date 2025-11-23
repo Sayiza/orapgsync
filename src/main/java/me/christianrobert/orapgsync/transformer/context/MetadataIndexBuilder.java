@@ -1,6 +1,8 @@
 package me.christianrobert.orapgsync.transformer.context;
 
 import me.christianrobert.orapgsync.core.job.model.function.FunctionMetadata;
+import me.christianrobert.orapgsync.core.job.model.objectdatatype.ObjectDataTypeMetaData;
+import me.christianrobert.orapgsync.core.job.model.objectdatatype.ObjectDataTypeVariable;
 import me.christianrobert.orapgsync.core.job.model.synonym.SynonymMetadata;
 import me.christianrobert.orapgsync.core.job.model.table.ColumnMetadata;
 import me.christianrobert.orapgsync.core.job.model.table.TableMetadata;
@@ -77,10 +79,16 @@ public class MetadataIndexBuilder {
         Map<String, Map<String, String>> synonyms =
                 indexSynonyms(stateService);
 
-        log.info("Indices built: {} tables, {} types with methods, {} package functions, {} synonym schemas",
-                tableColumns.size(), typeMethods.size(), packageFunctions.size(), synonyms.size());
+        Map<String, Map<String, String>> typeFieldTypes =
+                indexTypeFields(stateService, normalizedSchemas);
 
-        return new TransformationIndices(tableColumns, typeMethods, packageFunctions, synonyms);
+        Set<String> objectTypeNames =
+                indexObjectTypeNames(stateService, normalizedSchemas);
+
+        log.info("Indices built: {} tables, {} types with methods, {} package functions, {} synonym schemas, {} object types",
+                tableColumns.size(), typeMethods.size(), packageFunctions.size(), synonyms.size(), objectTypeNames.size());
+
+        return new TransformationIndices(tableColumns, typeMethods, packageFunctions, synonyms, typeFieldTypes, objectTypeNames);
     }
 
     /**
@@ -214,6 +222,67 @@ public class MetadataIndexBuilder {
     }
 
     /**
+     * Builds object type field index: "schema.typename" → field → type.
+     * Includes all fields from Oracle object types for field access transformation.
+     */
+    private static Map<String, Map<String, String>> indexTypeFields(
+            StateService stateService, Set<String> schemas) {
+
+        Map<String, Map<String, String>> index = new HashMap<>();
+        int fieldCount = 0;
+
+        for (ObjectDataTypeMetaData type : stateService.getOracleObjectDataTypeMetaData()) {
+            String normalizedSchema = type.getSchema().toLowerCase();
+
+            if (!schemas.contains(normalizedSchema)) {
+                continue; // Skip types not in target schemas
+            }
+
+            String qualifiedTypeName = normalizedSchema + "." + type.getName().toLowerCase();
+            Map<String, String> fields = new HashMap<>();
+
+            if (type.getVariables() != null) {
+                for (ObjectDataTypeVariable variable : type.getVariables()) {
+                    String fieldName = variable.getName().toLowerCase();
+                    String fieldType = variable.getDataType(); // Keep original case for built-in types
+
+                    fields.put(fieldName, fieldType);
+                    fieldCount++;
+                }
+            }
+
+            index.put(qualifiedTypeName, fields);
+        }
+
+        log.debug("Indexed {} fields across {} object types", fieldCount, index.size());
+        return index;
+    }
+
+    /**
+     * Builds object type name index: Set of qualified type names.
+     * Used for quick existence checks during type name qualification.
+     */
+    private static Set<String> indexObjectTypeNames(
+            StateService stateService, Set<String> schemas) {
+
+        Set<String> index = new HashSet<>();
+
+        for (ObjectDataTypeMetaData type : stateService.getOracleObjectDataTypeMetaData()) {
+            String normalizedSchema = type.getSchema().toLowerCase();
+
+            if (!schemas.contains(normalizedSchema)) {
+                continue; // Skip types not in target schemas
+            }
+
+            String qualifiedTypeName = normalizedSchema + "." + type.getName().toLowerCase();
+            index.add(qualifiedTypeName);
+        }
+
+        log.debug("Indexed {} object type names", index.size());
+        return index;
+    }
+
+    /**
      * Creates empty indices (for testing with no metadata).
      */
     public static TransformationIndices buildEmpty() {
@@ -221,7 +290,9 @@ public class MetadataIndexBuilder {
                 Collections.emptyMap(),
                 Collections.emptyMap(),
                 Collections.emptySet(),
-                Collections.emptyMap()
+                Collections.emptyMap(),
+                Collections.emptyMap(),
+                Collections.emptySet()
         );
     }
 }

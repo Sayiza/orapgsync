@@ -577,6 +577,89 @@ public class TransformationContext {
         return indices.isPackageFunction(qualifiedName);
     }
 
+    // ========== Object Type Field Access Support ==========
+
+    /**
+     * Qualifies a type name following Oracle resolution rules.
+     *
+     * <p>Resolution order:</p>
+     * <ol>
+     *   <li>Check current schema</li>
+     *   <li>Check PUBLIC schema (synonyms)</li>
+     *   <li>Check SYS schema (system types)</li>
+     * </ol>
+     *
+     * <p>This is critical for synonym support - types may be defined in
+     * different schemas and referenced via PUBLIC synonyms.</p>
+     *
+     * @param typeName Type name (may be unqualified like "LANGY_TYPE" or qualified like "HR.ADDRESS_TYPE")
+     * @return Qualified type name (e.g., "hr.address_type") or unqualified if not found
+     */
+    public String qualifyTypeName(String typeName) {
+        if (typeName == null || typeName.trim().isEmpty()) {
+            return typeName;
+        }
+
+        // If already qualified, return as-is (normalized)
+        if (typeName.contains(".")) {
+            return typeName.toUpperCase();
+        }
+
+        String normalized = typeName.toUpperCase();
+
+        // Check current schema
+        String qualified = currentSchema.toUpperCase() + "." + normalized;
+        if (indices.isObjectType(qualified)) {
+            return qualified;
+        }
+
+        // Check PUBLIC schema
+        qualified = "PUBLIC." + normalized;
+        if (indices.isObjectType(qualified)) {
+            return qualified;
+        }
+
+        // Check SYS schema
+        qualified = "SYS." + normalized;
+        if (indices.isObjectType(qualified)) {
+            return qualified;
+        }
+
+        // Not found - return unqualified (will fail later, but preserves intent)
+        return normalized;
+    }
+
+    /**
+     * Gets the type of a field in an object type.
+     *
+     * @param qualifiedTypeName Qualified type name (e.g., "hr.address_type")
+     * @param fieldName Field name (e.g., "street")
+     * @return Field type or null if not found
+     */
+    public String getFieldType(String qualifiedTypeName, String fieldName) {
+        return indices.getFieldType(qualifiedTypeName, fieldName);
+    }
+
+    /**
+     * Checks if a type name is a known object type.
+     *
+     * @param qualifiedTypeName Qualified type name (e.g., "hr.address_type")
+     * @return true if type exists in metadata
+     */
+    public boolean isObjectType(String qualifiedTypeName) {
+        return indices.isObjectType(qualifiedTypeName);
+    }
+
+    /**
+     * Gets all fields of an object type.
+     *
+     * @param qualifiedTypeName Qualified type name (e.g., "hr.address_type")
+     * @return Map of field names to types, or empty map if not found
+     */
+    public Map<String, String> getTypeFields(String qualifiedTypeName) {
+        return indices.getTypeFields(qualifiedTypeName);
+    }
+
     // ========== Query-Local State (Table Aliases) ==========
 
     /**
