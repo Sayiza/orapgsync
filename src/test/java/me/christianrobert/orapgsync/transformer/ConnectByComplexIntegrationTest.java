@@ -9,6 +9,7 @@ import me.christianrobert.orapgsync.transformer.type.SimpleTypeEvaluator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 
@@ -42,7 +43,9 @@ class ConnectByComplexIntegrationTest {
         new HashMap<>(), // tableColumns - Map<String, Map<String, ColumnTypeInfo>>
         new HashMap<>(), // typeMethods - Map<String, Set<String>>
         new HashSet<>(), // packageFunctions - Set<String>
-        new HashMap<>()  // synonyms - Map<String, Map<String, String>>
+        new HashMap<>(), // synonyms - Map<String, Map<String, String>>
+        Collections.emptyMap(), // typeFieldTypes
+        Collections.emptySet()  // objectTypeNames
     );
     TransformationContext context = new TransformationContext(
         "hr",

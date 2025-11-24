@@ -8,8 +8,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
+import java.util.Collections;
 import java.util.HashSet;
+import java.util.Collections;
 import java.util.Map;
+import java.util.Collections;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -63,7 +66,9 @@ class TypeAnalysisVisitorPhase3Test {
                 tableColumns,
                 new HashMap<>(),  // typeMethods
                 new HashSet<>(),  // packageFunctions
-                new HashMap<>()   // synonyms
+                new HashMap<>(), // synonyms
+        Collections.emptyMap(), // typeFieldTypes
+        Collections.emptySet()  // objectTypeNames
         );
     }
 

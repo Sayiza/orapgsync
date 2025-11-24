@@ -11,6 +11,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.*;
+import java.util.Collections;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -50,7 +51,9 @@ class PackageVariableTransformationTest {
             Collections.emptyMap(),  // tableColumns
             Collections.emptyMap(),  // typeMethods
             Collections.emptySet(),  // packageFunctions
-            Collections.emptyMap()   // synonyms
+            Collections.emptyMap(), // synonym
+            Collections.emptyMap(), // typeFieldTypes
+            Collections.emptySet()  // objectTypeNames
         );
 
         // Create simple type evaluator for testing

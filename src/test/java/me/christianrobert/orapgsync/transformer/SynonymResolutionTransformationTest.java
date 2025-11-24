@@ -10,6 +10,7 @@ import me.christianrobert.orapgsync.transformer.parser.ParseResult;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
@@ -218,7 +219,9 @@ class SynonymResolutionTransformationTest {
             new HashMap<>(),  // No table columns needed
             new HashMap<>(),  // No type methods needed
             Set.of(),         // No package functions needed
-            synonyms          // Synonyms for testing
+            synonyms, // synonym
+            Collections.emptyMap(), // typeFieldTypes
+            Collections.emptySet()  // objectTypeNames
         );
     }
 }

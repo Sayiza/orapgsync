@@ -6,6 +6,7 @@ import me.christianrobert.orapgsync.transformer.parser.AntlrParser;
 import me.christianrobert.orapgsync.transformer.parser.ParseResult;
 import org.junit.jupiter.api.Test;
 
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -26,7 +27,8 @@ class Phase2DiagnosticTest {
         tableColumns.put("hr.employees", employeesColumns);
 
         TransformationIndices indices = new TransformationIndices(
-            tableColumns, new HashMap<>(), new HashSet<>(), new HashMap<>()
+            tableColumns, new HashMap<>(), new HashSet<>(), new HashMap<>(),
+            Collections.emptyMap(), Collections.emptySet()
         );
 
         Map<String, TypeInfo> typeCache = new HashMap<>();

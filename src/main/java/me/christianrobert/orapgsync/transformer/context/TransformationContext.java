@@ -600,27 +600,44 @@ public class TransformationContext {
             return typeName;
         }
 
-        // If already qualified, return as-is (normalized)
-        if (typeName.contains(".")) {
-            return typeName.toUpperCase();
+        // Normalize to lowercase for case-insensitive matching (indices are lowercase)
+        String normalized = typeName.toLowerCase();
+
+        // If already qualified, verify it exists as an object type
+        if (normalized.contains(".")) {
+            if (indices.isObjectType(normalized)) {
+                return normalized;
+            }
+            // Already qualified but not found - return as-is (will fail later)
+            return normalized;
         }
 
-        String normalized = typeName.toUpperCase();
+        // STEP 1: Try synonym resolution first
+        // Synonyms can point to object types (e.g., PUBLIC.ADDRESS_TYPE → HR.ADDRESS_TYPE)
+        String synonymTarget = resolveSynonym(normalized);
+        if (synonymTarget != null) {
+            // Synonym resolved - check if target is an object type
+            String normalizedTarget = synonymTarget.toLowerCase();
+            if (indices.isObjectType(normalizedTarget)) {
+                return normalizedTarget;
+            }
+        }
 
+        // STEP 2: Not a synonym - try to qualify by checking if it exists as an object type
         // Check current schema
-        String qualified = currentSchema.toUpperCase() + "." + normalized;
+        String qualified = currentSchema.toLowerCase() + "." + normalized;
         if (indices.isObjectType(qualified)) {
             return qualified;
         }
 
         // Check PUBLIC schema
-        qualified = "PUBLIC." + normalized;
+        qualified = "public." + normalized;
         if (indices.isObjectType(qualified)) {
             return qualified;
         }
 
         // Check SYS schema
-        qualified = "SYS." + normalized;
+        qualified = "sys." + normalized;
         if (indices.isObjectType(qualified)) {
             return qualified;
         }

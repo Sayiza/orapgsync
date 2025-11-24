@@ -7,6 +7,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.*;
+import java.util.Collections;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -39,7 +40,9 @@ class SqlTransformationServiceTest {
                 new HashMap<>(),  // tableColumns
                 new HashMap<>(),  // typeMethods
                 new HashSet<>(),  // packageFunctions
-                new HashMap<>()   // synonyms
+                new HashMap<>(), // synonyms
+        Collections.emptyMap(), // typeFieldTypes
+        Collections.emptySet()  // objectTypeNames
         );
     }
 

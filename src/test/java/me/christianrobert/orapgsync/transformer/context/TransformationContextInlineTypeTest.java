@@ -9,6 +9,7 @@ import me.christianrobert.orapgsync.transformer.type.SimpleTypeEvaluator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -31,7 +32,9 @@ class TransformationContextInlineTypeTest {
                 new java.util.HashMap<>(),  // tableColumns
                 new java.util.HashMap<>(),  // typeMethods
                 new java.util.HashSet<>(),  // packageFunctions
-                new java.util.HashMap<>()   // synonyms
+                new java.util.HashMap<>(), // synonym
+                Collections.emptyMap(), // typeFieldTypes
+                Collections.emptySet()  // objectTypeNames
         );
 
         // Create context with no package context
