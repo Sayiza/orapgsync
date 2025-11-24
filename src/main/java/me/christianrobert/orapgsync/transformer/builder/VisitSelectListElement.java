@@ -47,8 +47,33 @@ public class VisitSelectListElement {
     // Regular expression - visit normally
     String expression = b.visit(exprCtx);
 
-    // Handle column alias if present
+    // Determine column alias (for type casting lookup)
+    String columnAlias = null;
     PlSqlParser.Column_aliasContext aliasCtx = ctx.column_alias();
+    if (aliasCtx != null) {
+      // Extract alias name without "AS" keyword
+      PlSqlParser.IdentifierContext identifierCtx = aliasCtx.identifier();
+      PlSqlParser.Quoted_stringContext quotedStringCtx = aliasCtx.quoted_string();
+      if (identifierCtx != null) {
+        columnAlias = identifierCtx.getText();
+      } else if (quotedStringCtx != null) {
+        // Remove quotes from quoted string
+        String quotedText = quotedStringCtx.getText();
+        columnAlias = quotedText.substring(1, quotedText.length() - 1);
+      }
+    }
+
+    // Apply type casting for view transformations
+    // This ensures CREATE OR REPLACE VIEW succeeds by matching stub column types exactly
+    if (columnAlias != null && b.getContext() != null && b.getContext().isViewTransformation()) {
+      String targetType = b.getContext().getViewColumnType(columnAlias);
+      if (targetType != null) {
+        // Cast expression to target type (e.g., COUNT(1) → (COUNT(1))::numeric)
+        expression = "( " + expression + " )::" + targetType;
+      }
+    }
+
+    // Handle column alias if present
     if (aliasCtx != null) {
       String alias = buildColumnAlias(aliasCtx);
       return expression + " " + alias;

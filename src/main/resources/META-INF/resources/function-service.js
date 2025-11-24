@@ -980,6 +980,9 @@ function generateSchemaGroupedFunctionList(functions, statusClass, failureReason
         html += '</div>';
         html += `<div class="table-items-list" id="${schemaId}">`;
 
+        // Sort functions within schema by function name
+        schemaFunctions.sort((a, b) => (a.functionName || '').localeCompare(b.functionName || ''));
+
         schemaFunctions.forEach((func, index) => {
             const funcId = `${schemaId}-func-${index}`;
             const statusIcon = statusClass === 'verified' ? '✓' : '✗';

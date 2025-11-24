@@ -88,22 +88,38 @@ public class TransformationService {
      * @return TransformationResult containing either transformed SQL or error details
      */
     public TransformationResult transformSql(String oracleSql, String schema, TransformationIndices indices) {
-        return transformSql(oracleSql, schema, indices, false);
+        return transformSql(oracleSql, schema, indices, null, false);
+    }
+
+    /**
+     * Transforms Oracle SQL to PostgreSQL equivalent for view transformations with column type metadata.
+     *
+     * <p>This variant is used for view implementation where we need to cast SELECT list expressions
+     * to match stub column types (ensures CREATE OR REPLACE VIEW succeeds).</p>
+     *
+     * @param oracleSql Oracle SELECT statement
+     * @param schema Current schema context (e.g., "hr")
+     * @param indices Pre-built metadata indices for lookups
+     * @param viewColumnTypes Column name → PostgreSQL type mapping (from view stub metadata)
+     * @return TransformationResult with transformed SQL or error details
+     */
+    public TransformationResult transformSql(String oracleSql, String schema, TransformationIndices indices, Map<String, String> viewColumnTypes) {
+        return transformSql(oracleSql, schema, indices, viewColumnTypes, false);
     }
 
     /**
      * Transforms Oracle SQL to PostgreSQL equivalent with optional AST tree output.
      *
-     * <p>Same as {@link #transformSql(String, String, TransformationIndices)} but optionally
-     * includes AST tree representation for debugging.</p>
+     * <p>This is the master transformation method that all other overloads delegate to.</p>
      *
      * @param oracleSql Oracle SELECT statement (any Oracle SQL syntax)
      * @param schema Schema context for synonym and name resolution
      * @param indices Pre-built metadata indices for lookups
+     * @param viewColumnTypes Column name → PostgreSQL type mapping (null for non-view transformations)
      * @param includeAst Whether to include AST tree in result (for debugging)
      * @return TransformationResult containing transformed SQL and optionally AST tree
      */
-    public TransformationResult transformSql(String oracleSql, String schema, TransformationIndices indices, boolean includeAst) {
+    public TransformationResult transformSql(String oracleSql, String schema, TransformationIndices indices, Map<String, String> viewColumnTypes, boolean includeAst) {
         if (oracleSql == null || oracleSql.trim().isEmpty()) {
             return TransformationResult.failure(oracleSql, "Oracle SQL cannot be null or empty");
         }
@@ -152,8 +168,14 @@ public class TransformationService {
             // STEP 3: Create TransformationContext with schema, indices, and type evaluator
             log.debug("Step 3: Creating transformation context with schema: {}", schema);
 
-            // Create context with type evaluator
-            TransformationContext context = new TransformationContext(schema, indices, typeEvaluator);
+            // Create context with type evaluator and optional view column types
+            TransformationContext context;
+            if (viewColumnTypes != null) {
+                log.debug("Creating context for view transformation with {} column types", viewColumnTypes.size());
+                context = new TransformationContext(schema, indices, typeEvaluator, viewColumnTypes);
+            } else {
+                context = new TransformationContext(schema, indices, typeEvaluator);
+            }
 
             // STEP 4: Transform ANTLR parse tree to PostgreSQL SQL with context
             log.debug("Step 4: Transforming to PostgreSQL");
@@ -402,7 +424,8 @@ public class TransformationService {
                 typeEvaluator,
                 packageContextCache,  // Package variable context
                 functionName,         // Current function name
-                packageName);         // Current package name (null for standalone)
+                packageName,          // Current package name (null for standalone)
+                null);                // No view column types for PL/SQL transformations
 
             // STEP 4: Transform ANTLR parse tree to PostgreSQL PL/pgSQL
             log.debug("Step 4: Transforming to PostgreSQL PL/pgSQL");
@@ -641,7 +664,8 @@ public class TransformationService {
                 typeEvaluator,
                 packageContextCache,  // Package variable context
                 procedureName,        // Current procedure name
-                packageName);         // Current package name (null for standalone)
+                packageName,          // Current package name (null for standalone)
+                null);                // No view column types for PL/SQL transformations
 
             // STEP 4: Transform ANTLR parse tree to PostgreSQL PL/pgSQL
             log.debug("Step 4: Transforming to PostgreSQL PL/pgSQL");

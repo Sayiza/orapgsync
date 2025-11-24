@@ -287,10 +287,10 @@ public class RegexpFunctionTransformationTest {
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
         String postgresSql = builder.visit(parseResult.getTree());
 
-        // Then: Should work nested (UPPER gets schema-qualified)
+        // Then: Should work nested (UPPER remains unqualified - it's a built-in function)
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
 
-        assertTrue(normalized.contains("upper( ( REGEXP_MATCH( email , '[^@]+' ) )[1] )"),
+        assertTrue(normalized.contains("UPPER( ( REGEXP_MATCH( email , '[^@]+' ) )[1] )"),
             "REGEXP_SUBSTR should work nested with UPPER, got: " + normalized);
     }
 
@@ -405,10 +405,10 @@ public class RegexpFunctionTransformationTest {
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
         String postgresSql = builder.visit(parseResult.getTree());
 
-        // Then: All functions should be transformed (UPPER gets schema-qualified)
+        // Then: All functions should be transformed (UPPER remains unqualified - it's a built-in function)
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
 
-        assertTrue(normalized.contains("upper( REGEXP_REPLACE( email , '@.*' , '' , 'g' ) )"),
+        assertTrue(normalized.contains("UPPER( REGEXP_REPLACE( email , '@.*' , '' , 'g' ) )"),
             "REGEXP_REPLACE with UPPER should work, got: " + normalized);
         assertTrue(normalized.contains("POSITION( '@' IN email )"),
             "INSTR should also be transformed, got: " + normalized);

@@ -3,6 +3,7 @@ package me.christianrobert.orapgsync.transformer.context;
 import me.christianrobert.orapgsync.transformer.inline.InlineTypeDefinition;
 import me.christianrobert.orapgsync.transformer.inline.TypeCategory;
 import me.christianrobert.orapgsync.transformer.packagevariable.PackageContext;
+import me.christianrobert.orapgsync.transformer.type.SimpleTypeEvaluator;
 import me.christianrobert.orapgsync.transformer.type.TypeEvaluator;
 
 import java.util.ArrayDeque;
@@ -75,6 +76,9 @@ import java.util.Set;
  * @see InlineTypeDefinition
  */
 public class TransformationContext {
+    public TransformationContext(String hr, TransformationIndices emptyIndices, SimpleTypeEvaluator typeEvaluator, Map<String, PackageContext> packageContextCache, String testProc, String empPkg) {
+        this(hr, emptyIndices, typeEvaluator, packageContextCache, testProc, empPkg, new HashMap<>());
+    }
 
     // ========== Variable Scope Tracking (Inner Classes) ==========
 
@@ -257,6 +261,16 @@ public class TransformationContext {
      */
     private final Map<String, InlineTypeDefinition> inlineTypes;
 
+    /**
+     * View column types for view transformations (column name → PostgreSQL type).
+     * Used to cast SELECT list expressions to match stub column types.
+     * Null for non-view transformations (functions, procedures, ad-hoc SQL).
+     *
+     * <p><strong>Purpose:</strong> Ensures CREATE OR REPLACE VIEW succeeds by matching stub types exactly.</p>
+     * <p><strong>Example:</strong> COUNT(*) returns bigint, but stub expects numeric → cast to numeric.</p>
+     */
+    private final Map<String, String> viewColumnTypes;
+
     // ========== Layer 3: Query-Level Context ==========
 
     private final Map<String, String> tableAliases;  // alias → table name (per query)
@@ -296,14 +310,32 @@ public class TransformationContext {
      * @param typeEvaluator Type evaluator for type-aware transformations
      */
     public TransformationContext(String currentSchema, TransformationIndices indices, TypeEvaluator typeEvaluator) {
-        this(currentSchema, indices, typeEvaluator, null, null, null);
+        this(currentSchema, indices, typeEvaluator, null, null, null, null);
     }
 
     /**
-     * Creates context with full transformation-level context (for PL/SQL functions/procedures).
+     * Creates context for view transformation with column type metadata.
      *
-     * <p>This constructor is for PL/SQL transformations that may involve package variables,
-     * inline types, or need function/package context.</p>
+     * <p>This constructor is for view transformations that need to cast SELECT list expressions
+     * to match stub column types (ensures CREATE OR REPLACE VIEW succeeds).</p>
+     *
+     * @param currentSchema Schema context for resolution (e.g., "hr")
+     * @param indices Pre-built metadata indices for fast lookups
+     * @param typeEvaluator Type evaluator for type-aware transformations
+     * @param viewColumnTypes Column name → PostgreSQL type mapping (from view stub metadata)
+     */
+    public TransformationContext(String currentSchema,
+                                 TransformationIndices indices,
+                                 TypeEvaluator typeEvaluator,
+                                 Map<String, String> viewColumnTypes) {
+        this(currentSchema, indices, typeEvaluator, null, null, null, viewColumnTypes);
+    }
+
+    /**
+     * Creates context with full transformation-level context (for PL/SQL functions/procedures and views).
+     *
+     * <p>This is the master constructor that all other constructors delegate to.
+     * It accepts all possible context parameters.</p>
      *
      * @param currentSchema Schema context for resolution (e.g., "hr")
      * @param indices Pre-built metadata indices for fast lookups
@@ -311,13 +343,15 @@ public class TransformationContext {
      * @param packageContextCache Package variable contexts (null for standalone/views)
      * @param functionName Current function/procedure name (null for views)
      * @param packageName Current package name (null for standalone/views)
+     * @param viewColumnTypes View column types for casting (null for functions/procedures)
      */
     public TransformationContext(String currentSchema,
                                  TransformationIndices indices,
                                  TypeEvaluator typeEvaluator,
                                  Map<String, PackageContext> packageContextCache,
                                  String functionName,
-                                 String packageName) {
+                                 String packageName,
+                                 Map<String, String> viewColumnTypes) {
         // Validate required parameters
         if (currentSchema == null || currentSchema.trim().isEmpty()) {
             throw new IllegalArgumentException("Current schema cannot be null or empty");
@@ -339,6 +373,7 @@ public class TransformationContext {
         this.currentPackageName = packageName;
         this.packageContextCache = packageContextCache != null ? packageContextCache : new HashMap<>();
         this.inlineTypes = new HashMap<>();  // FUTURE - ready for inline type support
+        this.viewColumnTypes = viewColumnTypes;  // Null for non-view transformations
 
         // Layer 3: Query-level context (mutable during transformation)
         this.tableAliases = new HashMap<>();
@@ -452,6 +487,42 @@ public class TransformationContext {
         }
         String cacheKey = (currentSchema + "." + packageName).toLowerCase();
         return packageContextCache.get(cacheKey);
+    }
+
+    // ========== View Column Type Support ==========
+
+    /**
+     * Checks if currently transforming a view with column type metadata.
+     *
+     * @return true if viewColumnTypes is set (view transformation with metadata)
+     */
+    public boolean isViewTransformation() {
+        return viewColumnTypes != null;
+    }
+
+    /**
+     * Gets the PostgreSQL type for a view column (case-insensitive lookup).
+     *
+     * @param columnName Column name (alias in SELECT list)
+     * @return PostgreSQL type (e.g., "numeric", "text", "bigint") or null if not found
+     */
+    public String getViewColumnType(String columnName) {
+        if (viewColumnTypes == null || columnName == null) {
+            return null;
+        }
+        // Case-insensitive lookup (Oracle/PostgreSQL identifiers are case-insensitive by default)
+        String normalizedName = columnName.toLowerCase();
+        return viewColumnTypes.get(normalizedName);
+    }
+
+    /**
+     * Checks if column type metadata exists for a given column.
+     *
+     * @param columnName Column name (alias in SELECT list)
+     * @return true if column type is known
+     */
+    public boolean hasViewColumnType(String columnName) {
+        return getViewColumnType(columnName) != null;
     }
 
     // ========== Inline Type Support (FUTURE - stubs for now) ==========

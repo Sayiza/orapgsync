@@ -127,7 +127,7 @@ public class TransformationResource {
         // Transform SQL
         log.debug("Transforming SQL for schema: {} (showAst={})", targetSchema, showAst);
         TransformationResult result = transformationService.transformSql(
-                oracleSql, targetSchema, indices, showAst
+                oracleSql, targetSchema, indices, null, showAst
         );
 
         if (result.isSuccess()) {
@@ -218,7 +218,7 @@ public class TransformationResource {
         try {
             switch (parseType.toLowerCase()) {
                 case "select_statement":
-                    result = transformationService.transformSql(oracleCode, targetSchema, indices, showAst);
+                    result = transformationService.transformSql(oracleCode, targetSchema, indices, null, showAst);
                     break;
 
                 case "function_body":

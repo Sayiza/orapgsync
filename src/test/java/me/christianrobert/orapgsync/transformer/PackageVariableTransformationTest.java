@@ -476,7 +476,7 @@ class PackageVariableTransformationTest {
 
         TransformationContext context = new TransformationContext(
             "hr", emptyIndices, typeEvaluator,
-            packageContextCache, "test_proc", "emp_pkg"
+            packageContextCache, "test_proc", "emp_pkg", null
         );
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
 
@@ -508,7 +508,7 @@ class PackageVariableTransformationTest {
 
         TransformationContext context = new TransformationContext(
             "hr", emptyIndices, typeEvaluator,
-            packageContextCache, "test_func", null
+            packageContextCache, "test_func", null, null
         );
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
 

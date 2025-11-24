@@ -490,9 +490,16 @@ function displayViewStubCreationResults(result, database) {
             html += '<div class="created-tables-section">';
             html += '<h4>Created View Stubs:</h4>';
             html += '<div class="table-items">';
-            Object.values(summary.createdViews).forEach(view => {
-                html += `<div class="table-item created">${view.viewName} ✓</div>`;
-            });
+            Object.values(summary.createdViews)
+                .sort((a, b) => {
+                    // Sort by schema first, then by view name
+                    const schemaCompare = (a.schema || '').localeCompare(b.schema || '');
+                    if (schemaCompare !== 0) return schemaCompare;
+                    return (a.viewName || '').localeCompare(b.viewName || '');
+                })
+                .forEach(view => {
+                    html += `<div class="table-item created">${view.viewName} ✓</div>`;
+                });
             html += '</div>';
             html += '</div>';
         }
@@ -502,9 +509,16 @@ function displayViewStubCreationResults(result, database) {
             html += '<div class="skipped-tables-section">';
             html += '<h4>Skipped Views (already exist):</h4>';
             html += '<div class="table-items">';
-            Object.values(summary.skippedViews).forEach(view => {
-                html += `<div class="table-item skipped">${view.viewName}</div>`;
-            });
+            Object.values(summary.skippedViews)
+                .sort((a, b) => {
+                    // Sort by schema first, then by view name
+                    const schemaCompare = (a.schema || '').localeCompare(b.schema || '');
+                    if (schemaCompare !== 0) return schemaCompare;
+                    return (a.viewName || '').localeCompare(b.viewName || '');
+                })
+                .forEach(view => {
+                    html += `<div class="table-item skipped">${view.viewName}</div>`;
+                });
             html += '</div>';
             html += '</div>';
         }
@@ -514,14 +528,19 @@ function displayViewStubCreationResults(result, database) {
             html += '<div class="error-tables-section">';
             html += '<h4>Failed Views:</h4>';
             html += '<div class="table-items">';
-            Object.values(summary.errors).forEach(error => {
-                html += `<div class="table-item error">`;
-                html += `<strong>${error.viewName}</strong>: ${error.error}`;
-                if (error.sql) {
-                    html += `<div class="sql-statement"><pre>${error.sql}</pre></div>`;
-                }
-                html += `</div>`;
-            });
+            Object.values(summary.errors)
+                .sort((a, b) => {
+                    // Sort by view name (errors may not have schema property, parse from viewName)
+                    return (a.viewName || '').localeCompare(b.viewName || '');
+                })
+                .forEach(error => {
+                    html += `<div class="table-item error">`;
+                    html += `<strong>${error.viewName}</strong>: ${error.error}`;
+                    if (error.sql) {
+                        html += `<div class="sql-statement"><pre>${error.sql}</pre></div>`;
+                    }
+                    html += `</div>`;
+                });
             html += '</div>';
             html += '</div>';
         }
@@ -712,9 +731,16 @@ function displayViewImplementationResults(result, database) {
             html += '<div class="created-tables-section">';
             html += '<h4>Implemented Views:</h4>';
             html += '<div class="table-items">';
-            Object.values(summary.implementedViews).forEach(view => {
-                html += `<div class="table-item created">${view.viewName} ✓</div>`;
-            });
+            Object.values(summary.implementedViews)
+                .sort((a, b) => {
+                    // Sort by schema first, then by view name
+                    const schemaCompare = (a.schema || '').localeCompare(b.schema || '');
+                    if (schemaCompare !== 0) return schemaCompare;
+                    return (a.viewName || '').localeCompare(b.viewName || '');
+                })
+                .forEach(view => {
+                    html += `<div class="table-item created">${view.viewName} ✓</div>`;
+                });
             html += '</div>';
             html += '</div>';
         }
@@ -724,9 +750,16 @@ function displayViewImplementationResults(result, database) {
             html += '<div class="skipped-tables-section">';
             html += '<h4>Skipped Views:</h4>';
             html += '<div class="table-items">';
-            Object.values(summary.skippedViews).forEach(view => {
-                html += `<div class="table-item skipped">${view.viewName}</div>`;
-            });
+            Object.values(summary.skippedViews)
+                .sort((a, b) => {
+                    // Sort by schema first, then by view name
+                    const schemaCompare = (a.schema || '').localeCompare(b.schema || '');
+                    if (schemaCompare !== 0) return schemaCompare;
+                    return (a.viewName || '').localeCompare(b.viewName || '');
+                })
+                .forEach(view => {
+                    html += `<div class="table-item skipped">${view.viewName}</div>`;
+                });
             html += '</div>';
             html += '</div>';
         }
@@ -736,14 +769,19 @@ function displayViewImplementationResults(result, database) {
             html += '<div class="error-tables-section">';
             html += '<h4>Failed Views:</h4>';
             html += '<div class="table-items">';
-            Object.values(summary.errors).forEach(error => {
-                html += `<div class="table-item error">`;
-                html += `<strong>${error.viewName}</strong>: ${error.error}`;
-                if (error.sql) {
-                    html += `<div class="sql-statement"><pre>${error.sql}</pre></div>`;
-                }
-                html += `</div>`;
-            });
+            Object.values(summary.errors)
+                .sort((a, b) => {
+                    // Sort by view name (errors may not have schema property, parse from viewName)
+                    return (a.viewName || '').localeCompare(b.viewName || '');
+                })
+                .forEach(error => {
+                    html += `<div class="table-item error">`;
+                    html += `<strong>${error.viewName}</strong>: ${error.error}`;
+                    if (error.sql) {
+                        html += `<div class="sql-statement"><pre>${error.sql}</pre></div>`;
+                    }
+                    html += `</div>`;
+                });
             html += '</div>';
             html += '</div>';
         }
@@ -1017,6 +1055,9 @@ function generateSchemaGroupedViewList(verifiedViews, statusClass, rowCounts) {
         html += `<span class="toggle-indicator" id="${schemaId}-indicator">▼</span> ${schemaName} (${schemaViews.length} views)`;
         html += '</div>';
         html += `<div class="table-items-list" id="${schemaId}">`;
+
+        // Sort views within schema by view name
+        schemaViews.sort((a, b) => (a.viewName || '').localeCompare(b.viewName || ''));
 
         schemaViews.forEach(view => {
             const rowCountText = view.rowCount !== undefined ? ` (${view.rowCount} rows)` : '';

@@ -10,6 +10,9 @@ import me.christianrobert.orapgsync.transformer.parser.ParseResult;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.HashMap;
+import java.util.Map;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -561,5 +564,298 @@ public class OracleFunctionTransformationTest {
         assertTrue(normalized.contains("WHEN NULL"), "Should have WHEN with NULL");
         assertTrue(normalized.contains("THEN 'No Middle Name'"), "Should have THEN clause");
         assertTrue(normalized.contains("ELSE middle_name"), "Should have ELSE with column");
+    }
+
+    // ==================== Built-in Function Schema Qualification Tests ====================
+
+    @Test
+    void coalesceNotSchemaQualified() {
+        // Given: Direct COALESCE usage (valid in Oracle)
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
+
+        String oracleSql = "SELECT COALESCE(commission, bonus, 0) FROM employees";
+
+        // When: Parse and transform
+        ParseResult parseResult = parser.parseSelectStatement(oracleSql);
+        assertFalse(parseResult.hasErrors(), "Parse should succeed");
+
+        PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
+        String postgresSql = builder.visit(parseResult.getTree());
+
+        // Then: COALESCE should NOT be schema-qualified (it's a built-in function)
+        String normalized = postgresSql.trim().replaceAll("\\s+", " ");
+        assertTrue(normalized.contains("COALESCE( commission , bonus , 0 )"),
+            "COALESCE should remain unqualified");
+        assertFalse(normalized.contains("hr.coalesce"), "COALESCE should NOT be schema-qualified");
+        assertFalse(normalized.contains("HR.COALESCE"), "COALESCE should NOT be schema-qualified (uppercase)");
+    }
+
+    @Test
+    void upperLowerNotSchemaQualified() {
+        // Given: UPPER and LOWER functions
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
+
+        String oracleSql = "SELECT UPPER(first_name), LOWER(last_name) FROM employees";
+
+        // When: Parse and transform
+        ParseResult parseResult = parser.parseSelectStatement(oracleSql);
+        assertFalse(parseResult.hasErrors(), "Parse should succeed");
+
+        PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
+        String postgresSql = builder.visit(parseResult.getTree());
+
+        // Then: UPPER and LOWER should NOT be schema-qualified
+        String normalized = postgresSql.trim().replaceAll("\\s+", " ");
+        assertTrue(normalized.contains("UPPER(") || normalized.contains("upper("),
+            "UPPER should be present");
+        assertTrue(normalized.contains("LOWER(") || normalized.contains("lower("),
+            "LOWER should be present");
+        assertFalse(normalized.contains("hr.upper") && !normalized.contains("hr.lower"),
+            "String functions should NOT be schema-qualified");
+    }
+
+    @Test
+    void lengthNotSchemaQualified() {
+        // Given: LENGTH function
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
+
+        String oracleSql = "SELECT LENGTH(first_name) FROM employees";
+
+        // When: Parse and transform
+        ParseResult parseResult = parser.parseSelectStatement(oracleSql);
+        assertFalse(parseResult.hasErrors(), "Parse should succeed");
+
+        PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
+        String postgresSql = builder.visit(parseResult.getTree());
+
+        // Then: LENGTH should NOT be schema-qualified
+        String normalized = postgresSql.trim().replaceAll("\\s+", " ");
+        assertTrue(normalized.contains("LENGTH(") || normalized.contains("length("),
+            "LENGTH should be present");
+        assertFalse(normalized.contains("hr.length"),
+            "LENGTH should NOT be schema-qualified");
+    }
+
+    @Test
+    void nullifNotSchemaQualified() {
+        // Given: NULLIF function
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
+
+        String oracleSql = "SELECT NULLIF(first_name, 'Unknown') FROM employees";
+
+        // When: Parse and transform
+        ParseResult parseResult = parser.parseSelectStatement(oracleSql);
+        assertFalse(parseResult.hasErrors(), "Parse should succeed");
+
+        PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
+        String postgresSql = builder.visit(parseResult.getTree());
+
+        // Then: NULLIF should NOT be schema-qualified
+        String normalized = postgresSql.trim().replaceAll("\\s+", " ");
+        assertTrue(normalized.contains("NULLIF(") || normalized.contains("nullif("),
+            "NULLIF should be present");
+        assertFalse(normalized.contains("hr.nullif"),
+            "NULLIF should NOT be schema-qualified");
+    }
+
+    @Test
+    void greatestLeastNotSchemaQualified() {
+        // Given: GREATEST and LEAST functions
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
+
+        String oracleSql = "SELECT GREATEST(10, 20, 30), LEAST(10, 20, 30) FROM employees";
+
+        // When: Parse and transform
+        ParseResult parseResult = parser.parseSelectStatement(oracleSql);
+        assertFalse(parseResult.hasErrors(), "Parse should succeed");
+
+        PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
+        String postgresSql = builder.visit(parseResult.getTree());
+
+        // Then: GREATEST and LEAST should NOT be schema-qualified
+        String normalized = postgresSql.trim().replaceAll("\\s+", " ");
+        assertTrue(normalized.contains("GREATEST(") || normalized.contains("greatest("),
+            "GREATEST should be present");
+        assertTrue(normalized.contains("LEAST(") || normalized.contains("least("),
+            "LEAST should be present");
+        assertFalse(normalized.contains("hr.greatest") && !normalized.contains("hr.least"),
+            "GREATEST/LEAST should NOT be schema-qualified");
+    }
+
+    @Test
+    void mathFunctionsNotSchemaQualified() {
+        // Given: Math functions (ABS, CEIL, FLOOR, ROUND)
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
+
+        String oracleSql = "SELECT ABS(salary), CEIL(commission), FLOOR(bonus) FROM employees";
+
+        // When: Parse and transform
+        ParseResult parseResult = parser.parseSelectStatement(oracleSql);
+        assertFalse(parseResult.hasErrors(), "Parse should succeed");
+
+        PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
+        String postgresSql = builder.visit(parseResult.getTree());
+
+        // Then: Math functions should NOT be schema-qualified
+        String normalized = postgresSql.trim().replaceAll("\\s+", " ");
+        assertTrue(normalized.contains("ABS(") || normalized.contains("abs("),
+            "ABS should be present");
+        assertTrue(normalized.contains("CEIL(") || normalized.contains("ceil("),
+            "CEIL should be present");
+        assertTrue(normalized.contains("FLOOR(") || normalized.contains("floor("),
+            "FLOOR should be present");
+        assertFalse(normalized.contains("hr.abs"),
+            "Math functions should NOT be schema-qualified");
+    }
+
+    @Test
+    void aggregateFunctionsNotSchemaQualified() {
+        // Given: Aggregate functions (COUNT, SUM, AVG, MIN, MAX)
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
+
+        String oracleSql = "SELECT COUNT(*), SUM(salary), AVG(commission), MIN(hire_date), MAX(hire_date) FROM employees";
+
+        // When: Parse and transform
+        ParseResult parseResult = parser.parseSelectStatement(oracleSql);
+        assertFalse(parseResult.hasErrors(), "Parse should succeed");
+
+        PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
+        String postgresSql = builder.visit(parseResult.getTree());
+
+        // Then: Aggregate functions should NOT be schema-qualified
+        String normalized = postgresSql.trim().replaceAll("\\s+", " ");
+        assertTrue(normalized.contains("COUNT(") || normalized.contains("count("),
+            "COUNT should be present");
+        assertTrue(normalized.contains("SUM(") || normalized.contains("sum("),
+            "SUM should be present");
+        assertTrue(normalized.contains("AVG(") || normalized.contains("avg("),
+            "AVG should be present");
+        assertFalse(normalized.contains("hr.count") && !normalized.contains("hr.sum") && !normalized.contains("hr.avg"),
+            "Aggregate functions should NOT be schema-qualified");
+    }
+
+    @Test
+    void builtinFunctionsInWhereClause() {
+        // Given: Built-in functions in WHERE clause
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
+
+        String oracleSql = "SELECT empno FROM employees WHERE COALESCE(commission, 0) > 100 AND LENGTH(first_name) > 5";
+
+        // When: Parse and transform
+        ParseResult parseResult = parser.parseSelectStatement(oracleSql);
+        assertFalse(parseResult.hasErrors(), "Parse should succeed");
+
+        PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
+        String postgresSql = builder.visit(parseResult.getTree());
+
+        // Then: Built-in functions in WHERE should NOT be schema-qualified
+        String normalized = postgresSql.trim().replaceAll("\\s+", " ");
+        assertTrue(normalized.contains("COALESCE(") || normalized.contains("coalesce("),
+            "COALESCE should be present in WHERE");
+        assertTrue(normalized.contains("LENGTH(") || normalized.contains("length("),
+            "LENGTH should be present in WHERE");
+        assertFalse(normalized.contains("hr.coalesce") && !normalized.contains("hr.length"),
+            "Built-in functions in WHERE should NOT be schema-qualified");
+    }
+
+    @Test
+    void userDefinedFunctionShouldBeSchemaQualified() {
+        // Given: A user-defined function (not in built-in list)
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
+
+        String oracleSql = "SELECT calculate_bonus(salary) FROM employees";
+
+        // When: Parse and transform
+        ParseResult parseResult = parser.parseSelectStatement(oracleSql);
+        assertFalse(parseResult.hasErrors(), "Parse should succeed");
+
+        PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
+        String postgresSql = builder.visit(parseResult.getTree());
+
+        // Then: User-defined function SHOULD be schema-qualified
+        String normalized = postgresSql.trim().replaceAll("\\s+", " ");
+        assertTrue(normalized.contains("hr.calculate_bonus("),
+            "User-defined function should be schema-qualified");
+    }
+
+    // ==================== View Column Type Casting Tests ====================
+
+    @Test
+    void viewTransformationCastsCountToNumeric() {
+        // Given: View transformation with COUNT aggregate (returns bigint) but stub expects numeric
+        Map<String, String> viewColumnTypes = new HashMap<>();
+        viewColumnTypes.put("cnttest", "numeric");  // Stub column type
+
+        TransformationContext context = new TransformationContext(
+            "HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices), viewColumnTypes);
+
+        String oracleSql = "SELECT (SELECT COUNT(1) FROM testtable) cnttest FROM testtable";
+
+        // When: Parse and transform
+        ParseResult parseResult = parser.parseSelectStatement(oracleSql);
+        assertFalse(parseResult.hasErrors(), "Parse should succeed");
+
+        PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
+        String postgresSql = builder.visit(parseResult.getTree());
+
+        // Then: COUNT should be cast to numeric to match stub
+        String normalized = postgresSql.trim().replaceAll("\\s+", " ");
+        assertTrue(normalized.contains("::numeric"),
+            "COUNT expression should be cast to numeric, got: " + normalized);
+        assertTrue(normalized.contains("AS cnttest"),
+            "Column alias should be preserved, got: " + normalized);
+    }
+
+    @Test
+    void viewTransformationCastsMultipleColumns() {
+        // Given: View transformation with multiple columns requiring casts
+        Map<String, String> viewColumnTypes = new HashMap<>();
+        viewColumnTypes.put("id", "numeric");
+        viewColumnTypes.put("name", "text");
+        viewColumnTypes.put("cnt", "numeric");
+
+        TransformationContext context = new TransformationContext(
+            "HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices), viewColumnTypes);
+
+        String oracleSql = "SELECT empno id, ename name, COUNT(*) cnt FROM employees GROUP BY empno, ename";
+
+        // When: Parse and transform
+        ParseResult parseResult = parser.parseSelectStatement(oracleSql);
+        assertFalse(parseResult.hasErrors(), "Parse should succeed");
+
+        PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
+        String postgresSql = builder.visit(parseResult.getTree());
+
+        // Then: All columns should be cast to match stub types
+        String normalized = postgresSql.trim().replaceAll("\\s+", " ");
+        // Count occurrences of ::numeric (should be 2: id and cnt)
+        int numericCasts = (normalized.split("::numeric", -1).length - 1);
+        assertEquals(2, numericCasts, "Should have 2 numeric casts (id and cnt), got: " + normalized);
+
+        // Count occurrences of ::text (should be 1: name)
+        int textCasts = (normalized.split("::text", -1).length - 1);
+        assertEquals(1, textCasts, "Should have 1 text cast (name), got: " + normalized);
+    }
+
+    @Test
+    void nonViewTransformationDoesNotCast() {
+        // Given: Regular transformation WITHOUT view column types
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
+
+        String oracleSql = "SELECT (SELECT COUNT(1) FROM testtable) cnttest FROM testtable";
+
+        // When: Parse and transform
+        ParseResult parseResult = parser.parseSelectStatement(oracleSql);
+        assertFalse(parseResult.hasErrors(), "Parse should succeed");
+
+        PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
+        String postgresSql = builder.visit(parseResult.getTree());
+
+        // Then: COUNT should NOT be cast (no view column types provided)
+        String normalized = postgresSql.trim().replaceAll("\\s+", " ");
+        assertFalse(normalized.contains("::numeric"),
+            "Non-view transformation should NOT cast, got: " + normalized);
+        assertTrue(normalized.contains("AS cnttest"),
+            "Column alias should be preserved, got: " + normalized);
     }
 }

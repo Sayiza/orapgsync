@@ -613,12 +613,16 @@ public class VisitGeneralElement {
       // Apply schema qualification if context available
       // Oracle implicit schema resolution: unqualified function → current schema
       // PostgreSQL uses search_path which may not include the current schema
-      // Reuse context from above (line 505)
+      // Reuse context and upperFunctionName from above
       if (context != null && !functionName.contains(".")) {
-        // Unqualified function → qualify with current schema
-        // Note: Built-in PostgreSQL functions (like COALESCE, UPPER, etc.) are in pg_catalog
-        // which is always in search_path, so this is safe
-        functionName = context.getCurrentSchema().toLowerCase() + "." + functionName.toLowerCase();
+        // Check if this is a built-in function that should NOT be schema-qualified
+        // Built-in PostgreSQL functions (COALESCE, UPPER, COUNT, etc.) are in pg_catalog
+        // which is always in search_path, so they must remain unqualified
+        if (!isKnownBuiltinFunction(upperFunctionName)) {
+          // User-defined function → qualify with current schema
+          functionName = context.getCurrentSchema().toLowerCase() + "." + functionName.toLowerCase();
+        }
+        // else: Built-in function → leave unqualified (PostgreSQL will find it in pg_catalog)
       }
 
       return functionName + arguments;

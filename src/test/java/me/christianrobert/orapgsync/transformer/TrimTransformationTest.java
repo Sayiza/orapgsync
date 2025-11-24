@@ -412,9 +412,9 @@ class TrimTransformationTest {
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
         String postgresSql = builder.visit(parseResult.getTree());
 
-        // Then: Both functions preserved (UPPER is schema-qualified)
+        // Then: Both functions preserved (UPPER remains unqualified - built-in function)
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
-        assertTrue(normalized.contains("TRIM( hr.upper( name ) )"),
+        assertTrue(normalized.contains("TRIM( UPPER( name ) )"),
                 "Should preserve TRIM with nested UPPER");
     }
 
@@ -431,9 +431,9 @@ class TrimTransformationTest {
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
         String postgresSql = builder.visit(parseResult.getTree());
 
-        // Then: Both functions preserved
+        // Then: Both functions preserved (UPPER remains unqualified - built-in function)
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
-        assertTrue(normalized.contains("hr.upper( TRIM( name ) )"),
+        assertTrue(normalized.contains("UPPER( TRIM( name ) )"),
                 "Should preserve UPPER with nested TRIM");
     }
 }

@@ -193,10 +193,10 @@ class SubstrTransformationTest {
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
         String postgresSql = builder.visit(parseResult.getTree());
 
-        // Then: UPPER preserved (schema-qualified), SUBSTR transformed
-        // Note: UPPER becomes hr.upper (schema-qualified, lowercase)
+        // Then: UPPER preserved (unqualified - built-in function), SUBSTR transformed
+        // Note: UPPER remains as UPPER (unqualified, built-in function)
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
-        assertTrue(normalized.contains("SUBSTRING( hr.upper( name ) FROM 1 FOR 5 )"),
+        assertTrue(normalized.contains("SUBSTRING( UPPER( name ) FROM 1 FOR 5 )"),
                 "Should combine UPPER with SUBSTRING");
     }
 

@@ -452,9 +452,16 @@ function displayTypeMethodStubCreationResults(result, database) {
             html += '<div class="created-tables-section">';
             html += '<h4>Created Type Method Stubs:</h4>';
             html += '<div class="table-items">';
-            Object.values(summary.createdMethods).forEach(method => {
-                html += `<div class="table-item created">${method.methodName} ✓</div>`;
-            });
+            Object.values(summary.createdMethods)
+                .sort((a, b) => {
+                    // Sort by schema first, then by method name
+                    const schemaCompare = (a.schema || '').localeCompare(b.schema || '');
+                    if (schemaCompare !== 0) return schemaCompare;
+                    return (a.methodName || '').localeCompare(b.methodName || '');
+                })
+                .forEach(method => {
+                    html += `<div class="table-item created">${method.methodName} ✓</div>`;
+                });
             html += '</div>';
             html += '</div>';
         }
@@ -464,9 +471,16 @@ function displayTypeMethodStubCreationResults(result, database) {
             html += '<div class="skipped-tables-section">';
             html += '<h4>Skipped Type Methods (already exist):</h4>';
             html += '<div class="table-items">';
-            Object.values(summary.skippedMethods).forEach(method => {
-                html += `<div class="table-item skipped">${method.methodName} (already exists)</div>`;
-            });
+            Object.values(summary.skippedMethods)
+                .sort((a, b) => {
+                    // Sort by schema first, then by method name
+                    const schemaCompare = (a.schema || '').localeCompare(b.schema || '');
+                    if (schemaCompare !== 0) return schemaCompare;
+                    return (a.methodName || '').localeCompare(b.methodName || '');
+                })
+                .forEach(method => {
+                    html += `<div class="table-item skipped">${method.methodName} (already exists)</div>`;
+                });
             html += '</div>';
             html += '</div>';
         }
@@ -476,14 +490,19 @@ function displayTypeMethodStubCreationResults(result, database) {
             html += '<div class="error-tables-section">';
             html += '<h4>Failed Type Methods:</h4>';
             html += '<div class="table-items">';
-            Object.values(summary.errors).forEach(error => {
-                html += `<div class="table-item error">`;
-                html += `<strong>${error.methodName}</strong>: ${error.error}`;
-                if (error.sql) {
-                    html += `<div class="sql-statement"><pre>${error.sql}</pre></div>`;
-                }
-                html += `</div>`;
-            });
+            Object.values(summary.errors)
+                .sort((a, b) => {
+                    // Sort by method name (errors may not have schema property, parse from methodName)
+                    return (a.methodName || '').localeCompare(b.methodName || '');
+                })
+                .forEach(error => {
+                    html += `<div class="table-item error">`;
+                    html += `<strong>${error.methodName}</strong>: ${error.error}`;
+                    if (error.sql) {
+                        html += `<div class="sql-statement"><pre>${error.sql}</pre></div>`;
+                    }
+                    html += `</div>`;
+                });
             html += '</div>';
             html += '</div>';
         }
@@ -812,9 +831,16 @@ function displayTypeMethodImplementationResults(result) {
             html += '<div class="created-tables-section">';
             html += '<h4>Implemented Type Methods:</h4>';
             html += '<div class="table-items">';
-            Object.values(summary.implementedMethods).forEach(method => {
-                html += `<div class="table-item created">${method.methodName} ✓</div>`;
-            });
+            Object.values(summary.implementedMethods)
+                .sort((a, b) => {
+                    // Sort by schema first, then by method name
+                    const schemaCompare = (a.schema || '').localeCompare(b.schema || '');
+                    if (schemaCompare !== 0) return schemaCompare;
+                    return (a.methodName || '').localeCompare(b.methodName || '');
+                })
+                .forEach(method => {
+                    html += `<div class="table-item created">${method.methodName} ✓</div>`;
+                });
             html += '</div>';
             html += '</div>';
         }
@@ -824,9 +850,16 @@ function displayTypeMethodImplementationResults(result) {
             html += '<div class="skipped-tables-section">';
             html += '<h4>Skipped Type Methods:</h4>';
             html += '<div class="table-items">';
-            Object.values(summary.skippedMethods).forEach(method => {
-                html += `<div class="table-item skipped">${method.methodName} (skipped)</div>`;
-            });
+            Object.values(summary.skippedMethods)
+                .sort((a, b) => {
+                    // Sort by schema first, then by method name
+                    const schemaCompare = (a.schema || '').localeCompare(b.schema || '');
+                    if (schemaCompare !== 0) return schemaCompare;
+                    return (a.methodName || '').localeCompare(b.methodName || '');
+                })
+                .forEach(method => {
+                    html += `<div class="table-item skipped">${method.methodName} (skipped)</div>`;
+                });
             html += '</div>';
             html += '</div>';
         }
@@ -836,14 +869,19 @@ function displayTypeMethodImplementationResults(result) {
             html += '<div class="error-tables-section">';
             html += '<h4>Failed Type Methods:</h4>';
             html += '<div class="table-items">';
-            Object.values(summary.errors).forEach(error => {
-                html += `<div class="table-item error">`;
-                html += `<strong>${error.typeMethodName}</strong>: ${error.error}`;
-                if (error.sql) {
-                    html += `<div class="sql-statement"><pre>${error.sql}</pre></div>`;
-                }
-                html += `</div>`;
-            });
+            Object.values(summary.errors)
+                .sort((a, b) => {
+                    // Sort by type method name (errors may not have schema property, parse from typeMethodName)
+                    return (a.typeMethodName || '').localeCompare(b.typeMethodName || '');
+                })
+                .forEach(error => {
+                    html += `<div class="table-item error">`;
+                    html += `<strong>${error.typeMethodName}</strong>: ${error.error}`;
+                    if (error.sql) {
+                        html += `<div class="sql-statement"><pre>${error.sql}</pre></div>`;
+                    }
+                    html += `</div>`;
+                });
             html += '</div>';
             html += '</div>';
         }
@@ -892,6 +930,14 @@ function displayTypeMethodVerificationResults(result) {
             html += `<div class="table-schema-group">`;
             html += `<div class="table-schema-header"><strong>${schemaName}</strong> (${schemaMethods.length} type methods)</div>`;
             html += '<div class="table-items">';
+
+            // Sort methods within schema by type name first, then method name
+            schemaMethods.sort((a, b) => {
+                const typeCompare = (a.typeName || '').localeCompare(b.typeName || '');
+                if (typeCompare !== 0) return typeCompare;
+                return (a.methodName || '').localeCompare(b.methodName || '');
+            });
+
             schemaMethods.forEach(method => {
                 const displayName = `${method.typeName}.${method.methodName}`;
                 const memberIndicator = method.instantiable === 'YES' ? 'M' : 'S';

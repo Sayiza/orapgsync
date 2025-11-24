@@ -4,9 +4,12 @@ import jakarta.enterprise.context.Dependent;
 import jakarta.inject.Inject;
 import me.christianrobert.orapgsync.core.job.AbstractDatabaseWriteJob;
 import me.christianrobert.orapgsync.core.job.model.JobProgress;
+import me.christianrobert.orapgsync.core.job.model.table.ColumnMetadata;
 import me.christianrobert.orapgsync.core.job.model.view.ViewImplementationResult;
 import me.christianrobert.orapgsync.core.job.model.view.ViewMetadata;
+import me.christianrobert.orapgsync.core.tools.OracleTypeClassifier;
 import me.christianrobert.orapgsync.core.tools.PostgresIdentifierNormalizer;
+import me.christianrobert.orapgsync.core.tools.TypeConverter;
 import me.christianrobert.orapgsync.database.service.PostgresConnectionService;
 import me.christianrobert.orapgsync.transformer.context.MetadataIndexBuilder;
 import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
@@ -19,7 +22,9 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Consumer;
 
 /**
@@ -182,9 +187,48 @@ public class PostgresViewImplementationJob extends AbstractDatabaseWriteJob<View
         log.debug("Transforming view: {}", qualifiedName);
         log.trace("Oracle SQL: {}", oracleSql);
 
-        // Transform Oracle SQL to PostgreSQL
+        // Extract column types from view metadata (for type casting in SELECT list)
+        // This ensures CREATE OR REPLACE VIEW succeeds by matching stub column types exactly
+        // IMPORTANT: Convert Oracle types to PostgreSQL types (same logic as stub creation)
+        Map<String, String> viewColumnTypes = new HashMap<>();
+        for (ColumnMetadata column : view.getColumns()) {
+            // Use lowercase for case-insensitive lookup (Oracle/PostgreSQL identifiers)
+            String columnName = column.getColumnName().toLowerCase();
+
+            // Determine PostgreSQL type (same logic as PostgresViewStubCreationJob)
+            String postgresType;
+            if (column.isCustomDataType()) {
+                String oracleType = column.getDataType().toLowerCase();
+                String owner = column.getDataTypeOwner().toLowerCase();
+
+                // Check if it's XMLTYPE - has direct PostgreSQL xml type mapping
+                if (OracleTypeClassifier.isXmlType(owner, oracleType)) {
+                    postgresType = "xml";
+                }
+                // Check if it's a complex Oracle system type that needs jsonb serialization
+                else if (OracleTypeClassifier.isComplexOracleSystemType(owner, oracleType)) {
+                    postgresType = "jsonb";
+                } else {
+                    // User-defined type - use the created PostgreSQL composite type
+                    postgresType = owner + "." + oracleType;
+                }
+            } else {
+                // Convert Oracle built-in data type to PostgreSQL
+                postgresType = TypeConverter.toPostgre(column.getDataType());
+                if (postgresType == null) {
+                    postgresType = "text"; // Fallback for unknown types
+                    log.warn("Unknown data type '{}' for column '{}' in view '{}', using 'text' as fallback",
+                            column.getDataType(), columnName, qualifiedName);
+                }
+            }
+
+            viewColumnTypes.put(columnName, postgresType);
+        }
+        log.debug("Extracted and converted {} column types for view {}", viewColumnTypes.size(), qualifiedName);
+
+        // Transform Oracle SQL to PostgreSQL with view column types
         TransformationResult transformationResult = transformationService.transformSql(
-                oracleSql, schema, indices);
+                oracleSql, schema, indices, viewColumnTypes);
 
         if (transformationResult.isFailure()) {
             log.error("Transformation failed for view {}: {}", qualifiedName,
