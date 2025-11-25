@@ -14,7 +14,7 @@ import me.christianrobert.orapgsync.transformer.context.TransformationResult;
 import me.christianrobert.orapgsync.transformer.packagevariable.PackageContext;
 import me.christianrobert.orapgsync.transformer.parser.AntlrParser;
 import me.christianrobert.orapgsync.transformer.parser.ParseResult;
-import me.christianrobert.orapgsync.transformer.type.SimpleTypeEvaluator;
+import me.christianrobert.orapgsync.transformer.type.FullTypeEvaluator;
 import me.christianrobert.orapgsync.transformer.type.TypeAnalysisVisitor;
 import me.christianrobert.orapgsync.transformer.type.TypeEvaluator;
 import me.christianrobert.orapgsync.transformer.type.TypeInfo;
@@ -135,9 +135,6 @@ public class TransformationService {
         log.debug("Transforming SQL for schema: {}", schema);
         log.trace("Oracle SQL: {}", oracleSql);
 
-        // Create type evaluator upfront for proper cleanup
-        SimpleTypeEvaluator typeEvaluator = new SimpleTypeEvaluator(schema, indices);
-
         try {
             // STEP 1: Parse Oracle SQL using ANTLR
             log.debug("Step 1: Parsing Oracle SQL");
@@ -157,6 +154,10 @@ public class TransformationService {
                 new TypeAnalysisVisitor(schema, indices, typeCache);
             typeAnalysisVisitor.visit(parseResult.getTree());
             log.debug("Type analysis complete: {} types cached", typeCache.size());
+
+            // STEP 2.5: Create type evaluator with populated cache
+            log.debug("Step 2.5: Creating FullTypeEvaluator with populated type cache");
+            FullTypeEvaluator typeEvaluator = new FullTypeEvaluator(typeCache);
 
             // Generate AST tree representation with type information if requested
             String astTree = null;
@@ -199,13 +200,8 @@ public class TransformationService {
             log.error("Unexpected error during transformation", e);
             String errorMsg = "Unexpected error: " + e.getMessage();
             return TransformationResult.failure(oracleSql, errorMsg);
-
-        } finally {
-            // HIGH PRIORITY FIX: Clear type evaluator cache to prevent memory leaks
-            // Without this, caches accumulate 100KB-1MB per transformation
-            typeEvaluator.clearCache();
-            log.trace("Cleared type evaluator cache");
         }
+        // Note: No cleanup needed - FullTypeEvaluator cache is immutable and will be GC'd
     }
 
     // ==================== PL/SQL TRANSFORMATIONS ====================
@@ -259,9 +255,6 @@ public class TransformationService {
         log.debug("Transforming function for schema: {}", schema);
         log.trace("Oracle PL/SQL: {}", oraclePlSql);
 
-        // Create type evaluator upfront for proper cleanup
-        SimpleTypeEvaluator typeEvaluator = new SimpleTypeEvaluator(schema, indices);
-
         try {
             // STEP 1: Parse Oracle PL/SQL function body using ANTLR
             log.debug("Step 1: Parsing Oracle PL/SQL function body");
@@ -281,6 +274,10 @@ public class TransformationService {
                 new TypeAnalysisVisitor(schema, indices, typeCache);
             typeAnalysisVisitor.visit(parseResult.getTree());
             log.debug("Type analysis complete: {} types cached", typeCache.size());
+
+            // STEP 2.5: Create type evaluator with populated cache
+            log.debug("Step 2.5: Creating FullTypeEvaluator with populated type cache");
+            FullTypeEvaluator typeEvaluator = new FullTypeEvaluator(typeCache);
 
             // Generate AST tree representation with type information if requested
             String astTree = null;
@@ -316,12 +313,8 @@ public class TransformationService {
             log.error("Unexpected error during transformation for schema {}", schema, e);
             String errorMsg = "Unexpected error: " + e.getMessage();
             return TransformationResult.failure(oraclePlSql, errorMsg);
-
-        } finally {
-            // HIGH PRIORITY FIX: Clear type evaluator cache to prevent memory leaks
-            typeEvaluator.clearCache();
-            log.trace("Cleared type evaluator cache");
         }
+        // Note: No cleanup needed - FullTypeEvaluator cache is immutable and will be GC'd
     }
 
     /**
@@ -383,9 +376,6 @@ public class TransformationService {
                  schema, packageName != null ? packageName : "standalone", functionName);
         log.trace("Oracle PL/SQL: {}", oraclePlSql);
 
-        // Create type evaluator upfront for proper cleanup
-        SimpleTypeEvaluator typeEvaluator = new SimpleTypeEvaluator(schema, indices);
-
         try {
             // STEP 1: Parse Oracle PL/SQL function body using ANTLR
             log.debug("Step 1: Parsing Oracle PL/SQL function body");
@@ -405,6 +395,10 @@ public class TransformationService {
                 new TypeAnalysisVisitor(schema, indices, typeCache);
             typeAnalysisVisitor.visit(parseResult.getTree());
             log.debug("Type analysis complete: {} types cached", typeCache.size());
+
+            // STEP 2.5: Create type evaluator with populated cache
+            log.debug("Step 2.5: Creating FullTypeEvaluator with populated type cache");
+            FullTypeEvaluator typeEvaluator = new FullTypeEvaluator(typeCache);
 
             // Generate AST tree representation with type information if requested
             String astTree = null;
@@ -449,12 +443,8 @@ public class TransformationService {
             log.error("Unexpected error during transformation for schema {}", schema, e);
             String errorMsg = "Unexpected error: " + e.getMessage();
             return TransformationResult.failure(oraclePlSql, errorMsg);
-
-        } finally {
-            // HIGH PRIORITY FIX: Clear type evaluator cache to prevent memory leaks
-            typeEvaluator.clearCache();
-            log.trace("Cleared type evaluator cache");
         }
+        // Note: No cleanup needed - FullTypeEvaluator cache is immutable and will be GC'd
     }
 
     /**
@@ -499,9 +489,6 @@ public class TransformationService {
         log.debug("Transforming procedure for schema: {}", schema);
         log.trace("Oracle PL/SQL: {}", oraclePlSql);
 
-        // Create type evaluator upfront for proper cleanup
-        SimpleTypeEvaluator typeEvaluator = new SimpleTypeEvaluator(schema, indices);
-
         try {
             // STEP 1: Parse Oracle PL/SQL procedure body using ANTLR
             log.debug("Step 1: Parsing Oracle PL/SQL procedure body");
@@ -521,6 +508,10 @@ public class TransformationService {
                 new TypeAnalysisVisitor(schema, indices, typeCache);
             typeAnalysisVisitor.visit(parseResult.getTree());
             log.debug("Type analysis complete: {} types cached", typeCache.size());
+
+            // STEP 2.5: Create type evaluator with populated cache
+            log.debug("Step 2.5: Creating FullTypeEvaluator with populated type cache");
+            FullTypeEvaluator typeEvaluator = new FullTypeEvaluator(typeCache);
 
             // Generate AST tree representation with type information if requested
             String astTree = null;
@@ -556,12 +547,8 @@ public class TransformationService {
             log.error("Unexpected error during transformation for schema {}", schema, e);
             String errorMsg = "Unexpected error: " + e.getMessage();
             return TransformationResult.failure(oraclePlSql, errorMsg);
-
-        } finally {
-            // HIGH PRIORITY FIX: Clear type evaluator cache to prevent memory leaks
-            typeEvaluator.clearCache();
-            log.trace("Cleared type evaluator cache");
         }
+        // Note: No cleanup needed - FullTypeEvaluator cache is immutable and will be GC'd
     }
 
     /**
@@ -623,9 +610,6 @@ public class TransformationService {
                  schema, packageName != null ? packageName : "standalone", procedureName);
         log.trace("Oracle PL/SQL: {}", oraclePlSql);
 
-        // Create type evaluator upfront for proper cleanup
-        SimpleTypeEvaluator typeEvaluator = new SimpleTypeEvaluator(schema, indices);
-
         try {
             // STEP 1: Parse Oracle PL/SQL procedure body using ANTLR
             log.debug("Step 1: Parsing Oracle PL/SQL procedure body");
@@ -645,6 +629,10 @@ public class TransformationService {
                 new TypeAnalysisVisitor(schema, indices, typeCache);
             typeAnalysisVisitor.visit(parseResult.getTree());
             log.debug("Type analysis complete: {} types cached", typeCache.size());
+
+            // STEP 2.5: Create type evaluator with populated cache
+            log.debug("Step 2.5: Creating FullTypeEvaluator with populated type cache");
+            FullTypeEvaluator typeEvaluator = new FullTypeEvaluator(typeCache);
 
             // Generate AST tree representation with type information if requested
             String astTree = null;
@@ -689,11 +677,7 @@ public class TransformationService {
             log.error("Unexpected error during transformation for schema {}", schema, e);
             String errorMsg = "Unexpected error: " + e.getMessage();
             return TransformationResult.failure(oraclePlSql, errorMsg);
-
-        } finally {
-            // HIGH PRIORITY FIX: Clear type evaluator cache to prevent memory leaks
-            typeEvaluator.clearCache();
-            log.trace("Cleared type evaluator cache");
         }
+        // Note: No cleanup needed - FullTypeEvaluator cache is immutable and will be GC'd
     }
 }

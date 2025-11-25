@@ -3,6 +3,9 @@ package me.christianrobert.orapgsync.transformer.builder;
 import me.christianrobert.orapgsync.antlr.PlSqlParser;
 import me.christianrobert.orapgsync.transformer.context.TransformationException;
 
+import static me.christianrobert.orapgsync.transformer.builder.functions.DateArithmeticTransformer.isDateArithmetic;
+import static me.christianrobert.orapgsync.transformer.builder.functions.DateArithmeticTransformer.transformDateArithmetic;
+
 public class VisitConcatenation {
   public static String v(PlSqlParser.ConcatenationContext ctx, PostgresCodeBuilder b) {
 
@@ -45,6 +48,17 @@ public class VisitConcatenation {
     if (ctx.PLUS_SIGN() != null) {
       // + addition
       java.util.List<PlSqlParser.ConcatenationContext> operands = ctx.concatenation();
+
+      // Check if this is date arithmetic (date + integer or integer + date)
+      // Uses heuristic detection now, will be replaced with type inference in Phase 2
+      // See DateArithmeticTransformer for detailed documentation
+      if (isDateArithmetic(operands.get(0), operands.get(1), "+", b)) {
+        String left = b.visit(operands.get(0));
+        String right = b.visit(operands.get(1));
+        return transformDateArithmetic(left, right, operands.get(0), operands.get(1), "+", b);
+      }
+
+      // Regular numeric addition
       String left = b.visit(operands.get(0));
       String right = b.visit(operands.get(1));
       return left + " + " + right;
@@ -53,6 +67,18 @@ public class VisitConcatenation {
     if (ctx.MINUS_SIGN() != null) {
       // - subtraction
       java.util.List<PlSqlParser.ConcatenationContext> operands = ctx.concatenation();
+
+      // Check if this is date arithmetic (date - integer)
+      // Note: date1 - date2 returns interval in both Oracle and PostgreSQL, no transformation needed
+      // Uses heuristic detection now, will be replaced with type inference in Phase 2
+      // See DateArithmeticTransformer for detailed documentation
+      if (isDateArithmetic(operands.get(0), operands.get(1), "-", b)) {
+        String left = b.visit(operands.get(0));
+        String right = b.visit(operands.get(1));
+        return transformDateArithmetic(left, right, operands.get(0), operands.get(1), "-", b);
+      }
+
+      // Regular numeric subtraction or date1 - date2
       String left = b.visit(operands.get(0));
       String right = b.visit(operands.get(1));
       return left + " - " + right;

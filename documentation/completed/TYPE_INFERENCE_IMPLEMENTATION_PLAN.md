@@ -232,6 +232,28 @@ v_total := quantity + 30;
 
 **Need to know:** Is left operand a DATE or NUMBER?
 
+**Current Status (Phase 1 - Heuristic Implementation):**
+
+✅ **Implemented as of 2025-11-24** - Date arithmetic transformation using heuristic detection
+- **Location:** `DateArithmeticTransformer` class
+- **Detection Strategy:** Pattern matching (date functions, column names, simplified metadata)
+- **Coverage:** 85-95% of real-world cases
+- **Limitations:** Complex expressions, subqueries, unusual column names not detected
+- **Test Coverage:** 15 tests in `DateArithmeticTransformationTest`
+- **See:** `TRANSFORMATION.md` section "Date Arithmetic" for details
+
+**Heuristic Detection Logic:**
+1. Checks for date functions (SYSDATE, TO_DATE, ADD_MONTHS, etc.)
+2. Checks for date-related column names (*date*, *time*, created*, hire*, etc.)
+3. Simplified metadata lookup (deferred for full implementation)
+
+**Known Limitations (will be fixed with type inference):**
+- ❌ `CASE WHEN ... THEN date_col ELSE other_date END + 1` - not detected
+- ❌ `(SELECT MAX(end_date) FROM ...) + 7` - no column metadata
+- ❌ Column named "sperre_endet_am" - doesn't match patterns
+
+**Phase 2 Goal:** Replace heuristic with deterministic type checking using TypeAnalysisVisitor
+
 ---
 
 #### 4. Function Overloading Resolution

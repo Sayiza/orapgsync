@@ -69,26 +69,18 @@ Password: secret
 **Save container state to image:**
 ```bash
 # 1. Start fresh empty DB — data will be inside the container
+# 1. Start empty DB with data stored inside the container (no volume!)
 docker rm -f pgtest
-docker run --name pgtest \
-  -e POSTGRES_PASSWORD=secret \
-  -p 5432:5432 \
-  -v /var/lib/postgresql/data \   # this is the magic line
-  -d postgres
+docker run --name pgtest -e POSTGRES_PASSWORD=secret -e PGDATA=/var/lib/postgresql/pgdata -p 5432:5432 -d postgres
 
-# ... run your DDL, migrations, seed data ...
+# ... Run your DDL, insert data, etc. (or your 8-hour job) ...
 
-# 2. Save the exact current state (data IS included now!)
-docker commit pgtest trunkdevpg:latest
-# or with date:
-docker commit pgtest trunkdevpg:2025-11-22
+# 2. Commit the full state (data IS included now)
+docker commit pgtest trunkdevpg:2025-11-24
 
-# 3. Later — start exactly from that saved state
+# 3. Later, start from the saved image (data restores instantly)
 docker rm -f pgtest
-docker run --name pgtest \
-  -p 5432:5432 \
-  -v /var/lib/postgresql/data \   # same trick again!
-  -d trunkdevpg:latest
+docker run --name pgtest -e POSTGRES_PASSWORD=secret -e PGDATA=/var/lib/postgresql/pgdata -p 5432:5432 -d trunkdevpg:2025-11-24
 ```
 # Remove the old container (if running)
 docker rm -f pgtest

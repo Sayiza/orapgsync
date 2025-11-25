@@ -65,6 +65,32 @@ public class FullTypeEvaluator implements TypeEvaluator {
         return TypeInfo.UNKNOWN;
     }
 
+    /**
+     * Gets type information for any AST node (not just ExpressionContext).
+     *
+     * <p>This is useful for cases where transformation code has a more specific context type
+     * (e.g., ConcatenationContext) but needs to query the type cache.</p>
+     *
+     * @param ctx Any parser rule context
+     * @return The type of the node, or {@link TypeInfo#UNKNOWN} if not found
+     */
+    public TypeInfo getTypeForNode(ParserRuleContext ctx) {
+        if (ctx == null) {
+            return TypeInfo.UNKNOWN;
+        }
+
+        String key = nodeKey(ctx);
+        TypeInfo type = typeCache.get(key);
+
+        if (type != null) {
+            log.trace("Type cache hit for {}: {}", key, type.getCategory());
+            return type;
+        }
+
+        log.trace("Type cache miss for {}", key);
+        return TypeInfo.UNKNOWN;
+    }
+
     @Override
     public void clearCache() {
         // No-op: Cache is immutable after type analysis pass.
