@@ -32,8 +32,8 @@ import static org.junit.jupiter.api.Assertions.*;
  * <p><strong>PostgreSQL Requirement:</strong> Explicit INTERVAL syntax:
  * <pre>
  * -- PostgreSQL
- * SELECT hire_date + INTERVAL '30 days' FROM employees;
- * SELECT end_date - INTERVAL '7 days' FROM projects;
+ * SELECT hire_date + (30 * INTERVAL '1 day') FROM employees;
+ * SELECT end_date - (7 * INTERVAL '1 day') FROM projects;
  * </pre>
  *
  * <p><strong>Test Coverage:</strong></p>
@@ -89,7 +89,7 @@ public class DateArithmeticTransformationTest {
         // Then: Should transform to INTERVAL syntax
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
 
-        assertTrue(normalized.contains("hire_date + INTERVAL '30 days'"),
+        assertTrue(normalized.contains("hire_date + ( 30 * INTERVAL '1 day' )"),
             "Date + integer should transform to INTERVAL, got: " + normalized);
         assertTrue(normalized.contains("FROM hr.employees"),
             "Table should be schema-qualified");
@@ -112,7 +112,7 @@ public class DateArithmeticTransformationTest {
         // Then: Should transform to INTERVAL syntax
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
 
-        assertTrue(normalized.contains("end_date - INTERVAL '7 days'"),
+        assertTrue(normalized.contains("end_date - ( 7 * INTERVAL '1 day' )"),
             "Date - integer should transform to INTERVAL, got: " + normalized);
     }
 
@@ -133,7 +133,7 @@ public class DateArithmeticTransformationTest {
         // Then: Should reorder operands and transform to INTERVAL
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
 
-        assertTrue(normalized.contains("hire_date + INTERVAL '14 days'"),
+        assertTrue(normalized.contains("hire_date + ( 14 * INTERVAL '1 day' )"),
             "Integer + date should reorder and transform to INTERVAL, got: " + normalized);
     }
 
@@ -182,7 +182,7 @@ public class DateArithmeticTransformationTest {
         // Then: Should transform to INTERVAL
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
 
-        assertTrue(normalized.contains("CURRENT_TIMESTAMP + INTERVAL '7 days'"),
+        assertTrue(normalized.contains("CURRENT_TIMESTAMP + ( 7 * INTERVAL '1 day' )"),
             "SYSDATE + integer should transform to INTERVAL, got: " + normalized);
     }
 
@@ -203,7 +203,7 @@ public class DateArithmeticTransformationTest {
         // Then: Should transform to INTERVAL
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
 
-        assertTrue(normalized.contains("INTERVAL '30 days'"),
+        assertTrue(normalized.contains("( 30 * INTERVAL '1 day' )"),
             "TO_DATE() + integer should transform to INTERVAL, got: " + normalized);
     }
 
@@ -224,9 +224,9 @@ public class DateArithmeticTransformationTest {
         // Then: Both ADD_MONTHS and + should be transformed
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
 
-        assertTrue(normalized.contains("INTERVAL '6 months'"),
+        assertTrue(normalized.contains("( 6 * INTERVAL '1 month' )"),
             "ADD_MONTHS should be transformed, got: " + normalized);
-        assertTrue(normalized.contains("INTERVAL '15 days'"),
+        assertTrue(normalized.contains("( 15 * INTERVAL '1 day' )"),
             "Date arithmetic should also be transformed, got: " + normalized);
     }
 
@@ -249,7 +249,7 @@ public class DateArithmeticTransformationTest {
         // Then: Date arithmetic in WHERE should be transformed
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
 
-        assertTrue(normalized.contains("hire_date + INTERVAL '90 days'"),
+        assertTrue(normalized.contains("hire_date + ( 90 * INTERVAL '1 day' )"),
             "Date arithmetic in WHERE should transform, got: " + normalized);
         assertTrue(normalized.contains("> CURRENT_TIMESTAMP"),
             "SYSDATE should be transformed");
@@ -277,13 +277,13 @@ public class DateArithmeticTransformationTest {
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
 
         // This test documents the limitation - when type inference is integrated, this should pass
-        assertFalse(normalized.contains("INTERVAL '1 days'"),
+        assertFalse(normalized.contains("( 1 * INTERVAL '1 day' )"),
             "Heuristic does not detect 'sperre_endet_am' as date column (expected limitation), got: " + normalized);
         assertTrue(normalized.contains("> CURRENT_TIMESTAMP"),
             "SYSDATE should be transformed");
 
         // Future: When type inference is integrated, this assertion should be flipped:
-        // assertTrue(normalized.contains("INTERVAL '1 days'"), "Should detect via type inference");
+        // assertTrue(normalized.contains("( 1 * INTERVAL '1 day' )"), "Should detect via type inference");
     }
 
     // ==================== Metadata-Based Detection (Future with Type Inference) ====================
@@ -307,7 +307,7 @@ public class DateArithmeticTransformationTest {
         String postgresSql = builder.visit(parseResult.getTree());
 
         // Then: Should transform based on type inference
-        assertTrue(postgresSql.contains("INTERVAL '7 days'"));
+        assertTrue(postgresSql.contains("( 7 * INTERVAL '1 day' )"));
     }
     */
 
@@ -423,9 +423,9 @@ public class DateArithmeticTransformationTest {
         // Then: Both operations should be transformed
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
 
-        assertTrue(normalized.contains("hire_date + INTERVAL '30 days'"),
+        assertTrue(normalized.contains("hire_date + ( 30 * INTERVAL '1 day' )"),
             "First date arithmetic should transform, got: " + normalized);
-        assertTrue(normalized.contains("end_date - INTERVAL '7 days'"),
+        assertTrue(normalized.contains("end_date - ( 7 * INTERVAL '1 day' )"),
             "Second date arithmetic should transform, got: " + normalized);
     }
 
@@ -447,7 +447,7 @@ public class DateArithmeticTransformationTest {
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
 
         // Note: ANTLR may add spaces around the dot (emp . hire_date)
-        assertTrue(normalized.contains("INTERVAL '60 days'"),
+        assertTrue(normalized.contains("( 60 * INTERVAL '1 day' )"),
             "Qualified column date arithmetic should transform, got: " + normalized);
         assertTrue(normalized.contains("hire_date"),
             "Column name should be present");
@@ -495,10 +495,10 @@ public class DateArithmeticTransformationTest {
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
         String postgresSql = builder.visit(parseResult.getTree());
 
-        // Then: Should transform x.somedate + 3 to x.somedate + INTERVAL '3 days'
+        // Then: Should transform x.somedate + 3 to x.somedate + (3 * INTERVAL '1 day')
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
 
-        assertTrue(normalized.contains("INTERVAL '3 days'"),
+        assertTrue(normalized.contains("( 3 * INTERVAL '1 day' )"),
             "Type inference should detect x.somedate as DATE and transform arithmetic, got: " + normalized);
         assertTrue(normalized.contains("FROM test.tablexy"),
             "Table should be schema-qualified");
@@ -550,7 +550,7 @@ public class DateArithmeticTransformationTest {
         // Then: Type inference should detect CASE result as DATE and transform + 1
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
 
-        assertTrue(normalized.contains("INTERVAL '1 days'"),
+        assertTrue(normalized.contains("( 1 * INTERVAL '1 day' )"),
             "Type inference should detect CASE result as DATE, got: " + normalized);
         assertTrue(normalized.contains("CASE WHEN"),
             "CASE expression should be present");
@@ -654,7 +654,7 @@ public class DateArithmeticTransformationTest {
         // Then: Should detect date arithmetic and transform to INTERVAL
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
 
-        assertTrue(normalized.contains("INTERVAL") && normalized.contains("days"),
+        assertTrue(normalized.contains("INTERVAL") && normalized.contains("day"),
             "Scalar subquery should be inferred as NUMERIC, enabling date arithmetic detection, got: " + normalized);
     }
 
@@ -700,8 +700,59 @@ public class DateArithmeticTransformationTest {
         // Then: Should detect date arithmetic
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
 
-        assertTrue(normalized.contains("INTERVAL") && normalized.contains("days"),
+        assertTrue(normalized.contains("INTERVAL") && normalized.contains("day"),
             "Scalar subquery with expression should be inferred as NUMERIC, enabling date arithmetic, got: " + normalized);
+    }
+
+    @Test
+    void dateArithmeticWithScalarSubquery_truncCurrentDateOriginalBug() {
+        // Given: Original bug report - TRUNC(CURRENT_DATE) + (SELECT 1 FROM dual)
+        // This was incorrectly transformed to: DATE_TRUNC(...) + INTERVAL '(SELECT 1) days'
+        // Should now correctly transform to: DATE_TRUNC(...) + ((SELECT 1) * INTERVAL '1 day')
+
+        Map<String, TransformationIndices.ColumnTypeInfo> columns = new HashMap<>();
+        Map<String, Map<String, TransformationIndices.ColumnTypeInfo>> tableColumns = new HashMap<>();
+
+        TransformationIndices indices = new TransformationIndices(
+            tableColumns,
+            new HashMap<>(),
+            new HashSet<>(),
+            new HashMap<>(),
+            new HashMap<>(),
+            new HashSet<>()
+        );
+
+        String oracleSql = "SELECT TRUNC(CURRENT_DATE) + (SELECT 1 FROM dual) FROM dual";
+
+        // When: Parse and run type analysis pass
+        ParseResult parseResult = parser.parseSelectStatement(oracleSql);
+        assertFalse(parseResult.hasErrors(), "Parse should succeed");
+
+        // Run type analysis pass (should now infer scalar subquery type)
+        Map<String, TypeInfo> typeCache = new HashMap<>();
+        TypeAnalysisVisitor typeAnalyzer = new TypeAnalysisVisitor("hr", indices, typeCache);
+        typeAnalyzer.visit(parseResult.getTree());
+
+        // Create context with FullTypeEvaluator
+        FullTypeEvaluator typeEvaluator = new FullTypeEvaluator(typeCache);
+        TransformationContext context = new TransformationContext("hr", indices, typeEvaluator);
+
+        // Transform
+        PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
+        String postgresSql = builder.visit(parseResult.getTree());
+
+        // Then: Should produce valid PostgreSQL syntax
+        String normalized = postgresSql.trim().replaceAll("\\s+", " ");
+
+        // Verify the transformation is correct
+        assertTrue(normalized.contains("DATE_TRUNC( 'day' , CURRENT_DATE )::DATE"),
+            "TRUNC(CURRENT_DATE) should transform to DATE_TRUNC");
+        assertTrue(normalized.contains("* INTERVAL '1 day'"),
+            "Scalar subquery should use multiplication pattern, got: " + normalized);
+        assertFalse(normalized.contains("INTERVAL '(SELECT"),
+            "Should NOT embed subquery in INTERVAL string literal, got: " + normalized);
+        assertFalse(normalized.contains("INTERVAL '(SELECT 1) days'"),
+            "Should NOT have broken syntax, got: " + normalized);
     }
 
     @Test

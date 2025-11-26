@@ -80,8 +80,8 @@ public class DateFunctionTransformer {
     String dateExpr = transformArgument(args.get(0), b);
     String monthsExpr = transformArgument(args.get(1), b);
 
-    // Build: date + INTERVAL 'n months'
-    return dateExpr + " + INTERVAL '" + monthsExpr + " months'";
+    // Build: date + (n * INTERVAL '1 month')
+    return dateExpr + " + ( " + monthsExpr + " * INTERVAL '1 month' )";
   }
 
   /**

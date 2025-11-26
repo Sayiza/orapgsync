@@ -261,9 +261,9 @@ public class DateArithmeticTransformer {
             if (!leftType.isUnknown() && !rightType.isUnknown()) {
                 // Both types known - use deterministic type inference
                 if (leftType.isDate() && rightType.isNumeric()) {
-                    return leftExpr + " + INTERVAL '" + rightExpr + " days'";
+                    return leftExpr + " + ( " + rightExpr + " * INTERVAL '1 day' )";
                 } else if (leftType.isNumeric() && rightType.isDate()) {
-                    return rightExpr + " + INTERVAL '" + leftExpr + " days'";
+                    return rightExpr + " + ( " + leftExpr + " * INTERVAL '1 day' )";
                 } else {
                     // Shouldn't happen if isDateArithmetic was true
                     return leftExpr + " + " + rightExpr;
@@ -283,10 +283,10 @@ public class DateArithmeticTransformer {
 
             if (leftHasDateFunc || (leftLooksLikeDate && !rightLooksLikeDate && !rightHasDateFunc)) {
                 // Left is the date: date + n
-                return leftExpr + " + INTERVAL '" + rightExpr + " days'";
+                return leftExpr + " + ( " + rightExpr + " * INTERVAL '1 day' )";
             } else {
                 // Right is the date: n + date (commutative)
-                return rightExpr + " + INTERVAL '" + leftExpr + " days'";
+                return rightExpr + " + ( " + leftExpr + " * INTERVAL '1 day' )";
             }
 
         } else if (operator.equals("-")) {
@@ -294,7 +294,7 @@ public class DateArithmeticTransformer {
             if (!leftType.isUnknown() && !rightType.isUnknown()) {
                 // Both types known - use deterministic type inference
                 if (leftType.isDate() && rightType.isNumeric()) {
-                    return leftExpr + " - INTERVAL '" + rightExpr + " days'";
+                    return leftExpr + " - ( " + rightExpr + " * INTERVAL '1 day' )";
                 } else {
                     // date1 - date2 or n - n (no transformation needed)
                     return leftExpr + " - " + rightExpr;
@@ -315,7 +315,7 @@ public class DateArithmeticTransformer {
             // Only transform if left is date and right is NOT date
             if ((leftHasDateFunc || leftLooksLikeDate) && !rightHasDateFunc && !rightLooksLikeDate) {
                 // date - n → date - INTERVAL 'n days'
-                return leftExpr + " - INTERVAL '" + rightExpr + " days'";
+                return leftExpr + " - ( " + rightExpr + " * INTERVAL '1 day' )";
             } else {
                 // date1 - date2 or unknown case (no transformation)
                 return leftExpr + " - " + rightExpr;

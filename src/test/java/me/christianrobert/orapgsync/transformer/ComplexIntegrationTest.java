@@ -103,7 +103,7 @@ public class ComplexIntegrationTest {
         // Date functions
         assertTrue(normalized.contains("DATE_TRUNC( 'day' , e . hire_date )::DATE"),
             "TRUNC should be transformed, got: " + normalized);
-        assertTrue(normalized.contains("e . hire_date + INTERVAL '6 months'"),
+        assertTrue(normalized.contains("e . hire_date + ( 6 * INTERVAL '1 month' )"),
             "ADD_MONTHS should be transformed, got: " + normalized);
         assertTrue(normalized.contains("CURRENT_TIMESTAMP"),
             "SYSDATE should be transformed, got: " + normalized);
@@ -160,7 +160,7 @@ public class ComplexIntegrationTest {
         // Date functions inside CTE
         assertTrue(normalized.contains("DATE_TRUNC( 'day' , e . hire_date )::DATE"),
             "TRUNC in CTE should be transformed, got: " + normalized);
-        assertTrue(normalized.contains("CURRENT_TIMESTAMP + INTERVAL '-6 months'"),
+        assertTrue(normalized.contains("CURRENT_TIMESTAMP + ( -6 * INTERVAL '1 month' )"),
             "ADD_MONTHS with SYSDATE in CTE should be transformed, got: " + normalized);
 
         // Outer join in main query
@@ -319,7 +319,7 @@ public class ComplexIntegrationTest {
         // Date functions in WHERE
         assertTrue(normalized.contains("DATE_TRUNC( 'year' , e . hire_date )::DATE"),
             "TRUNC in WHERE should be transformed, got: " + normalized);
-        assertTrue(normalized.contains("DATE_TRUNC( 'year' , CURRENT_TIMESTAMP + INTERVAL '-12 months' )::DATE"),
+        assertTrue(normalized.contains("DATE_TRUNC( 'year' , CURRENT_TIMESTAMP + ( -12 * INTERVAL '1 month' ) )::DATE"),
             "Nested ADD_MONTHS/TRUNC should be transformed, got: " + normalized);
     }
 
@@ -402,7 +402,7 @@ public class ComplexIntegrationTest {
             "MONTHS_BETWEEN should be transformed, got: " + normalized);
 
         // Complex nested date functions
-        assertTrue(normalized.contains("DATE_TRUNC( 'MONTH' , CURRENT_TIMESTAMP + INTERVAL '1 months' ) + INTERVAL '1 month' - INTERVAL '1 day' )::DATE"),
+        assertTrue(normalized.contains("DATE_TRUNC( 'MONTH' , CURRENT_TIMESTAMP + ( 1 * INTERVAL '1 month' ) ) + INTERVAL '1 month' - INTERVAL '1 day' )::DATE"),
             "LAST_DAY(ADD_MONTHS(SYSDATE, 1)) should be transformed, got: " + normalized);
 
         // CASE expression

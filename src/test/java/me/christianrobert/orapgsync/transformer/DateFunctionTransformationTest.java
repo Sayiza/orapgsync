@@ -68,11 +68,11 @@ public class DateFunctionTransformationTest {
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
         String postgresSql = builder.visit(parseResult.getTree());
 
-        // Then: ADD_MONTHS should be transformed to date + INTERVAL
+        // Then: ADD_MONTHS should be transformed to date + (n * INTERVAL '1 month')
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
 
-        assertTrue(normalized.contains("hire_date + INTERVAL '6 months'"),
-            "ADD_MONTHS should be transformed to date + INTERVAL, got: " + normalized);
+        assertTrue(normalized.contains("hire_date + ( 6 * INTERVAL '1 month' )"),
+            "ADD_MONTHS should be transformed to date + (n * INTERVAL '1 month'), got: " + normalized);
         assertTrue(normalized.contains("FROM hr.employees"),
             "Table should be schema-qualified");
         assertFalse(normalized.toUpperCase().contains("ADD_MONTHS"),
@@ -96,7 +96,7 @@ public class DateFunctionTransformationTest {
         // Then: ADD_MONTHS with negative value should work
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
 
-        assertTrue(normalized.contains("hire_date + INTERVAL '-3 months'"),
+        assertTrue(normalized.contains("hire_date + ( -3 * INTERVAL '1 month' )"),
             "ADD_MONTHS with negative value should be transformed, got: " + normalized);
     }
 
@@ -119,7 +119,7 @@ public class DateFunctionTransformationTest {
 
         assertTrue(normalized.contains("WHERE"),
             "WHERE clause should be present");
-        assertTrue(normalized.contains("INTERVAL '-12 months'"),
+        assertTrue(normalized.contains("( -12 * INTERVAL '1 month' )"),
             "ADD_MONTHS should be transformed in WHERE clause, got: " + normalized);
         assertTrue(normalized.contains("CURRENT_TIMESTAMP"),
             "SYSDATE should also be transformed");
@@ -342,7 +342,7 @@ public class DateFunctionTransformationTest {
         assertTrue(normalized.contains("+ INTERVAL '1 month' - INTERVAL '1 day' )::DATE"),
             "LAST_DAY's month arithmetic should be present");
         // ADD_MONTHS transformation wraps the LAST_DAY result
-        assertTrue(normalized.contains("+ INTERVAL '3 months'"),
+        assertTrue(normalized.contains("( 3 * INTERVAL '1 month' )"),
             "ADD_MONTHS transformation should be present, got: " + normalized);
     }
 
@@ -360,10 +360,10 @@ public class DateFunctionTransformationTest {
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
         String postgresSql = builder.visit(parseResult.getTree());
 
-        // Then: Column reference should be preserved
+        // Then: Column reference should be preserved in multiplication pattern
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
 
-        assertTrue(normalized.contains("hire_date + INTERVAL 'months_employed months'"),
+        assertTrue(normalized.contains("hire_date + ( months_employed * INTERVAL '1 month' )"),
             "ADD_MONTHS with column should work, got: " + normalized);
     }
 
@@ -449,7 +449,7 @@ public class DateFunctionTransformationTest {
         // Then: All three functions should be transformed
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
 
-        assertTrue(normalized.contains("INTERVAL '6 months'"),
+        assertTrue(normalized.contains("( 6 * INTERVAL '1 month' )"),
             "ADD_MONTHS should be transformed");
         assertTrue(normalized.contains("DATE_TRUNC( 'MONTH' , hire_date ) + INTERVAL '1 month' - INTERVAL '1 day'"),
             "LAST_DAY should be transformed");
@@ -798,13 +798,13 @@ public class DateFunctionTransformationTest {
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
 
         // First: date column + 11 should use INTERVAL
-        assertTrue(normalized.contains("spa_abgelehnt_am + INTERVAL '11 days'"),
+        assertTrue(normalized.contains("spa_abgelehnt_am + ( 11 * INTERVAL '1 day' )"),
             "Date arithmetic should add INTERVAL, got: " + normalized);
 
         // Second: TRUNC(date) should use DATE_TRUNC, and result + 22 should use INTERVAL
         assertTrue(normalized.contains("DATE_TRUNC( 'day' , ws1 . spa_abgelehnt_am )::DATE"),
             "TRUNC should use DATE_TRUNC for date column, got: " + normalized);
-        assertTrue(normalized.contains("+ INTERVAL '22 days'"),
+        assertTrue(normalized.contains("( 22 * INTERVAL '1 day' )"),
             "Date arithmetic on TRUNC result should use INTERVAL, got: " + normalized);
 
         // Critical: Should NOT have ::numeric cast
