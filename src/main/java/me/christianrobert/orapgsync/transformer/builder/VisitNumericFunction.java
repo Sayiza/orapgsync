@@ -104,12 +104,35 @@ public class VisitNumericFunction {
                 throw new TransformationException("ROUND function requires an expression");
             }
 
-            // Transform the expression first
-            String transformedExpr = b.visit(expression);
-
-            // Use type evaluator to determine if cast is needed
+            // Use type evaluator to determine if this is date or numeric ROUND
+            // Note: getContext() may be null in tests without full setup
             me.christianrobert.orapgsync.transformer.type.TypeInfo exprType =
-                b.getContext().getTypeEvaluator().getType(expression);
+                (b.getContext() != null)
+                    ? b.getContext().getTypeEvaluator().getType(expression)
+                    : me.christianrobert.orapgsync.transformer.type.TypeInfo.UNKNOWN;
+
+            // If type is DATE, delegate to DateFunctionTransformer
+            if (exprType.isDate()) {
+                // Transform the expression first
+                String transformedExpr = b.visit(expression);
+
+                // Determine format string (default: DD for day rounding)
+                String format = "DD";
+                if (ctx.UNSIGNED_INTEGER() != null) {
+                    // If there's a second argument, it's a format string or precision
+                    // For dates, we expect format strings like 'MM', 'YYYY', etc.
+                    // But in numeric_function grammar, the second arg is UNSIGNED_INTEGER
+                    // This means format-based date ROUND won't come through here
+                    // So we use default 'DD' (day rounding)
+                }
+
+                // Delegate to DateFunctionTransformer for date ROUND logic
+                return me.christianrobert.orapgsync.transformer.builder.functions.DateFunctionTransformer
+                    .buildDateRoundExpression(transformedExpr, format);
+            }
+
+            // Numeric ROUND: transform with type-aware cast
+            String transformedExpr = b.visit(expression);
 
             // If type is known and numeric, no cast needed
             // If type is unknown or non-numeric, add defensive cast

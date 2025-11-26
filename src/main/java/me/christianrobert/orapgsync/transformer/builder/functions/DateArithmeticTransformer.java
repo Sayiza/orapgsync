@@ -169,8 +169,13 @@ public class DateArithmeticTransformer {
         // - Backward compatibility with SimpleTypeEvaluator (falls back to heuristics)
         // - Graceful degradation when types can't be determined
 
-        TypeInfo leftType = getTypeForContext(leftCtx, b.getContext().getTypeEvaluator());
-        TypeInfo rightType = getTypeForContext(rightCtx, b.getContext().getTypeEvaluator());
+        // Note: getContext() may be null in tests without full setup
+        TypeInfo leftType = (b.getContext() != null)
+                ? getTypeForContext(leftCtx, b.getContext().getTypeEvaluator())
+                : TypeInfo.UNKNOWN;
+        TypeInfo rightType = (b.getContext() != null)
+                ? getTypeForContext(rightCtx, b.getContext().getTypeEvaluator())
+                : TypeInfo.UNKNOWN;
 
         // ========== PHASE 1: Type Inference (Preferred) ==========
         if (!leftType.isUnknown() && !rightType.isUnknown()) {
@@ -243,8 +248,13 @@ public class DateArithmeticTransformer {
         PostgresCodeBuilder b) {
 
         // HYBRID APPROACH: Type inference first, heuristic fallback if types unknown
-        TypeInfo leftType = getTypeForContext(leftCtx, b.getContext().getTypeEvaluator());
-        TypeInfo rightType = getTypeForContext(rightCtx, b.getContext().getTypeEvaluator());
+        // Note: getContext() may be null in tests without full setup
+        TypeInfo leftType = (b.getContext() != null)
+                ? getTypeForContext(leftCtx, b.getContext().getTypeEvaluator())
+                : TypeInfo.UNKNOWN;
+        TypeInfo rightType = (b.getContext() != null)
+                ? getTypeForContext(rightCtx, b.getContext().getTypeEvaluator())
+                : TypeInfo.UNKNOWN;
 
         if (operator.equals("+")) {
             // ========== PHASE 1: Type Inference (Preferred) ==========

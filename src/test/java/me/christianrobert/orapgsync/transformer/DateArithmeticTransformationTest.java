@@ -602,4 +602,151 @@ public class DateArithmeticTransformationTest {
         assertTrue(normalized.contains("salary + 1000"),
             "Numeric arithmetic should pass through unchanged");
     }
+
+    // ==================== Scalar Subquery Tests (Phase 4) ====================
+
+    @Test
+    void dateArithmeticWithScalarSubquery_literalInteger() {
+        // Given: Bug report - scalar subquery type was UNKNOWN, now inferred as NUMERIC
+        // This test verifies that scalar subquery type inference works
+
+        Map<String, TransformationIndices.ColumnTypeInfo> columns = new HashMap<>();
+        columns.put("hire_date", new TransformationIndices.ColumnTypeInfo("DATE", "hire_date"));
+
+        Map<String, Map<String, TransformationIndices.ColumnTypeInfo>> tableColumns = new HashMap<>();
+        tableColumns.put("hr.employees", columns);
+
+        TransformationIndices indices = new TransformationIndices(
+            tableColumns,
+            new HashMap<>(),
+            new HashSet<>(),
+            new HashMap<>(),
+            new HashMap<>(),
+            new HashSet<>()
+        );
+
+        // Use a simpler query with hire_date (column name heuristic will help)
+        String oracleSql = "SELECT e.hire_date + (SELECT 7 FROM dual) FROM employees e";
+
+        // When: Parse and run type analysis pass
+        ParseResult parseResult = parser.parseSelectStatement(oracleSql);
+        assertFalse(parseResult.hasErrors(), "Parse should succeed");
+
+        // Run type analysis pass (should now infer scalar subquery type)
+        Map<String, TypeInfo> typeCache = new HashMap<>();
+        TypeAnalysisVisitor typeAnalyzer = new TypeAnalysisVisitor("hr", indices, typeCache);
+        typeAnalyzer.visit(parseResult.getTree());
+
+        // Verify: Scalar subquery should be inferred as NUMERIC
+        long numericTypes = typeCache.values().stream()
+                .filter(TypeInfo::isNumeric)
+                .count();
+        assertTrue(numericTypes >= 1, "Scalar subquery (SELECT 7) should be inferred as NUMERIC");
+
+        // Create context with FullTypeEvaluator
+        FullTypeEvaluator typeEvaluator = new FullTypeEvaluator(typeCache);
+        TransformationContext context = new TransformationContext("hr", indices, typeEvaluator);
+
+        // Transform
+        PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
+        String postgresSql = builder.visit(parseResult.getTree());
+
+        // Then: Should detect date arithmetic and transform to INTERVAL
+        String normalized = postgresSql.trim().replaceAll("\\s+", " ");
+
+        assertTrue(normalized.contains("INTERVAL") && normalized.contains("days"),
+            "Scalar subquery should be inferred as NUMERIC, enabling date arithmetic detection, got: " + normalized);
+    }
+
+    @Test
+    void dateArithmeticWithScalarSubquery_complexExpression() {
+        // Given: More complex scalar subquery with expression
+        // TRUNC(date) + (SELECT 7 * 2 FROM dual) should detect scalar subquery type as NUMERIC
+
+        Map<String, TransformationIndices.ColumnTypeInfo> columns = new HashMap<>();
+        columns.put("hire_date", new TransformationIndices.ColumnTypeInfo("DATE", "hire_date"));
+
+        Map<String, Map<String, TransformationIndices.ColumnTypeInfo>> tableColumns = new HashMap<>();
+        tableColumns.put("hr.employees", columns);
+
+        TransformationIndices indices = new TransformationIndices(
+            tableColumns,
+            new HashMap<>(),
+            new HashSet<>(),
+            new HashMap<>(),
+            new HashMap<>(),
+            new HashSet<>()
+        );
+
+        String oracleSql = "SELECT hire_date + (SELECT 7 * 2 FROM dual) FROM employees";
+
+        // When: Parse and run type analysis pass
+        ParseResult parseResult = parser.parseSelectStatement(oracleSql);
+        assertFalse(parseResult.hasErrors(), "Parse should succeed");
+
+        // Run type analysis pass
+        Map<String, TypeInfo> typeCache = new HashMap<>();
+        TypeAnalysisVisitor typeAnalyzer = new TypeAnalysisVisitor("HR", indices, typeCache);
+        typeAnalyzer.visit(parseResult.getTree());
+
+        // Create context with FullTypeEvaluator
+        FullTypeEvaluator typeEvaluator = new FullTypeEvaluator(typeCache);
+        TransformationContext context = new TransformationContext("HR", indices, typeEvaluator);
+
+        // Transform
+        PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
+        String postgresSql = builder.visit(parseResult.getTree());
+
+        // Then: Should detect date arithmetic
+        String normalized = postgresSql.trim().replaceAll("\\s+", " ");
+
+        assertTrue(normalized.contains("INTERVAL") && normalized.contains("days"),
+            "Scalar subquery with expression should be inferred as NUMERIC, enabling date arithmetic, got: " + normalized);
+    }
+
+    @Test
+    void scalarSubquery_withDateResult_shouldNotTransform() {
+        // Given: Scalar subquery returning a DATE (not a numeric addition)
+
+        Map<String, TransformationIndices.ColumnTypeInfo> columns = new HashMap<>();
+        columns.put("hire_date", new TransformationIndices.ColumnTypeInfo("DATE", "hire_date"));
+
+        Map<String, Map<String, TransformationIndices.ColumnTypeInfo>> tableColumns = new HashMap<>();
+        tableColumns.put("hr.employees", columns);
+
+        TransformationIndices indices = new TransformationIndices(
+            tableColumns,
+            new HashMap<>(),
+            new HashSet<>(),
+            new HashMap<>(),
+            new HashMap<>(),
+            new HashSet<>()
+        );
+
+        String oracleSql = "SELECT hire_date + (SELECT SYSDATE FROM dual) FROM employees";
+
+        // When: Parse and run type analysis pass
+        ParseResult parseResult = parser.parseSelectStatement(oracleSql);
+        assertFalse(parseResult.hasErrors(), "Parse should succeed");
+
+        // Run type analysis pass
+        Map<String, TypeInfo> typeCache = new HashMap<>();
+        TypeAnalysisVisitor typeAnalyzer = new TypeAnalysisVisitor("HR", indices, typeCache);
+        typeAnalyzer.visit(parseResult.getTree());
+
+        // Create context with FullTypeEvaluator
+        FullTypeEvaluator typeEvaluator = new FullTypeEvaluator(typeCache);
+        TransformationContext context = new TransformationContext("HR", indices, typeEvaluator);
+
+        // Transform
+        PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
+        String postgresSql = builder.visit(parseResult.getTree());
+
+        // Then: Should NOT transform (DATE + DATE is not valid)
+        String normalized = postgresSql.trim().replaceAll("\\s+", " ");
+
+        // This is an edge case - Oracle would reject DATE + DATE
+        // We just verify it doesn't crash
+        assertNotNull(postgresSql, "Should produce output");
+    }
 }

@@ -434,6 +434,84 @@ public class TypeAnalysisVisitor extends PlSqlParserBaseVisitor<TypeInfo> {
         return cacheAndReturn(ctx, result);
     }
 
+    // ========== Phase 4: Complex Expressions (Scalar Subqueries) ==========
+
+    /**
+     * Visit subquery to infer scalar subquery types.
+     *
+     * <p>A scalar subquery is a subquery that returns a single column value.
+     * We propagate the type of that single column to the subquery node itself,
+     * enabling accurate type inference in expressions like:</p>
+     *
+     * <pre>
+     * TRUNC(hire_date) + (SELECT 1 FROM dual)  -- Should detect DATE + NUMERIC
+     * </pre>
+     *
+     * <p>Phase 4: Handles scalar subqueries only (single column SELECT).
+     * Multi-column subqueries return UNKNOWN.</p>
+     */
+    @Override
+    public TypeInfo visitSubquery(SubqueryContext ctx) {
+        // Visit children first (populates cache for inner expressions)
+        visitChildren(ctx);
+
+        // Try to infer scalar subquery type
+        TypeInfo scalarType = inferScalarSubqueryType(ctx);
+
+        return cacheAndReturn(ctx, scalarType);
+    }
+
+    /**
+     * Infers the type of a scalar subquery by examining its SELECT list.
+     *
+     * <p>Algorithm:</p>
+     * <ol>
+     *   <li>Navigate to query_block</li>
+     *   <li>Check if SELECT list has exactly one element (scalar subquery)</li>
+     *   <li>Look up the cached type of that single expression</li>
+     *   <li>Return the expression's type (or UNKNOWN if not scalar)</li>
+     * </ol>
+     *
+     * @param ctx Subquery context
+     * @return TypeInfo of the scalar expression, or UNKNOWN if not a scalar subquery
+     */
+    private TypeInfo inferScalarSubqueryType(SubqueryContext ctx) {
+        // Navigate to query block
+        Subquery_basic_elementsContext basicElements = ctx.subquery_basic_elements();
+        if (basicElements == null || basicElements.query_block() == null) {
+            log.trace("Subquery has no basic elements or query block, returning UNKNOWN");
+            return TypeInfo.UNKNOWN;
+        }
+
+        Query_blockContext queryBlock = basicElements.query_block();
+        Selected_listContext selectedList = queryBlock.selected_list();
+
+        if (selectedList == null || selectedList.select_list_elements() == null) {
+            log.trace("Subquery has no selected list, returning UNKNOWN");
+            return TypeInfo.UNKNOWN;
+        }
+
+        var elements = selectedList.select_list_elements();
+
+        // Only handle scalar subqueries (single column SELECT)
+        if (elements.size() != 1) {
+            log.trace("Subquery has {} columns (not scalar), returning UNKNOWN", elements.size());
+            return TypeInfo.UNKNOWN;  // Multi-column subquery
+        }
+
+        // Get the single expression's type from cache
+        Select_list_elementsContext element = elements.get(0);
+        if (element.expression() != null) {
+            String key = nodeKey(element.expression());
+            TypeInfo cachedType = typeCache.getOrDefault(key, TypeInfo.UNKNOWN);
+            log.trace("Scalar subquery resolved to type: {}", cachedType.getCategory());
+            return cachedType;
+        }
+
+        log.trace("Subquery element has no expression, returning UNKNOWN");
+        return TypeInfo.UNKNOWN;
+    }
+
     // ========== Scope Management (Phase 5+) ==========
     // Currently unused - will be implemented in Phase 5
 

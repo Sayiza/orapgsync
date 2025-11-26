@@ -149,11 +149,15 @@ public class DateFunctionTransformer {
    *   <li>Date: TRUNC(hire_date, 'MM') → first day of month (needs DATE_TRUNC)</li>
    * </ul>
    *
-   * <p>Heuristic to distinguish:
+   * <p>Detection strategy (prioritizes type inference over heuristics):
    * <ul>
-   *   <li>If 2nd arg is date format string ('MM', 'YYYY', etc.) → Date TRUNC</li>
-   *   <li>If 1st arg contains date expression (SYSDATE, TO_DATE, etc.) → Date TRUNC</li>
-   *   <li>Otherwise → Numeric TRUNC (pass through)</li>
+   *   <li>1. Type inference: If type evaluator identifies argument as DATE → Date TRUNC</li>
+   *   <li>2. Heuristic fallback (when type is UNKNOWN):</li>
+   *   <ul>
+   *     <li>If 2nd arg is date format string ('MM', 'YYYY', etc.) → Date TRUNC</li>
+   *     <li>If 1st arg contains date expression (SYSDATE, TO_DATE, etc.) → Date TRUNC</li>
+   *   </ul>
+   *   <li>3. Otherwise → Numeric TRUNC (pass through)</li>
    * </ul>
    *
    * <p>PostgreSQL transformation: DATE_TRUNC(field, date)::DATE
@@ -176,40 +180,48 @@ public class DateFunctionTransformer {
       return "TRUNC" + getFunctionArguments(partCtx, b);
     }
 
-    // Apply heuristic to determine if this is date or numeric TRUNC
+    // Get the first argument (the expression to truncate)
+    PlSqlParser.ArgumentContext firstArgCtx = args.get(0);
+    PlSqlParser.ExpressionContext firstArgExpr = firstArgCtx.expression();
+
+    if (firstArgExpr == null) {
+      // No expression found, pass through unchanged
+      return "TRUNC" + getFunctionArguments(partCtx, b);
+    }
+
+    // STEP 1: Query type evaluator FIRST (preferred - accurate)
+    // Note: getContext() may be null in tests without full setup
+    me.christianrobert.orapgsync.transformer.type.TypeInfo exprType =
+        (b.getContext() != null)
+            ? b.getContext().getTypeEvaluator().getType(firstArgExpr)
+            : me.christianrobert.orapgsync.transformer.type.TypeInfo.UNKNOWN;
+
     boolean isDateTrunc = false;
 
-    if (args.size() == 2) {
-      // Check if 2nd argument looks like a date format string
-      String secondArgText = args.get(1).getText(); // UNTRANSFORMED
-      if (isDateFormatString(secondArgText)) {
-        isDateTrunc = true;
+    if (exprType.isDate()) {
+      // Type inference says this is a date → use date transformation
+      isDateTrunc = true;
+    } else if (exprType.isUnknown()) {
+      // STEP 2: Type unknown → fall back to heuristics
+      if (args.size() == 2) {
+        // Check if 2nd argument looks like a date format string
+        String secondArgText = args.get(1).getText(); // UNTRANSFORMED
+        if (isDateFormatString(secondArgText)) {
+          isDateTrunc = true;
+        }
+      } else if (args.size() == 1) {
+        // Check if 1st argument looks like a date expression
+        String firstArgText = args.get(0).getText(); // UNTRANSFORMED
+        if (containsDateExpression(firstArgText)) {
+          isDateTrunc = true;
+        }
       }
-    } else if (args.size() == 1) {
-      // Check if 1st argument looks like a date expression
-      String firstArgText = args.get(0).getText(); // UNTRANSFORMED
-      if (containsDateExpression(firstArgText)) {
-        isDateTrunc = true;
-      }
-      // Otherwise: default to numeric TRUNC (safer)
     }
+    // STEP 3: If type is numeric or anything else → numeric TRUNC
 
     if (!isDateTrunc) {
       // Numeric TRUNC: transform with type-aware cast
-      // Get the first argument (the expression to truncate)
-      PlSqlParser.ArgumentContext firstArgCtx = args.get(0);
-      PlSqlParser.ExpressionContext firstArgExpr = firstArgCtx.expression();
-
-      if (firstArgExpr == null) {
-        // No expression found, pass through unchanged
-        return "TRUNC" + getFunctionArguments(partCtx, b);
-      }
-
       String transformedExpr = b.visit(firstArgExpr);
-
-      // Use type evaluator to determine if cast is needed
-      me.christianrobert.orapgsync.transformer.type.TypeInfo exprType =
-          b.getContext().getTypeEvaluator().getType(firstArgExpr);
 
       // If type is known and numeric, no cast needed
       // If type is unknown or non-numeric, add defensive cast
@@ -260,11 +272,15 @@ public class DateFunctionTransformer {
    *   <li>Date: ROUND(hire_date, 'MM') → rounds to nearest month (needs complex logic)</li>
    * </ul>
    *
-   * <p>Heuristic to distinguish:
+   * <p>Detection strategy (prioritizes type inference over heuristics):
    * <ul>
-   *   <li>If 2nd arg is date format string ('MM', 'YYYY', etc.) → Date ROUND</li>
-   *   <li>If 1st arg contains date expression (SYSDATE, TO_DATE, etc.) → Date ROUND</li>
-   *   <li>Otherwise → Numeric ROUND (pass through)</li>
+   *   <li>1. Type inference: If type evaluator identifies argument as DATE → Date ROUND</li>
+   *   <li>2. Heuristic fallback (when type is UNKNOWN):</li>
+   *   <ul>
+   *     <li>If 2nd arg is date format string ('MM', 'YYYY', etc.) → Date ROUND</li>
+   *     <li>If 1st arg contains date expression (SYSDATE, TO_DATE, etc.) → Date ROUND</li>
+   *   </ul>
+   *   <li>3. Otherwise → Numeric ROUND (pass through)</li>
    * </ul>
    *
    * <p>Date ROUND logic:
@@ -300,23 +316,44 @@ public class DateFunctionTransformer {
       return "ROUND" + getFunctionArguments(partCtx, b);
     }
 
-    // Apply heuristic to determine if this is date or numeric ROUND
+    // Get the first argument (the expression to round)
+    PlSqlParser.ArgumentContext firstArgCtx = args.get(0);
+    PlSqlParser.ExpressionContext firstArgExpr = firstArgCtx.expression();
+
+    if (firstArgExpr == null) {
+      // No expression found, pass through unchanged
+      return "ROUND" + getFunctionArguments(partCtx, b);
+    }
+
+    // STEP 1: Query type evaluator FIRST (preferred - accurate)
+    // Note: getContext() may be null in tests without full setup
+    me.christianrobert.orapgsync.transformer.type.TypeInfo exprType =
+        (b.getContext() != null)
+            ? b.getContext().getTypeEvaluator().getType(firstArgExpr)
+            : me.christianrobert.orapgsync.transformer.type.TypeInfo.UNKNOWN;
+
     boolean isDateRound = false;
 
-    if (args.size() == 2) {
-      // Check if 2nd argument looks like a date format string
-      String secondArgText = args.get(1).getText(); // UNTRANSFORMED
-      if (isDateFormatString(secondArgText)) {
-        isDateRound = true;
+    if (exprType.isDate()) {
+      // Type inference says this is a date → use date transformation
+      isDateRound = true;
+    } else if (exprType.isUnknown()) {
+      // STEP 2: Type unknown → fall back to heuristics
+      if (args.size() == 2) {
+        // Check if 2nd argument looks like a date format string
+        String secondArgText = args.get(1).getText(); // UNTRANSFORMED
+        if (isDateFormatString(secondArgText)) {
+          isDateRound = true;
+        }
+      } else if (args.size() == 1) {
+        // Check if 1st argument looks like a date expression
+        String firstArgText = args.get(0).getText(); // UNTRANSFORMED
+        if (containsDateExpression(firstArgText)) {
+          isDateRound = true;
+        }
       }
-    } else if (args.size() == 1) {
-      // Check if 1st argument looks like a date expression
-      String firstArgText = args.get(0).getText(); // UNTRANSFORMED
-      if (containsDateExpression(firstArgText)) {
-        isDateRound = true;
-      }
-      // Otherwise: default to numeric ROUND (safer)
     }
+    // STEP 3: If type is numeric or anything else → numeric ROUND
 
     if (!isDateRound) {
       // Numeric ROUND: pass through unchanged
@@ -347,8 +384,10 @@ public class DateFunctionTransformer {
    *   <li>Year (YYYY): July 1st - EXTRACT(MONTH FROM date) >= 7</li>
    *   <li>Quarter (Q): 2nd month of quarter - complex logic</li>
    * </ul>
+   *
+   * <p>Public to allow VisitNumericFunction to access it for ROUND delegation.
    */
-  private static String buildDateRoundExpression(String dateExpr, String oracleFormat) {
+  public static String buildDateRoundExpression(String dateExpr, String oracleFormat) {
     String pgFormat = mapOracleDateFormatToPostgres(oracleFormat);
     String extractField;
     int threshold;

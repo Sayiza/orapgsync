@@ -321,12 +321,12 @@ public class OracleFunctionTransformationTest {
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
         String postgresSql = builder.visit(parseResult.getTree());
 
-        // Then: SYSDATE should be transformed in arithmetic expression
+        // Then: SYSDATE should be transformed in arithmetic expression with INTERVAL
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
         assertTrue(normalized.contains("CURRENT_TIMESTAMP"), "SYSDATE should be transformed");
-        assertTrue(normalized.contains("- 30"), "Subtraction should be preserved");
-        assertTrue(normalized.contains("hire_date > CURRENT_TIMESTAMP - 30"),
-            "Arithmetic expression should be correct");
+        assertTrue(normalized.contains("INTERVAL '30 days'"), "Date arithmetic should use INTERVAL syntax");
+        assertTrue(normalized.contains("hire_date > CURRENT_TIMESTAMP - INTERVAL '30 days'"),
+            "Arithmetic expression should use correct PostgreSQL date arithmetic syntax");
     }
 
     @Test
