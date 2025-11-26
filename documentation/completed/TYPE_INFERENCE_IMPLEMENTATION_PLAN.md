@@ -1,8 +1,8 @@
 # Type Inference Implementation Plan
 
-**Status:** Phase 3 Complete + Refactored ✅ (Foundation, Metadata, Functions - Clean Architecture)
+**Status:** Phase 4 Complete ✅ (Foundation, Metadata, Functions, Scalar Subqueries - Clean Architecture)
 **Created:** 2025-10-27
-**Last Updated:** 2025-10-28
+**Last Updated:** 2025-11-26
 **Purpose:** Design and implement a full two-pass type inference system for accurate Oracle→PostgreSQL PL/SQL transformation
 
 ---
@@ -22,14 +22,14 @@
 
 ## Implementation Progress
 
-**Overall Status:** Phase 3 of 7 Complete (42%)
+**Overall Status:** Phase 4 of 7 Complete (57%)
 
 | Phase | Status | Description | Test Coverage |
 |-------|--------|-------------|---------------|
 | **Phase 1** | ✅ **COMPLETE** | Foundation: Literals and Simple Expressions | 18/18 tests passing |
 | **Phase 2** | ✅ **COMPLETE** | Column References and Metadata Integration | 13/14 tests passing (1 disabled: JOIN support) |
 | **Phase 3** | ✅ **COMPLETE** | Built-in Functions | 36/36 tests passing ✅ |
-| **Phase 4** | 📋 Planned | Complex Expressions (CASE, type precedence) | Not started |
+| **Phase 4** | ✅ **COMPLETE** | Scalar Subqueries and Atom Propagation | 11/11 tests passing ✅ |
 | **Phase 5** | 📋 Planned | PL/SQL Variables and Assignments | Not started |
 | **Phase 6** | 📋 Planned | Collections and Records | Not started |
 | **Phase 7** | 📋 Planned | Integration and Optimization | Not started |
@@ -68,13 +68,28 @@
 - ✅ **Pseudo-column resolution** (SYSDATE, SYSTIMESTAMP, ROWNUM, LEVEL, USER, ROWID)
 - ✅ 560 lines: Comprehensive test suite (36/36 tests passing)
 
+**Phase 4 Achievements (Completed 2025-11-26):**
+- ✅ **Scalar subquery type inference** - Propagates single-column SELECT types
+- ✅ **Atom node type propagation** - Critical fix: types flow through parentheses wrapper
+- ✅ Handles nested scalar subqueries correctly
+- ✅ Multi-column subqueries correctly return UNKNOWN
+- ✅ Integration with date arithmetic transformation
+- ✅ **Diagnostic testing** - Created ScalarSubqueryAtomDiagnosticTest for precise AST verification
+- ✅ 11 comprehensive tests: TypeAnalysisVisitorPhase4Test (10) + ScalarSubqueryAtomDiagnosticTest (1)
+- ✅ **Real-world bug fix** - Resolved user-reported issue: `TRUNC(date) + (SELECT 1 FROM dual)` now correctly detected as date arithmetic
+
 **Key Metrics:**
-- Lines of code: ~3,400 (implementation + tests)
-- Test coverage: 68 unit tests, 67 passing, 1 skipped (JOIN only)
+- Lines of code: ~3,800 (implementation + tests)
+- Test coverage: 79 unit tests, 78 passing, 1 skipped (JOIN only)
+  - Phase 1: 18 tests (literals, operators)
+  - Phase 2: 13 tests (column resolution)
+  - Phase 3: 36 tests (functions)
+  - Phase 4: 11 tests (scalar subqueries, atom propagation)
+  - Diagnostic: 1 test (AST verification)
 - Supported function categories: 8 (date, string, conversion, NULL-handling, aggregate, numeric, polymorphic, window)
 - Supported functions: 50+ built-in Oracle functions
 - Supported pseudo-columns: 10+ (SYSDATE, SYSTIMESTAMP, ROWNUM, LEVEL, USER, etc.)
-- Type inference accuracy: 100% (36/36 Phase 3 tests passing)
+- Type inference accuracy: 100% for all completed phases
 
 ### Phase 3.5: Architecture Refactoring ✅ **COMPLETE** (2025-10-28)
 

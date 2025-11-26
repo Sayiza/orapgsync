@@ -437,6 +437,40 @@ public class TypeAnalysisVisitor extends PlSqlParserBaseVisitor<TypeInfo> {
     // ========== Phase 4: Complex Expressions (Scalar Subqueries) ==========
 
     /**
+     * Visit atom to propagate subquery types through parentheses.
+     *
+     * <p>In the AST, subqueries are wrapped in Atom nodes like this:</p>
+     * <pre>
+     * Atom
+     *   "("
+     *   Subquery  <- We infer type here
+     *   ")"
+     * </pre>
+     *
+     * <p>This visitor ensures the Atom node gets the same type as its subquery child.</p>
+     */
+    @Override
+    public TypeInfo visitAtom(AtomContext ctx) {
+        // Visit children first (populates cache for subquery)
+        visitChildren(ctx);
+
+        // If this atom contains a subquery, propagate its type
+        if (ctx.subquery() != null) {
+            String subqueryKey = nodeKey(ctx.subquery());
+            TypeInfo subqueryType = typeCache.getOrDefault(subqueryKey, TypeInfo.UNKNOWN);
+
+            // Cache the atom with the same type as the subquery
+            return cacheAndReturn(ctx, subqueryType);
+        }
+
+        // For other atoms (constants, expressions), use default behavior
+        // The visit() method will have already cached types from visitChildren()
+        String key = nodeKey(ctx);
+        TypeInfo cachedType = typeCache.getOrDefault(key, TypeInfo.UNKNOWN);
+        return cachedType;
+    }
+
+    /**
      * Visit subquery to infer scalar subquery types.
      *
      * <p>A scalar subquery is a subquery that returns a single column value.
