@@ -27,9 +27,9 @@
 | Phase | Status | Description | Test Coverage |
 |-------|--------|-------------|---------------|
 | **Phase 1** | ✅ **COMPLETE** | Foundation: Literals and Simple Expressions | 18/18 tests passing |
-| **Phase 2** | ✅ **COMPLETE** | Column References and Metadata Integration | 13/14 tests passing (1 disabled: JOIN support) |
+| **Phase 2** | ✅ **COMPLETE** | Column References and Metadata Integration | 14/14 tests passing ✅ |
 | **Phase 3** | ✅ **COMPLETE** | Built-in Functions | 36/36 tests passing ✅ |
-| **Phase 4** | ✅ **COMPLETE** | Scalar Subqueries and Atom Propagation | 11/11 tests passing ✅ |
+| **Phase 4** | ✅ **COMPLETE** | Scalar Subqueries and Atom Propagation | 10/10 tests passing ✅ |
 | **Phase 5** | 📋 Planned | PL/SQL Variables and Assignments | Not started |
 | **Phase 6** | 📋 Planned | Collections and Records | Not started |
 | **Phase 7** | 📋 Planned | Integration and Optimization | Not started |
@@ -48,10 +48,13 @@
 - ✅ Unqualified column resolution (SELECT emp_id FROM employees)
 - ✅ Qualified column resolution (SELECT e.emp_id FROM employees e)
 - ✅ Table alias support (with and without AS keyword)
+- ✅ **JOIN support** (2025-11-27): Extracts table aliases from both FROM and JOIN clauses
+  - Refactored extraction logic into reusable helper method
+  - Handles INNER, LEFT, RIGHT, FULL, CROSS JOINs
+  - Resolves qualified columns across multiple joined tables
 - ✅ Oracle type mapping (NUMBER→NUMERIC, VARCHAR2→TEXT, DATE→DATE, TIMESTAMP→DATE)
 - ✅ Integration with TransformationIndices for O(1) metadata lookups
-- ✅ 350 lines: Comprehensive test suite (13 tests passing, 1 disabled for JOIN enhancement)
-- ⚠️ JOIN support needs additional work (Phase 2.1 - deferred)
+- ✅ 350 lines: Comprehensive test suite (14/14 tests passing)
 
 **Phase 3 Achievements:**
 - ✅ 600+ lines: Built-in function return type resolution
@@ -80,11 +83,11 @@
 
 **Key Metrics:**
 - Lines of code: ~3,800 (implementation + tests)
-- Test coverage: 79 unit tests, 78 passing, 1 skipped (JOIN only)
+- Test coverage: 79 unit tests, 79 passing, 0 skipped ✅
   - Phase 1: 18 tests (literals, operators)
-  - Phase 2: 13 tests (column resolution)
+  - Phase 2: 14 tests (column resolution, JOIN support)
   - Phase 3: 36 tests (functions)
-  - Phase 4: 11 tests (scalar subqueries, atom propagation)
+  - Phase 4: 10 tests (scalar subqueries, atom propagation)
   - Diagnostic: 1 test (AST verification)
 - Supported function categories: 8 (date, string, conversion, NULL-handling, aggregate, numeric, polymorphic, window)
 - Supported functions: 50+ built-in Oracle functions

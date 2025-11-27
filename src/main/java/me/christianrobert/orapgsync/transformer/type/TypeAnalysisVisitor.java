@@ -222,20 +222,46 @@ public class TypeAnalysisVisitor extends PlSqlParserBaseVisitor<TypeInfo> {
     /**
      * Extracts table name and alias from a table reference.
      *
+     * <p>Handles both main FROM clause tables and JOIN clause tables.</p>
+     *
      * <p>Examples:
      * <ul>
      *   <li>FROM employees → "employees" → "employees"</li>
      *   <li>FROM employees emp → "emp" → "employees"</li>
      *   <li>FROM hr.employees e → "e" → "employees"</li>
+     *   <li>FROM employees e JOIN departments d → extracts both "e" and "d"</li>
      * </ul>
      */
     private void extractTableAlias(Table_refContext ctx) {
-        if (ctx.table_ref_aux() == null) {
+        // Step 1: Process main table (from table_ref_aux)
+        if (ctx.table_ref_aux() != null) {
+            extractTableAliasFromAux(ctx.table_ref_aux());
+        }
+
+        // Step 2: Process JOIN clauses (if any)
+        if (ctx.join_clause() != null && !ctx.join_clause().isEmpty()) {
+            for (Join_clauseContext joinCtx : ctx.join_clause()) {
+                if (joinCtx.table_ref_aux() != null) {
+                    extractTableAliasFromAux(joinCtx.table_ref_aux());
+                }
+            }
+        }
+    }
+
+    /**
+     * Extracts table name and alias from a table_ref_aux context.
+     *
+     * <p>This helper method is reused for both main FROM clause tables and JOIN clause tables.</p>
+     *
+     * @param auxCtx Table reference auxiliary context
+     */
+    private void extractTableAliasFromAux(Table_ref_auxContext auxCtx) {
+        if (auxCtx == null) {
             return;
         }
 
         // Get table name
-        Table_ref_aux_internalContext aux = ctx.table_ref_aux().table_ref_aux_internal();
+        Table_ref_aux_internalContext aux = auxCtx.table_ref_aux_internal();
         if (aux == null) {
             return;
         }
@@ -259,8 +285,8 @@ public class TypeAnalysisVisitor extends PlSqlParserBaseVisitor<TypeInfo> {
 
         // Get alias (if exists)
         String alias = tableName;  // Default: use table name as alias
-        if (ctx.table_ref_aux().table_alias() != null) {
-            String explicitAlias = ctx.table_ref_aux().table_alias().getText();
+        if (auxCtx.table_alias() != null) {
+            String explicitAlias = auxCtx.table_alias().getText();
             if (explicitAlias != null && !explicitAlias.trim().isEmpty()) {
                 // Remove AS keyword if present
                 explicitAlias = explicitAlias.replaceFirst("(?i)^AS\\s+", "");
@@ -280,6 +306,16 @@ public class TypeAnalysisVisitor extends PlSqlParserBaseVisitor<TypeInfo> {
      * Extracts table name from tableview_name context.
      *
      * <p>Handles qualified names (schema.table) and simple names (table).</p>
+     *
+     * <p><b>IMPORTANT:</b> Preserves schema qualification when explicitly specified.
+     * This ensures that cross-schema table references resolve correctly regardless
+     * of the current transformation context schema.</p>
+     *
+     * <p>Examples:</p>
+     * <ul>
+     *   <li>co_abs.abs_werk_sperren → "co_abs.abs_werk_sperren" (qualified, preserved)</li>
+     *   <li>employees → "employees" (unqualified, just table name)</li>
+     * </ul>
      */
     private String extractTableName(Tableview_nameContext ctx) {
         if (ctx.identifier() == null) {
@@ -291,12 +327,9 @@ public class TypeAnalysisVisitor extends PlSqlParserBaseVisitor<TypeInfo> {
             return null;
         }
 
-        // Handle qualified names: schema.table → table
-        if (fullName.contains(".")) {
-            String[] parts = fullName.split("\\.");
-            return parts[parts.length - 1];  // Return last part (table name)
-        }
-
+        // PRESERVE schema qualification if present
+        // This allows ResolveColumn to use the explicitly specified schema
+        // instead of defaulting to currentSchema
         return fullName;
     }
 

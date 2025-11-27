@@ -269,11 +269,7 @@ class TypeAnalysisVisitorPhase2Test {
 
     // ========== JOIN Scenarios ==========
 
-    // TODO: JOIN support needs additional work - JOIN clauses have different AST structure
-    // Currently extractTableAlias() only handles simple FROM clause table references
-    // Need to enhance to handle JOIN ... ON clauses with multiple tables
     @Test
-    @org.junit.jupiter.api.Disabled("JOIN support needs enhancement - Phase 2.1")
     void join_withMultipleTables_shouldResolveColumns() {
         // Given: JOIN with qualified columns
         String sql = """

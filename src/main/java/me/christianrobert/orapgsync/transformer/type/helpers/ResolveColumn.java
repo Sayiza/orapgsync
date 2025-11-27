@@ -91,6 +91,9 @@ public final class ResolveColumn {
      * Resolves unqualified column reference.
      *
      * <p>Tries to resolve from all tables in current FROM clause.</p>
+     *
+     * <p><b>Cross-schema support:</b> Table names in aliases may be schema-qualified.
+     * This method handles both simple and qualified table names.</p>
      */
     private static TypeInfo resolveUnqualified(String columnName,
                                                 String currentSchema,
@@ -102,7 +105,19 @@ public final class ResolveColumn {
 
         // Try each table in the current FROM clause
         for (String tableName : tableAliases.values()) {
-            TypeInfo type = lookup(currentSchema, tableName, columnName, indices);
+            TypeInfo type;
+
+            if (tableName.contains(".")) {
+                // Schema-qualified: extract schema and table
+                String[] parts = tableName.split("\\.", 2);
+                String schema = parts[0];
+                String table = parts[1];
+                type = lookup(schema, table, columnName, indices);
+            } else {
+                // Unqualified: use current schema
+                type = lookup(currentSchema, tableName, columnName, indices);
+            }
+
             if (!type.isUnknown()) {
                 log.trace("Resolved unqualified column {} to type {} from table {}",
                     columnName, type.getCategory(), tableName);
@@ -118,6 +133,11 @@ public final class ResolveColumn {
      * Resolves qualified column reference: qualifier.column.
      *
      * <p>The qualifier could be a table name or alias.</p>
+     *
+     * <p><b>Cross-schema support:</b> Table aliases may contain schema-qualified
+     * table names (e.g., "co_abs.abs_werk_sperren") when tables are explicitly
+     * schema-qualified in FROM clauses. This method parses the qualified name
+     * and uses the explicit schema instead of currentSchema.</p>
      */
     private static TypeInfo resolveQualified(String qualifier,
                                              String columnName,
@@ -131,12 +151,30 @@ public final class ResolveColumn {
         // Check if qualifier is a table alias
         String tableName = tableAliases.get(qualifier);
         if (tableName != null) {
-            // Alias found - lookup column in that table
-            TypeInfo type = lookup(currentSchema, tableName, columnName, indices);
-            if (!type.isUnknown()) {
-                log.trace("Resolved qualified column {}.{} (alias) to type {}",
-                    qualifier, columnName, type.getCategory());
-                return type;
+            // Alias found - table name could be:
+            // 1. Simple: "employees"
+            // 2. Schema-qualified: "co_abs.abs_werk_sperren"
+
+            if (tableName.contains(".")) {
+                // Schema-qualified: extract schema and table
+                String[] parts = tableName.split("\\.", 2);
+                String explicitSchema = parts[0];
+                String table = parts[1];
+
+                TypeInfo type = lookup(explicitSchema, table, columnName, indices);
+                if (!type.isUnknown()) {
+                    log.trace("Resolved qualified column {}.{} (alias → {}) to type {}",
+                        qualifier, columnName, tableName, type.getCategory());
+                    return type;
+                }
+            } else {
+                // Unqualified: use current schema
+                TypeInfo type = lookup(currentSchema, tableName, columnName, indices);
+                if (!type.isUnknown()) {
+                    log.trace("Resolved qualified column {}.{} (alias → {}) to type {}",
+                        qualifier, columnName, tableName, type.getCategory());
+                    return type;
+                }
             }
         }
 
