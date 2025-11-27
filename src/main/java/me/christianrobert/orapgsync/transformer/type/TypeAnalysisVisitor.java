@@ -8,10 +8,7 @@ import org.antlr.v4.runtime.ParserRuleContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayDeque;
-import java.util.Deque;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.*;
 
 /**
  * First pass: Type inference visitor.
@@ -37,11 +34,13 @@ public class TypeAnalysisVisitor extends PlSqlParserBaseVisitor<TypeInfo> {
     private final TransformationIndices indices;
     private final Map<String, TypeInfo> typeCache;  // Shared with FullTypeEvaluator
 
-    // Scope management for PL/SQL variables (Phase 1: not used yet)
+    // Scope management for PL/SQL variables (Phase 5+)
     private final Deque<Map<String, TypeInfo>> scopeStack = new ArrayDeque<>();
 
-    // Query-local state (Phase 1: not used yet)
-    private final Map<String, String> tableAliases = new HashMap<>();
+    // Query scope management for table aliases (Phase 4.5: hierarchical subquery scopes)
+    // Each scope represents a query level (outer query, subquery, etc.)
+    // Inner scopes can reference outer scopes (correlated subqueries)
+    private final Deque<Map<String, String>> tableAliasScopes = new ArrayDeque<>();
 
     /**
      * Creates a type analysis visitor.
@@ -64,6 +63,9 @@ public class TypeAnalysisVisitor extends PlSqlParserBaseVisitor<TypeInfo> {
         this.currentSchema = currentSchema;
         this.indices = indices;
         this.typeCache = typeCache;
+
+        // Initialize with global query scope
+        tableAliasScopes.push(new HashMap<>());
 
         log.debug("TypeAnalysisVisitor created for schema: {}", currentSchema);
     }
@@ -186,22 +188,29 @@ public class TypeAnalysisVisitor extends PlSqlParserBaseVisitor<TypeInfo> {
     /**
      * Visit query_block to capture table aliases from FROM clause.
      *
-     * <p>Phase 2: Tracks table aliases for column resolution within this query block.</p>
+     * <p>Phase 4.5: Creates new query scope for table aliases.
+     * This ensures subqueries don't pollute outer query aliases.</p>
      */
     @Override
     public TypeInfo visitQuery_block(Query_blockContext ctx) {
-        // Clear table aliases for this query block
-        tableAliases.clear();
+        // Enter new query scope
+        enterQueryScope();
 
-        // Visit FROM clause first to populate table aliases
-        if (ctx.from_clause() != null) {
-            visitFromClauseForAliases(ctx.from_clause());
+        try {
+            // Visit FROM clause first to populate table aliases for THIS query level
+            if (ctx.from_clause() != null) {
+                visitFromClauseForAliases(ctx.from_clause());
+            }
+
+            // Now visit children (SELECT, WHERE, etc.) - they can use the aliases
+            // Subqueries will create their own scopes via recursive visitQuery_block calls
+            TypeInfo result = visitChildren(ctx);
+
+            return cacheAndReturn(ctx, result);
+        } finally {
+            // Exit query scope (even if exception occurs)
+            exitQueryScope();
         }
-
-        // Now visit children (SELECT, WHERE, etc.) - they can use the aliases
-        TypeInfo result = visitChildren(ctx);
-
-        return cacheAndReturn(ctx, result);
     }
 
     /**
@@ -298,7 +307,8 @@ public class TypeAnalysisVisitor extends PlSqlParserBaseVisitor<TypeInfo> {
         String normalizedAlias = alias.toLowerCase();
         String normalizedTable = tableName.toLowerCase();
 
-        tableAliases.put(normalizedAlias, normalizedTable);
+        // Register alias in current query scope
+        declareTableAlias(normalizedAlias, normalizedTable);
         log.trace("Captured table alias: {} → {}", normalizedAlias, normalizedTable);
     }
 
@@ -374,8 +384,8 @@ public class TypeAnalysisVisitor extends PlSqlParserBaseVisitor<TypeInfo> {
             }
         }
 
-        // Delegate to column resolution helper
-        TypeInfo columnType = ResolveColumn.resolve(ctx, currentSchema, indices, tableAliases);
+        // Delegate to column resolution helper (uses hierarchical scope lookup)
+        TypeInfo columnType = ResolveColumn.resolve(ctx, currentSchema, indices, this::resolveTableAlias, this::getAllTablesInScope);
         return cacheAndReturn(ctx, columnType);
     }
 
@@ -470,37 +480,58 @@ public class TypeAnalysisVisitor extends PlSqlParserBaseVisitor<TypeInfo> {
     // ========== Phase 4: Complex Expressions (Scalar Subqueries) ==========
 
     /**
-     * Visit atom to propagate subquery types through parentheses.
+     * Visit atom to propagate types through parentheses.
      *
-     * <p>In the AST, subqueries are wrapped in Atom nodes like this:</p>
+     * <p>In the AST, parenthesized expressions are wrapped in Atom nodes like this:</p>
      * <pre>
-     * Atom
-     *   "("
-     *   Subquery  <- We infer type here
-     *   ")"
+     * Atom cases:
+     *   1. '(' subquery ')'              <- Scalar subquery
+     *   2. '(' expressions_ ')'          <- Parenthesized expression (e.g., (42), (salary + 1000))
+     *   3. constant                      <- Already has type from visitConstant
+     *   4. general_element               <- Already has type from visitGeneral_element
+     *   5. bind_variable                 <- Variable reference
      * </pre>
      *
-     * <p>This visitor ensures the Atom node gets the same type as its subquery child.</p>
+     * <p>This visitor ensures the Atom node propagates types correctly in all cases.</p>
      */
     @Override
     public TypeInfo visitAtom(AtomContext ctx) {
-        // Visit children first (populates cache for subquery)
+        // Visit children first (populates cache for child nodes)
         visitChildren(ctx);
 
-        // If this atom contains a subquery, propagate its type
+        // Case 1: Atom wraps a scalar subquery - '(' subquery ')'
         if (ctx.subquery() != null) {
             String subqueryKey = nodeKey(ctx.subquery());
             TypeInfo subqueryType = typeCache.getOrDefault(subqueryKey, TypeInfo.UNKNOWN);
-
-            // Cache the atom with the same type as the subquery
             return cacheAndReturn(ctx, subqueryType);
         }
 
-        // For other atoms (constants, expressions), use default behavior
-        // The visit() method will have already cached types from visitChildren()
-        String key = nodeKey(ctx);
-        TypeInfo cachedType = typeCache.getOrDefault(key, TypeInfo.UNKNOWN);
-        return cachedType;
+        // Case 2: Atom wraps a parenthesized expression - '(' expressions_ ')'
+        if (ctx.expressions_() != null) {
+            // Get the first expression from expressions_ (for single-expression parentheses)
+            if (ctx.expressions_().expression() != null && !ctx.expressions_().expression().isEmpty()) {
+                ExpressionContext firstExpr = ctx.expressions_().expression().get(0);
+                String exprKey = nodeKey(firstExpr);
+                TypeInfo exprType = typeCache.getOrDefault(exprKey, TypeInfo.UNKNOWN);
+                return cacheAndReturn(ctx, exprType);
+            }
+        }
+
+        // Case 3-5: For other atom types (constant, general_element, bind_variable),
+        // try to find a child with a cached type
+        for (int i = 0; i < ctx.getChildCount(); i++) {
+            org.antlr.v4.runtime.tree.ParseTree child = ctx.getChild(i);
+            if (child instanceof ParserRuleContext) {
+                String childKey = nodeKey((ParserRuleContext) child);
+                TypeInfo childType = typeCache.get(childKey);
+                if (childType != null && !childType.isUnknown()) {
+                    return cacheAndReturn(ctx, childType);
+                }
+            }
+        }
+
+        // Fallback: UNKNOWN
+        return cacheAndReturn(ctx, TypeInfo.UNKNOWN);
     }
 
     /**
@@ -579,7 +610,93 @@ public class TypeAnalysisVisitor extends PlSqlParserBaseVisitor<TypeInfo> {
         return TypeInfo.UNKNOWN;
     }
 
-    // ========== Scope Management (Phase 5+) ==========
+    // ========== Query Scope Management (Phase 4.5) ==========
+
+    /**
+     * Enters a new query scope (for subqueries).
+     *
+     * <p>Phase 4.5: Creates new table alias scope to prevent pollution.</p>
+     */
+    protected void enterQueryScope() {
+        tableAliasScopes.push(new HashMap<>());
+        log.trace("Entered new query scope, depth: {}", tableAliasScopes.size());
+    }
+
+    /**
+     * Exits current query scope.
+     *
+     * <p>Phase 4.5: Removes current query's table aliases.</p>
+     */
+    protected void exitQueryScope() {
+        if (!tableAliasScopes.isEmpty()) {
+            Map<String, String> scope = tableAliasScopes.pop();
+            log.trace("Exited query scope, {} aliases dropped", scope.size());
+        }
+    }
+
+    /**
+     * Declares a table alias in current query scope.
+     *
+     * <p>Phase 4.5: Registers table alias for column resolution.</p>
+     *
+     * @param alias Table alias (normalized to lowercase)
+     * @param tableName Actual table name (normalized to lowercase)
+     */
+    protected void declareTableAlias(String alias, String tableName) {
+        if (!tableAliasScopes.isEmpty() && alias != null && tableName != null) {
+            tableAliasScopes.peek().put(alias, tableName);
+            log.trace("Declared table alias: {} → {}", alias, tableName);
+        }
+    }
+
+    /**
+     * Resolves table alias, searching from innermost to outermost query scope.
+     *
+     * <p>Phase 4.5: Supports correlated subqueries (inner queries can reference outer tables).</p>
+     *
+     * @param alias Table alias to resolve
+     * @return Actual table name, or null if not found
+     */
+    public String resolveTableAlias(String alias) {
+        if (alias == null) {
+            return null;
+        }
+
+        String normalizedAlias = alias.toLowerCase();
+
+        // Search from inner to outer query scopes
+        for (Map<String, String> scope : tableAliasScopes) {
+            String tableName = scope.get(normalizedAlias);
+            if (tableName != null) {
+                log.trace("Resolved table alias {} to {}", normalizedAlias, tableName);
+                return tableName;
+            }
+        }
+
+        log.trace("Table alias {} not found in any query scope", normalizedAlias);
+        return null;
+    }
+
+    /**
+     * Gets all unique table names visible in current query scope.
+     *
+     * <p>Phase 4.5: Collects table names from current and all outer scopes.
+     * Used for unqualified column resolution.</p>
+     *
+     * @return Collection of all visible table names (may include schema-qualified names)
+     */
+    public Collection<String> getAllTablesInScope() {
+        java.util.Set<String> allTables = new java.util.LinkedHashSet<>();
+
+        // Collect unique table names from all scopes (inner to outer)
+        for (Map<String, String> scope : tableAliasScopes) {
+            allTables.addAll(scope.values());
+        }
+
+        return allTables;
+    }
+
+    // ========== PL/SQL Variable Scope Management (Phase 5+) ==========
     // Currently unused - will be implemented in Phase 5
 
     /**

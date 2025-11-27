@@ -1,8 +1,8 @@
 # Type Inference Implementation Plan
 
-**Status:** Phase 4 Complete ✅ (Foundation, Metadata, Functions, Scalar Subqueries - Clean Architecture)
+**Status:** Phase 4.5 In Progress 🔄 (Query Scope Stack Fix)
 **Created:** 2025-10-27
-**Last Updated:** 2025-11-26
+**Last Updated:** 2025-11-27
 **Purpose:** Design and implement a full two-pass type inference system for accurate Oracle→PostgreSQL PL/SQL transformation
 
 ---
@@ -22,14 +22,15 @@
 
 ## Implementation Progress
 
-**Overall Status:** Phase 4 of 7 Complete (57%)
+**Overall Status:** Phase 4.5 of 7 In Progress (62%)
 
 | Phase | Status | Description | Test Coverage |
 |-------|--------|-------------|---------------|
 | **Phase 1** | ✅ **COMPLETE** | Foundation: Literals and Simple Expressions | 18/18 tests passing |
 | **Phase 2** | ✅ **COMPLETE** | Column References and Metadata Integration | 14/14 tests passing ✅ |
 | **Phase 3** | ✅ **COMPLETE** | Built-in Functions | 36/36 tests passing ✅ |
-| **Phase 4** | ✅ **COMPLETE** | Scalar Subqueries and Atom Propagation | 10/10 tests passing ✅ |
+| **Phase 4** | ✅ **COMPLETE** | Parenthesized Expressions and Type Bubbling | 22/22 tests passing ✅ |
+| **Phase 4.5** | 🔄 **IN PROGRESS** | Query Scope Stack (Subquery Isolation) | Bug identified, fix in progress |
 | **Phase 5** | 📋 Planned | PL/SQL Variables and Assignments | Not started |
 | **Phase 6** | 📋 Planned | Collections and Records | Not started |
 | **Phase 7** | 📋 Planned | Integration and Optimization | Not started |
@@ -71,24 +72,70 @@
 - ✅ **Pseudo-column resolution** (SYSDATE, SYSTIMESTAMP, ROWNUM, LEVEL, USER, ROWID)
 - ✅ 560 lines: Comprehensive test suite (36/36 tests passing)
 
-**Phase 4 Achievements (Completed 2025-11-26):**
+**Phase 4 Achievements (Completed 2025-11-27):**
 - ✅ **Scalar subquery type inference** - Propagates single-column SELECT types
-- ✅ **Atom node type propagation** - Critical fix: types flow through parentheses wrapper
+- ✅ **Atom node type propagation** - Critical fix: types flow through ALL parenthesized expressions
+  - **Initial fix (2025-11-26):** Handled `'(' subquery ')'` case only
+  - **Complete fix (2025-11-27):** Now handles ALL Atom cases:
+    - `'(' subquery ')'` - Scalar subqueries: `(SELECT 1 FROM dual)`
+    - `'(' expressions_ ')'` - Parenthesized expressions: `(42)`, `(salary + 1000)`, `((nested))`
+    - `constant`, `general_element`, `bind_variable` - Other atom types
 - ✅ Handles nested scalar subqueries correctly
+- ✅ Handles nested parentheses correctly: `((42))` propagates NUMERIC through all levels
 - ✅ Multi-column subqueries correctly return UNKNOWN
 - ✅ Integration with date arithmetic transformation
-- ✅ **Diagnostic testing** - Created ScalarSubqueryAtomDiagnosticTest for precise AST verification
-- ✅ 11 comprehensive tests: TypeAnalysisVisitorPhase4Test (10) + ScalarSubqueryAtomDiagnosticTest (1)
-- ✅ **Real-world bug fix** - Resolved user-reported issue: `TRUNC(date) + (SELECT 1 FROM dual)` now correctly detected as date arithmetic
+- ✅ **Comprehensive testing** - 3 test classes with full coverage:
+  - TypeAnalysisVisitorPhase4Test (10 tests) - Scalar subqueries
+  - ScalarSubqueryAtomDiagnosticTest (1 test) - AST structure verification
+  - ParenthesizedExpressionTypeBubblingTest (11 tests) - All parenthesized expression cases
+- ✅ **Real-world bug fixes:**
+  - `TRUNC(date) + (SELECT 1 FROM dual)` - Scalar subquery in date arithmetic (2025-11-26)
+  - `(hire_date) + 30` - Parenthesized column in date arithmetic (2025-11-27)
+  - `ROUND((salary))` - Parenthesized expression type detection (2025-11-27)
+
+**Phase 4.5 In Progress (Started 2025-11-27):**
+
+**Critical Bug Identified:** Table alias scope pollution in nested subqueries
+
+**Problem:**
+```sql
+-- Working case (no subquery):
+SELECT 1 FROM abs_werk_sperren ws1
+WHERE TRUNC(ws1.spa_abgelehnt_am) + 1 > CURRENT_DATE
+-- ✅ Correctly detects ws1.spa_abgelehnt_am as DATE
+
+-- Failing case (with subquery):
+SELECT 1 FROM abs_werk_sperren ws1
+WHERE TRUNC(ws1.spa_abgelehnt_am) + (SELECT 1 FROM dual) > CURRENT_DATE
+-- ❌ Fails to detect ws1.spa_abgelehnt_am as DATE (treats as NUMERIC)
+```
+
+**Root Cause Analysis:**
+- `TypeAnalysisVisitor.visitQuery_block()` line 194: `tableAliases.clear()`
+- When entering a subquery, the `clear()` call destroys the outer query's table aliases
+- Outer query column references can't be resolved after subquery completes
+- Type inference returns UNKNOWN → falls back to heuristic (fails)
+
+**Solution:** Query Scope Stack (mimics existing variable scope stack pattern)
+- Replace flat `Map<String, String> tableAliases` with `Deque<Map<String, String>> tableAliasScopes`
+- Push new scope on `enterQueryScope()`, pop on `exitQueryScope()`
+- Hierarchical resolution: inner queries can reference outer query tables (correlated subqueries)
+- Reuse pattern already proven in lines 41, 610-663 for PL/SQL variable scopes
+
+**Implementation Status:**
+- 🔄 Fix in progress
+- 📋 Test case identified: subquery with outer reference
+- 📋 Need to update ResolveColumn to use scoped resolution
 
 **Key Metrics:**
-- Lines of code: ~3,800 (implementation + tests)
-- Test coverage: 79 unit tests, 79 passing, 0 skipped ✅
+- Lines of code: ~4,200 (implementation + tests)
+- Test coverage: 90 unit tests, 90 passing, 0 skipped ✅
   - Phase 1: 18 tests (literals, operators)
   - Phase 2: 14 tests (column resolution, JOIN support)
   - Phase 3: 36 tests (functions)
-  - Phase 4: 10 tests (scalar subqueries, atom propagation)
+  - Phase 4: 10 tests (scalar subqueries)
   - Diagnostic: 1 test (AST verification)
+  - Parenthesized expressions: 11 tests (complete Atom coverage)
 - Supported function categories: 8 (date, string, conversion, NULL-handling, aggregate, numeric, polymorphic, window)
 - Supported functions: 50+ built-in Oracle functions
 - Supported pseudo-columns: 10+ (SYSDATE, SYSTIMESTAMP, ROWNUM, LEVEL, USER, etc.)
@@ -1319,6 +1366,44 @@ v_msg := 'Employee: ' || emp_id;  -- VARCHAR || NUMBER → VARCHAR (with convers
 - Operator type rules
 - Type precedence logic
 - Unit tests: `TypeAnalysisVisitorExpressionsTest.java`
+
+---
+
+### Phase 4.5: Query Scope Stack (Subquery Isolation) 🔄 **IN PROGRESS**
+
+**Goal:** Fix table alias scope pollution in nested subqueries.
+
+**Problem:**
+- Flat `Map<String, String> tableAliases` gets cleared when entering subqueries
+- Outer query table aliases are lost, causing column resolution failures
+- Type inference returns UNKNOWN for valid column references
+
+**Solution:**
+- Replace flat map with `Deque<Map<String, String>> tableAliasScopes`
+- Push new scope on `enterQueryScope()`, pop on `exitQueryScope()`
+- Hierarchical resolution: inner queries can reference outer query tables (correlated subqueries)
+- Reuse existing variable scope stack pattern (lines 41, 610-663)
+
+**Implementation Tasks:**
+1. ✅ Bug identified and root cause analyzed
+2. 🔄 Replace `tableAliases` with `tableAliasScopes` stack
+3. 🔄 Add `enterQueryScope()` and `exitQueryScope()` methods
+4. 🔄 Update `visitQuery_block()` to use try-finally pattern
+5. 🔄 Update `ResolveColumn` to use scoped resolution
+6. 🔄 Add test case: subquery with outer reference
+
+**Test Case:**
+```sql
+-- Should correctly detect spa_abgelehnt_am as DATE
+SELECT 1 FROM abs_werk_sperren ws1
+WHERE TRUNC(ws1.spa_abgelehnt_am) + (SELECT 1 FROM dual) > CURRENT_DATE
+```
+
+**Deliverables:**
+- Query scope management methods
+- Updated `visitQuery_block()` with proper scoping
+- Updated `ResolveColumn` for hierarchical resolution
+- Unit test: `TypeAnalysisVisitorQueryScopesTest.java`
 
 ---
 

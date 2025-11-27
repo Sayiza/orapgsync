@@ -7,17 +7,20 @@ import me.christianrobert.orapgsync.transformer.type.TypeInfo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Map;
+import java.util.Collection;
+import java.util.function.Function;
+import java.util.function.Supplier;
 
 /**
  * Static helper for resolving column types from metadata.
  *
- * <p>Handles column resolution from Phase 2:</p>
+ * <p>Handles column resolution from Phase 2-4.5:</p>
  * <ul>
  *   <li>Unqualified columns (emp_id)</li>
  *   <li>Qualified columns with table name (employees.emp_id)</li>
  *   <li>Qualified columns with alias (e.emp_id)</li>
  *   <li>Fully qualified (schema.table.column)</li>
+ *   <li>Phase 4.5: Hierarchical scope lookup for nested subqueries</li>
  * </ul>
  *
  * <p>Pattern: Static helper following PostgresCodeBuilder architecture.</p>
@@ -35,16 +38,20 @@ public final class ResolveColumn {
      *
      * <p>Handles both qualified and unqualified column references.</p>
      *
+     * <p>Phase 4.5: Uses hierarchical alias resolution to support nested subqueries.</p>
+     *
      * @param ctx General element context
      * @param currentSchema Current schema for lookups
      * @param indices Metadata indices
-     * @param tableAliases Table alias map (alias -> table name)
+     * @param aliasResolver Function to resolve table aliases (supports scope hierarchy)
+     * @param tableSupplier Supplier for all visible table names in current scope
      * @return TypeInfo from metadata, or UNKNOWN if not found
      */
     public static TypeInfo resolve(General_elementContext ctx,
                                     String currentSchema,
                                     TransformationIndices indices,
-                                    Map<String, String> tableAliases) {
+                                    Function<String, String> aliasResolver,
+                                    Supplier<Collection<String>> tableSupplier) {
         if (ctx == null || ctx.general_element_part() == null || ctx.general_element_part().isEmpty()) {
             return TypeInfo.UNKNOWN;
         }
@@ -54,13 +61,13 @@ public final class ResolveColumn {
         if (partCount == 1) {
             // Unqualified column: column_name
             String columnName = extractIdentifier(ctx.general_element_part().get(0));
-            return resolveUnqualified(columnName, currentSchema, indices, tableAliases);
+            return resolveUnqualified(columnName, currentSchema, indices, tableSupplier);
 
         } else if (partCount == 2) {
             // Qualified column: table.column or schema.table
             String qualifier = extractIdentifier(ctx.general_element_part().get(0));
             String columnName = extractIdentifier(ctx.general_element_part().get(1));
-            return resolveQualified(qualifier, columnName, currentSchema, indices, tableAliases);
+            return resolveQualified(qualifier, columnName, currentSchema, indices, aliasResolver);
 
         } else if (partCount == 3) {
             // Fully qualified: schema.table.column
@@ -92,19 +99,24 @@ public final class ResolveColumn {
      *
      * <p>Tries to resolve from all tables in current FROM clause.</p>
      *
-     * <p><b>Cross-schema support:</b> Table names in aliases may be schema-qualified.
+     * <p><b>Cross-schema support:</b> Table names may be schema-qualified.
      * This method handles both simple and qualified table names.</p>
+     *
+     * <p><b>Phase 4.5:</b> Uses hierarchical scope lookup - inner queries can access outer tables.</p>
      */
     private static TypeInfo resolveUnqualified(String columnName,
                                                 String currentSchema,
                                                 TransformationIndices indices,
-                                                Map<String, String> tableAliases) {
+                                                Supplier<Collection<String>> tableSupplier) {
         if (columnName == null) {
             return TypeInfo.UNKNOWN;
         }
 
-        // Try each table in the current FROM clause
-        for (String tableName : tableAliases.values()) {
+        // Get all visible tables from scope hierarchy
+        Collection<String> allTables = tableSupplier.get();
+
+        // Try each table in the current and outer FROM clauses
+        for (String tableName : allTables) {
             TypeInfo type;
 
             if (tableName.contains(".")) {
@@ -138,18 +150,20 @@ public final class ResolveColumn {
      * table names (e.g., "co_abs.abs_werk_sperren") when tables are explicitly
      * schema-qualified in FROM clauses. This method parses the qualified name
      * and uses the explicit schema instead of currentSchema.</p>
+     *
+     * <p><b>Phase 4.5:</b> Uses hierarchical alias resolution - inner queries can reference outer tables.</p>
      */
     private static TypeInfo resolveQualified(String qualifier,
                                              String columnName,
                                              String currentSchema,
                                              TransformationIndices indices,
-                                             Map<String, String> tableAliases) {
+                                             Function<String, String> aliasResolver) {
         if (qualifier == null || columnName == null) {
             return TypeInfo.UNKNOWN;
         }
 
-        // Check if qualifier is a table alias
-        String tableName = tableAliases.get(qualifier);
+        // Check if qualifier is a table alias (searches all scopes)
+        String tableName = aliasResolver.apply(qualifier);
         if (tableName != null) {
             // Alias found - table name could be:
             // 1. Simple: "employees"
