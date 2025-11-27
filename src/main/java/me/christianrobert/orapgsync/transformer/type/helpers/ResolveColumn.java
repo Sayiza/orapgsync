@@ -8,19 +8,21 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Collection;
+import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
  * Static helper for resolving column types from metadata.
  *
- * <p>Handles column resolution from Phase 2-4.5:</p>
+ * <p>Handles column resolution from Phase 2-4.6:</p>
  * <ul>
  *   <li>Unqualified columns (emp_id)</li>
  *   <li>Qualified columns with table name (employees.emp_id)</li>
  *   <li>Qualified columns with alias (e.emp_id)</li>
  *   <li>Fully qualified (schema.table.column)</li>
  *   <li>Phase 4.5: Hierarchical scope lookup for nested subqueries</li>
+ *   <li>Phase 4.6: CTE column resolution (checked before tables)</li>
  * </ul>
  *
  * <p>Pattern: Static helper following PostgresCodeBuilder architecture.</p>
@@ -34,24 +36,27 @@ public final class ResolveColumn {
     }
 
     /**
-     * Resolves column type from metadata.
+     * Resolves column type from metadata or CTEs.
      *
      * <p>Handles both qualified and unqualified column references.</p>
      *
      * <p>Phase 4.5: Uses hierarchical alias resolution to support nested subqueries.</p>
+     * <p>Phase 4.6: Checks CTEs before checking real tables.</p>
      *
      * @param ctx General element context
      * @param currentSchema Current schema for lookups
      * @param indices Metadata indices
      * @param aliasResolver Function to resolve table aliases (supports scope hierarchy)
      * @param tableSupplier Supplier for all visible table names in current scope
-     * @return TypeInfo from metadata, or UNKNOWN if not found
+     * @param cteColumnResolver BiFunction to resolve CTE column types (cteName, columnName -> TypeInfo)
+     * @return TypeInfo from metadata/CTE, or UNKNOWN if not found
      */
     public static TypeInfo resolve(General_elementContext ctx,
                                     String currentSchema,
                                     TransformationIndices indices,
                                     Function<String, String> aliasResolver,
-                                    Supplier<Collection<String>> tableSupplier) {
+                                    Supplier<Collection<String>> tableSupplier,
+                                    BiFunction<String, String, TypeInfo> cteColumnResolver) {
         if (ctx == null || ctx.general_element_part() == null || ctx.general_element_part().isEmpty()) {
             return TypeInfo.UNKNOWN;
         }
@@ -64,10 +69,10 @@ public final class ResolveColumn {
             return resolveUnqualified(columnName, currentSchema, indices, tableSupplier);
 
         } else if (partCount == 2) {
-            // Qualified column: table.column or schema.table
+            // Qualified column: table.column, cte.column, or schema.table
             String qualifier = extractIdentifier(ctx.general_element_part().get(0));
             String columnName = extractIdentifier(ctx.general_element_part().get(1));
-            return resolveQualified(qualifier, columnName, currentSchema, indices, aliasResolver);
+            return resolveQualified(qualifier, columnName, currentSchema, indices, aliasResolver, cteColumnResolver);
 
         } else if (partCount == 3) {
             // Fully qualified: schema.table.column
@@ -144,7 +149,7 @@ public final class ResolveColumn {
     /**
      * Resolves qualified column reference: qualifier.column.
      *
-     * <p>The qualifier could be a table name or alias.</p>
+     * <p>The qualifier could be a CTE name, table name, or alias.</p>
      *
      * <p><b>Cross-schema support:</b> Table aliases may contain schema-qualified
      * table names (e.g., "co_abs.abs_werk_sperren") when tables are explicitly
@@ -152,14 +157,26 @@ public final class ResolveColumn {
      * and uses the explicit schema instead of currentSchema.</p>
      *
      * <p><b>Phase 4.5:</b> Uses hierarchical alias resolution - inner queries can reference outer tables.</p>
+     * <p><b>Phase 4.6:</b> Checks CTEs first before checking table aliases.</p>
      */
     private static TypeInfo resolveQualified(String qualifier,
                                              String columnName,
                                              String currentSchema,
                                              TransformationIndices indices,
-                                             Function<String, String> aliasResolver) {
+                                             Function<String, String> aliasResolver,
+                                             BiFunction<String, String, TypeInfo> cteColumnResolver) {
         if (qualifier == null || columnName == null) {
             return TypeInfo.UNKNOWN;
+        }
+
+        // Phase 4.6: Check if qualifier is a CTE name FIRST
+        if (cteColumnResolver != null) {
+            TypeInfo cteType = cteColumnResolver.apply(qualifier, columnName);
+            if (!cteType.isUnknown()) {
+                log.trace("Resolved qualified column {}.{} from CTE to type {}",
+                    qualifier, columnName, cteType.getCategory());
+                return cteType;
+            }
         }
 
         // Check if qualifier is a table alias (searches all scopes)

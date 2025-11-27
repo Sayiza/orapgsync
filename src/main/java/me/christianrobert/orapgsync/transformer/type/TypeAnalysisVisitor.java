@@ -42,6 +42,43 @@ public class TypeAnalysisVisitor extends PlSqlParserBaseVisitor<TypeInfo> {
     // Inner scopes can reference outer scopes (correlated subqueries)
     private final Deque<Map<String, String>> tableAliasScopes = new ArrayDeque<>();
 
+    // CTE scope management (Phase 4.6: CTE column type tracking)
+    // Each scope represents a query level and contains CTE definitions visible at that level
+    // CTEs defined in WITH clause are visible in main query and all subqueries
+    private final Deque<Map<String, CteDefinition>> cteScopes = new ArrayDeque<>();
+
+    /**
+     * CTE definition: name -> (column name -> type).
+     *
+     * <p>Example: WITH c AS (SELECT emp_id, hire_date FROM employees)</p>
+     * <ul>
+     *   <li>cteName = "c"</li>
+     *   <li>columns = {"emp_id" -> NUMERIC, "hire_date" -> DATE}</li>
+     * </ul>
+     */
+    private static class CteDefinition {
+        final String cteName;
+        final Map<String, TypeInfo> columns;  // lowercase column names
+
+        CteDefinition(String cteName) {
+            this.cteName = cteName.toLowerCase();
+            this.columns = new HashMap<>();
+        }
+
+        void addColumn(String columnName, TypeInfo type) {
+            if (columnName != null && type != null) {
+                columns.put(columnName.toLowerCase(), type);
+            }
+        }
+
+        TypeInfo getColumnType(String columnName) {
+            if (columnName == null) {
+                return TypeInfo.UNKNOWN;
+            }
+            return columns.getOrDefault(columnName.toLowerCase(), TypeInfo.UNKNOWN);
+        }
+    }
+
     /**
      * Creates a type analysis visitor.
      *
@@ -66,6 +103,7 @@ public class TypeAnalysisVisitor extends PlSqlParserBaseVisitor<TypeInfo> {
 
         // Initialize with global query scope
         tableAliasScopes.push(new HashMap<>());
+        cteScopes.push(new HashMap<>());
 
         log.debug("TypeAnalysisVisitor created for schema: {}", currentSchema);
     }
@@ -384,9 +422,26 @@ public class TypeAnalysisVisitor extends PlSqlParserBaseVisitor<TypeInfo> {
             }
         }
 
-        // Delegate to column resolution helper (uses hierarchical scope lookup)
-        TypeInfo columnType = ResolveColumn.resolve(ctx, currentSchema, indices, this::resolveTableAlias, this::getAllTablesInScope);
+        // Delegate to column resolution helper (uses hierarchical scope lookup + CTE resolution)
+        TypeInfo columnType = ResolveColumn.resolve(ctx, currentSchema, indices, this::resolveTableAlias, this::getAllTablesInScope, this::resolveCteColumn);
         return cacheAndReturn(ctx, columnType);
+    }
+
+    /**
+     * Resolves CTE column type (used as BiFunction for ResolveColumn).
+     *
+     * <p>Phase 4.6: Looks up CTE definition and returns column type.</p>
+     *
+     * @param cteName CTE name
+     * @param columnName Column name
+     * @return TypeInfo from CTE, or UNKNOWN if not found
+     */
+    private TypeInfo resolveCteColumn(String cteName, String columnName) {
+        CteDefinition cte = resolveCte(cteName);
+        if (cte != null) {
+            return cte.getColumnType(columnName);
+        }
+        return TypeInfo.UNKNOWN;
     }
 
     /**
@@ -616,9 +671,11 @@ public class TypeAnalysisVisitor extends PlSqlParserBaseVisitor<TypeInfo> {
      * Enters a new query scope (for subqueries).
      *
      * <p>Phase 4.5: Creates new table alias scope to prevent pollution.</p>
+     * <p>Phase 4.6: Creates new CTE scope for CTE tracking.</p>
      */
     protected void enterQueryScope() {
         tableAliasScopes.push(new HashMap<>());
+        cteScopes.push(new HashMap<>());
         log.trace("Entered new query scope, depth: {}", tableAliasScopes.size());
     }
 
@@ -626,11 +683,16 @@ public class TypeAnalysisVisitor extends PlSqlParserBaseVisitor<TypeInfo> {
      * Exits current query scope.
      *
      * <p>Phase 4.5: Removes current query's table aliases.</p>
+     * <p>Phase 4.6: Removes current query's CTEs.</p>
      */
     protected void exitQueryScope() {
         if (!tableAliasScopes.isEmpty()) {
-            Map<String, String> scope = tableAliasScopes.pop();
-            log.trace("Exited query scope, {} aliases dropped", scope.size());
+            Map<String, String> aliasScope = tableAliasScopes.pop();
+            log.trace("Exited query scope, {} aliases dropped", aliasScope.size());
+        }
+        if (!cteScopes.isEmpty()) {
+            Map<String, CteDefinition> cteScope = cteScopes.pop();
+            log.trace("Exited query scope, {} CTEs dropped", cteScope.size());
         }
     }
 
@@ -694,6 +756,202 @@ public class TypeAnalysisVisitor extends PlSqlParserBaseVisitor<TypeInfo> {
         }
 
         return allTables;
+    }
+
+    /**
+     * Resolves CTE definition, searching from innermost to outermost query scope.
+     *
+     * <p>Phase 4.6: Supports nested queries referencing CTEs from outer scopes.</p>
+     *
+     * @param cteName CTE name to resolve
+     * @return CteDefinition, or null if not found
+     */
+    public CteDefinition resolveCte(String cteName) {
+        if (cteName == null) {
+            return null;
+        }
+
+        String normalizedName = cteName.toLowerCase();
+
+        // Search from inner to outer query scopes
+        for (Map<String, CteDefinition> scope : cteScopes) {
+            CteDefinition cte = scope.get(normalizedName);
+            if (cte != null) {
+                log.trace("Resolved CTE {} with {} columns", normalizedName, cte.columns.size());
+                return cte;
+            }
+        }
+
+        log.trace("CTE {} not found in any query scope", normalizedName);
+        return null;
+    }
+
+    // ========== Phase 4.6: CTE Analysis ==========
+
+    /**
+     * Visit with_clause to analyze CTEs and populate column types.
+     *
+     * <p>Phase 4.6: Analyzes CTE SELECT lists to determine column types.
+     * CTEs are registered in current scope and visible to main query and subqueries.</p>
+     *
+     * <p>Example:</p>
+     * <pre>
+     * WITH c AS (SELECT number_days tg FROM config_table)
+     * SELECT tg FROM c  -- Can resolve 'tg' type from CTE definition
+     * </pre>
+     */
+    @Override
+    public TypeInfo visitWith_clause(With_clauseContext ctx) {
+        // CTEs belong to the current query scope (not a new scope)
+        // They are visible in the main query and all subqueries
+
+        if (ctx.with_factoring_clause() == null || ctx.with_factoring_clause().isEmpty()) {
+            return cacheAndReturn(ctx, TypeInfo.UNKNOWN);
+        }
+
+        // Process each CTE (WITH c AS (...), d AS (...), ...)
+        for (With_factoring_clauseContext factoringCtx : ctx.with_factoring_clause()) {
+            if (factoringCtx.subquery_factoring_clause() != null) {
+                processSubqueryFactoringClause(factoringCtx.subquery_factoring_clause());
+            }
+        }
+
+        // Visit children to continue normal type analysis
+        visitChildren(ctx);
+
+        return cacheAndReturn(ctx, TypeInfo.UNKNOWN);
+    }
+
+    /**
+     * Processes a single CTE (subquery_factoring_clause).
+     *
+     * <p>Extracts CTE name, analyzes SELECT list, and registers column types.</p>
+     */
+    private void processSubqueryFactoringClause(Subquery_factoring_clauseContext ctx) {
+        // Extract CTE name
+        if (ctx.query_name() == null) {
+            return;
+        }
+
+        String cteName = ctx.query_name().getText();
+        if (cteName == null || cteName.trim().isEmpty()) {
+            return;
+        }
+
+        log.trace("Processing CTE: {}", cteName);
+
+        // Create CTE definition
+        CteDefinition cteDef = new CteDefinition(cteName);
+
+        // Check if explicit column list is provided: WITH c (col1, col2) AS ...
+        List<String> explicitColumns = null;
+        if (ctx.paren_column_list() != null && ctx.paren_column_list().column_list() != null) {
+            explicitColumns = new ArrayList<>();
+            for (var colName : ctx.paren_column_list().column_list().column_name()) {
+                explicitColumns.add(colName.getText());
+            }
+        }
+
+        // Analyze the CTE's SELECT statement
+        if (ctx.subquery() == null) {
+            return;
+        }
+
+        // Visit the CTE body first to populate type cache
+        visit(ctx.subquery());
+
+        // Navigate to query_block to get SELECT list
+        Subquery_basic_elementsContext basicElements = ctx.subquery().subquery_basic_elements();
+        if (basicElements == null || basicElements.query_block() == null) {
+            log.trace("CTE {} has no query block, skipping", cteName);
+            return;
+        }
+
+        Query_blockContext queryBlock = basicElements.query_block();
+        Selected_listContext selectedList = queryBlock.selected_list();
+
+        if (selectedList == null || selectedList.select_list_elements() == null) {
+            log.trace("CTE {} has no selected list, skipping", cteName);
+            return;
+        }
+
+        // Extract column names and types from SELECT list
+        int colIndex = 0;
+        for (Select_list_elementsContext selectElem : selectedList.select_list_elements()) {
+            String columnName;
+
+            // Determine column name
+            if (explicitColumns != null && colIndex < explicitColumns.size()) {
+                // Use explicit column name from WITH c (col1, col2) AS ...
+                columnName = explicitColumns.get(colIndex);
+            } else if (selectElem.column_alias() != null) {
+                // Use column alias from SELECT
+                columnName = selectElem.column_alias().getText();
+                // Remove quotes if present
+                columnName = columnName.replaceAll("^\"|\"$", "").replaceAll("^'|'$", "");
+            } else if (selectElem.expression() != null) {
+                // Try to extract column name from expression (e.g., SELECT emp_id -> "emp_id")
+                columnName = extractColumnNameFromExpression(selectElem.expression());
+                if (columnName == null) {
+                    // Fallback: auto-generate column name
+                    columnName = "column_" + colIndex;
+                }
+            } else {
+                // Fallback: auto-generate column name
+                columnName = "column_" + colIndex;
+            }
+
+            // Get type from expression
+            TypeInfo colType = TypeInfo.UNKNOWN;
+            if (selectElem.expression() != null) {
+                String exprKey = nodeKey(selectElem.expression());
+                colType = typeCache.getOrDefault(exprKey, TypeInfo.UNKNOWN);
+            }
+
+            cteDef.addColumn(columnName, colType);
+            log.trace("CTE {} column: {} -> {}", cteName, columnName, colType.getCategory());
+
+            colIndex++;
+        }
+
+        // Register CTE in current scope
+        if (!cteScopes.isEmpty()) {
+            cteScopes.peek().put(cteName.toLowerCase(), cteDef);
+            log.trace("Registered CTE {} with {} columns", cteName, cteDef.columns.size());
+        }
+    }
+
+    /**
+     * Attempts to extract column name from expression.
+     *
+     * <p>For simple column references, returns the column name.
+     * For complex expressions, returns null.</p>
+     */
+    private String extractColumnNameFromExpression(ExpressionContext ctx) {
+        // For simple expressions like "emp_id" or "t.emp_id", try to extract the column name
+        if (ctx == null) {
+            return null;
+        }
+
+        String text = ctx.getText();
+        if (text == null) {
+            return null;
+        }
+
+        // Simple heuristic: if it looks like a column reference (no operators, functions, etc.)
+        // Just use the last part after the last dot
+        if (text.contains(".")) {
+            String[] parts = text.split("\\.");
+            return parts[parts.length - 1];
+        }
+
+        // For simple identifiers, use as-is
+        if (text.matches("[a-zA-Z_][a-zA-Z0-9_]*")) {
+            return text;
+        }
+
+        // For anything else (literals, functions, expressions), return null
+        return null;
     }
 
     // ========== PL/SQL Variable Scope Management (Phase 5+) ==========
