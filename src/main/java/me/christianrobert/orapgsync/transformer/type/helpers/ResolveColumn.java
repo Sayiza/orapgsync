@@ -66,7 +66,7 @@ public final class ResolveColumn {
         if (partCount == 1) {
             // Unqualified column: column_name
             String columnName = extractIdentifier(ctx.general_element_part().get(0));
-            return resolveUnqualified(columnName, currentSchema, indices, tableSupplier);
+            return resolveUnqualified(columnName, currentSchema, indices, tableSupplier, cteColumnResolver);
 
         } else if (partCount == 2) {
             // Qualified column: table.column, cte.column, or schema.table
@@ -108,11 +108,13 @@ public final class ResolveColumn {
      * This method handles both simple and qualified table names.</p>
      *
      * <p><b>Phase 4.5:</b> Uses hierarchical scope lookup - inner queries can access outer tables.</p>
+     * <p><b>Phase 4.6:</b> Checks CTEs before real tables for unqualified columns.</p>
      */
     private static TypeInfo resolveUnqualified(String columnName,
                                                 String currentSchema,
                                                 TransformationIndices indices,
-                                                Supplier<Collection<String>> tableSupplier) {
+                                                Supplier<Collection<String>> tableSupplier,
+                                                BiFunction<String, String, TypeInfo> cteColumnResolver) {
         if (columnName == null) {
             return TypeInfo.UNKNOWN;
         }
@@ -124,6 +126,17 @@ public final class ResolveColumn {
         for (String tableName : allTables) {
             TypeInfo type;
 
+            // Phase 4.6: Check if this table is actually a CTE FIRST
+            if (cteColumnResolver != null) {
+                TypeInfo cteType = cteColumnResolver.apply(tableName, columnName);
+                if (!cteType.isUnknown()) {
+                    log.trace("Resolved unqualified column {} to type {} from CTE {}",
+                        columnName, cteType.getCategory(), tableName);
+                    return cteType;
+                }
+            }
+
+            // Not a CTE - try metadata lookup
             if (tableName.contains(".")) {
                 // Schema-qualified: extract schema and table
                 String[] parts = tableName.split("\\.", 2);
