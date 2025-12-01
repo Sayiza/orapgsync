@@ -22,6 +22,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -88,7 +89,7 @@ public class TransformationService {
      * @return TransformationResult containing either transformed SQL or error details
      */
     public TransformationResult transformSql(String oracleSql, String schema, TransformationIndices indices) {
-        return transformSql(oracleSql, schema, indices, null, false);
+        return transformSql(oracleSql, schema, indices, null, null, false);
     }
 
     /**
@@ -104,7 +105,24 @@ public class TransformationService {
      * @return TransformationResult with transformed SQL or error details
      */
     public TransformationResult transformSql(String oracleSql, String schema, TransformationIndices indices, Map<String, String> viewColumnTypes) {
-        return transformSql(oracleSql, schema, indices, viewColumnTypes, false);
+        return transformSql(oracleSql, schema, indices, viewColumnTypes, null, false);
+    }
+
+    /**
+     * Transforms Oracle SQL to PostgreSQL equivalent for view transformations with column type metadata and ordered names.
+     *
+     * <p>This variant supports position-based type casting when SELECT expressions have no explicit alias.</p>
+     *
+     * @param oracleSql Oracle SELECT statement
+     * @param schema Current schema context (e.g., "hr")
+     * @param indices Pre-built metadata indices for lookups
+     * @param viewColumnTypes Column name → PostgreSQL type mapping (from view stub metadata)
+     * @param viewColumnNamesOrdered Ordered list of column names (for position-based type casting)
+     * @return TransformationResult with transformed SQL or error details
+     */
+    public TransformationResult transformSql(String oracleSql, String schema, TransformationIndices indices,
+                                             Map<String, String> viewColumnTypes, List<String> viewColumnNamesOrdered) {
+        return transformSql(oracleSql, schema, indices, viewColumnTypes, viewColumnNamesOrdered, false);
     }
 
     /**
@@ -116,10 +134,12 @@ public class TransformationService {
      * @param schema Schema context for synonym and name resolution
      * @param indices Pre-built metadata indices for lookups
      * @param viewColumnTypes Column name → PostgreSQL type mapping (null for non-view transformations)
+     * @param viewColumnNamesOrdered Ordered list of column names (null for non-view transformations)
      * @param includeAst Whether to include AST tree in result (for debugging)
      * @return TransformationResult containing transformed SQL and optionally AST tree
      */
-    public TransformationResult transformSql(String oracleSql, String schema, TransformationIndices indices, Map<String, String> viewColumnTypes, boolean includeAst) {
+    public TransformationResult transformSql(String oracleSql, String schema, TransformationIndices indices,
+                                             Map<String, String> viewColumnTypes, List<String> viewColumnNamesOrdered, boolean includeAst) {
         if (oracleSql == null || oracleSql.trim().isEmpty()) {
             return TransformationResult.failure(oracleSql, "Oracle SQL cannot be null or empty");
         }
@@ -172,8 +192,13 @@ public class TransformationService {
             // Create context with type evaluator and optional view column types
             TransformationContext context;
             if (viewColumnTypes != null) {
-                log.debug("Creating context for view transformation with {} column types", viewColumnTypes.size());
-                context = new TransformationContext(schema, indices, typeEvaluator, viewColumnTypes);
+                if (viewColumnNamesOrdered != null) {
+                    log.debug("Creating context for view transformation with {} column types (ordered)", viewColumnTypes.size());
+                    context = new TransformationContext(schema, indices, typeEvaluator, viewColumnTypes, viewColumnNamesOrdered);
+                } else {
+                    log.debug("Creating context for view transformation with {} column types (name-based only)", viewColumnTypes.size());
+                    context = new TransformationContext(schema, indices, typeEvaluator, viewColumnTypes);
+                }
             } else {
                 context = new TransformationContext(schema, indices, typeEvaluator);
             }
@@ -419,7 +444,8 @@ public class TransformationService {
                 packageContextCache,  // Package variable context
                 functionName,         // Current function name
                 packageName,          // Current package name (null for standalone)
-                null);                // No view column types for PL/SQL transformations
+                null,                 // No view column types for PL/SQL transformations
+                null);                // No ordered column names for PL/SQL transformations
 
             // STEP 4: Transform ANTLR parse tree to PostgreSQL PL/pgSQL
             log.debug("Step 4: Transforming to PostgreSQL PL/pgSQL");
@@ -653,7 +679,8 @@ public class TransformationService {
                 packageContextCache,  // Package variable context
                 procedureName,        // Current procedure name
                 packageName,          // Current package name (null for standalone)
-                null);                // No view column types for PL/SQL transformations
+                null,                 // No view column types for PL/SQL transformations
+                null);                // No ordered column names for PL/SQL transformations
 
             // STEP 4: Transform ANTLR parse tree to PostgreSQL PL/pgSQL
             log.debug("Step 4: Transforming to PostgreSQL PL/pgSQL");

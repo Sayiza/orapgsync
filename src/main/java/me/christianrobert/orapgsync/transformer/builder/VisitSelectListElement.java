@@ -65,8 +65,23 @@ public class VisitSelectListElement {
 
     // Apply type casting for view transformations
     // This ensures CREATE OR REPLACE VIEW succeeds by matching stub column types exactly
-    if (columnAlias != null && b.getContext() != null && b.getContext().isViewTransformation()) {
-      String targetType = b.getContext().getViewColumnType(columnAlias);
+    if (b.getContext() != null && b.getContext().isViewTransformation()) {
+      String targetType = null;
+
+      // Try name-based lookup first (for explicit aliases)
+      if (columnAlias != null) {
+        targetType = b.getContext().getViewColumnType(columnAlias);
+      }
+
+      // Fall back to position-based lookup (for expressions without explicit alias)
+      if (targetType == null) {
+        int position = b.getContext().getCurrentSelectListPosition();
+        if (position >= 0) {
+          targetType = b.getContext().getViewColumnTypeByPosition(position);
+        }
+      }
+
+      // Apply cast if type was found
       if (targetType != null) {
         // Cast expression to target type (e.g., COUNT(1) → (COUNT(1))::numeric)
         expression = "( " + expression + " )::" + targetType;

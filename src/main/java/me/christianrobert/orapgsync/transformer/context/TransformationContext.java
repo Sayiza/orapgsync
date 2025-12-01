@@ -77,7 +77,7 @@ import java.util.Set;
  */
 public class TransformationContext {
     public TransformationContext(String hr, TransformationIndices emptyIndices, SimpleTypeEvaluator typeEvaluator, Map<String, PackageContext> packageContextCache, String testProc, String empPkg) {
-        this(hr, emptyIndices, typeEvaluator, packageContextCache, testProc, empPkg, new HashMap<>());
+        this(hr, emptyIndices, typeEvaluator, packageContextCache, testProc, empPkg, new HashMap<>(), null);
     }
 
     // ========== Variable Scope Tracking (Inner Classes) ==========
@@ -271,6 +271,29 @@ public class TransformationContext {
      */
     private final Map<String, String> viewColumnTypes;
 
+    /**
+     * Ordered list of view column names (for position-based type casting).
+     * Used when SELECT list elements have no explicit alias - match by position.
+     * Null for non-view transformations.
+     *
+     * <p><strong>Example:</strong></p>
+     * <pre>
+     * Stub: CREATE VIEW v AS SELECT NULL::numeric AS col1, NULL::text AS col2
+     * Oracle SQL: SELECT 1, 'hello' FROM dual
+     * Position 0 → col1 (numeric), Position 1 → col2 (text)
+     * </pre>
+     */
+    private final java.util.List<String> viewColumnNamesOrdered;
+
+    /**
+     * Current position in SELECT list (0-based index).
+     * Set by VisitSelectedList before visiting each element, read by VisitSelectListElement.
+     * Used for position-based column type matching when no explicit alias exists.
+     *
+     * <p><strong>Lifecycle:</strong> Ephemeral state, only valid during SELECT list traversal.</p>
+     */
+    private int currentSelectListPosition = -1;  // -1 = not in SELECT list
+
     // ========== Layer 3: Query-Level Context ==========
 
     private final Map<String, String> tableAliases;  // alias → table name (per query)
@@ -310,7 +333,7 @@ public class TransformationContext {
      * @param typeEvaluator Type evaluator for type-aware transformations
      */
     public TransformationContext(String currentSchema, TransformationIndices indices, TypeEvaluator typeEvaluator) {
-        this(currentSchema, indices, typeEvaluator, null, null, null, null);
+        this(currentSchema, indices, typeEvaluator, null, null, null, null, null);
     }
 
     /**
@@ -328,7 +351,27 @@ public class TransformationContext {
                                  TransformationIndices indices,
                                  TypeEvaluator typeEvaluator,
                                  Map<String, String> viewColumnTypes) {
-        this(currentSchema, indices, typeEvaluator, null, null, null, viewColumnTypes);
+        this(currentSchema, indices, typeEvaluator, null, null, null, viewColumnTypes, null);
+    }
+
+    /**
+     * Creates context for view transformation with column type metadata and ordered column names.
+     *
+     * <p>This constructor is for view transformations that need to cast SELECT list expressions
+     * to match stub column types, including position-based matching for expressions without explicit aliases.</p>
+     *
+     * @param currentSchema Schema context for resolution (e.g., "hr")
+     * @param indices Pre-built metadata indices for fast lookups
+     * @param typeEvaluator Type evaluator for type-aware transformations
+     * @param viewColumnTypes Column name → PostgreSQL type mapping (from view stub metadata)
+     * @param viewColumnNamesOrdered Ordered list of column names (for position-based matching)
+     */
+    public TransformationContext(String currentSchema,
+                                 TransformationIndices indices,
+                                 TypeEvaluator typeEvaluator,
+                                 Map<String, String> viewColumnTypes,
+                                 java.util.List<String> viewColumnNamesOrdered) {
+        this(currentSchema, indices, typeEvaluator, null, null, null, viewColumnTypes, viewColumnNamesOrdered);
     }
 
     /**
@@ -344,6 +387,7 @@ public class TransformationContext {
      * @param functionName Current function/procedure name (null for views)
      * @param packageName Current package name (null for standalone/views)
      * @param viewColumnTypes View column types for casting (null for functions/procedures)
+     * @param viewColumnNamesOrdered Ordered view column names (null for functions/procedures)
      */
     public TransformationContext(String currentSchema,
                                  TransformationIndices indices,
@@ -351,7 +395,8 @@ public class TransformationContext {
                                  Map<String, PackageContext> packageContextCache,
                                  String functionName,
                                  String packageName,
-                                 Map<String, String> viewColumnTypes) {
+                                 Map<String, String> viewColumnTypes,
+                                 java.util.List<String> viewColumnNamesOrdered) {
         // Validate required parameters
         if (currentSchema == null || currentSchema.trim().isEmpty()) {
             throw new IllegalArgumentException("Current schema cannot be null or empty");
@@ -374,6 +419,7 @@ public class TransformationContext {
         this.packageContextCache = packageContextCache != null ? packageContextCache : new HashMap<>();
         this.inlineTypes = new HashMap<>();  // FUTURE - ready for inline type support
         this.viewColumnTypes = viewColumnTypes;  // Null for non-view transformations
+        this.viewColumnNamesOrdered = viewColumnNamesOrdered;  // Null for non-view transformations
 
         // Layer 3: Query-level context (mutable during transformation)
         this.tableAliases = new HashMap<>();
@@ -523,6 +569,64 @@ public class TransformationContext {
      */
     public boolean hasViewColumnType(String columnName) {
         return getViewColumnType(columnName) != null;
+    }
+
+    /**
+     * Sets the current position in the SELECT list (for position-based type casting).
+     * Called by VisitSelectedList before visiting each select_list_elements.
+     *
+     * <p><strong>Lifecycle:</strong> Set before each SELECT list element, reset after SELECT list completes.</p>
+     *
+     * @param position 0-based index in SELECT list (0 = first column, 1 = second, etc.)
+     */
+    public void setCurrentSelectListPosition(int position) {
+        this.currentSelectListPosition = position;
+    }
+
+    /**
+     * Gets the current position in the SELECT list.
+     * Used by VisitSelectListElement for position-based column matching.
+     *
+     * @return 0-based index in SELECT list, or -1 if not in SELECT list
+     */
+    public int getCurrentSelectListPosition() {
+        return currentSelectListPosition;
+    }
+
+    /**
+     * Gets the view column name at a specific position (for position-based type casting).
+     * Used when SELECT expression has no explicit alias - match by position instead.
+     *
+     * <p><strong>Example:</strong></p>
+     * <pre>
+     * Stub columns: ["col1", "col2", "col3"]
+     * Oracle SQL: SELECT 1, 'hello', SYSDATE FROM dual
+     * Position 0 → "col1", Position 1 → "col2", Position 2 → "col3"
+     * </pre>
+     *
+     * @param position 0-based index in column list
+     * @return Column name at position, or null if position out of bounds or no ordered list
+     */
+    public String getViewColumnNameByPosition(int position) {
+        if (viewColumnNamesOrdered == null || position < 0 || position >= viewColumnNamesOrdered.size()) {
+            return null;
+        }
+        return viewColumnNamesOrdered.get(position);
+    }
+
+    /**
+     * Gets the PostgreSQL type for a view column at a specific position.
+     * Convenience method that combines position → name → type lookup.
+     *
+     * @param position 0-based index in column list
+     * @return PostgreSQL type (e.g., "numeric", "text", "bigint") or null if not found
+     */
+    public String getViewColumnTypeByPosition(int position) {
+        String columnName = getViewColumnNameByPosition(position);
+        if (columnName == null) {
+            return null;
+        }
+        return getViewColumnType(columnName);
     }
 
     // ========== Inline Type Support (FUTURE - stubs for now) ==========

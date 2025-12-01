@@ -191,6 +191,8 @@ public class PostgresViewImplementationJob extends AbstractDatabaseWriteJob<View
         // This ensures CREATE OR REPLACE VIEW succeeds by matching stub column types exactly
         // IMPORTANT: Convert Oracle types to PostgreSQL types (same logic as stub creation)
         Map<String, String> viewColumnTypes = new HashMap<>();
+        List<String> viewColumnNamesOrdered = new ArrayList<>();
+
         for (ColumnMetadata column : view.getColumns()) {
             // Use lowercase for case-insensitive lookup (Oracle/PostgreSQL identifiers)
             String columnName = column.getColumnName().toLowerCase();
@@ -223,12 +225,14 @@ public class PostgresViewImplementationJob extends AbstractDatabaseWriteJob<View
             }
 
             viewColumnTypes.put(columnName, postgresType);
+            viewColumnNamesOrdered.add(columnName);  // Preserve order
         }
-        log.debug("Extracted and converted {} column types for view {}", viewColumnTypes.size(), qualifiedName);
+        log.debug("Extracted and converted {} column types for view {} (ordered: {})",
+                viewColumnTypes.size(), qualifiedName, viewColumnNamesOrdered);
 
-        // Transform Oracle SQL to PostgreSQL with view column types
+        // Transform Oracle SQL to PostgreSQL with view column types (name and position-based)
         TransformationResult transformationResult = transformationService.transformSql(
-                oracleSql, schema, indices, viewColumnTypes);
+                oracleSql, schema, indices, viewColumnTypes, viewColumnNamesOrdered);
 
         if (transformationResult.isFailure()) {
             log.error("Transformation failed for view {}: {}", qualifiedName,
