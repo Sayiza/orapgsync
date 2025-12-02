@@ -375,6 +375,29 @@ public class TransformationContext {
     }
 
     /**
+     * Creates context with full transformation-level context (for PL/SQL functions/procedures with view column types).
+     *
+     * <p>This constructor is for compatibility with existing code that doesn't need ordered column names.</p>
+     *
+     * @param currentSchema Schema context for resolution (e.g., "hr")
+     * @param indices Pre-built metadata indices for fast lookups
+     * @param typeEvaluator Type evaluator for type-aware transformations
+     * @param packageContextCache Package variable contexts (null for standalone/views)
+     * @param functionName Current function/procedure name (null for views)
+     * @param packageName Current package name (null for standalone/views)
+     * @param viewColumnTypes View column types for casting (null for functions/procedures)
+     */
+    public TransformationContext(String currentSchema,
+                                 TransformationIndices indices,
+                                 TypeEvaluator typeEvaluator,
+                                 Map<String, PackageContext> packageContextCache,
+                                 String functionName,
+                                 String packageName,
+                                 Map<String, String> viewColumnTypes) {
+        this(currentSchema, indices, typeEvaluator, packageContextCache, functionName, packageName, viewColumnTypes, null);
+    }
+
+    /**
      * Creates context with full transformation-level context (for PL/SQL functions/procedures and views).
      *
      * <p>This is the master constructor that all other constructors delegate to.

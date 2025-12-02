@@ -483,23 +483,64 @@ To prevent divergence between code and documentation:
 
 ## Type Mapping Strategy
 
-### Three Data Type Categories
+### Four Data Type Categories
 
 1. **Built-in Oracle Types**: Direct mapping via `TypeConverter.toPostgre()`
    - `NUMBER` → `numeric`, `VARCHAR2` → `text`, `DATE` → `timestamp`, etc.
 
-2. **User-Defined Object Types**: PostgreSQL composite types
+2. **LOB Types (Large Objects)**: PostgreSQL oid (Large Object references) ✅ **Updated 2025-12-01**
+   - **Purpose**: Java `@Lob` annotation compatibility (requires JDBC `Blob` API)
+   - **Type mappings**:
+     - `BLOB` → `oid` (was: `bytea`)
+     - `CLOB` → `oid` (was: `text`)
+     - `NCLOB` → `oid` (was: `text`)
+     - `LONG` → `varchar` (unchanged, obsolete type)
+     - `LONG RAW` → `bytea` (unchanged, obsolete type)
+   - **Data transfer**: Two-phase staging column workflow (see below)
+
+3. **User-Defined Object Types**: PostgreSQL composite types
    - Oracle `HR.ADDRESS_TYPE` → PostgreSQL `hr.address_type`
    - Serialized to PostgreSQL composite literal format during data transfer
 
-3. **Complex Oracle System Types**: jsonb with metadata wrapper
+4. **Complex Oracle System Types**: jsonb with metadata wrapper
    - `SYS.ANYDATA`, `SYS.XMLTYPE`, `SYS.AQ$_*`, `SYS.SDO_GEOMETRY`, etc.
    - JSON format: `{"oracleType": "SYS.ANYDATA", "value": {...}}`
    - Preserves type information for future PL/SQL code transformation
    - Note: May appear as owner `"SYS"` or `"PUBLIC"` (PUBLIC synonyms)
 
+### LOB→OID Staging Column Workflow
+
+**Problem**: PostgreSQL `oid` columns store Large Object references (integers), not binary data. Cannot COPY hex-encoded BLOB data directly into `oid` columns.
+
+**Solution**: Temporary staging columns for data transfer:
+
+1. **Table Creation**: Tables created with `oid` columns (via TypeConverter)
+2. **Before COPY**: Add temporary `{column}_staging bytea` columns
+3. **During COPY**: Load hex-encoded BLOB/CLOB data into staging columns
+4. **After COPY**: Convert to Large Objects:
+   ```sql
+   UPDATE table SET doc_content = lo_from_bytea(0, doc_content_staging)
+   ```
+5. **Cleanup**: Drop staging columns
+6. **Commit**: Transaction committed with final oid columns
+
+**Key Benefits**:
+- ✅ Java `@Lob` compatibility (`ResultSet.getBlob()` works)
+- ✅ Self-contained (staging lifecycle managed within data transfer step)
+- ✅ Repeatable (re-running data transfer works identically)
+- ✅ Transactional (rollback on failure, staging columns remain for debugging)
+
+**Implementation**: See `CsvDataTransferService` methods:
+- `detectOidColumns()` - Query PostgreSQL metadata for oid columns
+- `addStagingColumns()` - Create temporary bytea columns
+- `convertStagingToLargeObjects()` - Use PostgreSQL `lo_from_bytea()` function
+- `dropStagingColumns()` - Cleanup after successful conversion
+
+**Documentation**: See `documentation/LOB_TO_OID_MIGRATION_PLAN.md` for detailed implementation plan.
+
 ### Key Implementation Classes
-- `TypeConverter.toPostgre()` - Built-in type mapping
+- `TypeConverter.toPostgre()` - Built-in type mapping (includes LOB→oid)
+- `CsvDataTransferService` - LOB staging column lifecycle
 - `PostgresTableCreationJob.isComplexOracleSystemType()` - Detects complex system types
 - `OracleComplexTypeSerializer` - Handles all complex type serialization (objects, LOBs, system types)
 

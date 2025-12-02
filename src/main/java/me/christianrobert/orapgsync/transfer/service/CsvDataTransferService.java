@@ -21,6 +21,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 
@@ -174,11 +175,20 @@ public class CsvDataTransferService {
         String qualifiedOracleName = table.getSchema() + "." + table.getTableName();
         String qualifiedPostgresName = "\"" + table.getSchema() + "\".\"" + table.getTableName() + "\"";
 
-        // Build column list for SELECT and COPY
-        // The SELECT includes extra columns for ANYDATA extraction
-        String columnList = buildOracleSelectColumnList(table);
-        String quotedColumnList = buildQuotedColumnList(table);
+        // Step 1: Detect oid columns (needed for COPY column list and staging workflow)
+        List<String> oidColumns = detectOidColumns(postgresConn, table);
+        if (!oidColumns.isEmpty()) {
+            log.debug("Table {} has {} oid columns requiring staging: {}",
+                      table.getTableName(), oidColumns.size(), oidColumns);
+        }
 
+        // Step 2: Build column lists
+        // The SELECT includes extra columns for ANYDATA extraction
+        // For oid columns, COPY targets staging columns
+        String columnList = buildOracleSelectColumnList(table);
+        String quotedColumnList = buildQuotedColumnList(table, oidColumns);  // Pass oidColumns for staging substitution
+
+        // Step 3: Build SQL commands
         // Oracle SELECT query with ANYDATA extraction
         String selectSql = "SELECT " + columnList + " FROM " + qualifiedOracleName;
 
@@ -188,8 +198,14 @@ public class CsvDataTransferService {
         log.debug("Oracle query: {}", selectSql);
         log.debug("PostgreSQL COPY: {}", copySql);
 
+        // Step 4: Add staging columns (before COPY)
+        if (!oidColumns.isEmpty()) {
+            addStagingColumns(postgresConn, table, oidColumns);
+        }
+
         long totalTransferred = 0;
 
+        // Step 5: Perform COPY (unchanged)
         // Use piped streams for in-memory CSV transfer
         try (PipedOutputStream pipedOutput = new PipedOutputStream();
              PipedInputStream pipedInput = new PipedInputStream(pipedOutput, PIPE_BUFFER_SIZE);
@@ -236,6 +252,13 @@ public class CsvDataTransferService {
                 log.error("Data transfer failed for table {}", qualifiedOracleName, e);
                 throw new RuntimeException("Data transfer failed", e);
             }
+        }
+
+        // Step 6: Convert staging columns to Large Objects and cleanup (after COPY succeeds)
+        if (!oidColumns.isEmpty()) {
+            log.debug("Converting staging columns to Large Objects for table {}", qualifiedOracleName);
+            convertStagingToLargeObjects(postgresConn, table, oidColumns);
+            dropStagingColumns(postgresConn, table, oidColumns);
         }
 
         // Commit the transaction
@@ -539,11 +562,205 @@ public class CsvDataTransferService {
      * Builds a comma-separated list of normalized column names (for PostgreSQL COPY).
      * This only includes the actual table columns, not the extraction helper columns.
      * Column names are normalized to handle reserved words and special characters.
+     *
+     * For oid columns (BLOB/CLOB), substitutes staging column names:
+     * - Regular column: "doc_content"
+     * - OID column: "doc_content_staging" (COPY target for hex data)
+     *
+     * @param table Table metadata
+     * @param oidColumns List of oid column names (use staging columns for these)
+     * @return Comma-separated quoted column list for COPY command
      */
-    private String buildQuotedColumnList(TableMetadata table) {
+    private String buildQuotedColumnList(TableMetadata table, List<String> oidColumns) {
         return table.getColumns().stream()
-                .map(col -> PostgresIdentifierNormalizer.normalizeIdentifier(col.getColumnName()))
+                .map(col -> {
+                    String columnName = col.getColumnName();
+                    // If this is an oid column, use staging column for COPY
+                    if (oidColumns.contains(columnName)) {
+                        return PostgresIdentifierNormalizer.normalizeIdentifier(columnName + "_staging");
+                    } else {
+                        return PostgresIdentifierNormalizer.normalizeIdentifier(columnName);
+                    }
+                })
                 .reduce((a, b) -> a + ", " + b)
                 .orElse("*");
+    }
+
+    // ========== LOB→OID Migration Support (Staging Column Lifecycle) ==========
+
+    /**
+     * Detects columns with oid type in PostgreSQL table.
+     * These columns need staging columns for COPY + conversion to Large Objects.
+     *
+     * Background: PostgreSQL oid columns store Large Object references (integer OIDs),
+     * not binary data directly. We cannot COPY hex-encoded BLOB data into oid columns.
+     * Solution: COPY into temporary bytea staging columns, then convert to Large Objects.
+     *
+     * @param postgresConn PostgreSQL connection
+     * @param table Table metadata
+     * @return List of column names with oid type
+     * @throws SQLException if metadata query fails
+     */
+    private List<String> detectOidColumns(Connection postgresConn, TableMetadata table) throws SQLException {
+        List<String> oidColumns = new java.util.ArrayList<>();
+
+        String sql = "SELECT column_name " +
+                     "FROM information_schema.columns " +
+                     "WHERE table_schema = ? " +
+                     "AND table_name = ? " +
+                     "AND data_type = 'oid'";
+
+        try (PreparedStatement stmt = postgresConn.prepareStatement(sql)) {
+            stmt.setString(1, table.getSchema());
+            stmt.setString(2, table.getTableName());
+
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    oidColumns.add(rs.getString("column_name"));
+                }
+            }
+        }
+
+        log.debug("Found {} oid columns in table {}.{}: {}",
+                  oidColumns.size(), table.getSchema(), table.getTableName(), oidColumns);
+
+        return oidColumns;
+    }
+
+    /**
+     * Adds staging columns for oid columns.
+     * Staging columns are temporary bytea columns used during COPY.
+     * Format: {original_column}_staging bytea
+     *
+     * These staging columns are:
+     * - Created before COPY operation
+     * - Used as COPY target for hex-encoded BLOB/CLOB data
+     * - Converted to Large Objects after COPY completes
+     * - Dropped after successful conversion
+     *
+     * @param postgresConn PostgreSQL connection
+     * @param table Table metadata
+     * @param oidColumns List of oid column names
+     * @throws SQLException if ALTER TABLE fails
+     */
+    private void addStagingColumns(Connection postgresConn, TableMetadata table,
+                                    List<String> oidColumns) throws SQLException {
+        if (oidColumns.isEmpty()) {
+            return;
+        }
+
+        String qualifiedTableName = "\"" + table.getSchema() + "\".\"" + table.getTableName() + "\"";
+
+        for (String oidColumn : oidColumns) {
+            String stagingColumn = oidColumn + "_staging";
+            String sql = "ALTER TABLE " + qualifiedTableName +
+                         " ADD COLUMN \"" + stagingColumn + "\" bytea";
+
+            log.debug("Adding staging column: {} to {}", stagingColumn, qualifiedTableName);
+
+            try (PreparedStatement stmt = postgresConn.prepareStatement(sql)) {
+                stmt.execute();
+            }
+        }
+
+        log.debug("Added {} staging columns to {}", oidColumns.size(), qualifiedTableName);
+    }
+
+    /**
+     * Converts staging column data to Large Objects using lo_from_bytea().
+     *
+     * PostgreSQL function lo_from_bytea(loid oid, data bytea) creates a Large Object
+     * from bytea data and returns its OID reference. Using loid=0 means PostgreSQL
+     * auto-generates a unique OID.
+     *
+     * Process:
+     * 1. For each oid column with staging data:
+     *    UPDATE table SET doc_content = lo_from_bytea(0, doc_content_staging)
+     *    WHERE doc_content_staging IS NOT NULL
+     * 2. NULL staging values → NULL oid values (no Large Object created)
+     * 3. Each non-NULL row gets a unique Large Object with unique OID
+     *
+     * Error Handling:
+     * - Conversion failure → SQLException → Transaction rollback
+     * - Staging columns remain for debugging
+     *
+     * @param postgresConn PostgreSQL connection
+     * @param table Table metadata
+     * @param oidColumns List of oid column names
+     * @throws SQLException if conversion fails
+     */
+    private void convertStagingToLargeObjects(Connection postgresConn, TableMetadata table,
+                                              List<String> oidColumns) throws SQLException {
+        if (oidColumns.isEmpty()) {
+            return;
+        }
+
+        String qualifiedTableName = "\"" + table.getSchema() + "\".\"" + table.getTableName() + "\"";
+
+        for (String oidColumn : oidColumns) {
+            String stagingColumn = oidColumn + "_staging";
+
+            // UPDATE table SET doc_content = lo_from_bytea(0, doc_content_staging)
+            // WHERE doc_content_staging IS NOT NULL
+            String sql = "UPDATE " + qualifiedTableName +
+                         " SET \"" + oidColumn + "\" = lo_from_bytea(0, \"" + stagingColumn + "\") " +
+                         " WHERE \"" + stagingColumn + "\" IS NOT NULL";
+
+            log.debug("Converting staging column {} to Large Objects for column {} in {}",
+                      stagingColumn, oidColumn, qualifiedTableName);
+
+            try (PreparedStatement stmt = postgresConn.prepareStatement(sql)) {
+                int rowsUpdated = stmt.executeUpdate();
+                log.debug("Converted {} rows for column {} (NULL rows remain NULL)",
+                          rowsUpdated, oidColumn);
+            }
+        }
+
+        log.debug("Completed Large Object conversion for {} columns in {}",
+                  oidColumns.size(), qualifiedTableName);
+    }
+
+    /**
+     * Drops staging columns after successful Large Object conversion.
+     *
+     * Staging columns are temporary and should be removed after:
+     * 1. COPY completes successfully
+     * 2. Staging data converted to Large Objects
+     * 3. Transaction committed
+     *
+     * Error Handling:
+     * - Drop failure is logged but does not fail the transaction
+     * - Orphaned staging columns can be manually cleaned later
+     * - This is non-critical cleanup (data already converted)
+     *
+     * @param postgresConn PostgreSQL connection
+     * @param table Table metadata
+     * @param oidColumns List of oid column names
+     */
+    private void dropStagingColumns(Connection postgresConn, TableMetadata table,
+                                    List<String> oidColumns) {
+        if (oidColumns.isEmpty()) {
+            return;
+        }
+
+        String qualifiedTableName = "\"" + table.getSchema() + "\".\"" + table.getTableName() + "\"";
+
+        for (String oidColumn : oidColumns) {
+            String stagingColumn = oidColumn + "_staging";
+            String sql = "ALTER TABLE " + qualifiedTableName +
+                         " DROP COLUMN \"" + stagingColumn + "\"";
+
+            log.debug("Dropping staging column: {} from {}", stagingColumn, qualifiedTableName);
+
+            try (PreparedStatement stmt = postgresConn.prepareStatement(sql)) {
+                stmt.execute();
+            } catch (SQLException e) {
+                // Log error but don't fail transaction (data already converted)
+                log.warn("Failed to drop staging column {} from {}: {}",
+                         stagingColumn, qualifiedTableName, e.getMessage());
+            }
+        }
+
+        log.debug("Dropped {} staging columns from {}", oidColumns.size(), qualifiedTableName);
     }
 }

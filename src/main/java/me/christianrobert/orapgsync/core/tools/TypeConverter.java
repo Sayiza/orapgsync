@@ -138,11 +138,11 @@ public class TypeConverter {
         return "text";
 
       case "blob":
-        return "bytea";
+        return "oid";
 
       case "clob":
       case "nclob":
-        return "text";
+        return "oid";
 
       // XML type - Oracle XMLTYPE maps directly to PostgreSQL xml type
       // Note: When XMLTYPE appears with owner SYS/PUBLIC, it's detected via OracleTypeClassifier.isXmlType()
