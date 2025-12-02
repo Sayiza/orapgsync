@@ -219,6 +219,14 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
       - ALL_VIEWS.TEXT only contains `SELECT empno, ename...` (no column list)
       - Fix: Reconstruct column list from ALL_TAB_COLUMNS metadata to match stub columns
       - Prevents PostgreSQL "cannot change name of view column" errors
+    - ✅ **Query depth tracking** (2025-12-02) - Prevents view column casts from being applied to subqueries
+      - TransformationContext tracks query depth (0=none, 1=top-level, 2+=nested)
+      - Type casts only applied to top-level SELECT expressions, not nested subqueries
+      - Critical fix: Subqueries with scalar expressions were incorrectly receiving type casts
+    - ✅ **CTE depth tracking** (2025-12-02) - Prevents view column casts from being applied to CTE definitions
+      - TransformationContext tracks CTE depth (0=not in CTE, 1+=inside CTE)
+      - Counter-based approach handles nested CTEs correctly
+      - Critical fix: CTE SELECT expressions were incorrectly receiving type casts
     - **See [TRANSFORMATION.md](documentation/TRANSFORMATION.md) for detailed feature list and implementation history**
 
 12. **Type Inference System**: 🔄 **42% COMPLETE** - Two-pass type analysis for accurate PL/SQL transformation

@@ -49,6 +49,10 @@ public class VisitQueryBlock {
     b.pushOuterJoinContext(outerJoinContext);
     b.pushRownumContext(rownumContext);
 
+    // Track query depth for view column type casting
+    // Only apply casts to top-level SELECT, not to nested subqueries
+    b.getContext().enterQuery();
+
     try {
       // PHASE 2: TRANSFORMATION - Visit clauses with prepared context
 
@@ -140,6 +144,7 @@ public class VisitQueryBlock {
     } finally {
       // Always pop the contexts when leaving this query level (even if exception occurs)
       // This ensures nested subqueries don't corrupt parent query contexts
+      b.getContext().exitQuery();
       b.popOuterJoinContext();
       b.popRownumContext();
     }

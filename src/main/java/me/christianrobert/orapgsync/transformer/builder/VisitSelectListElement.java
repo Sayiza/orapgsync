@@ -65,7 +65,11 @@ public class VisitSelectListElement {
 
     // Apply type casting for view transformations
     // This ensures CREATE OR REPLACE VIEW succeeds by matching stub column types exactly
-    if (b.getContext() != null && b.getContext().isViewTransformation()) {
+    // IMPORTANT: Only apply casts to main view SELECT, not to:
+    //   - Nested subqueries (checked by isTopLevelQuery)
+    //   - CTE definitions (checked by !isInCTE)
+    if (b.getContext() != null && b.getContext().isViewTransformation()
+        && b.getContext().isTopLevelQuery() && !b.getContext().isInCTE()) {
       String targetType = null;
 
       // Try name-based lookup first (for explicit aliases)

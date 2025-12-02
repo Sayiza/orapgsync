@@ -294,6 +294,51 @@ public class TransformationContext {
      */
     private int currentSelectListPosition = -1;  // -1 = not in SELECT list
 
+    /**
+     * Query depth tracking (0 = not in query, 1 = top-level query, 2+ = nested subqueries).
+     * Used to prevent view column type casts from being applied to subqueries.
+     *
+     * <p><strong>Purpose:</strong> View column type casts should ONLY apply to the top-level SELECT,
+     * not to nested subqueries within the view SQL.</p>
+     *
+     * <p><strong>Example:</strong></p>
+     * <pre>
+     * -- View transformation with subquery
+     * SELECT col1, (SELECT MAX(date_col) FROM t2) FROM t1
+     *
+     * queryDepth=1: Apply casts to col1 and subquery result (top-level SELECT)
+     * queryDepth=2: NO casts to MAX(date_col) (nested subquery)
+     * </pre>
+     */
+    private int queryDepth = 0;
+
+    /**
+     * CTE depth tracking (0 = not in CTE, 1+ = inside CTE definition).
+     * Used to prevent view column type casts from being applied to CTE subqueries.
+     *
+     * <p><strong>Purpose:</strong> View column type casts should ONLY apply to the main SELECT,
+     * not to CTE definitions within the WITH clause.</p>
+     *
+     * <p><strong>Example:</strong></p>
+     * <pre>
+     * -- View transformation with CTE
+     * WITH cte AS (
+     *   SELECT col1, col2 FROM t1  -- cteDepth=1: NO casts (inside CTE)
+     * )
+     * SELECT col1, col2 FROM cte    -- cteDepth=0: Apply casts (main SELECT)
+     * </pre>
+     *
+     * <p><strong>Nested CTEs:</strong> Counter-based tracking handles nested CTEs correctly:</p>
+     * <pre>
+     * WITH outer_cte AS (
+     *   WITH inner_cte AS (SELECT ...)  -- cteDepth=2
+     *   SELECT ... FROM inner_cte        -- cteDepth=1
+     * )
+     * SELECT ... FROM outer_cte          -- cteDepth=0
+     * </pre>
+     */
+    private int cteDepth = 0;
+
     // ========== Layer 3: Query-Level Context ==========
 
     private final Map<String, String> tableAliases;  // alias → table name (per query)
@@ -650,6 +695,113 @@ public class TransformationContext {
             return null;
         }
         return getViewColumnType(columnName);
+    }
+
+    // ========== Query Depth Tracking ==========
+
+    /**
+     * Enters a new query scope (increments query depth).
+     * Call this when entering a SELECT statement (top-level or subquery).
+     *
+     * <p><strong>Usage pattern:</strong></p>
+     * <pre>
+     * public String visitQuery_block(Query_blockContext ctx) {
+     *     context.enterQuery();
+     *     try {
+     *         // ... transform query ...
+     *     } finally {
+     *         context.exitQuery();
+     *     }
+     * }
+     * </pre>
+     */
+    public void enterQuery() {
+        queryDepth++;
+    }
+
+    /**
+     * Exits the current query scope (decrements query depth).
+     * Always call in a finally block to ensure proper cleanup.
+     */
+    public void exitQuery() {
+        if (queryDepth > 0) {
+            queryDepth--;
+        }
+    }
+
+    /**
+     * Checks if currently processing the top-level query (depth = 1).
+     * Used to determine if view column type casts should be applied.
+     *
+     * @return true if at top-level query (not in subquery)
+     */
+    public boolean isTopLevelQuery() {
+        return queryDepth == 1;
+    }
+
+    /**
+     * Gets the current query depth.
+     * Useful for debugging and validation.
+     *
+     * @return Query depth (0 = not in query, 1 = top-level, 2+ = nested)
+     */
+    public int getQueryDepth() {
+        return queryDepth;
+    }
+
+    // ========== CTE Depth Tracking ==========
+
+    /**
+     * Enters a CTE definition scope (increments CTE depth).
+     * Call this when entering a CTE's subquery definition.
+     *
+     * <p><strong>Usage pattern:</strong></p>
+     * <pre>
+     * public String visitSubqueryFactoringClause(SubqueryFactoringClauseContext ctx) {
+     *     context.enterCTE();
+     *     try {
+     *         result.append(b.visit(ctx.subquery()));
+     *     } finally {
+     *         context.exitCTE();
+     *     }
+     * }
+     * </pre>
+     *
+     * <p><strong>Why counter-based:</strong> Handles nested CTEs correctly.
+     * If using a boolean, exiting an inner CTE would incorrectly clear the outer CTE context.</p>
+     */
+    public void enterCTE() {
+        cteDepth++;
+    }
+
+    /**
+     * Exits the current CTE definition scope (decrements CTE depth).
+     * Always call in a finally block to ensure proper cleanup.
+     */
+    public void exitCTE() {
+        if (cteDepth > 0) {
+            cteDepth--;
+        }
+    }
+
+    /**
+     * Checks if currently processing a CTE definition.
+     * Used to determine if view column type casts should be suppressed.
+     *
+     * @return true if inside any CTE definition (depth >= 1)
+     */
+    public boolean isInCTE() {
+        return cteDepth > 0;
+    }
+
+    /**
+     * Gets the current CTE depth.
+     * Useful for debugging and validation.
+     *
+     * @return CTE depth (0 = not in CTE, 1+ = inside CTE, higher = nested CTEs)
+     */
+    public int getCTEDepth() {
+        return cteDepth;
     }
 
     // ========== Inline Type Support (FUTURE - stubs for now) ==========

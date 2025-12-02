@@ -208,6 +208,18 @@ This document describes the ANTLR-based transformation module that converts Orac
   - Oracle views can define columns separately from SELECT aliases: `CREATE VIEW v (id, name) AS SELECT empno, ename...`
   - ALL_VIEWS.TEXT doesn't include the explicit column list, so it's reconstructed from ALL_TAB_COLUMNS
   - Ensures column names match between stub and implementation phases
+- **View column type casting** (2025-11-15):
+  - Casts SELECT list expressions to match stub column types (name-based and position-based)
+  - Ensures CREATE OR REPLACE VIEW succeeds by matching types exactly
+  - **Query depth tracking** (2025-12-02): Prevents casts from being applied to nested subqueries
+    - TransformationContext tracks query depth (0=none, 1=top-level, 2+=nested)
+    - Only top-level SELECT expressions receive type casts
+    - Subquery expressions preserve their natural types (critical for type inference correctness)
+  - **CTE depth tracking** (2025-12-02): Prevents casts from being applied to CTE definitions
+    - TransformationContext tracks CTE depth (0=not in CTE, 1+=inside CTE)
+    - Counter-based tracking handles nested CTEs correctly
+    - CTE SELECT expressions preserve their natural types (only main SELECT gets casts)
+    - Example: `WITH cte AS (SELECT date_col FROM t) SELECT * FROM cte` - no cast on date_col
 - SqlTransformationService extracts Oracle view SQL from ALL_VIEWS.TEXT
 - **Success rate:** ~90% real-world views
 
