@@ -793,14 +793,17 @@ public class CsvDataTransferService {
 
     /**
      * Adds staging columns for oid columns.
-     * Staging columns are temporary bytea columns used during COPY.
-     * Format: {original_column}_staging bytea
+     * Staging columns are temporary text columns used during COPY.
+     * Format: {original_column}_staging text
      *
      * These staging columns are:
      * - Created before COPY operation
-     * - Used as COPY target for hex-encoded BLOB/CLOB data
-     * - Converted to Large Objects after COPY completes
+     * - Used as COPY target for hex-encoded BLOB/CLOB data (as text)
+     * - Converted to Large Objects after COPY completes (using decode(text, 'hex'))
      * - Dropped after successful conversion
+     *
+     * Note: Using text instead of bytea because PostgreSQL CSV COPY does not
+     * automatically decode \x hex format into bytea. Explicit decode() is needed.
      *
      * @param postgresConn PostgreSQL connection
      * @param table Table metadata
@@ -818,7 +821,7 @@ public class CsvDataTransferService {
         for (String oidColumn : oidColumns) {
             String stagingColumn = oidColumn + "_staging";
             String sql = "ALTER TABLE " + qualifiedTableName +
-                         " ADD COLUMN \"" + stagingColumn + "\" bytea";
+                         " ADD COLUMN \"" + stagingColumn + "\" text";
 
             log.debug("Adding staging column: {} to {}", stagingColumn, qualifiedTableName);
 
@@ -831,7 +834,7 @@ public class CsvDataTransferService {
     }
 
     /**
-     * Converts staging column data to Large Objects using lo_from_bytea().
+     * Converts staging column data to Large Objects using lo_from_bytea() with decode().
      *
      * PostgreSQL function lo_from_bytea(loid oid, data bytea) creates a Large Object
      * from bytea data and returns its OID reference. Using loid=0 means PostgreSQL
@@ -839,10 +842,17 @@ public class CsvDataTransferService {
      *
      * Process:
      * 1. For each oid column with staging data:
-     *    UPDATE table SET doc_content = lo_from_bytea(0, doc_content_staging)
+     *    UPDATE table SET doc_content = lo_from_bytea(0, decode(doc_content_staging, 'hex'))
      *    WHERE doc_content_staging IS NOT NULL
-     * 2. NULL staging values → NULL oid values (no Large Object created)
-     * 3. Each non-NULL row gets a unique Large Object with unique OID
+     * 2. Staging column (text) contains hex-encoded data (e.g., "48656c6c6f")
+     * 3. decode(text, 'hex') converts hex string to binary bytea
+     * 4. lo_from_bytea creates Large Object from binary data and returns OID
+     * 5. NULL staging values → NULL oid values (no Large Object created)
+     * 6. Each non-NULL row gets a unique Large Object with unique OID
+     *
+     * Note: decode() is required because staging columns are text type. PostgreSQL CSV COPY
+     * does not automatically decode \x hex format into bytea, so we use text columns and
+     * explicit decode() to ensure correct binary conversion.
      *
      * Error Handling:
      * - Conversion failure → SQLException → Transaction rollback
@@ -864,10 +874,11 @@ public class CsvDataTransferService {
         for (String oidColumn : oidColumns) {
             String stagingColumn = oidColumn + "_staging";
 
-            // UPDATE table SET doc_content = lo_from_bytea(0, doc_content_staging)
+            // UPDATE table SET doc_content = lo_from_bytea(0, decode(doc_content_staging, 'hex'))
             // WHERE doc_content_staging IS NOT NULL
+            // Note: decode() converts hex string (text) to binary (bytea) before creating Large Object
             String sql = "UPDATE " + qualifiedTableName +
-                         " SET \"" + oidColumn + "\" = lo_from_bytea(0, \"" + stagingColumn + "\") " +
+                         " SET \"" + oidColumn + "\" = lo_from_bytea(0, decode(\"" + stagingColumn + "\", 'hex')) " +
                          " WHERE \"" + stagingColumn + "\" IS NOT NULL";
 
             log.debug("Converting staging column {} to Large Objects for column {} in {}",

@@ -38,12 +38,14 @@ Since PostgreSQL `oid` columns cannot accept hex-encoded strings during COPY, we
 1. **Table Creation**: Create final structure with `oid` columns
 2. **Data Transfer**:
    - Drop NOT NULL constraints on `oid` columns (if present)
-   - Add temporary `{column}_staging bytea` columns
-   - COPY hex data into staging columns (oid columns remain NULL)
-   - Convert: `UPDATE table SET column = lo_from_bytea(0, column_staging)`
+   - Add temporary `{column}_staging text` columns
+   - COPY hex data into staging columns as text (oid columns remain NULL)
+   - Convert: `UPDATE table SET column = lo_from_bytea(0, decode(column_staging, 'hex'))`
    - Restore NOT NULL constraints on `oid` columns (if originally present)
    - Drop staging columns
 3. **View Stubs**: Reference `oid` columns directly (staging columns invisible)
+
+**Note:** Staging columns use `text` type (not `bytea`) because PostgreSQL's CSV COPY format does not automatically decode `\x` hex literals into bytea. Using text + explicit `decode()` ensures correct binary conversion.
 
 ### Key Principles
 ✅ **Stub mechanism preserved** - Views only see `oid` columns
@@ -921,9 +923,39 @@ Recommendation: Run `vacuumlo` weekly or after major data changes.
 
 ---
 
+## Known Issues and Fixes
+
+### Issue: Hex Encoding Bug (2025-12-05) - FIXED
+
+**Problem:** Initial implementation stored hex-encoded strings as Large Object content instead of decoded binary data, resulting in 2x data size.
+
+**Root Cause:**
+- Staging columns were type `bytea`
+- Hex strings like `\x48656c6c6f` were written to CSV
+- PostgreSQL CSV COPY does **not** automatically decode `\x` hex format into bytea
+- The ASCII characters '4','8','6','5'... were stored as binary, doubling the size
+- `lo_from_bytea()` then created Large Objects from the hex string bytes, not the decoded binary
+
+**Fix Applied:**
+1. Changed staging columns from `bytea` to `text`
+2. Removed `\x` prefix from hex serialization (just raw hex: `48656c6c6f`)
+3. Updated conversion to use explicit decode:
+   ```sql
+   UPDATE table SET column = lo_from_bytea(0, decode(column_staging, 'hex'))
+   ```
+
+**Impact:** All BLOB/CLOB migrations now transfer correct binary data with correct size.
+
+**Limitations:**
+- `LONG RAW` type (obsolete) still has this issue, as it uses direct bytea columns without staging
+- Workaround: Convert LONG RAW to BLOB in Oracle before migration
+
+---
+
 ## Document Version History
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | 2025-12-01 | Claude | Initial implementation plan |
+| 1.1 | 2025-12-05 | Claude | Fixed hex encoding bug: changed staging columns to text, added decode() |
 

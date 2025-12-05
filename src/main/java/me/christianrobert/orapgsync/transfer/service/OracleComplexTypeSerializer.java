@@ -217,18 +217,19 @@ public class OracleComplexTypeSerializer {
     }
 
     /**
-     * Serializes an Oracle BLOB or LONG RAW to PostgreSQL bytea hex format for CSV COPY.
-     * Format: \\x48656c6c6f (hex encoding with \\x prefix, escaped for CSV)
+     * Serializes an Oracle BLOB to hex format for PostgreSQL oid (Large Object) migration.
+     * Format: 48656c6c6f (plain hex string, no prefix)
      *
-     * Note: Oracle LONG RAW datatype is different from BLOB:
-     * - LONG RAW is an obsolete type (replaced by BLOB in Oracle 8i)
-     * - LONG RAW uses getBytes() for access
-     * - BLOB uses getBlob() for access
+     * The hex string is written to a text staging column during CSV COPY, then converted
+     * to a Large Object using: lo_from_bytea(0, decode(staging_column, 'hex'))
+     *
+     * Note: This method also handles LONG RAW for backwards compatibility, but LONG RAW
+     * has known issues with hex decoding (see serializeLongRawToHex).
      *
      * @param rs ResultSet positioned at current row
      * @param columnIndex Column index (1-based)
      * @param column Column metadata
-     * @return Hex-encoded string for PostgreSQL bytea, or null if NULL/too large
+     * @return Hex-encoded string (no prefix), or null if NULL/too large
      * @throws SQLException if database access fails
      */
     public String serializeBlobToHex(ResultSet rs, int columnIndex, ColumnMetadata column) throws SQLException {
@@ -260,7 +261,7 @@ public class OracleComplexTypeSerializer {
             }
 
             if (size == 0) {
-                return "\\\\x"; // Empty BLOB → \x (escaped for CSV)
+                return ""; // Empty BLOB → empty hex string (decoded to empty bytea)
             }
 
             log.debug("Serializing BLOB of {} bytes in column {}", size, column.getColumnName());
@@ -309,6 +310,9 @@ public class OracleComplexTypeSerializer {
             log.debug("Serialized LONG RAW of {} bytes in column {}", longRawData.length, column.getColumnName());
 
             // Convert bytes to hex
+            // NOTE: LONG RAW uses bytea (not oid), so this has the same CSV hex decoding issue as the old BLOB code.
+            // However, LONG RAW is obsolete (replaced by BLOB in Oracle 8i) and rarely used, so we accept this limitation.
+            // If needed, migrate LONG RAW to BLOB in Oracle before migration.
             StringBuilder hex = new StringBuilder(4 + (longRawData.length * 2));
             hex.append("\\\\x"); // Escaped \x prefix for CSV
             appendBytesAsHex(hex, longRawData, 0, longRawData.length);
@@ -326,11 +330,11 @@ public class OracleComplexTypeSerializer {
      * This avoids loading the entire BLOB into memory at once.
      */
     private String streamBlobToHex(BLOB blob, long size) throws SQLException {
-        // Pre-allocate StringBuilder with known size: \\x + 2 chars per byte
+        // Pre-allocate StringBuilder with known size: 2 chars per byte
         // Add some buffer for safety
-        int capacity = (int) (4 + (size * 2));
+        int capacity = (int) (size * 2) + 4;
         StringBuilder hex = new StringBuilder(capacity);
-        hex.append("\\\\x"); // Escaped \x prefix for CSV
+        // No prefix - just raw hex string for PostgreSQL decode() function
 
         try (InputStream stream = blob.getBinaryStream()) {
             byte[] buffer = new byte[LOB_CHUNK_SIZE];
