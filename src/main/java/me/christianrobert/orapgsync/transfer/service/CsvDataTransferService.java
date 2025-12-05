@@ -182,13 +182,20 @@ public class CsvDataTransferService {
                       table.getTableName(), oidColumns.size(), oidColumns);
         }
 
-        // Step 2: Build column lists
+        // Step 2: Detect which oid columns have NOT NULL constraints
+        List<String> notNullOidColumns = detectNotNullOidColumns(postgresConn, table, oidColumns);
+        if (!notNullOidColumns.isEmpty()) {
+            log.debug("Table {} has {} oid columns with NOT NULL constraints: {}",
+                      table.getTableName(), notNullOidColumns.size(), notNullOidColumns);
+        }
+
+        // Step 3: Build column lists
         // The SELECT includes extra columns for ANYDATA extraction
         // For oid columns, COPY targets staging columns
         String columnList = buildOracleSelectColumnList(table);
         String quotedColumnList = buildQuotedColumnList(table, oidColumns);  // Pass oidColumns for staging substitution
 
-        // Step 3: Build SQL commands
+        // Step 4: Build SQL commands
         // Oracle SELECT query with ANYDATA extraction
         String selectSql = "SELECT " + columnList + " FROM " + qualifiedOracleName;
 
@@ -198,8 +205,13 @@ public class CsvDataTransferService {
         log.debug("Oracle query: {}", selectSql);
         log.debug("PostgreSQL COPY: {}", copySql);
 
-        // Step 4: Add staging columns (before COPY)
+        // Step 5: Prepare staging workflow (before COPY)
         if (!oidColumns.isEmpty()) {
+            // Drop NOT NULL constraints first (before adding staging columns)
+            // This allows COPY to insert rows with NULL in oid columns while data goes into staging
+            dropNotNullConstraints(postgresConn, table, notNullOidColumns);
+
+            // Add staging columns
             addStagingColumns(postgresConn, table, oidColumns);
         }
 
@@ -258,6 +270,11 @@ public class CsvDataTransferService {
         if (!oidColumns.isEmpty()) {
             log.debug("Converting staging columns to Large Objects for table {}", qualifiedOracleName);
             convertStagingToLargeObjects(postgresConn, table, oidColumns);
+
+            // Restore NOT NULL constraints after conversion
+            restoreNotNullConstraints(postgresConn, table, notNullOidColumns);
+
+            // Drop staging columns
             dropStagingColumns(postgresConn, table, oidColumns);
         }
 
@@ -625,6 +642,153 @@ public class CsvDataTransferService {
                   oidColumns.size(), table.getSchema(), table.getTableName(), oidColumns);
 
         return oidColumns;
+    }
+
+    /**
+     * Detects which oid columns have NOT NULL constraints.
+     * These constraints must be temporarily dropped during staging to allow COPY
+     * to insert rows where the oid column is NULL (data goes into staging column).
+     *
+     * After conversion to Large Objects, NOT NULL constraints are restored.
+     *
+     * @param postgresConn PostgreSQL connection
+     * @param table Table metadata
+     * @param oidColumns List of oid column names
+     * @return List of oid columns with NOT NULL constraints
+     * @throws SQLException if metadata query fails
+     */
+    private List<String> detectNotNullOidColumns(Connection postgresConn,
+                                                 TableMetadata table,
+                                                 List<String> oidColumns) throws SQLException {
+        if (oidColumns.isEmpty()) {
+            return java.util.Collections.emptyList();
+        }
+
+        List<String> notNullOidColumns = new java.util.ArrayList<>();
+
+        String sql = "SELECT column_name " +
+                     "FROM information_schema.columns " +
+                     "WHERE table_schema = ? " +
+                     "AND table_name = ? " +
+                     "AND column_name = ANY(?) " +
+                     "AND is_nullable = 'NO'";
+
+        try (PreparedStatement stmt = postgresConn.prepareStatement(sql)) {
+            stmt.setString(1, table.getSchema());
+            stmt.setString(2, table.getTableName());
+
+            // Convert List<String> to SQL array
+            java.sql.Array sqlArray = postgresConn.createArrayOf("text",
+                oidColumns.toArray(new String[0]));
+            stmt.setArray(3, sqlArray);
+
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    notNullOidColumns.add(rs.getString("column_name"));
+                }
+            }
+        }
+
+        log.debug("Found {} oid columns with NOT NULL constraints in {}.{}: {}",
+                  notNullOidColumns.size(), table.getSchema(),
+                  table.getTableName(), notNullOidColumns);
+
+        return notNullOidColumns;
+    }
+
+    /**
+     * Temporarily drops NOT NULL constraints on oid columns.
+     * Constraints will be restored after Large Object conversion.
+     *
+     * This is necessary because during COPY, the oid columns receive NULL values
+     * (actual data goes into staging columns). After conversion, the oid columns
+     * will contain Large Object references, and we can safely restore NOT NULL.
+     *
+     * @param postgresConn PostgreSQL connection
+     * @param table Table metadata
+     * @param notNullOidColumns List of oid columns with NOT NULL constraints
+     * @throws SQLException if ALTER TABLE fails
+     */
+    private void dropNotNullConstraints(Connection postgresConn,
+                                       TableMetadata table,
+                                       List<String> notNullOidColumns) throws SQLException {
+        if (notNullOidColumns.isEmpty()) {
+            return;
+        }
+
+        String qualifiedTableName = "\"" + table.getSchema() + "\".\"" + table.getTableName() + "\"";
+
+        for (String column : notNullOidColumns) {
+            String sql = "ALTER TABLE " + qualifiedTableName +
+                         " ALTER COLUMN \"" + column + "\" DROP NOT NULL";
+
+            log.debug("Dropping NOT NULL constraint on column: {} in {}", column, qualifiedTableName);
+
+            try (PreparedStatement stmt = postgresConn.prepareStatement(sql)) {
+                stmt.execute();
+            }
+        }
+
+        log.debug("Dropped NOT NULL constraints on {} columns in {}",
+                  notNullOidColumns.size(), qualifiedTableName);
+    }
+
+    /**
+     * Restores NOT NULL constraints on oid columns after conversion.
+     * Only restores if all values are non-NULL (safe to enforce constraint).
+     *
+     * This is the final step of the staging workflow:
+     * 1. NOT NULL dropped (before COPY)
+     * 2. Data copied into staging columns
+     * 3. Staging converted to Large Objects (oid columns now populated)
+     * 4. NOT NULL restored (this method)
+     * 5. Staging columns dropped
+     *
+     * Safety check: Verifies no NULL values exist before restoring constraint.
+     * If NULL values found, logs warning and skips that column.
+     *
+     * @param postgresConn PostgreSQL connection
+     * @param table Table metadata
+     * @param notNullOidColumns List of oid columns that had NOT NULL constraints
+     * @throws SQLException if constraint restoration fails
+     */
+    private void restoreNotNullConstraints(Connection postgresConn,
+                                          TableMetadata table,
+                                          List<String> notNullOidColumns) throws SQLException {
+        if (notNullOidColumns.isEmpty()) {
+            return;
+        }
+
+        String qualifiedTableName = "\"" + table.getSchema() + "\".\"" + table.getTableName() + "\"";
+
+        for (String column : notNullOidColumns) {
+            // First verify no NULLs exist (safety check)
+            String checkSql = "SELECT COUNT(*) FROM " + qualifiedTableName +
+                             " WHERE \"" + column + "\" IS NULL";
+
+            try (PreparedStatement checkStmt = postgresConn.prepareStatement(checkSql);
+                 ResultSet rs = checkStmt.executeQuery()) {
+
+                if (rs.next() && rs.getInt(1) > 0) {
+                    log.warn("Cannot restore NOT NULL constraint on {}.{} - {} NULL values exist",
+                            qualifiedTableName, column, rs.getInt(1));
+                    continue;
+                }
+            }
+
+            // Restore constraint
+            String sql = "ALTER TABLE " + qualifiedTableName +
+                         " ALTER COLUMN \"" + column + "\" SET NOT NULL";
+
+            log.debug("Restoring NOT NULL constraint on column: {} in {}", column, qualifiedTableName);
+
+            try (PreparedStatement stmt = postgresConn.prepareStatement(sql)) {
+                stmt.execute();
+            }
+        }
+
+        log.debug("Restored NOT NULL constraints on {} columns in {}",
+                  notNullOidColumns.size(), qualifiedTableName);
     }
 
     /**

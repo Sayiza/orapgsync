@@ -37,9 +37,11 @@ Since PostgreSQL `oid` columns cannot accept hex-encoded strings during COPY, we
 
 1. **Table Creation**: Create final structure with `oid` columns
 2. **Data Transfer**:
+   - Drop NOT NULL constraints on `oid` columns (if present)
    - Add temporary `{column}_staging bytea` columns
-   - COPY hex data into staging columns
+   - COPY hex data into staging columns (oid columns remain NULL)
    - Convert: `UPDATE table SET column = lo_from_bytea(0, column_staging)`
+   - Restore NOT NULL constraints on `oid` columns (if originally present)
    - Drop staging columns
 3. **View Stubs**: Reference `oid` columns directly (staging columns invisible)
 
@@ -74,7 +76,7 @@ Step 7: Create view stubs (bytea type)
 **After:**
 ```
 Step 4: Create tables (BLOB→oid)
-Step 5: Add staging → COPY hex → Convert to Large Object → Drop staging
+Step 5: Drop NOT NULL → Add staging → COPY hex → Convert to Large Object → Restore NOT NULL → Drop staging
 Step 7: Create view stubs (oid type) ← No change needed
 ```
 
@@ -118,6 +120,8 @@ case "nclob":
 
 **Purpose:** Query PostgreSQL table metadata to find `oid` columns (LOB columns that need staging).
 
+**Status:** ✅ Implemented
+
 ```java
 /**
  * Detects columns with oid type in PostgreSQL table.
@@ -158,9 +162,65 @@ private List<String> detectOidColumns(Connection postgresConn, TableMetadata tab
 - Unit test with mock connection returning oid column
 - Integration test with real PostgreSQL table
 
-#### 2.2 New Helper Method: Add Staging Columns
+#### 2.2 New Helper Methods: NOT NULL Constraint Management
+
+**Purpose:** Temporarily drop NOT NULL constraints on `oid` columns during staging, then restore after conversion.
+
+**Status:** ✅ Implemented (2025-12-03)
+
+**Background:** When `oid` columns have NOT NULL constraints, COPY fails because data goes into staging columns, leaving `oid` columns NULL. Solution: temporarily drop constraints, perform transfer, restore after conversion.
+
+**2.2a - Detect NOT NULL OID Columns:**
+```java
+/**
+ * Detects which oid columns have NOT NULL constraints.
+ * These constraints must be temporarily dropped during staging.
+ */
+private List<String> detectNotNullOidColumns(Connection postgresConn,
+                                             TableMetadata table,
+                                             List<String> oidColumns) throws SQLException {
+    // Query information_schema.columns for is_nullable = 'NO'
+    // Returns list of oid column names with NOT NULL constraints
+}
+```
+
+**2.2b - Drop NOT NULL Constraints:**
+```java
+/**
+ * Temporarily drops NOT NULL constraints on oid columns.
+ * Constraints will be restored after Large Object conversion.
+ */
+private void dropNotNullConstraints(Connection postgresConn,
+                                   TableMetadata table,
+                                   List<String> notNullOidColumns) throws SQLException {
+    // For each column: ALTER TABLE ... ALTER COLUMN ... DROP NOT NULL
+}
+```
+
+**2.2c - Restore NOT NULL Constraints:**
+```java
+/**
+ * Restores NOT NULL constraints on oid columns after conversion.
+ * Only restores if all values are non-NULL (safe to enforce constraint).
+ */
+private void restoreNotNullConstraints(Connection postgresConn,
+                                      TableMetadata table,
+                                      List<String> notNullOidColumns) throws SQLException {
+    // Safety check: COUNT(*) WHERE column IS NULL
+    // If no NULLs: ALTER TABLE ... ALTER COLUMN ... SET NOT NULL
+}
+```
+
+**Testing:**
+- Unit test: Verify detection of NOT NULL constraints
+- Integration test: Create table with NOT NULL oid column, verify constraint dropped/restored
+- Integration test: Verify data transfer succeeds with NOT NULL constraints
+
+#### 2.3 New Helper Method: Add Staging Columns
 
 **Purpose:** Add temporary `{column}_staging bytea` columns for COPY target.
+
+**Status:** ✅ Implemented
 
 ```java
 /**
@@ -204,9 +264,11 @@ private void addStagingColumns(Connection postgresConn, TableMetadata table,
 - Unit test: Verify correct SQL generation
 - Integration test: Check staging columns created in PostgreSQL
 
-#### 2.3 New Helper Method: Convert Staging to Large Objects
+#### 2.4 New Helper Method: Convert Staging to Large Objects
 
 **Purpose:** Convert hex data in staging columns to PostgreSQL Large Objects, store OID references.
+
+**Status:** ✅ Implemented
 
 ```java
 /**
@@ -268,9 +330,11 @@ private void convertStagingToLargeObjects(Connection postgresConn, TableMetadata
   - Verify oid column contains numeric OID
   - Verify Large Object readable via `lo_get(oid)`
 
-#### 2.4 New Helper Method: Drop Staging Columns
+#### 2.5 New Helper Method: Drop Staging Columns
 
 **Purpose:** Clean up temporary staging columns after successful conversion.
+
+**Status:** ✅ Implemented
 
 ```java
 /**
@@ -312,7 +376,9 @@ private void dropStagingColumns(Connection postgresConn, TableMetadata table,
 **Testing:**
 - Integration test: Verify staging columns removed after conversion
 
-#### 2.5 Modify `performCsvTransfer()` Method
+#### 2.6 Modify `performCsvTransfer()` Method
+
+**Status:** ✅ Implemented (including NOT NULL constraint management)
 
 **Current signature (line 172):**
 ```java
@@ -356,18 +422,25 @@ postgresConn.commit();
 private long performCsvTransfer(...) throws Exception {
     // ... existing setup code ...
 
-    // NEW: Detect and prepare staging columns
+    // NEW: Detect oid columns and NOT NULL constraints
     List<String> oidColumns = detectOidColumns(postgresConn, table);
+    List<String> notNullOidColumns = detectNotNullOidColumns(postgresConn, table, oidColumns);
+
     if (!oidColumns.isEmpty()) {
+        // Drop NOT NULL constraints first
+        dropNotNullConstraints(postgresConn, table, notNullOidColumns);
+        // Add staging columns
         addStagingColumns(postgresConn, table, oidColumns);
     }
 
     // Existing COPY logic (unchanged)
     // ... piped streams, producer, consumer ...
 
-    // NEW: Convert and cleanup
+    // NEW: Convert, restore constraints, and cleanup
     if (!oidColumns.isEmpty()) {
         convertStagingToLargeObjects(postgresConn, table, oidColumns);
+        // Restore NOT NULL constraints after conversion
+        restoreNotNullConstraints(postgresConn, table, notNullOidColumns);
         dropStagingColumns(postgresConn, table, oidColumns);
     }
 
@@ -376,7 +449,9 @@ private long performCsvTransfer(...) throws Exception {
 }
 ```
 
-#### 2.6 Modify `buildQuotedColumnList()` for COPY Target
+#### 2.7 Modify `buildQuotedColumnList()` for COPY Target
+
+**Status:** ✅ Implemented
 
 **Current implementation (line 543):**
 ```java
@@ -431,8 +506,9 @@ String quotedColumnList = buildQuotedColumnList(table, oidColumns);  // Pass oid
 
 **Revised flow in `performCsvTransfer()`:**
 ```java
-// Step 1: Detect oid columns (needed for COPY column list)
+// Step 1: Detect oid columns and NOT NULL constraints (needed for COPY column list)
 List<String> oidColumns = detectOidColumns(postgresConn, table);
+List<String> notNullOidColumns = detectNotNullOidColumns(postgresConn, table, oidColumns);
 
 // Step 2: Build column lists (uses oidColumns for staging substitution)
 String columnList = buildOracleSelectColumnList(table);  // Unchanged
@@ -442,17 +518,19 @@ String quotedColumnList = buildQuotedColumnList(table, oidColumns);  // Modified
 String selectSql = "SELECT " + columnList + " FROM " + qualifiedOracleName;
 String copySql = "COPY " + qualifiedPostgresName + " (" + quotedColumnList + ") ...";
 
-// Step 4: Add staging columns (after SQL is built)
+// Step 4: Prepare staging (after SQL is built)
 if (!oidColumns.isEmpty()) {
+    dropNotNullConstraints(postgresConn, table, notNullOidColumns);
     addStagingColumns(postgresConn, table, oidColumns);
 }
 
 // Step 5: Perform COPY (existing code)
 // ... producer/consumer ...
 
-// Step 6: Convert and cleanup (after COPY succeeds)
+// Step 6: Convert, restore constraints, and cleanup (after COPY succeeds)
 if (!oidColumns.isEmpty()) {
     convertStagingToLargeObjects(postgresConn, table, oidColumns);
+    restoreNotNullConstraints(postgresConn, table, notNullOidColumns);
     dropStagingColumns(postgresConn, table, oidColumns);
 }
 
