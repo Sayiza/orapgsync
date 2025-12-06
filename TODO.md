@@ -38,3 +38,4 @@
 [ ] make verify result get code only on request
 [ ] TO_NUMBER(TO_CHAR( not working
 [ ] full run with tr*nk*dev and NO errors, final todo ;-)
+[ ] thesis_only_v count bug: improve view feedback, select depth bug suspected

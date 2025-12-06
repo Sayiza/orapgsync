@@ -39,13 +39,17 @@ Since PostgreSQL `oid` columns cannot accept hex-encoded strings during COPY, we
 2. **Data Transfer**:
    - Drop NOT NULL constraints on `oid` columns (if present)
    - Add temporary `{column}_staging text` columns
-   - COPY hex data into staging columns as text (oid columns remain NULL)
-   - Convert: `UPDATE table SET column = lo_from_bytea(0, decode(column_staging, 'hex'))`
+   - COPY data into staging columns as text (oid columns remain NULL)
+     - BLOB/BFILE: hex-encoded strings (e.g., `"48656c6c6f"`)
+     - CLOB/NCLOB: plain text (e.g., `"Lorem ipsum..."`)
+   - Convert to Large Objects (type-specific):
+     - BLOB/BFILE: `UPDATE table SET column = lo_from_bytea(0, decode(column_staging, 'hex'))`
+     - CLOB/NCLOB: `UPDATE table SET column = lo_from_bytea(0, convert_to(column_staging, 'UTF8'))`
    - Restore NOT NULL constraints on `oid` columns (if originally present)
    - Drop staging columns
 3. **View Stubs**: Reference `oid` columns directly (staging columns invisible)
 
-**Note:** Staging columns use `text` type (not `bytea`) because PostgreSQL's CSV COPY format does not automatically decode `\x` hex literals into bytea. Using text + explicit `decode()` ensures correct binary conversion.
+**Note:** Staging columns use `text` type (not `bytea`) because PostgreSQL's CSV COPY format does not automatically decode `\x` hex literals into bytea. Using text allows both hex-encoded binary data (BLOB) and plain text data (CLOB) to be stored, then converted appropriately based on the original Oracle data type.
 
 ### Key Principles
 ✅ **Stub mechanism preserved** - Views only see `oid` columns
@@ -939,16 +943,45 @@ Recommendation: Run `vacuumlo` weekly or after major data changes.
 **Fix Applied:**
 1. Changed staging columns from `bytea` to `text`
 2. Removed `\x` prefix from hex serialization (just raw hex: `48656c6c6f`)
-3. Updated conversion to use explicit decode:
-   ```sql
-   UPDATE table SET column = lo_from_bytea(0, decode(column_staging, 'hex'))
-   ```
+3. Updated conversion to differentiate BLOB vs CLOB:
+   - BLOB/BFILE: `UPDATE table SET column = lo_from_bytea(0, decode(column_staging, 'hex'))`
+   - CLOB/NCLOB: `UPDATE table SET column = lo_from_bytea(0, convert_to(column_staging, 'UTF8'))`
 
-**Impact:** All BLOB/CLOB migrations now transfer correct binary data with correct size.
+**Impact:** All BLOB/CLOB migrations now transfer correct binary/text data with correct size.
 
 **Limitations:**
 - `LONG RAW` type (obsolete) still has this issue, as it uses direct bytea columns without staging
 - Workaround: Convert LONG RAW to BLOB in Oracle before migration
+
+### Issue: CLOB Conversion Error (2025-12-06) - FIXED
+
+**Problem:** After fixing the hex encoding bug for BLOB, CLOB columns failed with:
+```
+ERROR: invalid hexadecimal digit: "L"
+```
+
+**Root Cause:**
+- BLOB and CLOB were treated identically during conversion
+- BLOB staging columns contain **hex-encoded data**: `"48656c6c6f"`
+- CLOB staging columns contain **plain text**: `"Lorem ipsum..."`
+- Using `decode(staging, 'hex')` on plain text fails because 'L' is not a hex digit
+
+**Fix Applied:**
+Modified `convertStagingToLargeObjects()` to distinguish data types:
+```java
+if (oracleDataType.matches("BLOB|BFILE")) {
+    // Binary data - decode hex string to bytea
+    conversionExpr = "decode(staging, 'hex')";
+} else if (oracleDataType.matches("CLOB|NCLOB")) {
+    // Text data - convert text to UTF-8 bytea
+    conversionExpr = "convert_to(staging, 'UTF8')";
+}
+```
+
+**Impact:**
+- BLOB columns: hex data → decode → bytea → Large Object (binary content)
+- CLOB columns: text → UTF-8 encode → bytea → Large Object (text content)
+- Both work correctly with Java `@Lob` annotation via JDBC `Blob` API
 
 ---
 
@@ -958,4 +991,5 @@ Recommendation: Run `vacuumlo` weekly or after major data changes.
 |---------|------|--------|---------|
 | 1.0 | 2025-12-01 | Claude | Initial implementation plan |
 | 1.1 | 2025-12-05 | Claude | Fixed hex encoding bug: changed staging columns to text, added decode() |
+| 1.2 | 2025-12-06 | Claude | Fixed CLOB conversion: differentiate BLOB (hex) vs CLOB (text) using convert_to() |
 

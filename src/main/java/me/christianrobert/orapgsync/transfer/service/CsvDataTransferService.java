@@ -834,32 +834,35 @@ public class CsvDataTransferService {
     }
 
     /**
-     * Converts staging column data to Large Objects using lo_from_bytea() with decode().
+     * Converts staging column data to Large Objects using lo_from_bytea().
      *
      * PostgreSQL function lo_from_bytea(loid oid, data bytea) creates a Large Object
      * from bytea data and returns its OID reference. Using loid=0 means PostgreSQL
      * auto-generates a unique OID.
      *
-     * Process:
-     * 1. For each oid column with staging data:
-     *    UPDATE table SET doc_content = lo_from_bytea(0, decode(doc_content_staging, 'hex'))
-     *    WHERE doc_content_staging IS NOT NULL
-     * 2. Staging column (text) contains hex-encoded data (e.g., "48656c6c6f")
-     * 3. decode(text, 'hex') converts hex string to binary bytea
-     * 4. lo_from_bytea creates Large Object from binary data and returns OID
-     * 5. NULL staging values → NULL oid values (no Large Object created)
-     * 6. Each non-NULL row gets a unique Large Object with unique OID
+     * Process (depends on Oracle data type):
      *
-     * Note: decode() is required because staging columns are text type. PostgreSQL CSV COPY
-     * does not automatically decode \x hex format into bytea, so we use text columns and
-     * explicit decode() to ensure correct binary conversion.
+     * For BLOB/BFILE (binary data):
+     *   1. Staging column contains hex-encoded data (e.g., "48656c6c6f")
+     *   2. UPDATE table SET column = lo_from_bytea(0, decode(staging, 'hex'))
+     *   3. decode() converts hex string to binary bytea
+     *
+     * For CLOB/NCLOB (text data):
+     *   1. Staging column contains plain text (e.g., "Lorem ipsum...")
+     *   2. UPDATE table SET column = lo_from_bytea(0, convert_to(staging, 'UTF8'))
+     *   3. convert_to() encodes text as UTF-8 bytea
+     *
+     * Common:
+     *   4. lo_from_bytea creates Large Object from bytea and returns OID
+     *   5. NULL staging values → NULL oid values (no Large Object created)
+     *   6. Each non-NULL row gets a unique Large Object with unique OID
      *
      * Error Handling:
      * - Conversion failure → SQLException → Transaction rollback
      * - Staging columns remain for debugging
      *
      * @param postgresConn PostgreSQL connection
-     * @param table Table metadata
+     * @param table Table metadata (contains original Oracle data types)
      * @param oidColumns List of oid column names
      * @throws SQLException if conversion fails
      */
@@ -874,11 +877,33 @@ public class CsvDataTransferService {
         for (String oidColumn : oidColumns) {
             String stagingColumn = oidColumn + "_staging";
 
-            // UPDATE table SET doc_content = lo_from_bytea(0, decode(doc_content_staging, 'hex'))
-            // WHERE doc_content_staging IS NOT NULL
-            // Note: decode() converts hex string (text) to binary (bytea) before creating Large Object
+            // Find the original Oracle data type for this column
+            String oracleDataType = table.getColumns().stream()
+                    .filter(col -> col.getColumnName().equalsIgnoreCase(oidColumn))
+                    .map(col -> col.getDataType())
+                    .findFirst()
+                    .orElse("BLOB"); // Default to BLOB if not found
+
+            // Choose conversion expression based on Oracle data type
+            String conversionExpr;
+            if (oracleDataType.matches("BLOB|BFILE")) {
+                // Binary data - decode hex string to bytea
+                conversionExpr = "decode(\"" + stagingColumn + "\", 'hex')";
+                log.debug("Converting BLOB/BFILE column {} using hex decode", oidColumn);
+            } else if (oracleDataType.matches("CLOB|NCLOB")) {
+                // Text data - convert text to UTF-8 bytea
+                conversionExpr = "convert_to(\"" + stagingColumn + "\", 'UTF8')";
+                log.debug("Converting CLOB/NCLOB column {} using UTF-8 encoding", oidColumn);
+            } else {
+                // Unknown type - log warning and try hex decode
+                log.warn("Unknown LOB type {} for column {}, defaulting to hex decode", oracleDataType, oidColumn);
+                conversionExpr = "decode(\"" + stagingColumn + "\", 'hex')";
+            }
+
+            // UPDATE table SET column = lo_from_bytea(0, <conversion_expr>)
+            // WHERE staging IS NOT NULL
             String sql = "UPDATE " + qualifiedTableName +
-                         " SET \"" + oidColumn + "\" = lo_from_bytea(0, decode(\"" + stagingColumn + "\", 'hex')) " +
+                         " SET \"" + oidColumn + "\" = lo_from_bytea(0, " + conversionExpr + ") " +
                          " WHERE \"" + stagingColumn + "\" IS NOT NULL";
 
             log.debug("Converting staging column {} to Large Objects for column {} in {}",
