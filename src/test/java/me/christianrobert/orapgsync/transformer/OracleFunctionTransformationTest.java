@@ -783,11 +783,11 @@ public class OracleFunctionTransformationTest {
     @Test
     void viewTransformationCastsCountToNumeric() {
         // Given: View transformation with COUNT aggregate (returns bigint) but stub expects numeric
-        Map<String, String> viewColumnTypes = new HashMap<>();
-        viewColumnTypes.put("cnttest", "numeric");  // Stub column type
+        // NOTE: View column type casting is now handled in PostgresViewImplementationJob via wrapper SELECT
+        // This test verifies basic transformation without type casting
 
         TransformationContext context = new TransformationContext(
-            "HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices), viewColumnTypes);
+            "HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT (SELECT COUNT(1) FROM testtable) cnttest FROM testtable";
 
@@ -798,24 +798,22 @@ public class OracleFunctionTransformationTest {
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
         String postgresSql = builder.visit(parseResult.getTree());
 
-        // Then: COUNT should be cast to numeric to match stub
+        // Then: Transformation should succeed (type casting happens in view creation job)
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
-        assertTrue(normalized.contains("::numeric"),
-            "COUNT expression should be cast to numeric, got: " + normalized);
+        assertTrue(normalized.contains("COUNT( 1 )"),
+            "COUNT expression should be preserved, got: " + normalized);
         assertTrue(normalized.contains("AS cnttest"),
             "Column alias should be preserved, got: " + normalized);
     }
 
     @Test
     void viewTransformationCastsMultipleColumns() {
-        // Given: View transformation with multiple columns requiring casts
-        Map<String, String> viewColumnTypes = new HashMap<>();
-        viewColumnTypes.put("id", "numeric");
-        viewColumnTypes.put("name", "text");
-        viewColumnTypes.put("cnt", "numeric");
+        // Given: View transformation with multiple columns
+        // NOTE: View column type casting is now handled in PostgresViewImplementationJob via wrapper SELECT
+        // This test verifies basic transformation without type casting
 
         TransformationContext context = new TransformationContext(
-            "HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices), viewColumnTypes);
+            "HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT empno id, ename name, COUNT(*) cnt FROM employees GROUP BY empno, ename";
 
@@ -826,15 +824,14 @@ public class OracleFunctionTransformationTest {
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
         String postgresSql = builder.visit(parseResult.getTree());
 
-        // Then: All columns should be cast to match stub types
+        // Then: Transformation should succeed (type casting happens in view creation job)
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
-        // Count occurrences of ::numeric (should be 2: id and cnt)
-        int numericCasts = (normalized.split("::numeric", -1).length - 1);
-        assertEquals(2, numericCasts, "Should have 2 numeric casts (id and cnt), got: " + normalized);
-
-        // Count occurrences of ::text (should be 1: name)
-        int textCasts = (normalized.split("::text", -1).length - 1);
-        assertEquals(1, textCasts, "Should have 1 text cast (name), got: " + normalized);
+        assertTrue(normalized.contains("empno AS id"),
+            "Column id should be present, got: " + normalized);
+        assertTrue(normalized.contains("ename AS name"),
+            "Column name should be present, got: " + normalized);
+        assertTrue(normalized.contains("COUNT( * ) AS cnt"),
+            "Column cnt should be present, got: " + normalized);
     }
 
     @Test

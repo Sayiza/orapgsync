@@ -187,52 +187,9 @@ public class PostgresViewImplementationJob extends AbstractDatabaseWriteJob<View
         log.debug("Transforming view: {}", qualifiedName);
         log.trace("Oracle SQL: {}", oracleSql);
 
-        // Extract column types from view metadata (for type casting in SELECT list)
-        // This ensures CREATE OR REPLACE VIEW succeeds by matching stub column types exactly
-        // IMPORTANT: Convert Oracle types to PostgreSQL types (same logic as stub creation)
-        Map<String, String> viewColumnTypes = new HashMap<>();
-        List<String> viewColumnNamesOrdered = new ArrayList<>();
-
-        for (ColumnMetadata column : view.getColumns()) {
-            // Use lowercase for case-insensitive lookup (Oracle/PostgreSQL identifiers)
-            String columnName = column.getColumnName().toLowerCase();
-
-            // Determine PostgreSQL type (same logic as PostgresViewStubCreationJob)
-            String postgresType;
-            if (column.isCustomDataType()) {
-                String oracleType = column.getDataType().toLowerCase();
-                String owner = column.getDataTypeOwner().toLowerCase();
-
-                // Check if it's XMLTYPE - has direct PostgreSQL xml type mapping
-                if (OracleTypeClassifier.isXmlType(owner, oracleType)) {
-                    postgresType = "xml";
-                }
-                // Check if it's a complex Oracle system type that needs jsonb serialization
-                else if (OracleTypeClassifier.isComplexOracleSystemType(owner, oracleType)) {
-                    postgresType = "jsonb";
-                } else {
-                    // User-defined type - use the created PostgreSQL composite type
-                    postgresType = owner + "." + oracleType;
-                }
-            } else {
-                // Convert Oracle built-in data type to PostgreSQL
-                postgresType = TypeConverter.toPostgre(column.getDataType());
-                if (postgresType == null) {
-                    postgresType = "text"; // Fallback for unknown types
-                    log.warn("Unknown data type '{}' for column '{}' in view '{}', using 'text' as fallback",
-                            column.getDataType(), columnName, qualifiedName);
-                }
-            }
-
-            viewColumnTypes.put(columnName, postgresType);
-            viewColumnNamesOrdered.add(columnName);  // Preserve order
-        }
-        log.debug("Extracted and converted {} column types for view {} (ordered: {})",
-                viewColumnTypes.size(), qualifiedName, viewColumnNamesOrdered);
-
-        // Transform Oracle SQL to PostgreSQL with view column types (name and position-based)
+        // Transform Oracle SQL to PostgreSQL (pure translation, no type casting)
         TransformationResult transformationResult = transformationService.transformSql(
-                oracleSql, schema, indices, viewColumnTypes, viewColumnNamesOrdered);
+                oracleSql, schema, indices);
 
         if (transformationResult.isFailure()) {
             log.error("Transformation failed for view {}: {}", qualifiedName,
@@ -241,25 +198,121 @@ public class PostgresViewImplementationJob extends AbstractDatabaseWriteJob<View
             return;
         }
 
-        String postgresSql = transformationResult.getPostgresSql();
-        log.debug("Transformed SQL for {}: {}", qualifiedName, postgresSql);
+        String transformedSql = transformationResult.getPostgresSql();
+        log.debug("Transformed SQL for {}: {}", qualifiedName, transformedSql);
+
+        // Wrap transformed SQL with type-casting outer SELECT
+        // This ensures CREATE OR REPLACE VIEW succeeds by matching stub column types exactly
+        String wrappedSql = wrapWithTypeCasts(transformedSql, view);
+        log.debug("Wrapped SQL for {}: {}", qualifiedName, wrappedSql);
 
         // Replace stub view with actual implementation
         // IMPORTANT: Use CREATE OR REPLACE to preserve dependencies (functions/procedures)
         // This is the whole point of the two-phase stub architecture!
         try {
-            replaceView(pgConnection, schema, viewName, postgresSql, view);
+            replaceView(pgConnection, schema, viewName, wrappedSql);
             result.addImplementedView(qualifiedName);
             log.info("Successfully implemented view: {}", qualifiedName);
         } catch (SQLException e) {
             // Log SQL error but continue processing other views
             log.error("SQL error creating view {}: {}", qualifiedName, e.getMessage());
             log.debug("Failed SQL: CREATE OR REPLACE VIEW {}.{} AS {}",
-                    schema.toLowerCase(), viewName.toLowerCase(), postgresSql);
+                    schema.toLowerCase(), viewName.toLowerCase(), wrappedSql);
 
-            // Add error with the transformed SQL (shows what we tried to execute)
+            // Add error with the wrapped SQL (shows what we tried to execute)
             String errorMsg = "SQL execution failed: " + e.getMessage();
-            result.addError(qualifiedName, errorMsg, postgresSql);
+            result.addError(qualifiedName, errorMsg, wrappedSql);
+        }
+    }
+
+    /**
+     * Wraps transformed SQL with type-casting outer SELECT.
+     * This ensures CREATE OR REPLACE VIEW succeeds by matching stub column types exactly.
+     *
+     * <p><strong>Architecture:</strong> Type reconciliation is handled at the view creation layer
+     * (wrapper SELECT approach), NOT during SQL transformation. This provides:</p>
+     * <ul>
+     *   <li>Cleaner separation of concerns (transformation vs type reconciliation)</li>
+     *   <li>Position-based casting by design (no name matching needed)</li>
+     *   <li>Simpler transformation code (no view column metadata in transformation layer)</li>
+     *   <li>More robust (works regardless of SELECT aliases or column name conventions)</li>
+     * </ul>
+     *
+     * <p><strong>Example:</strong></p>
+     * <pre>
+     * Input (transformed SQL): SELECT empno, COUNT(*) FROM hr.emp GROUP BY empno
+     * Output (wrapped SQL):
+     *   SELECT c0::numeric AS emp_id, c1::bigint AS emp_count
+     *   FROM (
+     *     SELECT empno, COUNT(*) FROM hr.emp GROUP BY empno
+     *   ) AS subq(c0, c1)
+     * </pre>
+     *
+     * @param transformedSql PostgreSQL SQL from transformation (pure translation, no casts)
+     * @param view View metadata containing column definitions with types
+     * @return Wrapped SQL with type-casting outer SELECT
+     */
+    private String wrapWithTypeCasts(String transformedSql, ViewMetadata view) {
+        int columnCount = view.getColumns().size();
+
+        // Build generic subquery column list: c0, c1, c2, ...
+        List<String> subqColumns = new ArrayList<>();
+        for (int i = 0; i < columnCount; i++) {
+            subqColumns.add("c" + i);
+        }
+
+        // Build outer SELECT with casts: c0::type AS view_col, c1::type AS view_col, ...
+        List<String> selectExprs = new ArrayList<>();
+        for (int i = 0; i < columnCount; i++) {
+            ColumnMetadata column = view.getColumns().get(i);
+            String columnName = PostgresIdentifierNormalizer.normalizeIdentifier(column.getColumnName());
+
+            // Determine PostgreSQL type (same logic as stub creation)
+            String postgresType = determinePostgresType(column, view.getSchema() + "." + view.getViewName());
+
+            // Build cast expression: c0::numeric AS emp_id
+            selectExprs.add(String.format("c%d::%s AS %s", i, postgresType, columnName));
+        }
+
+        // Build final wrapped SQL
+        return String.format("SELECT %s FROM ( %s ) AS subq(%s)",
+                String.join(", ", selectExprs),
+                transformedSql,
+                String.join(", ", subqColumns));
+    }
+
+    /**
+     * Determines PostgreSQL type for a column (same logic as stub creation).
+     *
+     * @param column Column metadata
+     * @param qualifiedViewName Qualified view name for logging (schema.view)
+     * @return PostgreSQL type string
+     */
+    private String determinePostgresType(ColumnMetadata column, String qualifiedViewName) {
+        if (column.isCustomDataType()) {
+            String oracleType = column.getDataType().toLowerCase();
+            String owner = column.getDataTypeOwner().toLowerCase();
+
+            // Check if it's XMLTYPE - has direct PostgreSQL xml type mapping
+            if (OracleTypeClassifier.isXmlType(owner, oracleType)) {
+                return "xml";
+            }
+            // Check if it's a complex Oracle system type that needs jsonb serialization
+            else if (OracleTypeClassifier.isComplexOracleSystemType(owner, oracleType)) {
+                return "jsonb";
+            } else {
+                // User-defined type - use the created PostgreSQL composite type
+                return owner + "." + oracleType;
+            }
+        } else {
+            // Convert Oracle built-in data type to PostgreSQL
+            String postgresType = TypeConverter.toPostgre(column.getDataType());
+            if (postgresType == null) {
+                postgresType = "text"; // Fallback for unknown types
+                log.warn("Unknown data type '{}' for column '{}' in view '{}', using 'text' as fallback",
+                        column.getDataType(), column.getColumnName(), qualifiedViewName);
+            }
+            return postgresType;
         }
     }
 
@@ -267,49 +320,30 @@ public class PostgresViewImplementationJob extends AbstractDatabaseWriteJob<View
      * Replaces an existing view with new SQL definition.
      * Uses CREATE OR REPLACE VIEW to preserve dependencies on the view.
      *
-     * This is critical for the two-phase architecture:
-     * - Phase 1: Stubs allow functions/procedures to be created with references to views
-     * - Phase 2: Replace stubs WITHOUT breaking those dependencies
+     * <p>This is critical for the two-phase architecture:</p>
+     * <ul>
+     *   <li>Phase 1: Stubs allow functions/procedures to be created with references to views</li>
+     *   <li>Phase 2: Replace stubs WITHOUT breaking those dependencies</li>
+     * </ul>
      *
-     * IMPORTANT: Includes explicit column list to handle Oracle views with column renaming.
-     * Oracle views can have explicit column lists that override SELECT aliases:
-     *   CREATE VIEW v (col1, col2) AS SELECT a AS x, b AS y FROM t
-     * The view columns are col1, col2 (not x, y). ALL_VIEWS.TEXT doesn't include the
-     * explicit column list, so we must reconstruct it from ALL_TAB_COLUMNS metadata.
+     * <p><strong>Note:</strong> No explicit column list needed - the outer SELECT wrapper
+     * provides column names with type casts (wrapper SELECT approach).</p>
+     *
+     * @param pgConnection PostgreSQL database connection
+     * @param schema Schema name
+     * @param viewName View name
+     * @param wrappedSql Wrapped SQL with type-casting outer SELECT
      */
     private void replaceView(Connection pgConnection, String schema, String viewName,
-                            String selectSql, ViewMetadata view) throws SQLException {
-        // Generate explicit column list from metadata (same source as stub creation)
-        String columnList = generateColumnList(view);
-
-        String createOrReplaceSql = String.format("CREATE OR REPLACE VIEW %s.%s%s AS %s",
-                schema.toLowerCase(), viewName.toLowerCase(), columnList, selectSql);
+                            String wrappedSql) throws SQLException {
+        String createOrReplaceSql = String.format("CREATE OR REPLACE VIEW %s.%s AS %s",
+                schema.toLowerCase(), viewName.toLowerCase(), wrappedSql);
 
         log.debug("Replacing view with SQL: {}", createOrReplaceSql);
 
         try (PreparedStatement ps = pgConnection.prepareStatement(createOrReplaceSql)) {
             ps.executeUpdate();
         }
-    }
-
-    /**
-     * Generates explicit column list for view creation.
-     * This ensures view column names match the stub, even when Oracle view has
-     * explicit column renaming (e.g., CREATE VIEW v (id, name) AS SELECT empno, ename...).
-     *
-     * @param view View metadata containing column definitions
-     * @return Column list in format " (col1, col2, ...)" or empty string if no columns
-     */
-    private String generateColumnList(ViewMetadata view) {
-        if (view.getColumns().isEmpty()) {
-            return "";  // No explicit column list
-        }
-
-        List<String> columnNames = view.getColumns().stream()
-                .map(col -> PostgresIdentifierNormalizer.normalizeIdentifier(col.getColumnName()))
-                .toList();
-
-        return " (" + String.join(", ", columnNames) + ")";
     }
 
     /**

@@ -47,52 +47,8 @@ public class VisitSelectListElement {
     // Regular expression - visit normally
     String expression = b.visit(exprCtx);
 
-    // Determine column alias (for type casting lookup)
-    String columnAlias = null;
-    PlSqlParser.Column_aliasContext aliasCtx = ctx.column_alias();
-    if (aliasCtx != null) {
-      // Extract alias name without "AS" keyword
-      PlSqlParser.IdentifierContext identifierCtx = aliasCtx.identifier();
-      PlSqlParser.Quoted_stringContext quotedStringCtx = aliasCtx.quoted_string();
-      if (identifierCtx != null) {
-        columnAlias = identifierCtx.getText();
-      } else if (quotedStringCtx != null) {
-        // Remove quotes from quoted string
-        String quotedText = quotedStringCtx.getText();
-        columnAlias = quotedText.substring(1, quotedText.length() - 1);
-      }
-    }
-
-    // Apply type casting for view transformations
-    // This ensures CREATE OR REPLACE VIEW succeeds by matching stub column types exactly
-    // IMPORTANT: Only apply casts to main view SELECT, not to:
-    //   - Nested subqueries (checked by isTopLevelQuery)
-    //   - CTE definitions (checked by !isInCTE)
-    if (b.getContext() != null && b.getContext().isViewTransformation()
-        && b.getContext().isTopLevelQuery() && !b.getContext().isInCTE()) {
-      String targetType = null;
-
-      // Try name-based lookup first (for explicit aliases)
-      if (columnAlias != null) {
-        targetType = b.getContext().getViewColumnType(columnAlias);
-      }
-
-      // Fall back to position-based lookup (for expressions without explicit alias)
-      if (targetType == null) {
-        int position = b.getContext().getCurrentSelectListPosition();
-        if (position >= 0) {
-          targetType = b.getContext().getViewColumnTypeByPosition(position);
-        }
-      }
-
-      // Apply cast if type was found
-      if (targetType != null) {
-        // Cast expression to target type (e.g., COUNT(1) → (COUNT(1))::numeric)
-        expression = "( " + expression + " )::" + targetType;
-      }
-    }
-
     // Handle column alias if present
+    PlSqlParser.Column_aliasContext aliasCtx = ctx.column_alias();
     if (aliasCtx != null) {
       String alias = buildColumnAlias(aliasCtx);
       return expression + " " + alias;

@@ -80,7 +80,7 @@ docker commit pgtest trunkdevpg:2025-11-24
 
 # 3. Later, start from the saved image (data restores instantly)
 docker rm -f pgtest
-docker run --name pgtest -e POSTGRES_PASSWORD=secret -e PGDATA=/var/lib/postgresql/pgdata -p 5433:5432 -d trunkdevpg:2025-11-30
+docker run --name pgtest -e POSTGRES_PASSWORD=secret -e PGDATA=/var/lib/postgresql/pgdata -p 5433:5432 -d trunkdevpg:2025-12-07
 
 use the postgres with new profile: mvn quarkus:dev -Dquarkus.profile=postgres
 ```

@@ -326,8 +326,7 @@ class TransformationContextInlineTypeTest {
                 new SimpleTypeEvaluator("hr", indices),
                 packageContextCache,
                 null,  // functionName
-                "test_pkg",  // packageName
-                null  // viewColumnTypes
+                "test_pkg"  // packageName
         );
 
         // Should resolve from package level (Level 2)
@@ -361,8 +360,7 @@ class TransformationContextInlineTypeTest {
                 new SimpleTypeEvaluator("hr", indices),
                 packageContextCache,
                 null,  // functionName
-                "test_pkg",  // packageName
-                null  // viewColumnTypes
+                "test_pkg"  // packageName
         );
 
         // Register a block-level type with the same name
@@ -407,8 +405,7 @@ class TransformationContextInlineTypeTest {
                 new SimpleTypeEvaluator("hr", indices),
                 packageContextCache,
                 null,  // functionName
-                "test_pkg",  // packageName
-                null  // viewColumnTypes
+                "test_pkg"  // packageName
         );
 
         // Should find with different case variations

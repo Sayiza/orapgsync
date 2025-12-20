@@ -54,20 +54,8 @@ public class VisitSubqueryFactoringClause {
     // - Type methods, package functions
     // - Outer joins, ORDER BY, GROUP BY, etc.
     //
-    // IMPORTANT: Mark that we're inside a CTE definition
-    // This prevents view column type casts from being applied to CTE SELECT lists
-    // (casts should only apply to the main view SELECT, not to CTE definitions)
-    if (context != null) {
-      context.enterCTE();
-    }
-    try {
-      result.append(b.visit(ctx.subquery()));
-    } finally {
-      // Always exit CTE context (even if exception occurs)
-      if (context != null) {
-        context.exitCTE();
-      }
-    }
+    // Visit the CTE subquery
+    result.append(b.visit(ctx.subquery()));
 
     result.append(")");
 

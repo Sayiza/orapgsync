@@ -76,9 +76,6 @@ import java.util.Set;
  * @see InlineTypeDefinition
  */
 public class TransformationContext {
-    public TransformationContext(String hr, TransformationIndices emptyIndices, SimpleTypeEvaluator typeEvaluator, Map<String, PackageContext> packageContextCache, String testProc, String empPkg) {
-        this(hr, emptyIndices, typeEvaluator, packageContextCache, testProc, empPkg, new HashMap<>(), null);
-    }
 
     // ========== Variable Scope Tracking (Inner Classes) ==========
 
@@ -261,83 +258,6 @@ public class TransformationContext {
      */
     private final Map<String, InlineTypeDefinition> inlineTypes;
 
-    /**
-     * View column types for view transformations (column name → PostgreSQL type).
-     * Used to cast SELECT list expressions to match stub column types.
-     * Null for non-view transformations (functions, procedures, ad-hoc SQL).
-     *
-     * <p><strong>Purpose:</strong> Ensures CREATE OR REPLACE VIEW succeeds by matching stub types exactly.</p>
-     * <p><strong>Example:</strong> COUNT(*) returns bigint, but stub expects numeric → cast to numeric.</p>
-     */
-    private final Map<String, String> viewColumnTypes;
-
-    /**
-     * Ordered list of view column names (for position-based type casting).
-     * Used when SELECT list elements have no explicit alias - match by position.
-     * Null for non-view transformations.
-     *
-     * <p><strong>Example:</strong></p>
-     * <pre>
-     * Stub: CREATE VIEW v AS SELECT NULL::numeric AS col1, NULL::text AS col2
-     * Oracle SQL: SELECT 1, 'hello' FROM dual
-     * Position 0 → col1 (numeric), Position 1 → col2 (text)
-     * </pre>
-     */
-    private final java.util.List<String> viewColumnNamesOrdered;
-
-    /**
-     * Current position in SELECT list (0-based index).
-     * Set by VisitSelectedList before visiting each element, read by VisitSelectListElement.
-     * Used for position-based column type matching when no explicit alias exists.
-     *
-     * <p><strong>Lifecycle:</strong> Ephemeral state, only valid during SELECT list traversal.</p>
-     */
-    private int currentSelectListPosition = -1;  // -1 = not in SELECT list
-
-    /**
-     * Query depth tracking (0 = not in query, 1 = top-level query, 2+ = nested subqueries).
-     * Used to prevent view column type casts from being applied to subqueries.
-     *
-     * <p><strong>Purpose:</strong> View column type casts should ONLY apply to the top-level SELECT,
-     * not to nested subqueries within the view SQL.</p>
-     *
-     * <p><strong>Example:</strong></p>
-     * <pre>
-     * -- View transformation with subquery
-     * SELECT col1, (SELECT MAX(date_col) FROM t2) FROM t1
-     *
-     * queryDepth=1: Apply casts to col1 and subquery result (top-level SELECT)
-     * queryDepth=2: NO casts to MAX(date_col) (nested subquery)
-     * </pre>
-     */
-    private int queryDepth = 0;
-
-    /**
-     * CTE depth tracking (0 = not in CTE, 1+ = inside CTE definition).
-     * Used to prevent view column type casts from being applied to CTE subqueries.
-     *
-     * <p><strong>Purpose:</strong> View column type casts should ONLY apply to the main SELECT,
-     * not to CTE definitions within the WITH clause.</p>
-     *
-     * <p><strong>Example:</strong></p>
-     * <pre>
-     * -- View transformation with CTE
-     * WITH cte AS (
-     *   SELECT col1, col2 FROM t1  -- cteDepth=1: NO casts (inside CTE)
-     * )
-     * SELECT col1, col2 FROM cte    -- cteDepth=0: Apply casts (main SELECT)
-     * </pre>
-     *
-     * <p><strong>Nested CTEs:</strong> Counter-based tracking handles nested CTEs correctly:</p>
-     * <pre>
-     * WITH outer_cte AS (
-     *   WITH inner_cte AS (SELECT ...)  -- cteDepth=2
-     *   SELECT ... FROM inner_cte        -- cteDepth=1
-     * )
-     * SELECT ... FROM outer_cte          -- cteDepth=0
-     * </pre>
-     */
-    private int cteDepth = 0;
 
     // ========== Layer 3: Query-Level Context ==========
 
@@ -378,72 +298,11 @@ public class TransformationContext {
      * @param typeEvaluator Type evaluator for type-aware transformations
      */
     public TransformationContext(String currentSchema, TransformationIndices indices, TypeEvaluator typeEvaluator) {
-        this(currentSchema, indices, typeEvaluator, null, null, null, null, null);
+        this(currentSchema, indices, typeEvaluator, null, null, null);
     }
 
     /**
-     * Creates context for view transformation with column type metadata.
-     *
-     * <p>This constructor is for view transformations that need to cast SELECT list expressions
-     * to match stub column types (ensures CREATE OR REPLACE VIEW succeeds).</p>
-     *
-     * @param currentSchema Schema context for resolution (e.g., "hr")
-     * @param indices Pre-built metadata indices for fast lookups
-     * @param typeEvaluator Type evaluator for type-aware transformations
-     * @param viewColumnTypes Column name → PostgreSQL type mapping (from view stub metadata)
-     */
-    public TransformationContext(String currentSchema,
-                                 TransformationIndices indices,
-                                 TypeEvaluator typeEvaluator,
-                                 Map<String, String> viewColumnTypes) {
-        this(currentSchema, indices, typeEvaluator, null, null, null, viewColumnTypes, null);
-    }
-
-    /**
-     * Creates context for view transformation with column type metadata and ordered column names.
-     *
-     * <p>This constructor is for view transformations that need to cast SELECT list expressions
-     * to match stub column types, including position-based matching for expressions without explicit aliases.</p>
-     *
-     * @param currentSchema Schema context for resolution (e.g., "hr")
-     * @param indices Pre-built metadata indices for fast lookups
-     * @param typeEvaluator Type evaluator for type-aware transformations
-     * @param viewColumnTypes Column name → PostgreSQL type mapping (from view stub metadata)
-     * @param viewColumnNamesOrdered Ordered list of column names (for position-based matching)
-     */
-    public TransformationContext(String currentSchema,
-                                 TransformationIndices indices,
-                                 TypeEvaluator typeEvaluator,
-                                 Map<String, String> viewColumnTypes,
-                                 java.util.List<String> viewColumnNamesOrdered) {
-        this(currentSchema, indices, typeEvaluator, null, null, null, viewColumnTypes, viewColumnNamesOrdered);
-    }
-
-    /**
-     * Creates context with full transformation-level context (for PL/SQL functions/procedures with view column types).
-     *
-     * <p>This constructor is for compatibility with existing code that doesn't need ordered column names.</p>
-     *
-     * @param currentSchema Schema context for resolution (e.g., "hr")
-     * @param indices Pre-built metadata indices for fast lookups
-     * @param typeEvaluator Type evaluator for type-aware transformations
-     * @param packageContextCache Package variable contexts (null for standalone/views)
-     * @param functionName Current function/procedure name (null for views)
-     * @param packageName Current package name (null for standalone/views)
-     * @param viewColumnTypes View column types for casting (null for functions/procedures)
-     */
-    public TransformationContext(String currentSchema,
-                                 TransformationIndices indices,
-                                 TypeEvaluator typeEvaluator,
-                                 Map<String, PackageContext> packageContextCache,
-                                 String functionName,
-                                 String packageName,
-                                 Map<String, String> viewColumnTypes) {
-        this(currentSchema, indices, typeEvaluator, packageContextCache, functionName, packageName, viewColumnTypes, null);
-    }
-
-    /**
-     * Creates context with full transformation-level context (for PL/SQL functions/procedures and views).
+     * Creates context with full transformation-level context (for PL/SQL functions/procedures).
      *
      * <p>This is the master constructor that all other constructors delegate to.
      * It accepts all possible context parameters.</p>
@@ -454,17 +313,13 @@ public class TransformationContext {
      * @param packageContextCache Package variable contexts (null for standalone/views)
      * @param functionName Current function/procedure name (null for views)
      * @param packageName Current package name (null for standalone/views)
-     * @param viewColumnTypes View column types for casting (null for functions/procedures)
-     * @param viewColumnNamesOrdered Ordered view column names (null for functions/procedures)
      */
     public TransformationContext(String currentSchema,
                                  TransformationIndices indices,
                                  TypeEvaluator typeEvaluator,
                                  Map<String, PackageContext> packageContextCache,
                                  String functionName,
-                                 String packageName,
-                                 Map<String, String> viewColumnTypes,
-                                 java.util.List<String> viewColumnNamesOrdered) {
+                                 String packageName) {
         // Validate required parameters
         if (currentSchema == null || currentSchema.trim().isEmpty()) {
             throw new IllegalArgumentException("Current schema cannot be null or empty");
@@ -486,8 +341,6 @@ public class TransformationContext {
         this.currentPackageName = packageName;
         this.packageContextCache = packageContextCache != null ? packageContextCache : new HashMap<>();
         this.inlineTypes = new HashMap<>();  // FUTURE - ready for inline type support
-        this.viewColumnTypes = viewColumnTypes;  // Null for non-view transformations
-        this.viewColumnNamesOrdered = viewColumnNamesOrdered;  // Null for non-view transformations
 
         // Layer 3: Query-level context (mutable during transformation)
         this.tableAliases = new HashMap<>();
@@ -603,206 +456,6 @@ public class TransformationContext {
         return packageContextCache.get(cacheKey);
     }
 
-    // ========== View Column Type Support ==========
-
-    /**
-     * Checks if currently transforming a view with column type metadata.
-     *
-     * @return true if viewColumnTypes is set (view transformation with metadata)
-     */
-    public boolean isViewTransformation() {
-        return viewColumnTypes != null;
-    }
-
-    /**
-     * Gets the PostgreSQL type for a view column (case-insensitive lookup).
-     *
-     * @param columnName Column name (alias in SELECT list)
-     * @return PostgreSQL type (e.g., "numeric", "text", "bigint") or null if not found
-     */
-    public String getViewColumnType(String columnName) {
-        if (viewColumnTypes == null || columnName == null) {
-            return null;
-        }
-        // Case-insensitive lookup (Oracle/PostgreSQL identifiers are case-insensitive by default)
-        String normalizedName = columnName.toLowerCase();
-        return viewColumnTypes.get(normalizedName);
-    }
-
-    /**
-     * Checks if column type metadata exists for a given column.
-     *
-     * @param columnName Column name (alias in SELECT list)
-     * @return true if column type is known
-     */
-    public boolean hasViewColumnType(String columnName) {
-        return getViewColumnType(columnName) != null;
-    }
-
-    /**
-     * Sets the current position in the SELECT list (for position-based type casting).
-     * Called by VisitSelectedList before visiting each select_list_elements.
-     *
-     * <p><strong>Lifecycle:</strong> Set before each SELECT list element, reset after SELECT list completes.</p>
-     *
-     * @param position 0-based index in SELECT list (0 = first column, 1 = second, etc.)
-     */
-    public void setCurrentSelectListPosition(int position) {
-        this.currentSelectListPosition = position;
-    }
-
-    /**
-     * Gets the current position in the SELECT list.
-     * Used by VisitSelectListElement for position-based column matching.
-     *
-     * @return 0-based index in SELECT list, or -1 if not in SELECT list
-     */
-    public int getCurrentSelectListPosition() {
-        return currentSelectListPosition;
-    }
-
-    /**
-     * Gets the view column name at a specific position (for position-based type casting).
-     * Used when SELECT expression has no explicit alias - match by position instead.
-     *
-     * <p><strong>Example:</strong></p>
-     * <pre>
-     * Stub columns: ["col1", "col2", "col3"]
-     * Oracle SQL: SELECT 1, 'hello', SYSDATE FROM dual
-     * Position 0 → "col1", Position 1 → "col2", Position 2 → "col3"
-     * </pre>
-     *
-     * @param position 0-based index in column list
-     * @return Column name at position, or null if position out of bounds or no ordered list
-     */
-    public String getViewColumnNameByPosition(int position) {
-        if (viewColumnNamesOrdered == null || position < 0 || position >= viewColumnNamesOrdered.size()) {
-            return null;
-        }
-        return viewColumnNamesOrdered.get(position);
-    }
-
-    /**
-     * Gets the PostgreSQL type for a view column at a specific position.
-     * Convenience method that combines position → name → type lookup.
-     *
-     * @param position 0-based index in column list
-     * @return PostgreSQL type (e.g., "numeric", "text", "bigint") or null if not found
-     */
-    public String getViewColumnTypeByPosition(int position) {
-        String columnName = getViewColumnNameByPosition(position);
-        if (columnName == null) {
-            return null;
-        }
-        return getViewColumnType(columnName);
-    }
-
-    // ========== Query Depth Tracking ==========
-
-    /**
-     * Enters a new query scope (increments query depth).
-     * Call this when entering a SELECT statement (top-level or subquery).
-     *
-     * <p><strong>Usage pattern:</strong></p>
-     * <pre>
-     * public String visitQuery_block(Query_blockContext ctx) {
-     *     context.enterQuery();
-     *     try {
-     *         // ... transform query ...
-     *     } finally {
-     *         context.exitQuery();
-     *     }
-     * }
-     * </pre>
-     */
-    public void enterQuery() {
-        queryDepth++;
-    }
-
-    /**
-     * Exits the current query scope (decrements query depth).
-     * Always call in a finally block to ensure proper cleanup.
-     */
-    public void exitQuery() {
-        if (queryDepth > 0) {
-            queryDepth--;
-        }
-    }
-
-    /**
-     * Checks if currently processing the top-level query (depth = 1).
-     * Used to determine if view column type casts should be applied.
-     *
-     * @return true if at top-level query (not in subquery)
-     */
-    public boolean isTopLevelQuery() {
-        return queryDepth == 1;
-    }
-
-    /**
-     * Gets the current query depth.
-     * Useful for debugging and validation.
-     *
-     * @return Query depth (0 = not in query, 1 = top-level, 2+ = nested)
-     */
-    public int getQueryDepth() {
-        return queryDepth;
-    }
-
-    // ========== CTE Depth Tracking ==========
-
-    /**
-     * Enters a CTE definition scope (increments CTE depth).
-     * Call this when entering a CTE's subquery definition.
-     *
-     * <p><strong>Usage pattern:</strong></p>
-     * <pre>
-     * public String visitSubqueryFactoringClause(SubqueryFactoringClauseContext ctx) {
-     *     context.enterCTE();
-     *     try {
-     *         result.append(b.visit(ctx.subquery()));
-     *     } finally {
-     *         context.exitCTE();
-     *     }
-     * }
-     * </pre>
-     *
-     * <p><strong>Why counter-based:</strong> Handles nested CTEs correctly.
-     * If using a boolean, exiting an inner CTE would incorrectly clear the outer CTE context.</p>
-     */
-    public void enterCTE() {
-        cteDepth++;
-    }
-
-    /**
-     * Exits the current CTE definition scope (decrements CTE depth).
-     * Always call in a finally block to ensure proper cleanup.
-     */
-    public void exitCTE() {
-        if (cteDepth > 0) {
-            cteDepth--;
-        }
-    }
-
-    /**
-     * Checks if currently processing a CTE definition.
-     * Used to determine if view column type casts should be suppressed.
-     *
-     * @return true if inside any CTE definition (depth >= 1)
-     */
-    public boolean isInCTE() {
-        return cteDepth > 0;
-    }
-
-    /**
-     * Gets the current CTE depth.
-     * Useful for debugging and validation.
-     *
-     * @return CTE depth (0 = not in CTE, 1+ = inside CTE, higher = nested CTEs)
-     */
-    public int getCTEDepth() {
-        return cteDepth;
-    }
 
     // ========== Inline Type Support (FUTURE - stubs for now) ==========
 

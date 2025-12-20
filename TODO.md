@@ -35,7 +35,6 @@
 [x] co_gpr memory
 [x] full job run 2025-11-10: 8 hour total duration, 8% of functions implemented, 30% of views implemented, most views with functions do not work. Datatransfer 99% working 10GB in 1 hour 
 [ ] sort all results
-[ ] make verify result get code only on request
+[x] make verify result get code only on request
 [ ] TO_NUMBER(TO_CHAR( not working
 [ ] full run with tr*nk*dev and NO errors, final todo ;-)
-[ ] thesis_only_v count bug: improve view feedback, select depth bug suspected
