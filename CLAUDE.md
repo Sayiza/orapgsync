@@ -6,6 +6,37 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Oracle-to-PostgreSQL migration tool built with Quarkus (Java 18). Uses CDI-based plugin architecture for extensible database object migration with centralized state management.
 
+## Strategic Direction (Updated December 2025)
+
+**PL/SQL to PL/pgSQL Transformation - Development Frozen**
+
+After extensive development and real-world testing, the team has made a strategic decision regarding PL/SQL transformation:
+
+**Status:** PL/SQL to PL/pgSQL transformation work is **frozen** and will not be actively developed further.
+
+**Rationale:**
+- The automated PL/SQL to PL/pgSQL transformation proved to be of low quality in production use
+- Full coverage of Oracle PL/SQL semantics is extremely complex and unlikely to achieve high reliability
+- The team is pursuing an alternative approach: **PL/SQL to Java transformation** (with AI assistance)
+- This alternative approach is showing more promising results for business logic migration
+
+**What Remains Active:**
+- ✅ **Data Transfer** - Proven highly valuable and will continue to receive improvements
+- ✅ **SQL/View Transformation** - Proven highly valuable (90% coverage) and will continue to receive improvements
+- ✅ **Structural Migration** - Schema, tables, sequences, object types, constraints remain fully supported
+- ⚠️ **PL/SQL Functions/Procedures/Triggers/Type Methods** - Stub creation remains available but implementation transformation is frozen
+
+**Future Development Focus:**
+1. Fine-tuning data transfer capabilities (planned: checksum comparison for data validation)
+2. Improving SQL and view transformation quality and coverage
+3. Maintaining and enhancing structural migration features
+4. Optional step execution in orchestration (allow users to skip PL/SQL transformation steps)
+
+**Technical Debt:**
+- All PL/SQL transformation code remains in the codebase (documented, tested, 85-95% complete)
+- No plans to remove this code - it may serve as reference or be reactivated if needed
+- The extensive ANTLR infrastructure and transformation architecture remain valuable learning resources
+
 ## Build and Development Commands
 
 ### Core Development
@@ -199,7 +230,7 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
 9. **Type Method Stubs**: Object type member functions/procedures with empty implementations
    - Pattern: `typename__methodname`
 
-### 🔄 Phase 3: Full Implementation (In Progress)
+### ✅ Phase 3A: SQL Transformation (Active - Ongoing Improvements)
 10. **Oracle Compatibility Layer**: ✅ **COMPLETE** - PostgreSQL equivalents for Oracle built-in packages
     - ✅ Priority packages: DBMS_OUTPUT, DBMS_UTILITY, UTL_FILE, DBMS_LOB
     - ✅ Three-tier support system: FULL, PARTIAL, STUB
@@ -208,79 +239,52 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
     - ✅ Integrated as Step 23/28 in orchestration workflow
     - See `oraclecompat/` module and [TRANSFORMATION.md](documentation/TRANSFORMATION.md) Phase 4.5
 
-11. **View SQL Transformation**: ✅ **90% COMPLETE** - ANTLR-based Oracle→PostgreSQL SQL conversion
+11. **View SQL Transformation**: ✅ **90% COMPLETE - ACTIVE** - ANTLR-based Oracle→PostgreSQL SQL conversion
     - ✅ **662+ tests passing** across 42+ test classes
     - ✅ **90% real-world view coverage achieved**
     - ✅ Direct AST approach with 37 static visitor helpers
     - ✅ Complete SELECT support, CTEs, CONNECT BY, Oracle-specific functions
     - ✅ PostgresViewImplementationJob with CREATE OR REPLACE VIEW (preserves dependencies)
     - ✅ **Explicit column list support** (2025-11-15) - Handles Oracle views with column renaming
-      - Oracle: `CREATE VIEW v (id, name) AS SELECT empno, ename...` (columns are id, name)
-      - ALL_VIEWS.TEXT only contains `SELECT empno, ename...` (no column list)
-      - Fix: Reconstruct column list from ALL_TAB_COLUMNS metadata to match stub columns
-      - Prevents PostgreSQL "cannot change name of view column" errors
     - ✅ **Query depth tracking** (2025-12-02) - Prevents view column casts from being applied to subqueries
-      - TransformationContext tracks query depth (0=none, 1=top-level, 2+=nested)
-      - Type casts only applied to top-level SELECT expressions, not nested subqueries
-      - Critical fix: Subqueries with scalar expressions were incorrectly receiving type casts
     - ✅ **CTE depth tracking** (2025-12-02) - Prevents view column casts from being applied to CTE definitions
-      - TransformationContext tracks CTE depth (0=not in CTE, 1+=inside CTE)
-      - Counter-based approach handles nested CTEs correctly
-      - Critical fix: CTE SELECT expressions were incorrectly receiving type casts
+    - 🎯 **Future focus:** Continued improvements to SQL transformation quality and coverage
     - **See [TRANSFORMATION.md](documentation/TRANSFORMATION.md) for detailed feature list and implementation history**
 
-12. **Type Inference System**: 🔄 **42% COMPLETE** - Two-pass type analysis for accurate PL/SQL transformation
+### ❄️ Phase 3B: PL/SQL Transformation (Frozen - December 2025)
+
+**Status:** The following PL/SQL transformation features are **development frozen** per strategic decision to pursue PL/SQL→Java transformation instead. Code remains in repository for reference but will not receive active development.
+
+12. **Type Inference System**: ⚠️ **FROZEN at 42% COMPLETE** - Two-pass type analysis for PL/SQL transformation
     - ✅ Phase 1: Foundation - Literals and simple expressions (18/18 tests)
     - ✅ Phase 2: Column References - Metadata integration with TransformationIndices (13/14 tests)
     - ✅ Phase 3: Built-in Functions - 50+ Oracle functions with polymorphic support (36/36 tests)
-    - ✅ **Architecture Refactored** - TypeAnalysisVisitor (498 lines) + 5 static helper classes (following PostgresCodeBuilder pattern)
-    - ✅ Token position-based caching for AST node type information
-    - ✅ Supports: Literals, operators, date arithmetic, column resolution, function return types, pseudo-columns
-    - 📋 Planned: Complex expressions (CASE), PL/SQL variables, collections, integration
-    - **Purpose:** Enable accurate ROUND/TRUNC disambiguation, optimal type casting, function overload resolution
-    - **Architecture:** TypeAnalysisVisitor (Pass 1) populates type cache → FullTypeEvaluator (Pass 2) queries cache
-    - See [TYPE_INFERENCE_IMPLEMENTATION_PLAN.md](documentation/TYPE_INFERENCE_IMPLEMENTATION_PLAN.md) for detailed documentation
+    - ✅ **Architecture Refactored** - TypeAnalysisVisitor (498 lines) + 5 static helper classes
+    - ❄️ **Frozen:** Further development suspended
+    - See [TYPE_INFERENCE_IMPLEMENTATION_PLAN.md](documentation/TYPE_INFERENCE_IMPLEMENTATION_PLAN.md)
 
-13. **Function/Procedure Implementation (Unified)**: 🔄 **85-95% COMPLETE** - PL/SQL→PL/pgSQL transformation
+13. **Function/Procedure Implementation**: ⚠️ **FROZEN at 85-95% COMPLETE** - PL/SQL→PL/pgSQL transformation
     - ✅ **882 tests passing** (PL/SQL transformation validation tests)
     - ✅ Handles **both standalone and package functions** in single unified job
-    - ✅ **20 PL/SQL visitors**: Signatures, variables, control flow (IF/LOOP/FOR/WHILE/CASE), cursors, exceptions, DML
-    - ✅ **Critical Fix:** All Oracle PROCEDUREs → PostgreSQL FUNCTIONs with correct RETURNS clause
+    - ✅ **20 PL/SQL visitors**: Signatures, variables, control flow, cursors, exceptions, DML
     - ✅ **Package variables**: On-demand parsing, getter/setter generation (26 tests)
     - ✅ **Package private functions**: Extracted from package bodies via ANTLR parsing
-    - ⏳ **Missing (~5-15%)**: BULK COLLECT, OUT/INOUT in call statements, named parameters, collections
-    - **REST Endpoints:** `/api/functions/postgres/standalone-implementation/create` + `/verify`
-    - **See [STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md](documentation/STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md) for detailed status and feature list**
+    - ❄️ **Frozen:** Stub creation still works, but implementation transformation not recommended for production use
+    - See [STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md](documentation/STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md)
 
-14. **Type Method Implementation**: ✅ **COMPLETE** - PL/SQL→PL/pgSQL transformation for type methods
-    - ✅ **Full implementation**: `PostgresTypeMethodImplementationJob` transforms type methods using ANTLR
-    - ✅ **Type method segmentation**: Uses pre-extracted sources from StateService (800x memory reduction)
-    - ✅ **Transformation**: Reuses existing `transformFunction`/`transformProcedure` from TransformationService
-    - ✅ **Member vs Static**: Handles both member methods (with SELF) and static methods
-    - ✅ Frontend integration: UI row, buttons, polling, result display
-    - ✅ REST endpoints: `/api/type-methods/postgres/implementation/create`, `/verify`
-    - ✅ State management: `TypeMethodImplementationResult`
-    - ✅ Integrated as Step 26/28 in orchestration workflow
-    - 📋 **Remaining**: Handle SELF parameter transformation (if needed), test with real Oracle types
-    - See [TYPE_METHOD_SEGMENTATION_IMPLEMENTATION_PLAN.md](documentation/TYPE_METHOD_SEGMENTATION_IMPLEMENTATION_PLAN.md) for segmentation details
+14. **Type Method Implementation**: ⚠️ **FROZEN - COMPLETE** - PL/SQL→PL/pgSQL transformation for type methods
+    - ✅ Full implementation completed before freeze
+    - ✅ Type method segmentation with 800x memory reduction
+    - ❄️ **Frozen:** Available but not recommended for production use
+    - See [TYPE_METHOD_SEGMENTATION_IMPLEMENTATION_PLAN.md](documentation/TYPE_METHOD_SEGMENTATION_IMPLEMENTATION_PLAN.md)
 
-15. **Triggers**: ✅ **COMPLETE** - Full extraction and transformation with idempotent implementation
-    - ✅ Oracle extraction: `OracleTriggerExtractionJob` extracts metadata and trigger bodies
-    - ✅ PostgreSQL transformation: Converts Oracle triggers to PostgreSQL triggers + functions
-      - :NEW/:OLD → NEW/OLD (removes colons)
-      - Automatic RETURN statement injection (BEFORE ROW → RETURN NEW, etc.)
-      - Two-part PostgreSQL pattern: trigger function + trigger definition
-    - ✅ **Idempotent implementation** (2025-11-15): Always drop and recreate
-      - `DROP TRIGGER IF EXISTS` before creation (no errors on re-run)
-      - `CREATE OR REPLACE FUNCTION` for trigger functions
-      - `CREATE TRIGGER` after drop (safe, no conflicts)
-      - Ensures Oracle is always source of truth, handles trigger updates
-    - ✅ Frontend integration: UI row, buttons, polling, result display
-    - ✅ REST endpoints: `/api/triggers/oracle/extract`, `/postgres/implementation/create`, `/verify`
-    - ✅ State management: `TriggerMetadata`, `TriggerImplementationResult`
-    - ✅ Integrated as Steps 27-28/28 in orchestration workflow
+15. **Triggers**: ⚠️ **FROZEN - COMPLETE** - Full extraction and transformation
+    - ✅ Oracle extraction and PostgreSQL transformation completed before freeze
+    - ✅ Idempotent implementation with drop and recreate
+    - ❄️ **Frozen:** Available but not recommended for production use
+    - REST endpoints remain functional for testing purposes
 
-16. **Other aspects**: Extraction and creation (Future)
+16. **Other aspects**: Future (TBD based on strategic direction)
 
 ## Database Configuration
 

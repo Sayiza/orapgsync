@@ -81,6 +81,12 @@ td {
     width: 50% ;
 }
 
+input[type="checkbox"] {
+    width: 20px;
+    height: 20px;
+    accent-color: var(--mainblue2);
+}
+
 .header {
     background: #fcfdfd;
     padding: 0 var(--spacing-xl);

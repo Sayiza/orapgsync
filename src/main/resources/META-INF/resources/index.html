@@ -27,6 +27,15 @@
     <table class="database-comparison-table">
       <thead>
         <tr>
+          <th style="width: 80px; text-align: center;">
+            <div style="display: none" class="component-info">
+              <span>Enable</span>
+              <div style="margin-top: 4px;">
+                <button class="action-btn" style="font-size: 10px; padding: 2px 6px;" onclick="toggleAllSteps(true)" title="Select all steps">All</button>
+                <button class="action-btn" style="font-size: 10px; padding: 2px 6px;" onclick="toggleAllSteps(false)" title="Deselect all steps">None</button>
+              </div>
+            </div>
+          </th>
           <th >
             <div class="component-info">
               <span>Oracle (Source)</span>
@@ -43,6 +52,9 @@
       </thead>
       <tbody>
         <tr class="connection-row">
+          <td style="text-align: center; vertical-align: middle;">
+            <span title="Connection tests always run">-</span>
+          </td>
           <td class="source-cell">
             <div class="connection-status" id="oracle-connection">
               <span class="status-indicator disconnected"></span>
@@ -59,6 +71,9 @@
           </td>
         </tr>
         <tr class="schemas-row">
+          <td style="text-align: center; vertical-align: middle;">
+            <input type="checkbox" class="step-checkbox" data-step="schemas" checked title="Enable/disable schema migration">
+          </td>
           <td class="source-cell">
             <div class="component-info" id="oracle-schemas">
               <span class="count-badge">-</span>
@@ -100,6 +115,9 @@
           </td>
         </tr>
         <tr class="synonyms-row">
+          <td style="text-align: center; vertical-align: middle;">
+            <input type="checkbox" class="step-checkbox" data-step="synonyms" checked title="Enable/disable synonym extraction">
+          </td>
           <td class="source-cell">
             <div class="component-info" id="oracle-synonyms">
               <span class="count-badge">-</span>
@@ -123,6 +141,9 @@
           </td>
         </tr>
         <tr class="objects-row">
+          <td style="text-align: center; vertical-align: middle;">
+            <input type="checkbox" class="step-checkbox" data-step="objects" checked title="Enable/disable object type migration">
+          </td>
           <td class="source-cell">
             <div class="component-info" id="oracle-objects">
               <span class="count-badge">-</span>
@@ -164,6 +185,9 @@
           </td>
         </tr>
         <tr class="sequences-row">
+          <td style="text-align: center; vertical-align: middle;">
+            <input type="checkbox" class="step-checkbox" data-step="sequences" checked title="Enable/disable sequence migration">
+          </td>
           <td class="source-cell">
             <div class="component-info" id="oracle-sequences">
               <span class="count-badge">-</span>
@@ -205,6 +229,9 @@
           </td>
         </tr>
         <tr class="tables-row">
+          <td style="text-align: center; vertical-align: middle;">
+            <input type="checkbox" class="step-checkbox" data-step="tables" checked title="Enable/disable table migration">
+          </td>
           <td class="source-cell">
             <div class="component-info" id="oracle-tables">
               <span class="count-badge">-</span>
@@ -246,6 +273,9 @@
           </td>
         </tr>
         <tr class="data-row">
+          <td style="text-align: center; vertical-align: middle;">
+            <input type="checkbox" class="step-checkbox" data-step="data" checked title="Enable/disable data transfer">
+          </td>
           <td class="source-cell">
             <div class="component-info" id="oracle-data">
               <span class="count-badge">-</span>
@@ -287,6 +317,9 @@
           </td>
         </tr>
         <tr class="constraints-row">
+          <td style="text-align: center; vertical-align: middle;">
+            <input type="checkbox" class="step-checkbox" data-step="constraints" checked title="Enable/disable constraint creation">
+          </td>
           <td class="source-cell">
             <div class="component-info" id="oracle-constraints">
               <span class="count-badge">-</span>
@@ -328,6 +361,9 @@
           </td>
         </tr>
         <tr class="fk-indexes-row">
+          <td style="text-align: center; vertical-align: middle;">
+            <input type="checkbox" class="step-checkbox" data-step="fk-indexes" checked title="Enable/disable FK index creation">
+          </td>
           <td class="source-cell">
             <div class="component-info" id="oracle-fk-indexes">
               <span class="count-badge">-</span>
@@ -351,6 +387,9 @@
           </td>
         </tr>
         <tr class="views-row">
+          <td style="text-align: center; vertical-align: middle;">
+            <input type="checkbox" class="step-checkbox" data-step="views" checked title="Enable/disable view stub creation">
+          </td>
           <td class="source-cell">
             <div class="component-info" id="oracle-views">
               <span class="count-badge">-</span>
@@ -392,6 +431,9 @@
           </td>
         </tr>
         <tr class="functions-row">
+          <td style="text-align: center; vertical-align: middle;">
+            <input type="checkbox" class="step-checkbox" data-step="functions" checked title="Enable/disable function stub creation">
+          </td>
           <td class="source-cell">
             <div class="component-info" id="oracle-functions">
               <span class="count-badge">-</span>
@@ -433,6 +475,9 @@
           </td>
         </tr>
         <tr class="type-methods-row">
+          <td style="text-align: center; vertical-align: middle;">
+            <input type="checkbox" class="step-checkbox" data-step="type-methods" checked title="Enable/disable type method stub creation">
+          </td>
           <td class="source-cell">
             <div class="component-info" id="oracle-type-methods">
               <span class="count-badge">-</span>
@@ -474,6 +519,9 @@
           </td>
         </tr>
         <tr class="oracle-compat-row">
+          <td style="text-align: center; vertical-align: middle;">
+            <input type="checkbox" class="step-checkbox" data-step="oracle-compat" checked title="Enable/disable Oracle compatibility layer installation">
+          </td>
           <td class="source-cell">
             <div class="component-info" id="oracle-compat-source">
               <span class="count-badge">-</span>
@@ -506,6 +554,9 @@
           </td>
         </tr>
         <tr class="view-implementation-row">
+          <td style="text-align: center; vertical-align: middle;">
+            <input type="checkbox" class="step-checkbox" data-step="view-implementation" checked title="Enable/disable view implementation (SQL transformation)">
+          </td>
           <td class="source-cell">
             <div class="component-info" id="oracle-view-implementation">
               <span class="count-badge">-</span>
@@ -542,6 +593,9 @@
           </td>
         </tr>
         <tr class="standalone-function-implementation-row">
+          <td style="text-align: center; vertical-align: middle;">
+            <input type="checkbox" class="step-checkbox" data-step="function-implementation" title="Enable/disable function implementation (PL/SQL transformation - FROZEN)">
+          </td>
           <td class="source-cell">
             <div class="component-info" id="oracle-standalone-function-implementation">
               <span class="count-badge">-</span>
@@ -578,6 +632,9 @@
           </td>
         </tr>
         <tr class="type-method-implementation-row">
+          <td style="text-align: center; vertical-align: middle;">
+            <input type="checkbox" class="step-checkbox" data-step="type-method-implementation" title="Enable/disable type method implementation (PL/SQL transformation - FROZEN)">
+          </td>
           <td class="source-cell">
             <div class="component-info" id="oracle-type-method-implementation">
               <span class="count-badge">-</span>
@@ -614,6 +671,9 @@
           </td>
         </tr>
         <tr class="trigger-row">
+          <td style="text-align: center; vertical-align: middle;">
+            <input type="checkbox" class="step-checkbox" data-step="triggers" title="Enable/disable trigger implementation (PL/SQL transformation - FROZEN)">
+          </td>
           <td class="source-cell">
             <div class="component-info" id="oracle-triggers">
               <span class="count-badge">-</span>
