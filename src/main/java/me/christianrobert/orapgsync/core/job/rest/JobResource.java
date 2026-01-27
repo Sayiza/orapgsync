@@ -31,6 +31,7 @@ import me.christianrobert.orapgsync.core.job.model.typemethod.TypeMethodMetadata
 import me.christianrobert.orapgsync.core.job.model.typemethod.TypeMethodStubCreationResult;
 import me.christianrobert.orapgsync.core.job.model.trigger.TriggerMetadata;
 import me.christianrobert.orapgsync.core.job.model.trigger.TriggerImplementationResult;
+import me.christianrobert.orapgsync.core.job.model.synonym.SynonymReplacementViewCreationResult;
 import me.christianrobert.orapgsync.core.job.service.JobService;
 import me.christianrobert.orapgsync.function.rest.FunctionResource;
 import me.christianrobert.orapgsync.objectdatatype.rest.ObjectTypeResource;
@@ -41,6 +42,7 @@ import me.christianrobert.orapgsync.sequence.rest.SequenceResource;
 import me.christianrobert.orapgsync.table.rest.TableResource;
 import me.christianrobert.orapgsync.transfer.rest.DataTransferResource;
 import me.christianrobert.orapgsync.trigger.rest.TriggerResource;
+import me.christianrobert.orapgsync.synonym.rest.SynonymResource;
 import me.christianrobert.orapgsync.typemethod.rest.TypeMethodResource;
 import me.christianrobert.orapgsync.view.rest.ViewResource;
 import me.christianrobert.orapgsync.core.job.model.view.ViewVerificationResult;
@@ -285,6 +287,15 @@ public class JobResource {
                 response.put("skippedCount", triggerImplResult.getSkippedCount());
                 response.put("errorCount", triggerImplResult.getErrorCount());
                 response.put("isSuccessful", triggerImplResult.isSuccessful());
+                response.put("result", result);
+            } else if (result instanceof SynonymReplacementViewCreationResult) {
+                SynonymReplacementViewCreationResult synonymResult = (SynonymReplacementViewCreationResult) result;
+                Map<String, Object> summary = SynonymResource.generateSynonymReplacementViewCreationSummary(synonymResult);
+                response.put("summary", summary);
+                response.put("createdCount", synonymResult.getCreatedCount());
+                response.put("skippedCount", synonymResult.getSkippedCount());
+                response.put("errorCount", synonymResult.getErrorCount());
+                response.put("isSuccessful", synonymResult.isSuccessful());
                 response.put("result", result);
             } else if (result instanceof TypeMethodStubCreationResult) {
                 TypeMethodStubCreationResult typeMethodStubResult = (TypeMethodStubCreationResult) result;

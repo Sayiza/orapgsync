@@ -5,6 +5,7 @@ import me.christianrobert.orapgsync.core.job.model.function.FunctionImplementati
 import me.christianrobert.orapgsync.core.job.model.objectdatatype.ObjectDataTypeMetaData;
 import me.christianrobert.orapgsync.core.job.model.objectdatatype.ObjectTypeCreationResult;
 import me.christianrobert.orapgsync.core.job.model.synonym.SynonymMetadata;
+import me.christianrobert.orapgsync.core.job.model.synonym.SynonymReplacementViewCreationResult;
 import me.christianrobert.orapgsync.core.job.model.transfer.DataTransferResult;
 import me.christianrobert.orapgsync.core.job.model.transfer.RowCountMetadata;
 import me.christianrobert.orapgsync.core.job.model.schema.SchemaCreationResult;
@@ -54,6 +55,7 @@ public class StateService {
     // Enables fast lookup: synonymsByOwnerAndName.get(schema).get(synonymName)
     // Supports Oracle resolution: current schema → PUBLIC fallback
     Map<String, Map<String, SynonymMetadata>> oracleSynonymsByOwnerAndName = new HashMap<>();
+    SynonymReplacementViewCreationResult synonymReplacementViewCreationResult;
 
     List<ObjectDataTypeMetaData> oracleObjectDataTypeMetaData = new ArrayList<>();
     List<ObjectDataTypeMetaData> postgresObjectDataTypeMetaData = new ArrayList<>();
@@ -210,6 +212,14 @@ public class StateService {
         }
 
         return null; // Not a synonym
+    }
+
+    public SynonymReplacementViewCreationResult getSynonymReplacementViewCreationResult() {
+        return synonymReplacementViewCreationResult;
+    }
+
+    public void setSynonymReplacementViewCreationResult(SynonymReplacementViewCreationResult synonymReplacementViewCreationResult) {
+        this.synonymReplacementViewCreationResult = synonymReplacementViewCreationResult;
     }
 
     public List<ObjectDataTypeMetaData> getOracleObjectDataTypeMetaData() {
@@ -603,6 +613,7 @@ public class StateService {
         this.postgresSchemaNames = new ArrayList<>();
         this.schemaCreationResult = null;
         this.oracleSynonymsByOwnerAndName = new HashMap<>();
+        this.synonymReplacementViewCreationResult = null;
         this.oracleObjectDataTypeMetaData = new ArrayList<>();
         this.postgresObjectDataTypeMetaData = new ArrayList<>();
         this.objectTypeCreationResult = null;
