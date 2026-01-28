@@ -639,6 +639,13 @@ public class VisitGeneralElement {
       return "CURRENT_TIMESTAMP";
     }
 
+    // SYSTIMESTAMP → CURRENT_TIMESTAMP
+    // Oracle: SYSTIMESTAMP returns current timestamp with time zone
+    // PostgreSQL: CURRENT_TIMESTAMP is the equivalent
+    if ("SYSTIMESTAMP".equals(upperIdentifier)) {
+      return "CURRENT_TIMESTAMP";
+    }
+
     // Check for unqualified package variable reference
     // In Oracle, within a package function, you can reference package variables directly:
     // Oracle: RETURN g_counter;  (not counter_pkg.g_counter)
