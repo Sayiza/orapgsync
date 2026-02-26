@@ -108,22 +108,23 @@
     </dependency>
 
     <!-- Testcontainers for PostgreSQL integration testing -->
+    <!-- 1.21.4 backports Docker 29.x / containerd 2.x compatibility from 2.x -->
     <dependency>
       <groupId>org.testcontainers</groupId>
       <artifactId>testcontainers</artifactId>
-      <version>1.19.3</version>
+      <version>1.21.4</version>
       <scope>test</scope>
     </dependency>
     <dependency>
       <groupId>org.testcontainers</groupId>
       <artifactId>postgresql</artifactId>
-      <version>1.19.3</version>
+      <version>1.21.4</version>
       <scope>test</scope>
     </dependency>
     <dependency>
       <groupId>org.testcontainers</groupId>
       <artifactId>junit-jupiter</artifactId>
-      <version>1.19.3</version>
+      <version>1.21.4</version>
       <scope>test</scope>
     </dependency>
   </dependencies>
