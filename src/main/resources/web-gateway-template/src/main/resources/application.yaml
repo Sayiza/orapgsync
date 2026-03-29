@@ -8,27 +8,8 @@ quarkus:
     password: ${ENV_CO_DB_PASSWORD_ENCRYPTED}
     jdbc:
       url: ${ENV_CO_DB_JDBC_URL}
-      telemetry: true
-  hibernate-orm:
-    dialect: org.hibernate.dialect.PostgreSQLDialect
-    second-level-caching-enabled: false
-    fetch:
-      max-depth: 0
-    jdbc:
-      statement-fetch-size: 1000
-    log:
-      queries-slower-than-ms: 500
-      bind-parameters: true
-      sql: true
-      format-sql: true
-      jdbc-warnings: true
-    validate-in-dev-mode: false
-    database:
-      globally-quoted-identifiers: false
-  hibernate-orm."<default>":
-    jdbc:
-      lob:
-        non-contextual-creation: true
+    devservices:
+      enabled: false
   http:
     port: {{serverPort}}
   log:

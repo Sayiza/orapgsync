@@ -258,7 +258,12 @@ function collectConfigurationData() {
         'path-target-project-postgre': 'path.target-project-postgre',
         'postgre-url': 'postgre.url',
         'postgre-username': 'postgre.username',
-        'postgre-password': 'postgre.password'
+        'postgre-password': 'postgre.password',
+        // Web Gateway settings
+        'web-gateway-output-path': 'web-gateway.output-path',
+        'web-gateway-dad-name': 'web-gateway.dad-name',
+        'web-gateway-url-prefix': 'web-gateway.url-prefix',
+        'web-gateway-server-port': 'web-gateway.server-port'
     };
 
     Object.entries(fieldMappings).forEach(([fieldId, configKey]) => {
@@ -302,7 +307,12 @@ function populateConfigurationForm(config) {
         'path-target-project-postgre': 'path.target-project-postgre',
         'postgre-url': 'postgre.url',
         'postgre-username': 'postgre.username',
-        'postgre-password': 'postgre.password'
+        'postgre-password': 'postgre.password',
+        // Web Gateway settings
+        'web-gateway-output-path': 'web-gateway.output-path',
+        'web-gateway-dad-name': 'web-gateway.dad-name',
+        'web-gateway-url-prefix': 'web-gateway.url-prefix',
+        'web-gateway-server-port': 'web-gateway.server-port'
     };
 
     Object.entries(fieldMappings).forEach(([fieldId, configKey]) => {

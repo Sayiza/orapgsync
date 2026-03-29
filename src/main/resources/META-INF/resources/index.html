@@ -855,6 +855,35 @@
           <span class="config-help">PostgreSQL database password</span>
         </div>
 
+        <!-- Web Gateway Configuration -->
+        <div class="config-group" style="grid-column: 1 / -1; border-top: 1px solid #ddd; padding-top: 1rem; margin-top: 0.5rem;">
+          <h3 style="margin: 0 0 0.5rem 0; font-size: 1rem; color: #555;">Web Gateway Settings</h3>
+        </div>
+
+        <div class="config-group">
+          <label class="config-label" for="web-gateway-output-path">Output Path</label>
+          <input type="text" id="web-gateway-output-path" class="config-input" value="/tmp/web-gateway">
+          <span class="config-help">Directory for generated web gateway project</span>
+        </div>
+
+        <div class="config-group">
+          <label class="config-label" for="web-gateway-dad-name">DAD Name</label>
+          <input type="text" id="web-gateway-dad-name" class="config-input" value="myapp">
+          <span class="config-help">Database Access Descriptor name (URL path component)</span>
+        </div>
+
+        <div class="config-group">
+          <label class="config-label" for="web-gateway-url-prefix">URL Prefix</label>
+          <input type="text" id="web-gateway-url-prefix" class="config-input" value="/pls">
+          <span class="config-help">URL prefix for PL/SQL gateway (e.g., /pls)</span>
+        </div>
+
+        <div class="config-group">
+          <label class="config-label" for="web-gateway-server-port">Server Port</label>
+          <input type="text" id="web-gateway-server-port" class="config-input" value="8090">
+          <span class="config-help">Port for the generated web gateway application</span>
+        </div>
+
       </div>
 
       <div class="config-actions">
