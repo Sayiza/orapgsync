@@ -1,7 +1,7 @@
 # Mod-PL/SQL Web Gateway Implementation Plan
 
 **Created:** 2026-03-29
-**Status:** Phase 1 PostgreSQL Compatibility Layer COMPLETE, Quarkus Gateway PENDING
+**Status:** Phase 1 COMPLETE - PostgreSQL Compatibility Layer + Quarkus Gateway Generation
 **Priority:** High
 **Last Updated:** 2026-03-29
 
@@ -563,18 +563,45 @@ public class PlsqlExecutor {
 
 **Test Coverage:** 17 integration tests passing (`PostgresHtpBufferValidationTest`)
 
-**Quarkus Gateway:** 📋 **PENDING**
-- [ ] Basic project setup with Quarkus
-- [ ] Database connection configuration
-- [ ] Simple URL routing (`/pls/{dad}/{schema}.{procedure}`)
-- [ ] Basic parameter passing (query string only)
-- [ ] Buffer extraction and HTML response
-- [ ] Error handling (return error page on exception)
+**Quarkus Gateway Generation:** ✅ **COMPLETE** (2026-03-29)
+- [x] Project generation from templates
+- [x] pom.xml with Quarkus dependencies
+- [x] application.yaml with database and gateway config
+- [x] .env file with database credentials
+- [x] GatewayApplication.java - Main entry point
+- [x] GatewayConfig.java - Configuration interface
+- [x] PlsqlRouter.java - URL routing to PostgreSQL functions
+- [x] PlsqlExecutor.java - Buffer init, procedure call, buffer extraction
+- [x] Simple URL routing (`/pls/{dad}/{schema}.{procedure}`)
+- [x] CGI environment initialization
+- [x] Buffer extraction and HTML response
+- [x] Redirect support (via session variable)
+- [x] Error handling (return error page on exception)
+
+**Generator Implementation:**
+- `WebGatewayGenerator.java` - Template processing and file generation
+- `WebGatewayGenerationResult.java` - Result model
+- `WebGatewayResource.java` - REST endpoints (`POST /api/web-gateway/generate`)
+- Templates in `src/main/resources/web-gateway-template/`
+
+**Test Coverage:** 8 unit tests passing (`WebGatewayGeneratorTest`)
+
+**REST API:**
+- `POST /api/web-gateway/generate` - Generate gateway project
+- `GET /api/web-gateway/config` - Get current config
+- `PUT /api/web-gateway/config` - Update config
+
+**Configuration:**
+- `web-gateway.output-path` - Output directory (must be empty)
+- `web-gateway.dad-name` - DAD name for URL routing
+- `web-gateway.url-prefix` - URL prefix (default: /pls)
+- `web-gateway.server-port` - HTTP port (default: 8090)
+- `java.generated-package-name` - Java package name
 
 **Integration:**
 - [x] Add HTP functions to OracleBuiltinCatalog
 - [x] Functions auto-installed via PostgresOracleCompatInstallationJob
-- [ ] Test with simple "Hello World" procedure (needs Quarkus gateway)
+- [ ] Test with simple "Hello World" procedure (needs generated gateway to be built/run)
 
 **Deliverable:** A simple procedure like this works:
 ```sql

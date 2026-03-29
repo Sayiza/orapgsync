@@ -37,6 +37,12 @@ public class ConfigService {
         configuration.put("postgre.username", "postgres");
         configuration.put("postgre.password", "xxx");
 
+        // Web Gateway configuration
+        configuration.put("web-gateway.output-path", "/tmp/web-gateway");
+        configuration.put("web-gateway.dad-name", "myapp");
+        configuration.put("web-gateway.url-prefix", "/pls");
+        configuration.put("web-gateway.server-port", "8090");
+
         log.info("Configuration service initialized with default values");
     }
 

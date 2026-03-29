@@ -744,6 +744,32 @@
             </div>
           </td>
         </tr>
+        <tr class="web-gateway-row">
+          <td style="text-align: center; vertical-align: middle;">
+            <input type="checkbox" class="step-checkbox" data-step="web-gateway" checked title="Enable/disable web gateway project generation">
+          </td>
+          <td class="source-cell">
+            <div class="component-info" id="oracle-web-gateway">
+              <span class="count-badge">-</span>
+              <span class="component-text">N/A - generates external project</span>
+            </div>
+          </td>
+          <td class="target-cell">
+            <div class="component-info" id="postgres-web-gateway">
+              <span class="count-badge">-</span>
+              <span class="component-text">Web Gateway project generated</span>
+              <button class="action-btn" onclick="generateWebGateway()" title="Generate Quarkus web gateway project for mod_plsql compatibility">Generate Web Gateway</button>
+              <div class="table-creation-results" id="postgres-web-gateway-generation-results" style="display: none;">
+                <div class="table-creation-header" onclick="toggleWebGatewayResults()">
+                  <span class="toggle-indicator">▼</span> Web Gateway Generation Results
+                </div>
+                <div class="table-creation-details" id="postgres-web-gateway-generation-details">
+                  <!-- Web gateway generation results will be populated here -->
+                </div>
+              </div>
+            </div>
+          </td>
+        </tr>
       </tbody>
     </table>
   </div>
@@ -864,6 +890,7 @@
 <script src="trigger-service.js"></script>
 <script src="oracle-compat-service.js"></script>
 <script src="synonym-replacement-service.js"></script>
+<script src="web-gateway-service.js"></script>
 
 <!-- Orchestration Script -->
 <script src="orchestration-service.js"></script>
