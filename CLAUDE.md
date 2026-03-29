@@ -6,36 +6,34 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Oracle-to-PostgreSQL migration tool built with Quarkus (Java 18). Uses CDI-based plugin architecture for extensible database object migration with centralized state management.
 
-## Strategic Direction (Updated December 2025)
+## Strategic Direction (Updated March 2026)
 
-**PL/SQL to PL/pgSQL Transformation - Development Frozen**
+**PL/SQL to PL/pgSQL Transformation - ACTIVE**
 
-After extensive development and real-world testing, the team has made a strategic decision regarding PL/SQL transformation:
+**Status:** PL/SQL to PL/pgSQL transformation work is **active** and receiving continued development.
 
-**Status:** PL/SQL to PL/pgSQL transformation work is **frozen** and will not be actively developed further.
+**Current Focus: Mod-PL/SQL Web Gateway**
 
-**Rationale:**
-- The automated PL/SQL to PL/pgSQL transformation proved to be of low quality in production use
-- Full coverage of Oracle PL/SQL semantics is extremely complex and unlikely to achieve high reliability
-- The team is pursuing an alternative approach: **PL/SQL to Java transformation** (with AI assistance)
-- This alternative approach is showing more promising results for business logic migration
+A major new initiative is underway to support Oracle mod_plsql web applications:
+- **Oracle Compatibility Layer** - HTP/HTF/OWA functions for web page generation
+- **Quarkus Web Gateway** - Java application replacing Apache mod_plsql module
+- **Iterative Implementation** - Starting with HTP.P (95% of usage), expanding incrementally
 
-**What Remains Active:**
+See [MOD_PLSQL_IMPLEMENTATION_PLAN.md](documentation/MOD_PLSQL_IMPLEMENTATION_PLAN.md) for details.
+
+**What's Active:**
 - ✅ **Data Transfer** - Proven highly valuable and will continue to receive improvements
 - ✅ **SQL/View Transformation** - Proven highly valuable (90% coverage) and will continue to receive improvements
 - ✅ **Structural Migration** - Schema, tables, sequences, object types, constraints remain fully supported
-- ⚠️ **PL/SQL Functions/Procedures/Triggers/Type Methods** - Stub creation remains available but implementation transformation is frozen
+- ✅ **PL/SQL Functions/Procedures/Triggers/Type Methods** - Active development for mod_plsql support
+- 🔄 **Mod-PL/SQL Web Gateway** - New feature in development
 
-**Future Development Focus:**
-1. Fine-tuning data transfer capabilities (planned: checksum comparison for data validation)
-2. Improving SQL and view transformation quality and coverage
-3. Maintaining and enhancing structural migration features
-4. Optional step execution in orchestration (allow users to skip PL/SQL transformation steps)
-
-**Technical Debt:**
-- All PL/SQL transformation code remains in the codebase (documented, tested, 85-95% complete)
-- No plans to remove this code - it may serve as reference or be reactivated if needed
-- The extensive ANTLR infrastructure and transformation architecture remain valuable learning resources
+**Development Focus:**
+1. Mod-PL/SQL compatibility layer (HTP, HTF, OWA_UTIL packages)
+2. Quarkus web gateway for serving PL/SQL-generated web pages
+3. Continued PL/SQL transformation improvements as needed
+4. Fine-tuning data transfer capabilities
+5. Improving SQL and view transformation quality and coverage
 
 ## Build and Development Commands
 
@@ -251,40 +249,52 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
     - 🎯 **Future focus:** Continued improvements to SQL transformation quality and coverage
     - **See [TRANSFORMATION.md](documentation/TRANSFORMATION.md) for detailed feature list and implementation history**
 
-### ❄️ Phase 3B: PL/SQL Transformation (Frozen - December 2025)
+### 🔄 Phase 3B: PL/SQL Transformation (Active - March 2026)
 
-**Status:** The following PL/SQL transformation features are **development frozen** per strategic decision to pursue PL/SQL→Java transformation instead. Code remains in repository for reference but will not receive active development.
+**Status:** PL/SQL transformation is **active** and receiving continued development, primarily to support mod_plsql web application migration.
 
-12. **Type Inference System**: ⚠️ **FROZEN at 42% COMPLETE** - Two-pass type analysis for PL/SQL transformation
+12. **Type Inference System**: 🔄 **42% COMPLETE** - Two-pass type analysis for PL/SQL transformation
     - ✅ Phase 1: Foundation - Literals and simple expressions (18/18 tests)
     - ✅ Phase 2: Column References - Metadata integration with TransformationIndices (13/14 tests)
     - ✅ Phase 3: Built-in Functions - 50+ Oracle functions with polymorphic support (36/36 tests)
     - ✅ **Architecture Refactored** - TypeAnalysisVisitor (498 lines) + 5 static helper classes
-    - ❄️ **Frozen:** Further development suspended
     - See [TYPE_INFERENCE_IMPLEMENTATION_PLAN.md](documentation/TYPE_INFERENCE_IMPLEMENTATION_PLAN.md)
 
-13. **Function/Procedure Implementation**: ⚠️ **FROZEN at 85-95% COMPLETE** - PL/SQL→PL/pgSQL transformation
+13. **Function/Procedure Implementation**: 🔄 **85-95% COMPLETE** - PL/SQL→PL/pgSQL transformation
     - ✅ **882 tests passing** (PL/SQL transformation validation tests)
     - ✅ Handles **both standalone and package functions** in single unified job
     - ✅ **20 PL/SQL visitors**: Signatures, variables, control flow, cursors, exceptions, DML
     - ✅ **Package variables**: On-demand parsing, getter/setter generation (26 tests)
     - ✅ **Package private functions**: Extracted from package bodies via ANTLR parsing
-    - ❄️ **Frozen:** Stub creation still works, but implementation transformation not recommended for production use
+    - 🔄 **Active:** Continued development for mod_plsql support
     - See [STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md](documentation/STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md)
 
-14. **Type Method Implementation**: ⚠️ **FROZEN - COMPLETE** - PL/SQL→PL/pgSQL transformation for type methods
-    - ✅ Full implementation completed before freeze
+14. **Type Method Implementation**: ✅ **COMPLETE** - PL/SQL→PL/pgSQL transformation for type methods
+    - ✅ Full implementation completed
     - ✅ Type method segmentation with 800x memory reduction
-    - ❄️ **Frozen:** Available but not recommended for production use
     - See [TYPE_METHOD_SEGMENTATION_IMPLEMENTATION_PLAN.md](documentation/TYPE_METHOD_SEGMENTATION_IMPLEMENTATION_PLAN.md)
 
-15. **Triggers**: ⚠️ **FROZEN - COMPLETE** - Full extraction and transformation
-    - ✅ Oracle extraction and PostgreSQL transformation completed before freeze
+15. **Triggers**: ✅ **COMPLETE** - Full extraction and transformation
+    - ✅ Oracle extraction and PostgreSQL transformation completed
     - ✅ Idempotent implementation with drop and recreate
-    - ❄️ **Frozen:** Available but not recommended for production use
-    - REST endpoints remain functional for testing purposes
 
-16. **Other aspects**: Future (TBD based on strategic direction)
+### 🔄 Phase 4: Mod-PL/SQL Web Gateway (New - March 2026)
+
+**Status:** New feature in development to support Oracle mod_plsql web application migration.
+
+16. **HTP/HTF Compatibility Layer**: 📋 **PLANNED** - PostgreSQL equivalents for web output packages
+    - 📋 HTP package (htp__p, htp__print, htp__prn, HTML helpers)
+    - 📋 HTF package (htf__bold, htf__anchor, htf__img, etc.)
+    - 📋 OWA_UTIL package (get_cgi_env, redirect_url)
+    - 📋 Temp table buffer for HTTP response accumulation
+    - See [MOD_PLSQL_IMPLEMENTATION_PLAN.md](documentation/MOD_PLSQL_IMPLEMENTATION_PLAN.md)
+
+17. **Quarkus Web Gateway**: 📋 **PLANNED** - Java application replacing Apache mod_plsql
+    - 📋 URL → PostgreSQL function routing
+    - 📋 CGI environment initialization
+    - 📋 Parameter passing (GET, POST, arrays)
+    - 📋 Buffer extraction and HTTP response
+    - See [MOD_PLSQL_IMPLEMENTATION_PLAN.md](documentation/MOD_PLSQL_IMPLEMENTATION_PLAN.md)
 
 ## Database Configuration
 

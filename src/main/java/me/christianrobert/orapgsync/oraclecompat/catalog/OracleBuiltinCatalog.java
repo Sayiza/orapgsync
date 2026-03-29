@@ -4,6 +4,9 @@ import me.christianrobert.orapgsync.oraclecompat.implementations.DbmsLobImpl;
 import me.christianrobert.orapgsync.oraclecompat.implementations.DbmsOutputImpl;
 import me.christianrobert.orapgsync.oraclecompat.implementations.DbmsUtilityImpl;
 import me.christianrobert.orapgsync.oraclecompat.implementations.ExceptionHandlingImpl;
+import me.christianrobert.orapgsync.oraclecompat.implementations.HtpImpl;
+import me.christianrobert.orapgsync.oraclecompat.implementations.OwaImpl;
+import me.christianrobert.orapgsync.oraclecompat.implementations.OwaUtilImpl;
 import me.christianrobert.orapgsync.oraclecompat.implementations.UtlFileImpl;
 import me.christianrobert.orapgsync.oraclecompat.model.OracleBuiltinFunction;
 import me.christianrobert.orapgsync.oraclecompat.model.SupportLevel;
@@ -16,17 +19,22 @@ import java.util.stream.Collectors;
 /**
  * Central catalog of all Oracle built-in packages and their PostgreSQL equivalents.
  * <p>
- * Priority packages (Phase 1):
+ * Core packages:
  * - DBMS_OUTPUT (debugging, logging)
  * - DBMS_UTILITY (error handling, formatting)
  * - UTL_FILE (file operations - limited)
  * - DBMS_LOB (LOB operations)
  * <p>
+ * Mod-PL/SQL web packages:
+ * - HTP (Hypertext Procedures - web output buffer)
+ * - OWA (Oracle Web Agent - request initialization)
+ * - OWA_UTIL (CGI environment, redirects, headers)
+ * <p>
  * Future additions:
+ * - HTF (Hypertext Functions - return strings)
+ * - OWA_COOKIE (cookie handling)
  * - DBMS_SQL (dynamic SQL - complex)
  * - UTL_HTTP (HTTP operations - security concerns)
- * - DBMS_RANDOM (random numbers)
- * - DBMS_SCHEDULER (job scheduling)
  */
 public class OracleBuiltinCatalog {
 
@@ -43,6 +51,11 @@ public class OracleBuiltinCatalog {
 
         // Register standalone exception handling functions
         registerExceptionHandling();
+
+        // Register mod_plsql web packages (Phase 1)
+        registerHtp();
+        registerOwa();
+        registerOwaUtil();
     }
 
     private void registerDbmsOutput() {
@@ -249,6 +262,179 @@ public class OracleBuiltinCatalog {
                        "Error codes -20000 to -20999 map to SQLSTATE 'P0001' to 'P0999'. " +
                        "Original error code preserved in HINT clause.")
                 .sqlDefinition(null)  // No SQL definition - handled by visitor transformation
+                .build());
+    }
+
+    // ==================== MOD_PLSQL WEB PACKAGES ====================
+
+    private void registerHtp() {
+        // HTP.INIT - Buffer initialization (internal, called by gateway)
+        allFunctions.add(OracleBuiltinFunction.builder()
+                .packageName("HTP")
+                .functionName("INIT")
+                .signature("INIT()")
+                .supportLevel(SupportLevel.FULL)
+                .postgresFunction("oracle_compat.htp__init")
+                .notes("Initialize HTP buffer - called by web gateway at request start")
+                .sqlDefinition(HtpImpl.getInit())
+                .build());
+
+        // HTP.GET_BUFFER - Buffer retrieval (internal, called by gateway)
+        allFunctions.add(OracleBuiltinFunction.builder()
+                .packageName("HTP")
+                .functionName("GET_BUFFER")
+                .signature("GET_BUFFER() RETURNS TEXT")
+                .supportLevel(SupportLevel.FULL)
+                .postgresFunction("oracle_compat.htp__get_buffer")
+                .notes("Retrieve accumulated HTP buffer - called by web gateway after procedure execution")
+                .sqlDefinition(HtpImpl.getGetBuffer())
+                .build());
+
+        // HTP.P - Primary output function (95% of usage)
+        allFunctions.add(OracleBuiltinFunction.builder()
+                .packageName("HTP")
+                .functionName("P")
+                .signature("P(text)")
+                .supportLevel(SupportLevel.FULL)
+                .postgresFunction("oracle_compat.htp__p")
+                .notes("Primary HTP output function - appends text with newline to buffer")
+                .sqlDefinition(HtpImpl.getP())
+                .build());
+
+        // HTP.PRN - Output without newline
+        allFunctions.add(OracleBuiltinFunction.builder()
+                .packageName("HTP")
+                .functionName("PRN")
+                .signature("PRN(text)")
+                .supportLevel(SupportLevel.FULL)
+                .postgresFunction("oracle_compat.htp__prn")
+                .notes("Output text without newline to buffer")
+                .sqlDefinition(HtpImpl.getPrn())
+                .build());
+
+        // HTP.PRINT - Alias for HTP.P
+        allFunctions.add(OracleBuiltinFunction.builder()
+                .packageName("HTP")
+                .functionName("PRINT")
+                .signature("PRINT(text)")
+                .supportLevel(SupportLevel.FULL)
+                .postgresFunction("oracle_compat.htp__print")
+                .notes("Alias for HTP.P - appends text with newline")
+                .sqlDefinition(HtpImpl.getPrint())
+                .build());
+
+        // HTP.NL - Newline only
+        allFunctions.add(OracleBuiltinFunction.builder()
+                .packageName("HTP")
+                .functionName("NL")
+                .signature("NL()")
+                .supportLevel(SupportLevel.FULL)
+                .postgresFunction("oracle_compat.htp__nl")
+                .notes("Output newline only")
+                .sqlDefinition(HtpImpl.getNl())
+                .build());
+
+        // HTP.LINE - Horizontal rule
+        allFunctions.add(OracleBuiltinFunction.builder()
+                .packageName("HTP")
+                .functionName("LINE")
+                .signature("LINE()")
+                .supportLevel(SupportLevel.FULL)
+                .postgresFunction("oracle_compat.htp__line")
+                .notes("Output <hr> tag")
+                .sqlDefinition(HtpImpl.getLine())
+                .build());
+
+        // HTP.BR - Line break
+        allFunctions.add(OracleBuiltinFunction.builder()
+                .packageName("HTP")
+                .functionName("BR")
+                .signature("BR()")
+                .supportLevel(SupportLevel.FULL)
+                .postgresFunction("oracle_compat.htp__br")
+                .notes("Output <br> tag")
+                .sqlDefinition(HtpImpl.getBr())
+                .build());
+    }
+
+    private void registerOwa() {
+        // OWA.INIT_CGI_ENV - CGI environment initialization (internal, called by gateway)
+        allFunctions.add(OracleBuiltinFunction.builder()
+                .packageName("OWA")
+                .functionName("INIT_CGI_ENV")
+                .signature("INIT_CGI_ENV(jsonb)")
+                .supportLevel(SupportLevel.FULL)
+                .postgresFunction("oracle_compat.owa__init_cgi_env")
+                .notes("Initialize CGI environment from JSON - called by web gateway")
+                .sqlDefinition(OwaImpl.getInitCgiEnv())
+                .build());
+
+        // OWA.INIT_REQUEST - Combined initialization (internal, called by gateway)
+        allFunctions.add(OracleBuiltinFunction.builder()
+                .packageName("OWA")
+                .functionName("INIT_REQUEST")
+                .signature("INIT_REQUEST(jsonb DEFAULT '{}')")
+                .supportLevel(SupportLevel.FULL)
+                .postgresFunction("oracle_compat.owa__init_request")
+                .notes("Initialize complete request context (HTP buffer + CGI environment)")
+                .sqlDefinition(OwaImpl.getInitRequest())
+                .build());
+    }
+
+    private void registerOwaUtil() {
+        // OWA_UTIL.GET_CGI_ENV - Get CGI variable
+        allFunctions.add(OracleBuiltinFunction.builder()
+                .packageName("OWA_UTIL")
+                .functionName("GET_CGI_ENV")
+                .signature("GET_CGI_ENV(name TEXT) RETURNS TEXT")
+                .supportLevel(SupportLevel.FULL)
+                .postgresFunction("oracle_compat.owa_util__get_cgi_env")
+                .notes("Get CGI environment variable (REQUEST_METHOD, QUERY_STRING, etc.)")
+                .sqlDefinition(OwaUtilImpl.getGetCgiEnv())
+                .build());
+
+        // OWA_UTIL.HTTP_HEADER_CLOSE - Close headers
+        allFunctions.add(OracleBuiltinFunction.builder()
+                .packageName("OWA_UTIL")
+                .functionName("HTTP_HEADER_CLOSE")
+                .signature("HTTP_HEADER_CLOSE()")
+                .supportLevel(SupportLevel.FULL)
+                .postgresFunction("oracle_compat.owa_util__http_header_close")
+                .notes("Close HTTP headers section")
+                .sqlDefinition(OwaUtilImpl.getHttpHeaderClose())
+                .build());
+
+        // OWA_UTIL.MIME_HEADER - Set content type (stub for now)
+        allFunctions.add(OracleBuiltinFunction.builder()
+                .packageName("OWA_UTIL")
+                .functionName("MIME_HEADER")
+                .signature("MIME_HEADER(content_type TEXT, close_header BOOLEAN)")
+                .supportLevel(SupportLevel.PARTIAL)
+                .postgresFunction("oracle_compat.owa_util__mime_header")
+                .notes("Set Content-Type header - full support planned for Phase 5")
+                .sqlDefinition(OwaUtilImpl.getMimeHeader())
+                .build());
+
+        // OWA_UTIL.REDIRECT_URL - Redirect (stub for now)
+        allFunctions.add(OracleBuiltinFunction.builder()
+                .packageName("OWA_UTIL")
+                .functionName("REDIRECT_URL")
+                .signature("REDIRECT_URL(url TEXT, close_header BOOLEAN)")
+                .supportLevel(SupportLevel.PARTIAL)
+                .postgresFunction("oracle_compat.owa_util__redirect_url")
+                .notes("Redirect to another URL - full support planned for Phase 5")
+                .sqlDefinition(OwaUtilImpl.getRedirectUrl())
+                .build());
+
+        // OWA_UTIL.PRINT_CGI_ENV - Debug function
+        allFunctions.add(OracleBuiltinFunction.builder()
+                .packageName("OWA_UTIL")
+                .functionName("PRINT_CGI_ENV")
+                .signature("PRINT_CGI_ENV()")
+                .supportLevel(SupportLevel.FULL)
+                .postgresFunction("oracle_compat.owa_util__print_cgi_env")
+                .notes("Debug function - outputs all CGI variables as HTML table")
+                .sqlDefinition(OwaUtilImpl.getPrintCgiEnv())
                 .build());
     }
 
