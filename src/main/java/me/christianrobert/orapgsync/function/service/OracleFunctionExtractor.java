@@ -456,8 +456,20 @@ public class OracleFunctionExtractor {
                 try {
                     // Parse stub (tiny, <1ms per stub)
                     // Note: Stub already starts with FUNCTION/PROCEDURE keyword (no CREATE OR REPLACE needed)
-                    me.christianrobert.orapgsync.transformer.parser.ParseResult stubParseResult =
-                        parser.parseFunctionBody(stubSource);
+                    // Try as function first, then as procedure if that fails
+                    me.christianrobert.orapgsync.transformer.parser.ParseResult stubParseResult;
+
+                    // Check if stub starts with FUNCTION or PROCEDURE keyword
+                    String trimmedStub = stubSource.trim().toUpperCase();
+                    if (trimmedStub.startsWith("FUNCTION")) {
+                        stubParseResult = parser.parseFunctionBody(stubSource);
+                    } else if (trimmedStub.startsWith("PROCEDURE")) {
+                        stubParseResult = parser.parseProcedureBody(stubSource);
+                    } else {
+                        log.warn("Unknown stub type for {}.{}.{}: does not start with FUNCTION or PROCEDURE",
+                                schema, packageName, functionName);
+                        continue;
+                    }
 
                     if (stubParseResult.hasErrors()) {
                         log.warn("Failed to parse stub for {}.{}.{}: {}",
@@ -497,7 +509,13 @@ public class OracleFunctionExtractor {
      * Extracts function/procedure metadata from a parsed stub AST.
      * Used for package-private functions after scanning.
      *
-     * Handles both CREATE FUNCTION and CREATE PROCEDURE stubs.
+     * Handles both:
+     * - function_body / procedure_body (from parseFunctionBody/parseProcedureBody)
+     * - create_function_body / create_procedure_body (with CREATE OR REPLACE prefix)
+     *
+     * The key difference is the function name accessor:
+     * - function_body uses identifier() for name
+     * - create_function_body uses function_name() for name
      *
      * @param parseTree Parsed stub AST (can be function or procedure)
      * @param schema Schema name
@@ -512,7 +530,48 @@ public class OracleFunctionExtractor {
             return null;
         }
 
-        // Try as function first
+        // Try as function_body (no CREATE prefix - from parseFunctionBody)
+        // Grammar: function_body: FUNCTION identifier (...) RETURN type_spec ...
+        if (parseTree instanceof me.christianrobert.orapgsync.antlr.PlSqlParser.Function_bodyContext) {
+            me.christianrobert.orapgsync.antlr.PlSqlParser.Function_bodyContext funcCtx =
+                (me.christianrobert.orapgsync.antlr.PlSqlParser.Function_bodyContext) parseTree;
+
+            // Extract function name from identifier rule (not function_name!)
+            String functionName = funcCtx.identifier().getText().toLowerCase();
+
+            // Create metadata
+            FunctionMetadata metadata = new FunctionMetadata(schema.toLowerCase(), functionName, "FUNCTION");
+            metadata.setPackageName(packageName.toLowerCase());
+
+            // Extract return type
+            if (funcCtx.type_spec() != null) {
+                String returnType = extractTypeFromTypeSpec(funcCtx.type_spec());
+                metadata.setReturnDataType(returnType);
+                log.trace("Extracted return type '{}' for private function: {}.{}.{}",
+                         returnType, schema, packageName, functionName);
+            }
+
+            return metadata;
+        }
+
+        // Try as procedure_body (no CREATE prefix - from parseProcedureBody)
+        // Grammar: procedure_body: PROCEDURE identifier (...) ...
+        if (parseTree instanceof me.christianrobert.orapgsync.antlr.PlSqlParser.Procedure_bodyContext) {
+            me.christianrobert.orapgsync.antlr.PlSqlParser.Procedure_bodyContext procCtx =
+                (me.christianrobert.orapgsync.antlr.PlSqlParser.Procedure_bodyContext) parseTree;
+
+            // Extract procedure name from identifier rule (not procedure_name!)
+            String procedureName = procCtx.identifier().getText().toLowerCase();
+
+            // Create metadata
+            FunctionMetadata metadata = new FunctionMetadata(schema.toLowerCase(), procedureName, "PROCEDURE");
+            metadata.setPackageName(packageName.toLowerCase());
+
+            return metadata;
+        }
+
+        // Try as create_function_body (with CREATE prefix)
+        // Grammar: create_function_body: CREATE (OR REPLACE)? ... FUNCTION function_name ...
         if (parseTree instanceof me.christianrobert.orapgsync.antlr.PlSqlParser.Create_function_bodyContext) {
             me.christianrobert.orapgsync.antlr.PlSqlParser.Create_function_bodyContext funcCtx =
                 (me.christianrobert.orapgsync.antlr.PlSqlParser.Create_function_bodyContext) parseTree;
@@ -535,7 +594,8 @@ public class OracleFunctionExtractor {
             return metadata;
         }
 
-        // Try as procedure
+        // Try as create_procedure_body (with CREATE prefix)
+        // Grammar: create_procedure_body: CREATE (OR REPLACE)? ... PROCEDURE procedure_name ...
         if (parseTree instanceof me.christianrobert.orapgsync.antlr.PlSqlParser.Create_procedure_bodyContext) {
             me.christianrobert.orapgsync.antlr.PlSqlParser.Create_procedure_bodyContext procCtx =
                 (me.christianrobert.orapgsync.antlr.PlSqlParser.Create_procedure_bodyContext) parseTree;

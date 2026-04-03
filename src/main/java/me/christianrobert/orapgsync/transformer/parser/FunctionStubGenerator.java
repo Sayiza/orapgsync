@@ -54,7 +54,7 @@ public class FunctionStubGenerator {
         log.trace("Generating stub for {}", segment.getName());
 
         // Extract signature part (from start to just before body)
-        // The body starts after IS/AS keyword
+        // The body starts after IS/AS keyword, so signature includes IS/AS
         int signatureLength = segment.getBodyStartPos() - segment.getStartPos();
         String signature = fullFunctionSource.substring(0, signatureLength);
 
@@ -64,9 +64,9 @@ public class FunctionStubGenerator {
         // Generate minimal body based on function vs procedure
         String stubBody;
         if (segment.isFunction()) {
-            stubBody = " IS\nBEGIN\n  RETURN NULL;\nEND;";
+            stubBody = " \nBEGIN\n  RETURN NULL;\nEND;";
         } else {
-            stubBody = " IS\nBEGIN\n  RETURN;\nEND;";
+            stubBody = " \nBEGIN\n  RETURN;\nEND;";
         }
 
         String stub = signature + stubBody;

@@ -37,4 +37,4 @@
 [ ] sort all results
 [x] make verify result get code only on request
 [ ] TO_NUMBER(TO_CHAR( not working
-[ ] full run with tr*nk*dev and NO errors, final todo ;-)
+[ ] htp.p needs versions with casts

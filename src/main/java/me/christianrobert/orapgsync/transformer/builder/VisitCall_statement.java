@@ -184,6 +184,7 @@ public class VisitCall_statement {
      * <ul>
      *   <li>1 part: function → schema.function</li>
      *   <li>2 parts: package.function → schema.package__function</li>
+     *   <li>2 parts (oracle compat): HTP.P → oracle_compat.htp__p</li>
      *   <li>3 parts: schema.package.function → schema.package__function</li>
      * </ul>
      *
@@ -203,9 +204,16 @@ public class VisitCall_statement {
 
         } else if (parts.size() == 2) {
             // Two parts: package.function → schema.package__function
-            String packageName = parts.get(0).toLowerCase();
+            String packageName = parts.get(0);
             String functionName = parts.get(1).toLowerCase();
-            return currentSchema + "." + packageName + "__" + functionName;
+
+            // Check if this is an Oracle compatibility package (HTP, HTF, OWA, DBMS_OUTPUT, etc.)
+            // These should use oracle_compat schema, not current schema
+            if (isOracleCompatibilityPackage(packageName)) {
+                return "oracle_compat." + packageName.toLowerCase() + "__" + functionName;
+            }
+
+            return currentSchema + "." + packageName.toLowerCase() + "__" + functionName;
 
         } else if (parts.size() == 3) {
             // Three parts: schema.package.function → schema.package__function
@@ -218,6 +226,39 @@ public class VisitCall_statement {
             throw new TransformationException(
                 "Routine name with more than 3 parts not supported: " + parts);
         }
+    }
+
+    /**
+     * Checks if a package name is an Oracle compatibility package.
+     * These packages are provided in the oracle_compat schema and should not be
+     * prefixed with the current schema during transformation.
+     *
+     * <p>Supported packages:
+     * <ul>
+     *   <li>HTP - Hypertext Procedures (web output buffer)</li>
+     *   <li>HTF - Hypertext Functions (return HTML strings)</li>
+     *   <li>OWA - Oracle Web Agent (request initialization)</li>
+     *   <li>OWA_UTIL - OWA Utilities (CGI environment, redirects)</li>
+     *   <li>OWA_COOKIE - Cookie handling</li>
+     *   <li>DBMS_OUTPUT - Debug output</li>
+     *   <li>DBMS_UTILITY - Utility functions</li>
+     *   <li>DBMS_LOB - Large object handling</li>
+     *   <li>UTL_FILE - File I/O</li>
+     * </ul>
+     *
+     * @param packageName Package name to check (case-insensitive)
+     * @return true if it's an Oracle compatibility package
+     */
+    private static boolean isOracleCompatibilityPackage(String packageName) {
+        if (packageName == null) {
+            return false;
+        }
+        String upper = packageName.toUpperCase();
+        return switch (upper) {
+            case "HTP", "HTF", "OWA", "OWA_UTIL", "OWA_COOKIE",
+                 "DBMS_OUTPUT", "DBMS_UTILITY", "DBMS_LOB", "UTL_FILE" -> true;
+            default -> false;
+        };
     }
 
     /**

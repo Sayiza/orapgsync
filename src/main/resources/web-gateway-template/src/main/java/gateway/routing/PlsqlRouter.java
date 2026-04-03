@@ -119,19 +119,32 @@ public class PlsqlRouter {
 
     /**
      * Parse the URL path to extract schema and procedure name.
+     * <p>
+     * Handles Oracle-style naming and converts to PostgreSQL flattened format:
+     * <ul>
+     *   <li>schema.package.procedure → schema.package__procedure</li>
+     *   <li>schema.procedure → schema.procedure</li>
+     *   <li>procedure → defaultSchema.procedure</li>
+     * </ul>
      */
     private ProcedureCall parsePath(String path) {
         // Remove leading/trailing slashes
         path = path.replaceAll("^/+|/+$", "");
 
-        // Check for schema.procedure format
-        if (path.contains(".")) {
-            String[] parts = path.split("\\.", 2);
-            return new ProcedureCall(parts[0], parts[1]);
-        }
+        String[] parts = path.split("\\.");
 
-        // No schema specified, use default
-        return new ProcedureCall(config.defaultSchema(), path);
+        if (parts.length == 3) {
+            // schema.package.procedure → schema.package__procedure
+            String schema = parts[0];
+            String procedure = parts[1] + "__" + parts[2];
+            return new ProcedureCall(schema, procedure);
+        } else if (parts.length == 2) {
+            // schema.procedure (no package)
+            return new ProcedureCall(parts[0], parts[1]);
+        } else {
+            // Just procedure name, use default schema
+            return new ProcedureCall(config.defaultSchema(), path);
+        }
     }
 
     /**
