@@ -580,6 +580,39 @@ public class TransformationContext {
         return indices.isPackageFunction(qualifiedName);
     }
 
+    /**
+     * Checks if a function exists in a specific package (for package-local call resolution).
+     *
+     * <p>This method is used to detect unqualified calls to private package functions.
+     * When inside a package member, an unqualified call like {@code mini2} should be
+     * resolved to {@code schema.package__mini2} if {@code mini2} exists in the current package.</p>
+     *
+     * <p>Example:
+     * <pre>
+     * -- Oracle package body
+     * PROCEDURE mini2 IS BEGIN ... END;  -- private procedure
+     * FUNCTION mini1 RETURN NUMBER IS
+     * BEGIN
+     *   mini2;  -- unqualified call to private procedure
+     * END;
+     *
+     * -- When transforming mini1, isPackageFunction("hr", "minitest", "mini2") returns true
+     * -- So mini2 transforms to: hr.minitest__mini2()
+     * </pre>
+     *
+     * @param schema Schema name (e.g., "hr")
+     * @param packageName Package name (e.g., "minitest")
+     * @param functionName Function/procedure name (e.g., "mini2")
+     * @return true if this function exists in the specified package
+     */
+    public boolean isPackageFunction(String schema, String packageName, String functionName) {
+        if (schema == null || packageName == null || functionName == null) {
+            return false;
+        }
+        String qualifiedName = schema.toLowerCase() + "." + packageName.toLowerCase() + "." + functionName.toLowerCase();
+        return indices.isPackageFunction(qualifiedName);
+    }
+
     // ========== Object Type Field Access Support ==========
 
     /**

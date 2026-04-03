@@ -625,7 +625,23 @@ public class VisitGeneralElement {
         // Built-in PostgreSQL functions (COALESCE, UPPER, COUNT, etc.) are in pg_catalog
         // which is always in search_path, so they must remain unqualified
         if (!isKnownBuiltinFunction(upperFunctionName)) {
-          // User-defined function → qualify with current schema
+          // PACKAGE-LOCAL FUNCTION RESOLUTION:
+          // When inside a package member, check if this unqualified call refers to
+          // a function in the same package (public or private).
+          // Example: mini2 inside minitest package → user_robert.minitest__mini2
+          if (context.isInPackageMember()) {
+            String currentPackage = context.getCurrentPackageName();
+            String schema = context.getCurrentSchema();
+
+            // Check if this function exists in the current package
+            if (context.isPackageFunction(schema, currentPackage, functionName)) {
+              // Package-local call: qualify with schema.package__function
+              functionName = schema.toLowerCase() + "." + currentPackage.toLowerCase() + "__" + functionName.toLowerCase();
+              return functionName + arguments;
+            }
+          }
+
+          // User-defined function (not in current package) → qualify with current schema only
           functionName = context.getCurrentSchema().toLowerCase() + "." + functionName.toLowerCase();
         }
         // else: Built-in function → leave unqualified (PostgreSQL will find it in pg_catalog)

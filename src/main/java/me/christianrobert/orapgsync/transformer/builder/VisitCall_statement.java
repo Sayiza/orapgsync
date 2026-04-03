@@ -200,6 +200,22 @@ public class VisitCall_statement {
         if (parts.size() == 1) {
             // Single part: function_name → schema.function_name
             String functionName = parts.get(0).toLowerCase();
+
+            // PACKAGE-LOCAL FUNCTION RESOLUTION:
+            // When inside a package member, check if this unqualified call refers to
+            // a function in the same package (public or private).
+            // Example: mini2 inside minitest package → user_robert.minitest__mini2
+            if (context != null && context.isInPackageMember()) {
+                String currentPackageName = context.getCurrentPackageName();
+
+                // Check if this function exists in the current package
+                if (context.isPackageFunction(currentSchema, currentPackageName, functionName)) {
+                    // Package-local call: qualify with schema.package__function
+                    return currentSchema + "." + currentPackageName.toLowerCase() + "__" + functionName;
+                }
+            }
+
+            // Not a package-local call: qualify with schema only
             return currentSchema + "." + functionName;
 
         } else if (parts.size() == 2) {
