@@ -263,7 +263,11 @@ function collectConfigurationData() {
         'web-gateway-output-path': 'web-gateway.output-path',
         'web-gateway-dad-name': 'web-gateway.dad-name',
         'web-gateway-url-prefix': 'web-gateway.url-prefix',
-        'web-gateway-server-port': 'web-gateway.server-port'
+        'web-gateway-server-port': 'web-gateway.server-port',
+        // NLS settings for mod_plsql compatibility
+        'nls-date-format': 'nls.date-format',
+        'nls-timestamp-format': 'nls.timestamp-format',
+        'nls-numeric-characters': 'nls.numeric-characters'
     };
 
     Object.entries(fieldMappings).forEach(([fieldId, configKey]) => {
@@ -312,7 +316,11 @@ function populateConfigurationForm(config) {
         'web-gateway-output-path': 'web-gateway.output-path',
         'web-gateway-dad-name': 'web-gateway.dad-name',
         'web-gateway-url-prefix': 'web-gateway.url-prefix',
-        'web-gateway-server-port': 'web-gateway.server-port'
+        'web-gateway-server-port': 'web-gateway.server-port',
+        // NLS settings for mod_plsql compatibility
+        'nls-date-format': 'nls.date-format',
+        'nls-timestamp-format': 'nls.timestamp-format',
+        'nls-numeric-characters': 'nls.numeric-characters'
     };
 
     Object.entries(fieldMappings).forEach(([fieldId, configKey]) => {

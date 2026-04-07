@@ -43,6 +43,14 @@ public class ConfigService {
         configuration.put("web-gateway.url-prefix", "/pls");
         configuration.put("web-gateway.server-port", "8090");
 
+        // NLS Settings (Oracle defaults for mod_plsql compatibility)
+        // These control how DATE/TIMESTAMP/NUMBER are implicitly converted to text
+        // User should configure these to match their Oracle mod_plsql DAD settings
+        // Note: Using simplified timestamp format without fractional seconds for cleaner web output
+        configuration.put("nls.date-format", "DD-MON-RR");
+        configuration.put("nls.timestamp-format", "DD-MON-RR HH.MI.SS AM");
+        configuration.put("nls.numeric-characters", ".,");
+
         log.info("Configuration service initialized with default values");
     }
 

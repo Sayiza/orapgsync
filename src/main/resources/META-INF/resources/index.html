@@ -884,6 +884,32 @@
           <span class="config-help">Port for the generated web gateway application</span>
         </div>
 
+        <!-- NLS Settings for mod_plsql compatibility -->
+        <div class="config-group" style="grid-column: 1 / -1; border-top: 1px solid #ddd; padding-top: 1rem; margin-top: 0.5rem;">
+          <h3 style="margin: 0 0 0.5rem 0; font-size: 1rem; color: #555;">Oracle NLS Settings (mod_plsql)</h3>
+          <span class="config-help" style="display: block; margin-bottom: 0.5rem;">
+            Configure these to match your Oracle mod_plsql DAD settings. Used for implicit DATE/TIMESTAMP to text conversion in HTP functions.
+          </span>
+        </div>
+
+        <div class="config-group">
+          <label class="config-label" for="nls-date-format">NLS_DATE_FORMAT</label>
+          <input type="text" id="nls-date-format" class="config-input" value="DD-MON-RR">
+          <span class="config-help">Oracle date format (e.g., DD-MON-RR, YYYY-MM-DD)</span>
+        </div>
+
+        <div class="config-group">
+          <label class="config-label" for="nls-timestamp-format">NLS_TIMESTAMP_FORMAT</label>
+          <input type="text" id="nls-timestamp-format" class="config-input" value="DD-MON-RR HH.MI.SS AM">
+          <span class="config-help">Oracle timestamp format (e.g., DD-MON-RR HH.MI.SS AM)</span>
+        </div>
+
+        <div class="config-group">
+          <label class="config-label" for="nls-numeric-characters">NLS_NUMERIC_CHARACTERS</label>
+          <input type="text" id="nls-numeric-characters" class="config-input" value=".,">
+          <span class="config-help">Decimal and grouping separators (e.g., ., for period decimal)</span>
+        </div>
+
       </div>
 
       <div class="config-actions">

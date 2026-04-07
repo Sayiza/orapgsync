@@ -2,6 +2,7 @@ package me.christianrobert.orapgsync.oraclecompat.job;
 
 import jakarta.enterprise.context.Dependent;
 import jakarta.inject.Inject;
+import me.christianrobert.orapgsync.config.service.ConfigService;
 import me.christianrobert.orapgsync.core.job.AbstractDatabaseWriteJob;
 import me.christianrobert.orapgsync.core.job.model.JobProgress;
 import me.christianrobert.orapgsync.database.service.PostgresConnectionService;
@@ -27,6 +28,9 @@ import java.util.function.Consumer;
  * - FULL: Complete PostgreSQL equivalent, behavior matches Oracle closely
  * - PARTIAL: Covers common use cases but with limitations
  * - STUB: Minimal or no-op implementation
+ * <p>
+ * NLS settings (NLS_DATE_FORMAT, NLS_TIMESTAMP_FORMAT) are read from ConfigService and
+ * used to configure date/timestamp formatting in HTP functions for mod_plsql compatibility.
  */
 @Dependent
 public class PostgresOracleCompatInstallationJob extends AbstractDatabaseWriteJob<OracleCompatInstallationResult> {
@@ -38,7 +42,22 @@ public class PostgresOracleCompatInstallationJob extends AbstractDatabaseWriteJo
     @Inject
     private PostgresConnectionService postgresConnectionService;
 
-    private final OracleBuiltinCatalog catalog = new OracleBuiltinCatalog();
+    @Inject
+    private ConfigService configService;
+
+    /**
+     * Creates the OracleBuiltinCatalog with NLS settings from ConfigService.
+     * Called lazily to ensure ConfigService is injected.
+     */
+    private OracleBuiltinCatalog createCatalog() {
+        String nlsDateFormat = configService.getConfigValueAsString("nls.date-format");
+        String nlsTimestampFormat = configService.getConfigValueAsString("nls.timestamp-format");
+
+        log.info("Creating Oracle compatibility catalog with NLS_DATE_FORMAT='{}', NLS_TIMESTAMP_FORMAT='{}'",
+                nlsDateFormat, nlsTimestampFormat);
+
+        return new OracleBuiltinCatalog(nlsDateFormat, nlsTimestampFormat);
+    }
 
     @Override
     public String getTargetDatabase() {
@@ -67,6 +86,8 @@ public class PostgresOracleCompatInstallationJob extends AbstractDatabaseWriteJo
         OracleCompatInstallationResult result = new OracleCompatInstallationResult();
         long startTime = System.currentTimeMillis();
 
+        // Create catalog with NLS settings from config
+        OracleBuiltinCatalog catalog = createCatalog();
         List<OracleBuiltinFunction> functions = catalog.getAllFunctions();
         result.setTotalFunctions(functions.size());
 

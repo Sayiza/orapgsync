@@ -5,6 +5,7 @@ import me.christianrobert.orapgsync.oraclecompat.implementations.DbmsOutputImpl;
 import me.christianrobert.orapgsync.oraclecompat.implementations.DbmsUtilityImpl;
 import me.christianrobert.orapgsync.oraclecompat.implementations.ExceptionHandlingImpl;
 import me.christianrobert.orapgsync.oraclecompat.implementations.HtpImpl;
+import me.christianrobert.orapgsync.oraclecompat.implementations.NlsFormatConverter;
 import me.christianrobert.orapgsync.oraclecompat.implementations.OwaImpl;
 import me.christianrobert.orapgsync.oraclecompat.implementations.OwaUtilImpl;
 import me.christianrobert.orapgsync.oraclecompat.implementations.UtlFileImpl;
@@ -38,9 +39,44 @@ import java.util.stream.Collectors;
  */
 public class OracleBuiltinCatalog {
 
+    // Oracle default NLS formats (simplified without fractional seconds for cleaner web output)
+    private static final String DEFAULT_NLS_DATE_FORMAT = "DD-MON-RR";
+    private static final String DEFAULT_NLS_TIMESTAMP_FORMAT = "DD-MON-RR HH.MI.SS AM";
+
     private final List<OracleBuiltinFunction> allFunctions;
 
+    // NLS settings (converted to PostgreSQL format)
+    private final String pgDateFormat;
+    private final String pgTimestampFormat;
+
+    /**
+     * Creates a catalog with Oracle default NLS settings.
+     * <p>
+     * Default formats:
+     * <ul>
+     *   <li>NLS_DATE_FORMAT: DD-MON-RR</li>
+     *   <li>NLS_TIMESTAMP_FORMAT: DD-MON-RR HH.MI.SSXFF AM</li>
+     * </ul>
+     */
     public OracleBuiltinCatalog() {
+        this(DEFAULT_NLS_DATE_FORMAT, DEFAULT_NLS_TIMESTAMP_FORMAT);
+    }
+
+    /**
+     * Creates a catalog with custom NLS settings.
+     * <p>
+     * The Oracle NLS format strings are automatically converted to PostgreSQL TO_CHAR format.
+     *
+     * @param nlsDateFormat Oracle NLS_DATE_FORMAT (e.g., "DD-MON-RR", "YYYY-MM-DD")
+     * @param nlsTimestampFormat Oracle NLS_TIMESTAMP_FORMAT (e.g., "DD-MON-RR HH.MI.SSXFF AM")
+     */
+    public OracleBuiltinCatalog(String nlsDateFormat, String nlsTimestampFormat) {
+        // Convert Oracle formats to PostgreSQL formats
+        this.pgDateFormat = NlsFormatConverter.convertDateFormat(
+                nlsDateFormat != null ? nlsDateFormat : DEFAULT_NLS_DATE_FORMAT);
+        this.pgTimestampFormat = NlsFormatConverter.convertTimestampFormat(
+                nlsTimestampFormat != null ? nlsTimestampFormat : DEFAULT_NLS_TIMESTAMP_FORMAT);
+
         allFunctions = new ArrayList<>();
 
         // Register all packages
@@ -318,8 +354,8 @@ public class OracleBuiltinCatalog {
                 .signature("P(date)")
                 .supportLevel(SupportLevel.FULL)
                 .postgresFunction("oracle_compat.htp__p")
-                .notes("DATE overload - converts to Oracle-style DD-MON-YY format")
-                .sqlDefinition(HtpImpl.getPDate())
+                .notes("DATE overload - converts using configured NLS_DATE_FORMAT")
+                .sqlDefinition(HtpImpl.getPDate(pgDateFormat))
                 .build());
 
         allFunctions.add(OracleBuiltinFunction.builder()
@@ -328,8 +364,8 @@ public class OracleBuiltinCatalog {
                 .signature("P(timestamp)")
                 .supportLevel(SupportLevel.FULL)
                 .postgresFunction("oracle_compat.htp__p")
-                .notes("TIMESTAMP overload - converts to Oracle-style format")
-                .sqlDefinition(HtpImpl.getPTimestamp())
+                .notes("TIMESTAMP overload - converts using configured NLS_TIMESTAMP_FORMAT")
+                .sqlDefinition(HtpImpl.getPTimestamp(pgTimestampFormat))
                 .build());
 
         // HTP.PRN - Output without newline
@@ -360,8 +396,8 @@ public class OracleBuiltinCatalog {
                 .signature("PRN(date)")
                 .supportLevel(SupportLevel.FULL)
                 .postgresFunction("oracle_compat.htp__prn")
-                .notes("DATE overload - converts to Oracle-style DD-MON-YY format")
-                .sqlDefinition(HtpImpl.getPrnDate())
+                .notes("DATE overload - converts using configured NLS_DATE_FORMAT")
+                .sqlDefinition(HtpImpl.getPrnDate(pgDateFormat))
                 .build());
 
         allFunctions.add(OracleBuiltinFunction.builder()
@@ -370,8 +406,8 @@ public class OracleBuiltinCatalog {
                 .signature("PRN(timestamp)")
                 .supportLevel(SupportLevel.FULL)
                 .postgresFunction("oracle_compat.htp__prn")
-                .notes("TIMESTAMP overload - converts to Oracle-style format")
-                .sqlDefinition(HtpImpl.getPrnTimestamp())
+                .notes("TIMESTAMP overload - converts using configured NLS_TIMESTAMP_FORMAT")
+                .sqlDefinition(HtpImpl.getPrnTimestamp(pgTimestampFormat))
                 .build());
 
         // HTP.PRINT - Alias for HTP.P

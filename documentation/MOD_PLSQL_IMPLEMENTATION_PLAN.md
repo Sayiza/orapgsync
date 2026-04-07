@@ -570,7 +570,15 @@ public class PlsqlExecutor {
 - `OwaUtilImpl.java` - OWA_UTIL function SQL definitions
 - `OracleBuiltinCatalog.java` - Function registration
 
-**Test Coverage:** 27 integration tests passing (`PostgresHtpBufferValidationTest`)
+**Test Coverage:** 46 tests passing
+- `PostgresHtpBufferValidationTest` - 27 integration tests for HTP/OWA buffer functions
+- `NlsFormatConverterTest` - 19 unit tests for Oracle NLS format conversion
+
+**NLS Configuration:** ✅ **COMPLETE** (2026-04-07)
+- [x] Configurable NLS_DATE_FORMAT and NLS_TIMESTAMP_FORMAT via frontend UI
+- [x] Oracle format to PostgreSQL format conversion (NlsFormatConverter)
+- [x] Sensible defaults (DD-MON-RR, DD-MON-RR HH.MI.SS AM)
+- [x] Date/Timestamp overloads use configured formats for Oracle-compatible output
 
 **Quarkus Gateway Generation:** ✅ **COMPLETE** (2026-03-29)
 - [x] Project generation from templates

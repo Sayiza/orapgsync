@@ -128,43 +128,59 @@ public class HtpImpl {
     }
 
     /**
-     * HTP.P overload for DATE - converts date to text using Oracle-style formatting (DD-MON-YY).
+     * HTP.P overload for DATE - converts date to text using configurable Oracle-style formatting.
+     *
+     * @param dateFormat PostgreSQL TO_CHAR format string (converted from Oracle NLS_DATE_FORMAT)
      */
-    public static String getPDate() {
+    public static String getPDate(String dateFormat) {
+        // Determine if we need UPPER() based on format containing month/day names
+        boolean needsUpper = NlsFormatConverter.needsUpperCase(dateFormat);
+        String toCharExpr = needsUpper
+                ? "UPPER(TO_CHAR(p_date, '" + dateFormat + "'))"
+                : "TO_CHAR(p_date, '" + dateFormat + "')";
+
         return """
             CREATE OR REPLACE FUNCTION oracle_compat.htp__p(p_date DATE)
             RETURNS VOID
             LANGUAGE plpgsql
             AS $$
             BEGIN
-                -- Convert date to Oracle-style format (DD-MON-YY with uppercase month)
-                PERFORM oracle_compat.htp__p(UPPER(TO_CHAR(p_date, 'DD-MON-YY')));
+                -- Convert date using configured NLS_DATE_FORMAT
+                PERFORM oracle_compat.htp__p(%s);
             END;
             $$;
 
             COMMENT ON FUNCTION oracle_compat.htp__p(DATE) IS
-            'Oracle HTP.P equivalent for DATE - converts to DD-MON-YY format and appends with newline.';
-            """;
+            'Oracle HTP.P equivalent for DATE - converts using configured NLS_DATE_FORMAT and appends with newline.';
+            """.formatted(toCharExpr);
     }
 
     /**
-     * HTP.P overload for TIMESTAMP - converts timestamp to text using Oracle-style formatting.
+     * HTP.P overload for TIMESTAMP - converts timestamp to text using configurable Oracle-style formatting.
+     *
+     * @param timestampFormat PostgreSQL TO_CHAR format string (converted from Oracle NLS_TIMESTAMP_FORMAT)
      */
-    public static String getPTimestamp() {
+    public static String getPTimestamp(String timestampFormat) {
+        // Determine if we need UPPER() based on format containing month/day names
+        boolean needsUpper = NlsFormatConverter.needsUpperCase(timestampFormat);
+        String toCharExpr = needsUpper
+                ? "UPPER(TO_CHAR(p_ts, '" + timestampFormat + "'))"
+                : "TO_CHAR(p_ts, '" + timestampFormat + "')";
+
         return """
             CREATE OR REPLACE FUNCTION oracle_compat.htp__p(p_ts TIMESTAMP)
             RETURNS VOID
             LANGUAGE plpgsql
             AS $$
             BEGIN
-                -- Convert timestamp to Oracle-style format (DD-MON-YY HH.MI.SSXFF AM)
-                PERFORM oracle_compat.htp__p(UPPER(TO_CHAR(p_ts, 'DD-MON-YY HH.MI.SS AM')));
+                -- Convert timestamp using configured NLS_TIMESTAMP_FORMAT
+                PERFORM oracle_compat.htp__p(%s);
             END;
             $$;
 
             COMMENT ON FUNCTION oracle_compat.htp__p(TIMESTAMP) IS
-            'Oracle HTP.P equivalent for TIMESTAMP - converts to Oracle-style format and appends with newline.';
-            """;
+            'Oracle HTP.P equivalent for TIMESTAMP - converts using configured NLS_TIMESTAMP_FORMAT and appends with newline.';
+            """.formatted(toCharExpr);
     }
 
     /**
@@ -214,41 +230,55 @@ public class HtpImpl {
     }
 
     /**
-     * HTP.PRN overload for DATE - converts date to text using Oracle-style formatting (DD-MON-YY).
+     * HTP.PRN overload for DATE - converts date to text using configurable Oracle-style formatting.
+     *
+     * @param dateFormat PostgreSQL TO_CHAR format string (converted from Oracle NLS_DATE_FORMAT)
      */
-    public static String getPrnDate() {
+    public static String getPrnDate(String dateFormat) {
+        boolean needsUpper = NlsFormatConverter.needsUpperCase(dateFormat);
+        String toCharExpr = needsUpper
+                ? "UPPER(TO_CHAR(p_date, '" + dateFormat + "'))"
+                : "TO_CHAR(p_date, '" + dateFormat + "')";
+
         return """
             CREATE OR REPLACE FUNCTION oracle_compat.htp__prn(p_date DATE)
             RETURNS VOID
             LANGUAGE plpgsql
             AS $$
             BEGIN
-                PERFORM oracle_compat.htp__prn(UPPER(TO_CHAR(p_date, 'DD-MON-YY')));
+                PERFORM oracle_compat.htp__prn(%s);
             END;
             $$;
 
             COMMENT ON FUNCTION oracle_compat.htp__prn(DATE) IS
-            'Oracle HTP.PRN equivalent for DATE - converts to DD-MON-YY format and appends without newline.';
-            """;
+            'Oracle HTP.PRN equivalent for DATE - converts using configured NLS_DATE_FORMAT and appends without newline.';
+            """.formatted(toCharExpr);
     }
 
     /**
-     * HTP.PRN overload for TIMESTAMP - converts timestamp to text using Oracle-style formatting.
+     * HTP.PRN overload for TIMESTAMP - converts timestamp to text using configurable Oracle-style formatting.
+     *
+     * @param timestampFormat PostgreSQL TO_CHAR format string (converted from Oracle NLS_TIMESTAMP_FORMAT)
      */
-    public static String getPrnTimestamp() {
+    public static String getPrnTimestamp(String timestampFormat) {
+        boolean needsUpper = NlsFormatConverter.needsUpperCase(timestampFormat);
+        String toCharExpr = needsUpper
+                ? "UPPER(TO_CHAR(p_ts, '" + timestampFormat + "'))"
+                : "TO_CHAR(p_ts, '" + timestampFormat + "')";
+
         return """
             CREATE OR REPLACE FUNCTION oracle_compat.htp__prn(p_ts TIMESTAMP)
             RETURNS VOID
             LANGUAGE plpgsql
             AS $$
             BEGIN
-                PERFORM oracle_compat.htp__prn(UPPER(TO_CHAR(p_ts, 'DD-MON-YY HH.MI.SS AM')));
+                PERFORM oracle_compat.htp__prn(%s);
             END;
             $$;
 
             COMMENT ON FUNCTION oracle_compat.htp__prn(TIMESTAMP) IS
-            'Oracle HTP.PRN equivalent for TIMESTAMP - converts to Oracle-style format and appends without newline.';
-            """;
+            'Oracle HTP.PRN equivalent for TIMESTAMP - converts using configured NLS_TIMESTAMP_FORMAT and appends without newline.';
+            """.formatted(toCharExpr);
     }
 
     /**
