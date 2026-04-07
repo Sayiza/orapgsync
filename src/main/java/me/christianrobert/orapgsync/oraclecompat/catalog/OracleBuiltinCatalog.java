@@ -301,6 +301,37 @@ public class OracleBuiltinCatalog {
                 .sqlDefinition(HtpImpl.getP())
                 .build());
 
+        // HTP.P overloads for implicit type conversion (Oracle compatibility)
+        allFunctions.add(OracleBuiltinFunction.builder()
+                .packageName("HTP")
+                .functionName("P")
+                .signature("P(numeric)")
+                .supportLevel(SupportLevel.FULL)
+                .postgresFunction("oracle_compat.htp__p")
+                .notes("NUMERIC overload - converts to text")
+                .sqlDefinition(HtpImpl.getPNumeric())
+                .build());
+
+        allFunctions.add(OracleBuiltinFunction.builder()
+                .packageName("HTP")
+                .functionName("P")
+                .signature("P(date)")
+                .supportLevel(SupportLevel.FULL)
+                .postgresFunction("oracle_compat.htp__p")
+                .notes("DATE overload - converts to Oracle-style DD-MON-YY format")
+                .sqlDefinition(HtpImpl.getPDate())
+                .build());
+
+        allFunctions.add(OracleBuiltinFunction.builder()
+                .packageName("HTP")
+                .functionName("P")
+                .signature("P(timestamp)")
+                .supportLevel(SupportLevel.FULL)
+                .postgresFunction("oracle_compat.htp__p")
+                .notes("TIMESTAMP overload - converts to Oracle-style format")
+                .sqlDefinition(HtpImpl.getPTimestamp())
+                .build());
+
         // HTP.PRN - Output without newline
         allFunctions.add(OracleBuiltinFunction.builder()
                 .packageName("HTP")
@@ -312,6 +343,37 @@ public class OracleBuiltinCatalog {
                 .sqlDefinition(HtpImpl.getPrn())
                 .build());
 
+        // HTP.PRN overloads for implicit type conversion (Oracle compatibility)
+        allFunctions.add(OracleBuiltinFunction.builder()
+                .packageName("HTP")
+                .functionName("PRN")
+                .signature("PRN(numeric)")
+                .supportLevel(SupportLevel.FULL)
+                .postgresFunction("oracle_compat.htp__prn")
+                .notes("NUMERIC overload - converts to text")
+                .sqlDefinition(HtpImpl.getPrnNumeric())
+                .build());
+
+        allFunctions.add(OracleBuiltinFunction.builder()
+                .packageName("HTP")
+                .functionName("PRN")
+                .signature("PRN(date)")
+                .supportLevel(SupportLevel.FULL)
+                .postgresFunction("oracle_compat.htp__prn")
+                .notes("DATE overload - converts to Oracle-style DD-MON-YY format")
+                .sqlDefinition(HtpImpl.getPrnDate())
+                .build());
+
+        allFunctions.add(OracleBuiltinFunction.builder()
+                .packageName("HTP")
+                .functionName("PRN")
+                .signature("PRN(timestamp)")
+                .supportLevel(SupportLevel.FULL)
+                .postgresFunction("oracle_compat.htp__prn")
+                .notes("TIMESTAMP overload - converts to Oracle-style format")
+                .sqlDefinition(HtpImpl.getPrnTimestamp())
+                .build());
+
         // HTP.PRINT - Alias for HTP.P
         allFunctions.add(OracleBuiltinFunction.builder()
                 .packageName("HTP")
@@ -321,6 +383,37 @@ public class OracleBuiltinCatalog {
                 .postgresFunction("oracle_compat.htp__print")
                 .notes("Alias for HTP.P - appends text with newline")
                 .sqlDefinition(HtpImpl.getPrint())
+                .build());
+
+        // HTP.PRINT overloads for implicit type conversion (Oracle compatibility)
+        allFunctions.add(OracleBuiltinFunction.builder()
+                .packageName("HTP")
+                .functionName("PRINT")
+                .signature("PRINT(numeric)")
+                .supportLevel(SupportLevel.FULL)
+                .postgresFunction("oracle_compat.htp__print")
+                .notes("NUMERIC overload - alias for htp__p(NUMERIC)")
+                .sqlDefinition(HtpImpl.getPrintNumeric())
+                .build());
+
+        allFunctions.add(OracleBuiltinFunction.builder()
+                .packageName("HTP")
+                .functionName("PRINT")
+                .signature("PRINT(date)")
+                .supportLevel(SupportLevel.FULL)
+                .postgresFunction("oracle_compat.htp__print")
+                .notes("DATE overload - alias for htp__p(DATE)")
+                .sqlDefinition(HtpImpl.getPrintDate())
+                .build());
+
+        allFunctions.add(OracleBuiltinFunction.builder()
+                .packageName("HTP")
+                .functionName("PRINT")
+                .signature("PRINT(timestamp)")
+                .supportLevel(SupportLevel.FULL)
+                .postgresFunction("oracle_compat.htp__print")
+                .notes("TIMESTAMP overload - alias for htp__p(TIMESTAMP)")
+                .sqlDefinition(HtpImpl.getPrintTimestamp())
                 .build());
 
         // HTP.NL - Newline only

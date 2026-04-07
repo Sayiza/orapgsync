@@ -133,6 +133,64 @@ public class PostgresHtpBufferValidationTest extends PostgresSqlValidationTestBa
         assertEquals("\n", rows.get(0).get("content"));
     }
 
+    // ========== HTP.P TYPE OVERLOADS (Oracle implicit conversion) ==========
+
+    @Test
+    void htpP_numericOverload() throws SQLException {
+        // Given: Initialized buffer
+        executeUpdate("SELECT oracle_compat.htp__init()");
+
+        // When: Output NUMERIC value
+        executeUpdate("SELECT oracle_compat.htp__p(12345.67::NUMERIC)");
+
+        // Then: Number converted to text with newline
+        List<Map<String, Object>> rows = executeQuery(
+            "SELECT oracle_compat.htp__get_buffer() AS content");
+        assertEquals("12345.67\n", rows.get(0).get("content"));
+    }
+
+    @Test
+    void htpP_numericOverload_integer() throws SQLException {
+        // Given: Initialized buffer
+        executeUpdate("SELECT oracle_compat.htp__init()");
+
+        // When: Output integer NUMERIC value
+        executeUpdate("SELECT oracle_compat.htp__p(42::NUMERIC)");
+
+        // Then: Number converted to text with newline
+        List<Map<String, Object>> rows = executeQuery(
+            "SELECT oracle_compat.htp__get_buffer() AS content");
+        assertEquals("42\n", rows.get(0).get("content"));
+    }
+
+    @Test
+    void htpP_dateOverload() throws SQLException {
+        // Given: Initialized buffer
+        executeUpdate("SELECT oracle_compat.htp__init()");
+
+        // When: Output DATE value (Oracle-style DD-MON-YY format)
+        executeUpdate("SELECT oracle_compat.htp__p('2026-04-07'::DATE)");
+
+        // Then: Date converted to Oracle format (DD-MON-YY uppercase)
+        List<Map<String, Object>> rows = executeQuery(
+            "SELECT oracle_compat.htp__get_buffer() AS content");
+        assertEquals("07-APR-26\n", rows.get(0).get("content"));
+    }
+
+    @Test
+    void htpP_timestampOverload() throws SQLException {
+        // Given: Initialized buffer
+        executeUpdate("SELECT oracle_compat.htp__init()");
+
+        // When: Output TIMESTAMP value
+        executeUpdate("SELECT oracle_compat.htp__p('2026-04-07 14:30:45'::TIMESTAMP)");
+
+        // Then: Timestamp converted to Oracle format (DD-MON-YY HH.MI.SS AM)
+        List<Map<String, Object>> rows = executeQuery(
+            "SELECT oracle_compat.htp__get_buffer() AS content");
+        assertEquals("07-APR-26 02.30.45 PM\n", rows.get(0).get("content"));
+    }
+
     // ========== HTP.PRN - OUTPUT WITHOUT NEWLINE ==========
 
     @Test
@@ -165,6 +223,53 @@ public class PostgresHtpBufferValidationTest extends PostgresSqlValidationTestBa
         assertEquals("Hello World", rows.get(0).get("content"));
     }
 
+    // ========== HTP.PRN TYPE OVERLOADS (Oracle implicit conversion) ==========
+
+    @Test
+    void htpPrn_numericOverload() throws SQLException {
+        // Given: Initialized buffer
+        executeUpdate("SELECT oracle_compat.htp__init()");
+
+        // When: Output NUMERIC without newline
+        executeUpdate("SELECT oracle_compat.htp__prn('Value: ')");
+        executeUpdate("SELECT oracle_compat.htp__prn(99.5::NUMERIC)");
+
+        // Then: Number appended without newline
+        List<Map<String, Object>> rows = executeQuery(
+            "SELECT oracle_compat.htp__get_buffer() AS content");
+        assertEquals("Value: 99.5", rows.get(0).get("content"));
+    }
+
+    @Test
+    void htpPrn_dateOverload() throws SQLException {
+        // Given: Initialized buffer
+        executeUpdate("SELECT oracle_compat.htp__init()");
+
+        // When: Output DATE without newline
+        executeUpdate("SELECT oracle_compat.htp__prn('Date: ')");
+        executeUpdate("SELECT oracle_compat.htp__prn('2026-12-25'::DATE)");
+
+        // Then: Date in Oracle format without newline
+        List<Map<String, Object>> rows = executeQuery(
+            "SELECT oracle_compat.htp__get_buffer() AS content");
+        assertEquals("Date: 25-DEC-26", rows.get(0).get("content"));
+    }
+
+    @Test
+    void htpPrn_timestampOverload() throws SQLException {
+        // Given: Initialized buffer
+        executeUpdate("SELECT oracle_compat.htp__init()");
+
+        // When: Output TIMESTAMP without newline
+        executeUpdate("SELECT oracle_compat.htp__prn('Time: ')");
+        executeUpdate("SELECT oracle_compat.htp__prn('2026-04-07 09:15:30'::TIMESTAMP)");
+
+        // Then: Timestamp in Oracle format without newline
+        List<Map<String, Object>> rows = executeQuery(
+            "SELECT oracle_compat.htp__get_buffer() AS content");
+        assertEquals("Time: 07-APR-26 09.15.30 AM", rows.get(0).get("content"));
+    }
+
     // ========== HTP.PRINT - ALIAS FOR HTP.P ==========
 
     @Test
@@ -179,6 +284,50 @@ public class PostgresHtpBufferValidationTest extends PostgresSqlValidationTestBa
         List<Map<String, Object>> rows = executeQuery(
             "SELECT oracle_compat.htp__get_buffer() AS content");
         assertEquals("test\n", rows.get(0).get("content"));
+    }
+
+    // ========== HTP.PRINT TYPE OVERLOADS (Oracle implicit conversion) ==========
+
+    @Test
+    void htpPrint_numericOverload() throws SQLException {
+        // Given: Initialized buffer
+        executeUpdate("SELECT oracle_compat.htp__init()");
+
+        // When: Output NUMERIC with htp__print
+        executeUpdate("SELECT oracle_compat.htp__print(1000::NUMERIC)");
+
+        // Then: Number with newline (same as htp__p)
+        List<Map<String, Object>> rows = executeQuery(
+            "SELECT oracle_compat.htp__get_buffer() AS content");
+        assertEquals("1000\n", rows.get(0).get("content"));
+    }
+
+    @Test
+    void htpPrint_dateOverload() throws SQLException {
+        // Given: Initialized buffer
+        executeUpdate("SELECT oracle_compat.htp__init()");
+
+        // When: Output DATE with htp__print
+        executeUpdate("SELECT oracle_compat.htp__print('2026-01-15'::DATE)");
+
+        // Then: Date in Oracle format with newline
+        List<Map<String, Object>> rows = executeQuery(
+            "SELECT oracle_compat.htp__get_buffer() AS content");
+        assertEquals("15-JAN-26\n", rows.get(0).get("content"));
+    }
+
+    @Test
+    void htpPrint_timestampOverload() throws SQLException {
+        // Given: Initialized buffer
+        executeUpdate("SELECT oracle_compat.htp__init()");
+
+        // When: Output TIMESTAMP with htp__print
+        executeUpdate("SELECT oracle_compat.htp__print('2026-06-30 23:59:59'::TIMESTAMP)");
+
+        // Then: Timestamp in Oracle format with newline
+        List<Map<String, Object>> rows = executeQuery(
+            "SELECT oracle_compat.htp__get_buffer() AS content");
+        assertEquals("30-JUN-26 11.59.59 PM\n", rows.get(0).get("content"));
     }
 
     // ========== HTP.NL - NEWLINE ONLY ==========

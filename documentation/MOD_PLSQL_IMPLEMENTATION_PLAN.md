@@ -538,11 +538,20 @@ public class PlsqlExecutor {
 
 **Goal:** Get basic web pages rendering from PostgreSQL.
 
-**PostgreSQL Compatibility Layer:** ✅ **COMPLETE** (2026-03-29)
+**PostgreSQL Compatibility Layer:** ✅ **COMPLETE** (2026-03-29, updated 2026-04-07)
 - [x] `htp__init()` - Initialize buffer (temp table with PRESERVE ROWS)
-- [x] `htp__p()` - Primary output (95% of usage)
-- [x] `htp__prn()` - Output without newline
-- [x] `htp__print()` - Alias for p
+- [x] `htp__p(TEXT)` - Primary output (95% of usage)
+- [x] `htp__p(NUMERIC)` - Numeric overload with implicit conversion
+- [x] `htp__p(DATE)` - Date overload with Oracle-style DD-MON-YY format
+- [x] `htp__p(TIMESTAMP)` - Timestamp overload with Oracle-style format
+- [x] `htp__prn(TEXT)` - Output without newline
+- [x] `htp__prn(NUMERIC)` - Numeric overload
+- [x] `htp__prn(DATE)` - Date overload
+- [x] `htp__prn(TIMESTAMP)` - Timestamp overload
+- [x] `htp__print(TEXT)` - Alias for p
+- [x] `htp__print(NUMERIC)` - Numeric overload
+- [x] `htp__print(DATE)` - Date overload
+- [x] `htp__print(TIMESTAMP)` - Timestamp overload
 - [x] `htp__nl()` - Newline only
 - [x] `htp__br()` - Line break tag
 - [x] `htp__line()` - Horizontal rule tag
@@ -556,12 +565,12 @@ public class PlsqlExecutor {
 - [x] `owa_util__print_cgi_env()` - Debug function
 
 **Implementation Files:**
-- `HtpImpl.java` - HTP function SQL definitions
+- `HtpImpl.java` - HTP function SQL definitions (with type overloads)
 - `OwaImpl.java` - OWA core function SQL definitions
 - `OwaUtilImpl.java` - OWA_UTIL function SQL definitions
 - `OracleBuiltinCatalog.java` - Function registration
 
-**Test Coverage:** 17 integration tests passing (`PostgresHtpBufferValidationTest`)
+**Test Coverage:** 27 integration tests passing (`PostgresHtpBufferValidationTest`)
 
 **Quarkus Gateway Generation:** ✅ **COMPLETE** (2026-03-29)
 - [x] Project generation from templates

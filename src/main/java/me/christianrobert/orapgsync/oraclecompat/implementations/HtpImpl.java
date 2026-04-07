@@ -108,6 +108,66 @@ public class HtpImpl {
     }
 
     /**
+     * HTP.P overload for NUMERIC - converts number to text using Oracle-style formatting.
+     */
+    public static String getPNumeric() {
+        return """
+            CREATE OR REPLACE FUNCTION oracle_compat.htp__p(p_num NUMERIC)
+            RETURNS VOID
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                -- Convert numeric to text and delegate to text version
+                PERFORM oracle_compat.htp__p(p_num::TEXT);
+            END;
+            $$;
+
+            COMMENT ON FUNCTION oracle_compat.htp__p(NUMERIC) IS
+            'Oracle HTP.P equivalent for NUMERIC - converts to text and appends with newline.';
+            """;
+    }
+
+    /**
+     * HTP.P overload for DATE - converts date to text using Oracle-style formatting (DD-MON-YY).
+     */
+    public static String getPDate() {
+        return """
+            CREATE OR REPLACE FUNCTION oracle_compat.htp__p(p_date DATE)
+            RETURNS VOID
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                -- Convert date to Oracle-style format (DD-MON-YY with uppercase month)
+                PERFORM oracle_compat.htp__p(UPPER(TO_CHAR(p_date, 'DD-MON-YY')));
+            END;
+            $$;
+
+            COMMENT ON FUNCTION oracle_compat.htp__p(DATE) IS
+            'Oracle HTP.P equivalent for DATE - converts to DD-MON-YY format and appends with newline.';
+            """;
+    }
+
+    /**
+     * HTP.P overload for TIMESTAMP - converts timestamp to text using Oracle-style formatting.
+     */
+    public static String getPTimestamp() {
+        return """
+            CREATE OR REPLACE FUNCTION oracle_compat.htp__p(p_ts TIMESTAMP)
+            RETURNS VOID
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                -- Convert timestamp to Oracle-style format (DD-MON-YY HH.MI.SSXFF AM)
+                PERFORM oracle_compat.htp__p(UPPER(TO_CHAR(p_ts, 'DD-MON-YY HH.MI.SS AM')));
+            END;
+            $$;
+
+            COMMENT ON FUNCTION oracle_compat.htp__p(TIMESTAMP) IS
+            'Oracle HTP.P equivalent for TIMESTAMP - converts to Oracle-style format and appends with newline.';
+            """;
+    }
+
+    /**
      * HTP.PRN - Output without newline.
      * Appends text to the buffer without adding a newline.
      */
@@ -135,6 +195,63 @@ public class HtpImpl {
     }
 
     /**
+     * HTP.PRN overload for NUMERIC - converts number to text using Oracle-style formatting.
+     */
+    public static String getPrnNumeric() {
+        return """
+            CREATE OR REPLACE FUNCTION oracle_compat.htp__prn(p_num NUMERIC)
+            RETURNS VOID
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                PERFORM oracle_compat.htp__prn(p_num::TEXT);
+            END;
+            $$;
+
+            COMMENT ON FUNCTION oracle_compat.htp__prn(NUMERIC) IS
+            'Oracle HTP.PRN equivalent for NUMERIC - converts to text and appends without newline.';
+            """;
+    }
+
+    /**
+     * HTP.PRN overload for DATE - converts date to text using Oracle-style formatting (DD-MON-YY).
+     */
+    public static String getPrnDate() {
+        return """
+            CREATE OR REPLACE FUNCTION oracle_compat.htp__prn(p_date DATE)
+            RETURNS VOID
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                PERFORM oracle_compat.htp__prn(UPPER(TO_CHAR(p_date, 'DD-MON-YY')));
+            END;
+            $$;
+
+            COMMENT ON FUNCTION oracle_compat.htp__prn(DATE) IS
+            'Oracle HTP.PRN equivalent for DATE - converts to DD-MON-YY format and appends without newline.';
+            """;
+    }
+
+    /**
+     * HTP.PRN overload for TIMESTAMP - converts timestamp to text using Oracle-style formatting.
+     */
+    public static String getPrnTimestamp() {
+        return """
+            CREATE OR REPLACE FUNCTION oracle_compat.htp__prn(p_ts TIMESTAMP)
+            RETURNS VOID
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                PERFORM oracle_compat.htp__prn(UPPER(TO_CHAR(p_ts, 'DD-MON-YY HH.MI.SS AM')));
+            END;
+            $$;
+
+            COMMENT ON FUNCTION oracle_compat.htp__prn(TIMESTAMP) IS
+            'Oracle HTP.PRN equivalent for TIMESTAMP - converts to Oracle-style format and appends without newline.';
+            """;
+    }
+
+    /**
      * HTP.PRINT - Alias for HTP.P.
      * Included for compatibility with code that uses PRINT instead of P.
      */
@@ -151,6 +268,63 @@ public class HtpImpl {
 
             COMMENT ON FUNCTION oracle_compat.htp__print(TEXT) IS
             'Oracle HTP.PRINT equivalent - alias for htp__p (appends text with newline).';
+            """;
+    }
+
+    /**
+     * HTP.PRINT overload for NUMERIC - converts number to text.
+     */
+    public static String getPrintNumeric() {
+        return """
+            CREATE OR REPLACE FUNCTION oracle_compat.htp__print(p_num NUMERIC)
+            RETURNS VOID
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                PERFORM oracle_compat.htp__p(p_num);
+            END;
+            $$;
+
+            COMMENT ON FUNCTION oracle_compat.htp__print(NUMERIC) IS
+            'Oracle HTP.PRINT equivalent for NUMERIC - alias for htp__p(NUMERIC).';
+            """;
+    }
+
+    /**
+     * HTP.PRINT overload for DATE - converts date to text using Oracle-style formatting.
+     */
+    public static String getPrintDate() {
+        return """
+            CREATE OR REPLACE FUNCTION oracle_compat.htp__print(p_date DATE)
+            RETURNS VOID
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                PERFORM oracle_compat.htp__p(p_date);
+            END;
+            $$;
+
+            COMMENT ON FUNCTION oracle_compat.htp__print(DATE) IS
+            'Oracle HTP.PRINT equivalent for DATE - alias for htp__p(DATE).';
+            """;
+    }
+
+    /**
+     * HTP.PRINT overload for TIMESTAMP - converts timestamp to text using Oracle-style formatting.
+     */
+    public static String getPrintTimestamp() {
+        return """
+            CREATE OR REPLACE FUNCTION oracle_compat.htp__print(p_ts TIMESTAMP)
+            RETURNS VOID
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                PERFORM oracle_compat.htp__p(p_ts);
+            END;
+            $$;
+
+            COMMENT ON FUNCTION oracle_compat.htp__print(TIMESTAMP) IS
+            'Oracle HTP.PRINT equivalent for TIMESTAMP - alias for htp__p(TIMESTAMP).';
             """;
     }
 
