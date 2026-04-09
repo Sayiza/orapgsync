@@ -3,7 +3,6 @@ package me.christianrobert.orapgsync.function.service;
 import me.christianrobert.orapgsync.core.job.model.function.FunctionMetadata;
 import me.christianrobert.orapgsync.core.job.model.function.FunctionParameter;
 import me.christianrobert.orapgsync.core.service.StateService;
-import me.christianrobert.orapgsync.core.tools.CodeCleaner;
 import me.christianrobert.orapgsync.core.tools.DetailedMemoryMonitor;
 import me.christianrobert.orapgsync.core.tools.MemoryMonitor;
 import me.christianrobert.orapgsync.core.tools.UserExcluder;
@@ -367,8 +366,7 @@ public class OracleFunctionExtractor {
      * Separated into its own method to enable streaming and improve GC.
      *
      * NEW APPROACH (Package Segmentation):
-     * 1. Clean source (remove comments)
-     * 2. Scan function boundaries (FunctionBoundaryScanner)
+     * 1. Scan function boundaries (FunctionBoundaryScanner - handles comments via ANTLR lexer)
      * 3. Extract full functions + generate stubs + generate reduced body
      * 4. Store in StateService (for transformation job)
      * 5. Parse stubs (tiny, fast) to extract metadata
@@ -396,14 +394,10 @@ public class OracleFunctionExtractor {
         String fullSource = "CREATE OR REPLACE " + bodySource.trim();
 
         try {
-            // STEP 1: Clean source (remove comments)
-            String cleanedSource = CodeCleaner.removeComments(fullSource);
-            log.trace("Cleaned package {}.{} ({} chars -> {} chars)",
-                     schema, packageName, fullSource.length(), cleanedSource.length());
-
-            // STEP 2: Scan function boundaries (fast, lightweight)
+            // STEP 1: Scan function boundaries (fast, lightweight)
+            // Note: Scanner uses ANTLR lexer which handles comments automatically
             FunctionBoundaryScanner scanner = new FunctionBoundaryScanner();
-            PackageSegments segments = scanner.scanPackageBody(cleanedSource);
+            PackageSegments segments = scanner.scanPackageBody(fullSource);
 
             log.debug("Scanned package {}.{}: found {} functions/procedures",
                      schema, packageName, segments.getFunctionCount());
@@ -420,7 +414,7 @@ public class OracleFunctionExtractor {
 
             for (PackageSegments.FunctionSegment segment : segments.getFunctions()) {
                 // Extract full function source
-                String fullFunctionSource = cleanedSource.substring(segment.getStartPos(), segment.getEndPos());
+                String fullFunctionSource = fullSource.substring(segment.getStartPos(), segment.getEndPos());
                 fullSources.put(segment.getName().toLowerCase(), fullFunctionSource);
 
                 // Generate stub
@@ -434,10 +428,10 @@ public class OracleFunctionExtractor {
 
             // STEP 4: Generate reduced package body (all functions removed)
             PackageBodyReducer reducer = new PackageBodyReducer();
-            String reducedBody = reducer.removeAllFunctions(cleanedSource, segments);
+            String reducedBody = reducer.removeAllFunctions(fullSource, segments);
 
             log.debug("Generated reduced package body for {}.{} ({} chars -> {} chars, {} functions removed)",
-                     schema, packageName, cleanedSource.length(), reducedBody.length(), segments.getFunctionCount());
+                     schema, packageName, fullSource.length(), reducedBody.length(), segments.getFunctionCount());
 
             // STEP 5: Store in StateService (for transformation job later)
             stateService.storePackageFunctions(schema, packageName, fullSources, stubSources, reducedBody);

@@ -37,4 +37,5 @@
 [ ] sort all results
 [x] make verify result get code only on request
 [ ] TO_NUMBER(TO_CHAR( not working
-[ ] htp.p needs versions with casts
+[x] htp.p needs versions with casts
+[ ] package variables in htp are not reset!

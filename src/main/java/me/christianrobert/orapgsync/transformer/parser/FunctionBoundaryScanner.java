@@ -1,112 +1,108 @@
 package me.christianrobert.orapgsync.transformer.parser;
 
+import me.christianrobert.orapgsync.antlr.PlSqlLexer;
+import org.antlr.v4.runtime.CharStreams;
+import org.antlr.v4.runtime.CommonTokenStream;
+import org.antlr.v4.runtime.Token;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
- * Lightweight state machine scanner for identifying function/procedure boundaries in Oracle packages.
+ * Lexer-based scanner for identifying function/procedure boundaries in Oracle packages.
  *
- * This scanner provides a fast alternative to full ANTLR parsing when only function boundaries
- * are needed (e.g., for extraction jobs). It operates on comment-free source code to simplify
- * state management.
+ * This scanner uses ANTLR's PlSqlLexer to tokenize the source code, then applies
+ * state-based tracking on the token stream. This provides a fast alternative to full
+ * ANTLR parsing when only function boundaries are needed (e.g., for extraction jobs).
+ *
+ * **Key Features:**
+ * - Case insensitivity handled by lexer (FUNCTION, function, Function all become same token)
+ * - Whitespace invisible in token stream (no manual skipping needed)
+ * - Comments filtered to hidden channel (no preprocessing needed)
+ * - String literals are single tokens (no escape handling needed)
+ * - Quoted identifiers handled correctly ("END" as identifier vs END keyword)
+ * - Word boundaries are implicit (APPEND doesn't contain END token)
+ *
+ * **Correctly handles:**
+ * - END LOOP, END IF, END CASE (don't close BEGIN blocks)
+ * - Nested functions/procedures (inner END doesn't close outer function)
+ * - Forward declarations (signature without body)
+ * - Mixed case keywords
+ * - String literals containing keywords
  *
  * **Performance:**
+ * - O(n) tokenization + O(n) scan = O(n) total
  * - Scans 5000-line package in ~1 second vs. 3 minutes for full ANTLR parse
- * - Memory: ~50KB vs. 2GB for full AST
+ * - Memory: ~250KB vs. 2GB for full AST
  *
  * **Usage:**
  * ```java
- * String cleanedBody = CodeCleaner.removeComments(packageBodySql);
  * FunctionBoundaryScanner scanner = new FunctionBoundaryScanner();
- * PackageSegments segments = scanner.scanPackageBody(cleanedBody);
+ * PackageSegments segments = scanner.scanPackageBody(packageBodySql);
  * ```
  *
- * **IMPORTANT:** Input MUST be comment-free (use CodeCleaner.removeComments first).
- * Comments are not handled by this scanner to keep the state machine simple.
+ * **Note:** This scanner does NOT require comment-free input.
+ * Comments are automatically filtered by the lexer.
  */
 public class FunctionBoundaryScanner {
 
     private static final Logger log = LoggerFactory.getLogger(FunctionBoundaryScanner.class);
 
     /**
-     * Scanner states.
-     */
-    private enum State {
-        PACKAGE_LEVEL,        // Initial state, looking for functions
-        IN_KEYWORD,           // Inside FUNCTION or PROCEDURE keyword
-        IN_SIGNATURE,         // Tracking signature (parameters, RETURN clause)
-        IN_SIGNATURE_PAREN,   // Inside parameter list parentheses
-        IN_FUNCTION_BODY,     // Inside function implementation
-        IN_STRING             // Inside string literal (ignore all keywords)
-    }
-
-    // Current state
-    private State currentState;
-    private State previousState; // For returning from IN_STRING
-
-    // Position tracking
-    private int position;
-    private String source;
-
-    // Current function being parsed
-    private String currentFunctionName;
-    private int currentFunctionStart;
-    private int currentBodyStart;
-    private boolean currentIsFunction; // true = FUNCTION, false = PROCEDURE
-
-    // Depth tracking
-    private int parenDepth;
-    private int bodyDepth; // BEGIN/END depth
-
-    // Results
-    private PackageSegments segments;
-
-    /**
      * Scans package body and identifies function/procedure boundaries.
      *
-     * IMPORTANT: Input must be comment-free (use CodeCleaner.removeComments first)
-     *
-     * @param packageBodySql Clean package body SQL (comments removed)
+     * @param packageBodySql Package body SQL (comments are OK, lexer handles them)
      * @return Scanned segments with function boundaries
      */
     public PackageSegments scanPackageBody(String packageBodySql) {
         log.debug("Scanning package body ({} chars)", packageBodySql.length());
 
-        // Initialize
-        this.source = packageBodySql;
-        this.position = 0;
-        this.currentState = State.PACKAGE_LEVEL;
-        this.previousState = null;
-        this.segments = new PackageSegments();
-        this.parenDepth = 0;
-        this.bodyDepth = 0;
+        PackageSegments segments = new PackageSegments();
 
-        // Scan character by character
-        while (position < source.length()) {
-            char currentChar = source.charAt(position);
+        // Tokenize using ANTLR lexer
+        PlSqlLexer lexer = new PlSqlLexer(CharStreams.fromString(packageBodySql));
+        CommonTokenStream tokenStream = new CommonTokenStream(lexer);
+        tokenStream.fill();
 
-            switch (currentState) {
-                case PACKAGE_LEVEL:
-                    handlePackageLevel(currentChar);
-                    break;
-                case IN_KEYWORD:
-                    handleInKeyword(currentChar);
-                    break;
-                case IN_SIGNATURE_PAREN:
-                    handleInSignatureParen(currentChar);
-                    break;
-                case IN_SIGNATURE:
-                    handleInSignature(currentChar);
-                    break;
-                case IN_FUNCTION_BODY:
-                    handleInFunctionBody(currentChar);
-                    break;
-                case IN_STRING:
-                    handleInString(currentChar);
-                    break;
+        // Filter to only default channel tokens (excludes whitespace, comments)
+        List<Token> allTokens = tokenStream.getTokens();
+        List<Token> tokens = new ArrayList<>();
+        for (Token t : allTokens) {
+            if (t.getChannel() == Token.DEFAULT_CHANNEL) {
+                tokens.add(t);
+            }
+        }
+        log.trace("Tokenized into {} tokens ({} on default channel)", allTokens.size(), tokens.size());
+
+        int i = 0;
+        while (i < tokens.size()) {
+            Token token = tokens.get(i);
+            int tokenType = token.getType();
+
+            // Look for FUNCTION or PROCEDURE keyword at package level
+            if (tokenType == PlSqlLexer.FUNCTION || tokenType == PlSqlLexer.PROCEDURE) {
+                // Check if this is a package-level definition (not nested)
+                // by scanning to find IS/AS or semicolon
+                ScanResult result = scanFunctionOrProcedure(tokens, i, packageBodySql);
+                if (result != null) {
+                    if (!result.isForwardDeclaration) {
+                        segments.addFunction(result.segment);
+                        log.debug("Found {} {} at [{}-{}]",
+                                result.segment.isFunction() ? "FUNCTION" : "PROCEDURE",
+                                result.segment.getName(),
+                                result.segment.getStartPos(),
+                                result.segment.getEndPos());
+                    } else {
+                        log.trace("Skipping forward declaration: {}", result.functionName);
+                    }
+                    i = result.nextTokenIndex;
+                    continue;
+                }
             }
 
-            position++;
+            i++;
         }
 
         log.debug("Scan complete: found {} functions", segments.getFunctionCount());
@@ -114,9 +110,275 @@ public class FunctionBoundaryScanner {
     }
 
     /**
-     * Scans package spec for completeness (currently unused, reserved for future).
+     * Scans a function or procedure starting at the given token index.
      *
-     * @param packageSpecSql Clean package spec SQL (comments removed)
+     * @param tokens All tokens
+     * @param startIndex Index of FUNCTION/PROCEDURE token
+     * @param source Original source for position extraction
+     * @return ScanResult with segment info, or null if scan fails
+     */
+    private ScanResult scanFunctionOrProcedure(List<Token> tokens, int startIndex, String source) {
+        Token startToken = tokens.get(startIndex);
+        boolean isFunction = startToken.getType() == PlSqlLexer.FUNCTION;
+        int startPos = startToken.getStartIndex();
+
+        int i = startIndex + 1;
+
+        // Skip to find function/procedure name (next identifier-like token)
+        String functionName = null;
+        while (i < tokens.size()) {
+            Token t = tokens.get(i);
+            if (isIdentifierToken(t)) {
+                functionName = t.getText();
+                i++;
+                break;
+            } else if (t.getType() == PlSqlLexer.EOF) {
+                return null;
+            }
+            i++;
+        }
+
+        if (functionName == null) {
+            log.warn("Could not find function name after FUNCTION/PROCEDURE at position {}", startPos);
+            return null;
+        }
+
+        // Scan signature until IS/AS or semicolon (forward declaration)
+        int parenDepth = 0;
+        while (i < tokens.size()) {
+            Token t = tokens.get(i);
+            int type = t.getType();
+
+            if (type == PlSqlLexer.LEFT_PAREN) {
+                parenDepth++;
+            } else if (type == PlSqlLexer.RIGHT_PAREN) {
+                parenDepth--;
+            } else if (parenDepth == 0) {
+                if (type == PlSqlLexer.IS || type == PlSqlLexer.AS) {
+                    // Found IS/AS - this is a full definition
+                    i++;
+                    break;
+                } else if (type == PlSqlLexer.SEMICOLON) {
+                    // Forward declaration - no body
+                    return new ScanResult(functionName, i + 1, true, null);
+                }
+            }
+
+            if (type == PlSqlLexer.EOF) {
+                return null;
+            }
+            i++;
+        }
+
+        // Now we're after IS/AS - record body start position
+        // Find first non-whitespace token position for body start
+        int bodyStartPos = -1;
+        while (i < tokens.size() && bodyStartPos < 0) {
+            Token t = tokens.get(i);
+            if (t.getType() != PlSqlLexer.EOF && t.getChannel() == Token.DEFAULT_CHANNEL) {
+                bodyStartPos = t.getStartIndex();
+            }
+            if (t.getType() == PlSqlLexer.BEGIN || t.getType() == PlSqlLexer.FUNCTION ||
+                t.getType() == PlSqlLexer.PROCEDURE || t.getType() == PlSqlLexer.CURSOR ||
+                t.getType() == PlSqlLexer.TYPE || isIdentifierToken(t)) {
+                // Found start of declarations or BEGIN
+                break;
+            }
+            i++;
+        }
+
+        if (bodyStartPos < 0 && i < tokens.size()) {
+            bodyStartPos = tokens.get(i).getStartIndex();
+        }
+
+        // Track block depth to find the matching END
+        // BEGIN increments, END (not followed by IF/LOOP/CASE) decrements
+        // Also track nested FUNCTION/PROCEDURE definitions
+        int blockDepth = 0;
+        int nestedFunctionDepth = 0;
+        int bodyEndPos = -1;
+        int endPos = -1;
+
+        while (i < tokens.size()) {
+            Token t = tokens.get(i);
+            int type = t.getType();
+
+            if (type == PlSqlLexer.EOF) {
+                break;
+            }
+
+            // Check for nested FUNCTION/PROCEDURE declaration
+            if (type == PlSqlLexer.FUNCTION || type == PlSqlLexer.PROCEDURE) {
+                // Look ahead to see if this is a declaration (has IS/AS before semicolon)
+                if (isNestedFunctionDeclaration(tokens, i)) {
+                    nestedFunctionDepth++;
+                    log.trace("Nested function detected at token {}, depth now {}", i, nestedFunctionDepth);
+                }
+            }
+
+            // Track BEGIN
+            if (type == PlSqlLexer.BEGIN) {
+                blockDepth++;
+                log.trace("BEGIN at token {}, depth now {}", i, blockDepth);
+            }
+
+            // Track END
+            if (type == PlSqlLexer.END) {
+                // Peek at next token to check for IF/LOOP/CASE
+                Token nextToken = getNextDefaultChannelToken(tokens, i + 1);
+
+                if (nextToken != null && isEndControlStructure(nextToken.getType())) {
+                    // END IF, END LOOP, END CASE - skip, doesn't close BEGIN
+                    log.trace("END {} at token {} - skipping (control structure)", nextToken.getText(), i);
+                    i++; // Skip past the IF/LOOP/CASE token (will be incremented again at loop end)
+                } else {
+                    // Plain END or END <name> - closes a BEGIN block
+                    blockDepth--;
+                    log.trace("END at token {}, depth now {}", i, blockDepth);
+
+                    if (blockDepth <= 0) {
+                        if (nestedFunctionDepth > 0) {
+                            // This END closes a nested function, not the outer one
+                            nestedFunctionDepth--;
+                            blockDepth = 0; // Reset to avoid going more negative
+                            log.trace("END closes nested function, nested depth now {}", nestedFunctionDepth);
+                        } else {
+                            // This END closes the main function
+                            bodyEndPos = t.getStartIndex();
+
+                            // Find the semicolon after END [name]
+                            int j = i + 1;
+                            while (j < tokens.size()) {
+                                Token semicolonCandidate = tokens.get(j);
+                                if (semicolonCandidate.getType() == PlSqlLexer.SEMICOLON) {
+                                    endPos = semicolonCandidate.getStopIndex() + 1;
+                                    break;
+                                } else if (semicolonCandidate.getType() == PlSqlLexer.EOF) {
+                                    endPos = source.length();
+                                    break;
+                                }
+                                j++;
+                            }
+
+                            PackageSegments.FunctionSegment segment = new PackageSegments.FunctionSegment(
+                                    functionName,
+                                    startPos,
+                                    endPos,
+                                    bodyStartPos,
+                                    bodyEndPos,
+                                    isFunction
+                            );
+
+                            return new ScanResult(functionName, j + 1, false, segment);
+                        }
+                    }
+                }
+            }
+
+            i++;
+        }
+
+        log.warn("Could not find END for function {} starting at position {}", functionName, startPos);
+        return null;
+    }
+
+    /**
+     * Checks if a token can be used as an identifier in the context of a function/procedure name.
+     * In Oracle, many keywords can be used as identifiers in certain contexts.
+     *
+     * We use a "not a structural keyword" approach: anything that's not a
+     * punctuation mark or structural keyword can be a function name.
+     */
+    private boolean isIdentifierToken(Token token) {
+        int type = token.getType();
+
+        // Definitely identifiers
+        if (type == PlSqlLexer.REGULAR_ID || type == PlSqlLexer.DELIMITED_ID) {
+            return true;
+        }
+
+        // Definitely NOT identifiers (structural tokens)
+        if (type == PlSqlLexer.EOF ||
+            type == PlSqlLexer.SEMICOLON ||
+            type == PlSqlLexer.LEFT_PAREN ||
+            type == PlSqlLexer.RIGHT_PAREN ||
+            type == PlSqlLexer.COMMA ||
+            type == PlSqlLexer.PERIOD ||
+            type == PlSqlLexer.ASSIGN_OP ||
+            type == PlSqlLexer.COLON ||
+            type == PlSqlLexer.IS ||
+            type == PlSqlLexer.AS ||
+            type == PlSqlLexer.BEGIN ||
+            type == PlSqlLexer.END ||
+            type == PlSqlLexer.RETURN ||
+            type == PlSqlLexer.FUNCTION ||
+            type == PlSqlLexer.PROCEDURE ||
+            type == PlSqlLexer.CHAR_STRING ||
+            type == PlSqlLexer.UNSIGNED_INTEGER ||
+            type == PlSqlLexer.APPROXIMATE_NUM_LIT) {
+            return false;
+        }
+
+        // Most other tokens (including many keywords) can be used as identifiers
+        // in Oracle. For example: TYPE, CURSOR, EXCEPTION, etc. can be function names.
+        return true;
+    }
+
+    /**
+     * Checks if the token type indicates END LOOP, END IF, or END CASE.
+     */
+    private boolean isEndControlStructure(int tokenType) {
+        return tokenType == PlSqlLexer.LOOP ||
+               tokenType == PlSqlLexer.IF ||
+               tokenType == PlSqlLexer.CASE;
+    }
+
+    /**
+     * Gets the next token on the default channel (skipping hidden channel tokens).
+     */
+    private Token getNextDefaultChannelToken(List<Token> tokens, int startIndex) {
+        for (int i = startIndex; i < tokens.size(); i++) {
+            Token t = tokens.get(i);
+            if (t.getChannel() == Token.DEFAULT_CHANNEL && t.getType() != PlSqlLexer.EOF) {
+                return t;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Checks if the FUNCTION/PROCEDURE at the given index is a nested function declaration
+     * (has IS/AS before semicolon).
+     */
+    private boolean isNestedFunctionDeclaration(List<Token> tokens, int funcIndex) {
+        int parenDepth = 0;
+        for (int i = funcIndex + 1; i < tokens.size(); i++) {
+            Token t = tokens.get(i);
+            int type = t.getType();
+
+            if (type == PlSqlLexer.LEFT_PAREN) {
+                parenDepth++;
+            } else if (type == PlSqlLexer.RIGHT_PAREN) {
+                parenDepth--;
+            } else if (parenDepth == 0) {
+                if (type == PlSqlLexer.IS || type == PlSqlLexer.AS) {
+                    return true; // Has body
+                } else if (type == PlSqlLexer.SEMICOLON) {
+                    return false; // Forward declaration
+                }
+            }
+
+            if (type == PlSqlLexer.EOF) {
+                break;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Scans package spec (currently returns empty segments, reserved for future use).
+     *
+     * @param packageSpecSql Clean package spec SQL
      * @return Scanned segments (empty for now)
      */
     public PackageSegments scanPackageSpec(String packageSpecSql) {
@@ -125,213 +387,21 @@ public class FunctionBoundaryScanner {
         return new PackageSegments();
     }
 
-    // ========== State Handlers ==========
-
-    private void handlePackageLevel(char currentChar) {
-        // Look for FUNCTION or PROCEDURE keywords
-        if (isKeywordAt(position, "FUNCTION")) {
-            currentState = State.IN_KEYWORD;
-            currentFunctionStart = position;
-            currentIsFunction = true;
-            position += "FUNCTION".length() - 1; // -1 because main loop increments
-            log.trace("Found FUNCTION at position {}", currentFunctionStart);
-        } else if (isKeywordAt(position, "PROCEDURE")) {
-            currentState = State.IN_KEYWORD;
-            currentFunctionStart = position;
-            currentIsFunction = false;
-            position += "PROCEDURE".length() - 1;
-            log.trace("Found PROCEDURE at position {}", currentFunctionStart);
-        } else if (currentChar == '\'') {
-            // Enter string literal
-            previousState = State.PACKAGE_LEVEL;
-            currentState = State.IN_STRING;
-        }
-    }
-
-    private void handleInKeyword(char currentChar) {
-        // Skip whitespace after keyword
-        if (Character.isWhitespace(currentChar)) {
-            return;
-        }
-
-        // Start of function/procedure name
-        if (Character.isJavaIdentifierStart(currentChar)) {
-            // Extract name
-            int nameStart = position;
-            int nameEnd = position;
-            while (nameEnd < source.length() &&
-                   (Character.isJavaIdentifierPart(source.charAt(nameEnd)) ||
-                    source.charAt(nameEnd) == '$' || source.charAt(nameEnd) == '#')) {
-                nameEnd++;
-            }
-            currentFunctionName = source.substring(nameStart, nameEnd);
-            position = nameEnd - 1; // -1 because main loop increments
-
-            log.trace("Function name: {}", currentFunctionName);
-
-            // Move to signature state
-            currentState = State.IN_SIGNATURE;
-        }
-    }
-
-    private void handleInSignature(char currentChar) {
-        if (currentChar == '(') {
-            // Start of parameter list
-            parenDepth = 1;
-            currentState = State.IN_SIGNATURE_PAREN;
-        } else if (isKeywordAt(position, "IS") || isKeywordAt(position, "AS")) {
-            // Signature complete, entering body
-            int keywordLength = isKeywordAt(position, "IS") ? 2 : 2; // Both IS and AS are 2 chars
-            position += keywordLength; // Skip IS or AS
-            skipWhitespace();
-            currentBodyStart = position;
-            position--; // Compensate for main loop's position++
-            bodyDepth = 0;
-            currentState = State.IN_FUNCTION_BODY;
-            log.trace("Entering function body at position {}", currentBodyStart);
-        } else if (currentChar == ';') {
-            // Forward declaration (signature without body) - skip it
-            // Example: FUNCTION func_name(...) RETURN type;
-            // These don't have IS/AS clauses, so we return to package level
-            log.trace("Skipping forward declaration for: {}", currentFunctionName);
-            currentState = State.PACKAGE_LEVEL;
-            currentFunctionName = null;
-            currentFunctionStart = -1;
-        } else if (currentChar == '\'') {
-            previousState = State.IN_SIGNATURE;
-            currentState = State.IN_STRING;
-        }
-    }
-
-    private void handleInSignatureParen(char currentChar) {
-        if (currentChar == '(') {
-            parenDepth++;
-        } else if (currentChar == ')') {
-            parenDepth--;
-            if (parenDepth == 0) {
-                // Parameter list complete, back to signature
-                currentState = State.IN_SIGNATURE;
-            }
-        } else if (currentChar == '\'') {
-            previousState = State.IN_SIGNATURE_PAREN;
-            currentState = State.IN_STRING;
-        }
-    }
-
-    private void handleInFunctionBody(char currentChar) {
-        if (currentChar == '\'') {
-            previousState = State.IN_FUNCTION_BODY;
-            currentState = State.IN_STRING;
-        } else if (isKeywordAt(position, "BEGIN")) {
-            bodyDepth++;
-            position += "BEGIN".length() - 1; // -1 because main loop will increment
-            log.trace("BEGIN at depth {}", bodyDepth);
-        } else if (isKeywordAt(position, "END")) {
-            // Decrement depth first
-            bodyDepth--;
-            log.trace("END at depth {} (after decrement)", bodyDepth);
-
-            // Check if this END closes the function
-            if (bodyDepth <= 0) {
-                // bodyDepth is 0 or negative: This END closes the package-level function
-                // Find the semicolon after END
-                int endPos = position + "END".length();
-                while (endPos < source.length() && source.charAt(endPos) != ';') {
-                    endPos++;
-                }
-                if (endPos < source.length()) {
-                    endPos++; // Include semicolon
-                }
-
-                // Record function segment
-                int bodyEndPos = position; // Position of END keyword
-                PackageSegments.FunctionSegment segment = new PackageSegments.FunctionSegment(
-                    currentFunctionName,
-                    currentFunctionStart,
-                    endPos,
-                    currentBodyStart,
-                    bodyEndPos,
-                    currentIsFunction
-                );
-                segments.addFunction(segment);
-
-                log.debug("Completed {} {} [{}..{}]",
-                    currentIsFunction ? "FUNCTION" : "PROCEDURE",
-                    currentFunctionName,
-                    currentFunctionStart, endPos);
-
-                // Back to package level
-                position = endPos - 1; // -1 because main loop increments
-                currentState = State.PACKAGE_LEVEL;
-            } else {
-                // This END closes a nested BEGIN block
-                position += "END".length() - 1; // -1 because main loop will increment
-            }
-        }
-    }
-
-    private void handleInString(char currentChar) {
-        if (currentChar == '\'') {
-            // Check if this is an escaped quote
-            if (position + 1 < source.length() && source.charAt(position + 1) == '\'') {
-                // Escaped quote, skip both
-                position++;
-            } else {
-                // String end, return to previous state
-                currentState = previousState;
-                previousState = null;
-            }
-        }
-    }
-
-    // ========== Helper Methods ==========
-
     /**
-     * Checks if a keyword appears at the given position with proper word boundaries.
-     *
-     * @param pos Position to check
-     * @param keyword Keyword to match (case-insensitive)
-     * @return true if keyword found at position
+     * Internal result class for scan operations.
      */
-    private boolean isKeywordAt(int pos, String keyword) {
-        // Check if enough characters remain
-        if (pos + keyword.length() > source.length()) {
-            return false;
-        }
+    private static class ScanResult {
+        final String functionName;
+        final int nextTokenIndex;
+        final boolean isForwardDeclaration;
+        final PackageSegments.FunctionSegment segment;
 
-        // Extract candidate
-        String candidate = source.substring(pos, pos + keyword.length());
-
-        // Case-insensitive match
-        if (!candidate.equalsIgnoreCase(keyword)) {
-            return false;
-        }
-
-        // Check word boundary before (if not at start)
-        if (pos > 0) {
-            char before = source.charAt(pos - 1);
-            if (Character.isLetterOrDigit(before) || before == '_' || before == '$' || before == '#') {
-                return false; // Part of identifier
-            }
-        }
-
-        // Check word boundary after (if not at end)
-        if (pos + keyword.length() < source.length()) {
-            char after = source.charAt(pos + keyword.length());
-            if (Character.isLetterOrDigit(after) || after == '_' || after == '$' || after == '#') {
-                return false; // Part of identifier
-            }
-        }
-
-        return true;
-    }
-
-    /**
-     * Skips whitespace characters from current position.
-     */
-    private void skipWhitespace() {
-        while (position < source.length() && Character.isWhitespace(source.charAt(position))) {
-            position++;
+        ScanResult(String functionName, int nextTokenIndex, boolean isForwardDeclaration,
+                   PackageSegments.FunctionSegment segment) {
+            this.functionName = functionName;
+            this.nextTokenIndex = nextTokenIndex;
+            this.isForwardDeclaration = isForwardDeclaration;
+            this.segment = segment;
         }
     }
 }
