@@ -172,8 +172,10 @@ curl "http://localhost:8080/api/jobs/{jobId}/status"
 - **[CTE_IMPLEMENTATION_PLAN.md](documentation/completed/CTE_IMPLEMENTATION_PLAN.md)** - CTE (WITH clause) implementation details
 - **[CONNECT_BY_IMPLEMENTATION_PLAN.md](CONNECT_BY_IMPLEMENTATION_PLAN.md)** - Hierarchical query transformation
 
+Example use case with Web-Gateway (mod-plsql simulator):
+http://localhost:8090/pls/myapp/user_robert.test.wbstart
 ---
 
 ## License
 
-[Add your license here]
+Open source

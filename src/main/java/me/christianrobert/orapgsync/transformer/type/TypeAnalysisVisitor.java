@@ -162,11 +162,28 @@ public class TypeAnalysisVisitor extends PlSqlParserBaseVisitor<TypeInfo> {
     /**
      * Override visit to ensure we always cache and return types for all nodes.
      * This ensures proper traversal and caching even for nodes we don't explicitly handle.
+     *
+     * <p><b>IMPORTANT:</b> This method checks the cache BEFORE visiting to prevent
+     * exponential re-visitation of deeply nested expressions (e.g., 65 nested replace() calls).
+     * Without this early-exit, patterns like visitChildren() followed by visit(child)
+     * would cause 2^n complexity.</p>
      */
     @Override
     public TypeInfo visit(org.antlr.v4.runtime.tree.ParseTree tree) {
         if (tree == null) {
             return TypeInfo.UNKNOWN;
+        }
+
+        // EARLY-EXIT: Check cache BEFORE visiting to prevent exponential re-visitation
+        // This is critical for deeply nested expressions (e.g., 65 nested replace() calls)
+        if (tree instanceof ParserRuleContext) {
+            ParserRuleContext ctx = (ParserRuleContext) tree;
+            String key = nodeKey(ctx);
+            TypeInfo cached = typeCache.get(key);
+            if (cached != null) {
+                log.trace("Cache hit for node at {}, returning {}", key, cached.getCategory());
+                return cached;
+            }
         }
 
         // Visit the node (calls appropriate visitXXX method or default)
@@ -203,18 +220,24 @@ public class TypeAnalysisVisitor extends PlSqlParserBaseVisitor<TypeInfo> {
      * Visit concatenation - handles all binary operators including arithmetic.
      *
      * <p>Delegates to ResolveOperator helper for actual operator type resolution.</p>
+     *
+     * <p><b>IMPORTANT:</b> After visitChildren(), child types are already cached.
+     * We MUST lookup from cache instead of re-visiting to avoid exponential complexity
+     * with deeply nested expressions (e.g., 65 nested replace() calls).</p>
      */
     @Override
     public TypeInfo visitConcatenation(ConcatenationContext ctx) {
         // Visit children first to populate type cache for operands
         visitChildren(ctx);
 
-        // Delegate operator resolution to helper
-        TypeInfo operatorType = ResolveOperator.resolve(ctx, this);
+        // Delegate operator resolution to helper (uses cache lookups, not re-visits)
+        TypeInfo operatorType = ResolveOperator.resolve(ctx, typeCache, this);
 
-        // If operator helper returns UNKNOWN, try visiting child model_expression
+        // If operator helper returns UNKNOWN, lookup child model_expression type from cache
+        // DO NOT call visit() here - it would re-visit already-visited children!
         if (operatorType.isUnknown() && ctx.model_expression() != null) {
-            TypeInfo childType = visit(ctx.model_expression());
+            String childKey = nodeKey(ctx.model_expression());
+            TypeInfo childType = typeCache.getOrDefault(childKey, TypeInfo.UNKNOWN);
             return cacheAndReturn(ctx, childType);
         }
 

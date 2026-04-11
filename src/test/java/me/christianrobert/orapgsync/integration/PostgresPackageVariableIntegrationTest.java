@@ -198,42 +198,52 @@ public class PostgresPackageVariableIntegrationTest extends PostgresSqlValidatio
         executeUpdate(resetResult.getPostgresSql());
 
         // STEP 7: Verify package variable behavior
-        System.out.println("\n=== STEP 7: Testing Package Variable Behavior ===");
+        // Package variables use transaction-local storage (set_config with is_local=true),
+        // so we must run all verification within a single transaction to test persistence.
+        // This matches web gateway behavior where each request runs in one transaction.
+        System.out.println("\n=== STEP 7: Testing Package Variable Behavior (in single transaction) ===");
 
-        // Initial value should be 0
-        List<Map<String, Object>> initialResult = executeQuery(
-            "SELECT hr.counter_pkg__get_counter() AS value"
-        );
-        assertEquals(0, ((Number) initialResult.get(0).get("value")).intValue(),
-            "Initial counter value should be 0");
-        System.out.println("✓ Initial value: 0");
+        connection.setAutoCommit(false);
+        try {
+            // Initial value should be 0
+            List<Map<String, Object>> initialResult = executeQuery(
+                "SELECT hr.counter_pkg__get_counter() AS value"
+            );
+            assertEquals(0, ((Number) initialResult.get(0).get("value")).intValue(),
+                "Initial counter value should be 0");
+            System.out.println("✓ Initial value: 0");
 
-        // Increment once
-        executeUpdate("SELECT hr.counter_pkg__increment_counter()");
-        List<Map<String, Object>> afterInc1 = executeQuery(
-            "SELECT hr.counter_pkg__get_counter() AS value"
-        );
-        assertEquals(1, ((Number) afterInc1.get(0).get("value")).intValue(),
-            "Counter should be 1 after one increment");
-        System.out.println("✓ After increment: 1");
+            // Increment once
+            executeUpdate("SELECT hr.counter_pkg__increment_counter()");
+            List<Map<String, Object>> afterInc1 = executeQuery(
+                "SELECT hr.counter_pkg__get_counter() AS value"
+            );
+            assertEquals(1, ((Number) afterInc1.get(0).get("value")).intValue(),
+                "Counter should be 1 after one increment");
+            System.out.println("✓ After increment: 1");
 
-        // Increment again
-        executeUpdate("SELECT hr.counter_pkg__increment_counter()");
-        List<Map<String, Object>> afterInc2 = executeQuery(
-            "SELECT hr.counter_pkg__get_counter() AS value"
-        );
-        assertEquals(2, ((Number) afterInc2.get(0).get("value")).intValue(),
-            "Counter should be 2 after two increments");
-        System.out.println("✓ After second increment: 2");
+            // Increment again
+            executeUpdate("SELECT hr.counter_pkg__increment_counter()");
+            List<Map<String, Object>> afterInc2 = executeQuery(
+                "SELECT hr.counter_pkg__get_counter() AS value"
+            );
+            assertEquals(2, ((Number) afterInc2.get(0).get("value")).intValue(),
+                "Counter should be 2 after two increments");
+            System.out.println("✓ After second increment: 2");
 
-        // Reset
-        executeUpdate("SELECT hr.counter_pkg__reset_counter()");
-        List<Map<String, Object>> afterReset = executeQuery(
-            "SELECT hr.counter_pkg__get_counter() AS value"
-        );
-        assertEquals(0, ((Number) afterReset.get(0).get("value")).intValue(),
-            "Counter should be 0 after reset");
-        System.out.println("✓ After reset: 0");
+            // Reset
+            executeUpdate("SELECT hr.counter_pkg__reset_counter()");
+            List<Map<String, Object>> afterReset = executeQuery(
+                "SELECT hr.counter_pkg__get_counter() AS value"
+            );
+            assertEquals(0, ((Number) afterReset.get(0).get("value")).intValue(),
+                "Counter should be 0 after reset");
+            System.out.println("✓ After reset: 0");
+
+            connection.commit();
+        } finally {
+            connection.setAutoCommit(true);
+        }
 
         System.out.println("\n✅ ALL PACKAGE VARIABLE TESTS PASSED!");
     }

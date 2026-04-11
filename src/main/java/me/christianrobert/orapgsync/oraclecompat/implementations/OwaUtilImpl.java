@@ -81,8 +81,9 @@ public class OwaUtilImpl {
             AS $$
             BEGIN
                 -- TODO: Full header support will be added in Phase 5
-                -- For now, store the content type in a session variable for the gateway to retrieve
-                PERFORM set_config('oracle_compat.content_type', p_content_type, false);
+                -- Store content type in transaction-local variable for the gateway to retrieve
+                -- Using transaction-local (true) ensures auto-reset when transaction commits
+                PERFORM set_config('oracle_compat.content_type', p_content_type, true);
 
                 IF p_close_header THEN
                     PERFORM oracle_compat.owa_util__http_header_close();
@@ -110,8 +111,9 @@ public class OwaUtilImpl {
             AS $$
             BEGIN
                 -- TODO: Full redirect support will be added in Phase 5
-                -- For now, store the redirect URL in a session variable for the gateway to retrieve
-                PERFORM set_config('oracle_compat.redirect_url', p_url, false);
+                -- Store redirect URL in transaction-local variable for the gateway to retrieve
+                -- Using transaction-local (true) ensures auto-reset when transaction commits
+                PERFORM set_config('oracle_compat.redirect_url', p_url, true);
 
                 IF p_close_header THEN
                     PERFORM oracle_compat.owa_util__http_header_close();

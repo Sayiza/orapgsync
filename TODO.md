@@ -38,4 +38,4 @@
 [x] make verify result get code only on request
 [ ] TO_NUMBER(TO_CHAR( not working
 [x] htp.p needs versions with casts
-[ ] package variables in htp are not reset!
+[x] package variables in htp are not reset!

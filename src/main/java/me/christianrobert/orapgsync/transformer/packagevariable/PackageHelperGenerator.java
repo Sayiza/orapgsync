@@ -17,7 +17,8 @@ import java.util.List;
  *   <li><strong>Setter functions:</strong> {@code pkg__set_varname(value)} - Sets variable value</li>
  * </ul>
  *
- * <p>Uses PostgreSQL {@code set_config}/{@code current_setting} for session-level state management.
+ * <p>Uses PostgreSQL {@code set_config}/{@code current_setting} for transaction-local state management.
+ * Variables automatically reset when the transaction commits, ensuring clean state between web requests.
  *
  * <p><strong>Usage Pattern:</strong>
  * <pre>
@@ -90,12 +91,12 @@ public class PackageHelperGenerator {
             String pgDefaultValue = transformDefaultValue(var.getDefaultValue(), var.getDataType());
 
             sql.append("  PERFORM set_config('").append(configKey).append("', '")
-               .append(escapeQuotes(pgDefaultValue)).append("', false);\n");
+               .append(escapeQuotes(pgDefaultValue)).append("', true);\n");
         }
 
         // Mark as initialized
         sql.append("\n  -- Mark as initialized (idempotent)\n");
-        sql.append("  PERFORM set_config('").append(initFlagKey).append("', 'true', false);\n");
+        sql.append("  PERFORM set_config('").append(initFlagKey).append("', 'true', true);\n");
         sql.append("END;\n");
         sql.append("$$;");
 

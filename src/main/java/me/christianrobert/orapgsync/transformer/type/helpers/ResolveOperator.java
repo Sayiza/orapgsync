@@ -3,10 +3,12 @@ package me.christianrobert.orapgsync.transformer.type.helpers;
 import me.christianrobert.orapgsync.antlr.PlSqlParser.ConcatenationContext;
 import me.christianrobert.orapgsync.transformer.type.TypeInfo;
 import me.christianrobert.orapgsync.transformer.type.TypeAnalysisVisitor;
+import org.antlr.v4.runtime.ParserRuleContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Static helper for resolving operator result types.
@@ -33,11 +35,16 @@ public final class ResolveOperator {
      *
      * <p>Handles all binary operators: *, /, +, -, **, MOD, ||</p>
      *
+     * <p><b>IMPORTANT:</b> This method uses cache lookups instead of visitor.visit()
+     * to avoid exponential re-visitation with deeply nested expressions.
+     * The caller (visitConcatenation) has already called visitChildren() to populate the cache.</p>
+     *
      * @param ctx Concatenation context
-     * @param visitor TypeAnalysisVisitor for visiting child nodes
+     * @param typeCache Type cache populated by visitChildren
+     * @param visitor TypeAnalysisVisitor for generating node keys
      * @return TypeInfo representing the result type
      */
-    public static TypeInfo resolve(ConcatenationContext ctx, TypeAnalysisVisitor visitor) {
+    public static TypeInfo resolve(ConcatenationContext ctx, Map<String, TypeInfo> typeCache, TypeAnalysisVisitor visitor) {
         if (ctx == null) {
             return TypeInfo.UNKNOWN;
         }
@@ -45,13 +52,13 @@ public final class ResolveOperator {
         // Check for binary operators
         if (ctx.ASTERISK() != null || ctx.SOLIDUS() != null) {
             // * multiplication or / division
-            return resolveArithmetic(ctx.concatenation(), visitor);
+            return resolveArithmetic(ctx.concatenation(), typeCache, visitor);
         }
 
         if (ctx.PLUS_SIGN() != null || ctx.MINUS_SIGN() != null) {
             // + addition or - subtraction
             // Special handling: DATE arithmetic
-            return resolvePlusMinus(ctx, visitor);
+            return resolvePlusMinus(ctx, typeCache, visitor);
         }
 
         if (ctx.DOUBLE_ASTERISK() != null) {
@@ -71,7 +78,7 @@ public final class ResolveOperator {
             return TypeInfo.TEXT;
         }
 
-        // No binary operator - return UNKNOWN (caller should visit model_expression)
+        // No binary operator - return UNKNOWN (caller should lookup model_expression from cache)
         return TypeInfo.UNKNOWN;
     }
 
@@ -85,15 +92,20 @@ public final class ResolveOperator {
      *   <li>NULL in any operand → NULL_TYPE</li>
      *   <li>Otherwise → UNKNOWN</li>
      * </ul>
+     *
+     * <p><b>IMPORTANT:</b> Uses cache lookup instead of visitor.visit() to avoid
+     * exponential re-visitation with deeply nested expressions.</p>
      */
     private static TypeInfo resolveArithmetic(List<ConcatenationContext> operands,
+                                               Map<String, TypeInfo> typeCache,
                                                TypeAnalysisVisitor visitor) {
         if (operands == null || operands.size() < 2) {
             return TypeInfo.UNKNOWN;
         }
 
-        TypeInfo left = visitor.visit(operands.get(0));
-        TypeInfo right = visitor.visit(operands.get(1));
+        // Lookup from cache instead of re-visiting
+        TypeInfo left = lookupType(operands.get(0), typeCache, visitor);
+        TypeInfo right = lookupType(operands.get(1), typeCache, visitor);
 
         log.trace("Arithmetic operator: {} op {}", left.getCategory(), right.getCategory());
 
@@ -124,16 +136,21 @@ public final class ResolveOperator {
      *   <li>NULL in any operand → NULL_TYPE</li>
      *   <li>Otherwise → UNKNOWN</li>
      * </ul>
+     *
+     * <p><b>IMPORTANT:</b> Uses cache lookup instead of visitor.visit() to avoid
+     * exponential re-visitation with deeply nested expressions.</p>
      */
     private static TypeInfo resolvePlusMinus(ConcatenationContext ctx,
+                                             Map<String, TypeInfo> typeCache,
                                              TypeAnalysisVisitor visitor) {
         List<ConcatenationContext> operands = ctx.concatenation();
         if (operands == null || operands.size() < 2) {
             return TypeInfo.UNKNOWN;
         }
 
-        TypeInfo left = visitor.visit(operands.get(0));
-        TypeInfo right = visitor.visit(operands.get(1));
+        // Lookup from cache instead of re-visiting
+        TypeInfo left = lookupType(operands.get(0), typeCache, visitor);
+        TypeInfo right = lookupType(operands.get(1), typeCache, visitor);
 
         boolean isPlus = ctx.PLUS_SIGN() != null;
         log.trace("{} operator: {} {} {}", (isPlus ? "+" : "-"),
@@ -163,5 +180,23 @@ public final class ResolveOperator {
 
         // Unknown operand types
         return TypeInfo.UNKNOWN;
+    }
+
+    /**
+     * Looks up type from cache for a given context.
+     *
+     * <p>This is the safe alternative to visitor.visit() that avoids re-visitation.</p>
+     *
+     * @param ctx Parse context to lookup
+     * @param typeCache Type cache populated by visitChildren
+     * @param visitor Visitor for generating node keys
+     * @return TypeInfo from cache, or UNKNOWN if not found
+     */
+    private static TypeInfo lookupType(ParserRuleContext ctx, Map<String, TypeInfo> typeCache, TypeAnalysisVisitor visitor) {
+        if (ctx == null) {
+            return TypeInfo.UNKNOWN;
+        }
+        String key = visitor.nodeKey(ctx);
+        return typeCache.getOrDefault(key, TypeInfo.UNKNOWN);
     }
 }

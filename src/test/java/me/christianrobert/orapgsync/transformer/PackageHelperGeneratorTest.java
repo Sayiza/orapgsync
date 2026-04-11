@@ -112,10 +112,10 @@ class PackageHelperGeneratorTest {
             .findFirst()
             .orElseThrow();
 
-        // Should use set_config for session-level variables
+        // Should use set_config for transaction-local variables
         assertTrue(initFunction.contains("set_config"));
         assertTrue(initFunction.contains("hr.emp_pkg.g_counter"));
-        assertTrue(initFunction.contains("false")); // is_local = false (session-level)
+        assertTrue(initFunction.contains("true")); // is_local = true (transaction-local, auto-reset on commit)
     }
 
     @Test

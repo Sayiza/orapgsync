@@ -90,6 +90,9 @@ public class PlsqlExecutor {
 
     /**
      * Initialize HTP buffer and CGI environment.
+     * <p>
+     * Session state (package variables, content-type, redirect URL) is automatically
+     * reset when the transaction commits because they use transaction-local storage.
      */
     private void initializeRequest(Connection conn, CgiEnvironment cgiEnv) throws SQLException {
         // Initialize buffer
