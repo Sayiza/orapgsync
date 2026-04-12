@@ -525,7 +525,7 @@ public class OracleFunctionExtractor {
         }
 
         // Try as function_body (no CREATE prefix - from parseFunctionBody)
-        // Grammar: function_body: FUNCTION identifier (...) RETURN type_spec ...
+        // Grammar: function_body: FUNCTION identifier ('(' parameter (',' parameter)* ')')? RETURN type_spec ...
         if (parseTree instanceof me.christianrobert.orapgsync.antlr.PlSqlParser.Function_bodyContext) {
             me.christianrobert.orapgsync.antlr.PlSqlParser.Function_bodyContext funcCtx =
                 (me.christianrobert.orapgsync.antlr.PlSqlParser.Function_bodyContext) parseTree;
@@ -536,6 +536,9 @@ public class OracleFunctionExtractor {
             // Create metadata
             FunctionMetadata metadata = new FunctionMetadata(schema.toLowerCase(), functionName, "FUNCTION");
             metadata.setPackageName(packageName.toLowerCase());
+
+            // Extract parameters
+            extractParametersFromContext(funcCtx.parameter(), metadata);
 
             // Extract return type
             if (funcCtx.type_spec() != null) {
@@ -549,7 +552,7 @@ public class OracleFunctionExtractor {
         }
 
         // Try as procedure_body (no CREATE prefix - from parseProcedureBody)
-        // Grammar: procedure_body: PROCEDURE identifier (...) ...
+        // Grammar: procedure_body: PROCEDURE identifier ('(' parameter (',' parameter)* ')')? ...
         if (parseTree instanceof me.christianrobert.orapgsync.antlr.PlSqlParser.Procedure_bodyContext) {
             me.christianrobert.orapgsync.antlr.PlSqlParser.Procedure_bodyContext procCtx =
                 (me.christianrobert.orapgsync.antlr.PlSqlParser.Procedure_bodyContext) parseTree;
@@ -561,11 +564,14 @@ public class OracleFunctionExtractor {
             FunctionMetadata metadata = new FunctionMetadata(schema.toLowerCase(), procedureName, "PROCEDURE");
             metadata.setPackageName(packageName.toLowerCase());
 
+            // Extract parameters
+            extractParametersFromContext(procCtx.parameter(), metadata);
+
             return metadata;
         }
 
         // Try as create_function_body (with CREATE prefix)
-        // Grammar: create_function_body: CREATE (OR REPLACE)? ... FUNCTION function_name ...
+        // Grammar: create_function_body: CREATE (OR REPLACE)? ... FUNCTION function_name ('(' parameter (',' parameter)* ')')? ...
         if (parseTree instanceof me.christianrobert.orapgsync.antlr.PlSqlParser.Create_function_bodyContext) {
             me.christianrobert.orapgsync.antlr.PlSqlParser.Create_function_bodyContext funcCtx =
                 (me.christianrobert.orapgsync.antlr.PlSqlParser.Create_function_bodyContext) parseTree;
@@ -576,6 +582,9 @@ public class OracleFunctionExtractor {
             // Create metadata
             FunctionMetadata metadata = new FunctionMetadata(schema.toLowerCase(), functionName, "FUNCTION");
             metadata.setPackageName(packageName.toLowerCase());
+
+            // Extract parameters
+            extractParametersFromContext(funcCtx.parameter(), metadata);
 
             // Extract return type
             if (funcCtx.type_spec() != null) {
@@ -589,7 +598,7 @@ public class OracleFunctionExtractor {
         }
 
         // Try as create_procedure_body (with CREATE prefix)
-        // Grammar: create_procedure_body: CREATE (OR REPLACE)? ... PROCEDURE procedure_name ...
+        // Grammar: create_procedure_body: CREATE (OR REPLACE)? PROCEDURE procedure_name ('(' parameter (',' parameter)* ')')? ...
         if (parseTree instanceof me.christianrobert.orapgsync.antlr.PlSqlParser.Create_procedure_bodyContext) {
             me.christianrobert.orapgsync.antlr.PlSqlParser.Create_procedure_bodyContext procCtx =
                 (me.christianrobert.orapgsync.antlr.PlSqlParser.Create_procedure_bodyContext) parseTree;
@@ -600,6 +609,9 @@ public class OracleFunctionExtractor {
             // Create metadata
             FunctionMetadata metadata = new FunctionMetadata(schema.toLowerCase(), procedureName, "PROCEDURE");
             metadata.setPackageName(packageName.toLowerCase());
+
+            // Extract parameters
+            extractParametersFromContext(procCtx.parameter(), metadata);
 
             return metadata;
         }
@@ -643,5 +655,71 @@ public class OracleFunctionExtractor {
 
         // Fallback: return the entire text
         return typeSpecCtx.getText().toUpperCase();
+    }
+
+    /**
+     * Extracts parameters from a list of ANTLR ParameterContext nodes.
+     * Used for package-private functions where parameters are parsed from the stub.
+     *
+     * Grammar: parameter: parameter_name (IN | OUT | INOUT | NOCOPY)* type_spec? default_value_part?
+     *
+     * @param parameterContexts List of ParameterContext nodes from the parsed function/procedure
+     * @param metadata The FunctionMetadata to add parameters to
+     */
+    private static void extractParametersFromContext(
+            List<me.christianrobert.orapgsync.antlr.PlSqlParser.ParameterContext> parameterContexts,
+            FunctionMetadata metadata) {
+
+        if (parameterContexts == null || parameterContexts.isEmpty()) {
+            return;
+        }
+
+        int position = 1; // Oracle uses 1-based positions
+        for (me.christianrobert.orapgsync.antlr.PlSqlParser.ParameterContext paramCtx : parameterContexts) {
+            // Extract parameter name
+            String paramName = paramCtx.parameter_name().getText().toLowerCase();
+
+            // Extract IN/OUT mode
+            // Grammar allows: (IN | OUT | INOUT | NOCOPY)*
+            String inOut = "IN"; // Default is IN
+            if (paramCtx.OUT() != null && !paramCtx.OUT().isEmpty()) {
+                if (paramCtx.IN() != null && !paramCtx.IN().isEmpty()) {
+                    inOut = "IN OUT";
+                } else if (paramCtx.INOUT() != null && !paramCtx.INOUT().isEmpty()) {
+                    inOut = "IN OUT";
+                } else {
+                    inOut = "OUT";
+                }
+            } else if (paramCtx.INOUT() != null && !paramCtx.INOUT().isEmpty()) {
+                inOut = "IN OUT";
+            }
+
+            // Extract data type
+            String dataType = null;
+            if (paramCtx.type_spec() != null) {
+                dataType = extractTypeFromTypeSpec(paramCtx.type_spec());
+            }
+
+            // Create and add parameter
+            FunctionParameter param = new FunctionParameter(paramName, position, dataType, inOut);
+
+            // Check for custom (user-defined) types
+            if (paramCtx.type_spec() != null && paramCtx.type_spec().type_name() != null) {
+                me.christianrobert.orapgsync.antlr.PlSqlParser.Type_nameContext typeName = paramCtx.type_spec().type_name();
+                // type_name can be: id_expression ('.' id_expression)*
+                // For user-defined types like SCHEMA.TYPE_NAME
+                String typeText = typeName.getText();
+                if (typeText.contains(".")) {
+                    String[] parts = typeText.split("\\.", 2);
+                    param.setCustomDataType(true);
+                    param.setDataTypeOwner(parts[0].toLowerCase());
+                    param.setDataTypeName(parts[1].toLowerCase());
+                }
+            }
+
+            metadata.addParameter(param);
+            log.trace("Extracted parameter: {} {} {} (position {})", paramName, inOut, dataType, position);
+            position++;
+        }
     }
 }

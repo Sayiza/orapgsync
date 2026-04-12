@@ -704,6 +704,38 @@ public class TransformationContext {
     }
 
     /**
+     * Checks if a package name is an Oracle compatibility package.
+     *
+     * <p>These packages are provided in the oracle_compat schema and should not be
+     * prefixed with the current schema during transformation. They include:</p>
+     * <ul>
+     *   <li>HTP - Hypertext Procedures (web output buffer)</li>
+     *   <li>HTF - Hypertext Functions (return HTML strings)</li>
+     *   <li>OWA - Oracle Web Agent (request initialization)</li>
+     *   <li>OWA_UTIL - OWA Utilities (CGI environment, redirects)</li>
+     *   <li>OWA_COOKIE - Cookie handling</li>
+     *   <li>DBMS_OUTPUT - Debug output</li>
+     *   <li>DBMS_UTILITY - Utility functions</li>
+     *   <li>DBMS_LOB - Large object handling</li>
+     *   <li>UTL_FILE - File I/O</li>
+     * </ul>
+     *
+     * @param packageName Package name to check (case-insensitive)
+     * @return true if it's an Oracle compatibility package
+     */
+    public boolean isOracleCompatibilityPackage(String packageName) {
+        if (packageName == null) {
+            return false;
+        }
+        String upper = packageName.toUpperCase();
+        return switch (upper) {
+            case "HTP", "HTF", "OWA", "OWA_UTIL", "OWA_COOKIE",
+                 "DBMS_OUTPUT", "DBMS_UTILITY", "DBMS_LOB", "UTL_FILE" -> true;
+            default -> false;
+        };
+    }
+
+    /**
      * Gets all fields of an object type.
      *
      * @param qualifiedTypeName Qualified type name (e.g., "hr.address_type")
