@@ -301,7 +301,19 @@ public class VisitProcedureBody {
 
         // Extract parameter type
         String oracleType = paramCtx.type_spec().getText();
-        String postgresType = TypeConverter.toPostgre(oracleType);
+
+        // Check for package-qualified type (e.g., packageName.typeName)
+        TransformationContext context = b.getContext();
+        TransformationContext.PackageTypeResolution pkgTypeResolution = context.resolvePackageQualifiedType(oracleType);
+
+        String postgresType;
+        if (pkgTypeResolution != null) {
+            // Package-qualified type resolved
+            postgresType = pkgTypeResolution.postgresType();
+        } else {
+            // Regular type - use TypeConverter
+            postgresType = TypeConverter.toPostgre(oracleType);
+        }
 
         // Parameters are never CONSTANT in the DECLARE sense (though they may be IN parameters)
         // Parameters typically don't have default values in the body scope (default values are in signature)
@@ -314,6 +326,6 @@ public class VisitProcedureBody {
             null    // parameters are simple types, not inline types
         );
 
-        b.getContext().registerVariable(paramName, paramDef);
+        context.registerVariable(paramName, paramDef);
     }
 }

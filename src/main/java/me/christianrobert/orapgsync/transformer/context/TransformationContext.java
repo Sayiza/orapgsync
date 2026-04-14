@@ -1006,4 +1006,147 @@ public class TransformationContext {
     public int getVariableScopeDepth() {
         return variableScopeStack.size();
     }
+
+    // ========== Package-Qualified Type Resolution ==========
+
+    /**
+     * Result of package-qualified type resolution.
+     *
+     * <p>Either contains an inline type definition (for RECORD, TABLE OF, etc.)
+     * or a PostgreSQL type string (for composite types or defaulting to jsonb).</p>
+     *
+     * <p>Usage:</p>
+     * <ul>
+     *   <li>Variable declarations: Use both postgresType and inlineType (for initialization)</li>
+     *   <li>Parameters and return types: Use only postgresType</li>
+     * </ul>
+     */
+    public record PackageTypeResolution(String postgresType, InlineTypeDefinition inlineType) {
+        public static PackageTypeResolution ofType(String postgresType) {
+            return new PackageTypeResolution(postgresType, null);
+        }
+
+        public static PackageTypeResolution ofInlineType(InlineTypeDefinition inlineType) {
+            return new PackageTypeResolution("jsonb", inlineType);
+        }
+    }
+
+    /**
+     * Resolves a package-qualified type reference like "packageName.typeName".
+     *
+     * <p>This method distinguishes between:</p>
+     * <ul>
+     *   <li>Schema-qualified object types (e.g., "HR.ADDRESS_TYPE") → returns null (use TypeConverter)</li>
+     *   <li>Package-qualified types (e.g., "packageName.typeName") → resolves via PackageContext or defaults to jsonb</li>
+     *   <li>Oracle compatibility package types (e.g., "HTP.PageType") → oracle_compat.htp__pagetype</li>
+     * </ul>
+     *
+     * <p>Resolution order:</p>
+     * <ol>
+     *   <li>Check if type contains "." (dotted notation)</li>
+     *   <li>Check if it's a known object type (schema.type) → return null (use normal path)</li>
+     *   <li>Check if it's an Oracle compatibility package → oracle_compat.package__type</li>
+     *   <li>Resolve package name via synonym lookup to find actual schema</li>
+     *   <li>Try to resolve from PackageContext (inline type like RECORD) → jsonb with InlineTypeDefinition</li>
+     *   <li>Package type not found → default to jsonb</li>
+     * </ol>
+     *
+     * <p>Usage:</p>
+     * <pre>
+     * // In variable declaration, parameter, or return type handling:
+     * PackageTypeResolution resolution = context.resolvePackageQualifiedType(oracleType);
+     * if (resolution != null) {
+     *     // Use resolution.postgresType() for the type
+     *     // Use resolution.inlineType() for initialization (variables only)
+     * } else {
+     *     // Not a package type - use TypeConverter.toPostgre()
+     * }
+     * </pre>
+     *
+     * @param oracleType Oracle type specification (e.g., "packageName.typeName")
+     * @return PackageTypeResolution or null if not a package-qualified type
+     */
+    public PackageTypeResolution resolvePackageQualifiedType(String oracleType) {
+        // Only applies to dotted types (package.type syntax)
+        if (oracleType == null || !oracleType.contains(".")) {
+            return null;
+        }
+
+        // Skip if contains % (e.g., table.column%TYPE) - handled separately
+        if (oracleType.toUpperCase().contains("%")) {
+            return null;
+        }
+
+        String[] parts = oracleType.split("\\.", 2);
+        if (parts.length != 2) {
+            return null;
+        }
+
+        String firstPart = parts[0].trim();
+        String secondPart = parts[1].trim();
+
+        // STEP 1: Check if this is a schema-qualified object type (e.g., "HR.ADDRESS_TYPE")
+        // Object types are defined at schema level, not inside packages
+        String qualifiedAsObjectType = qualifyTypeName(oracleType);
+        if (isObjectType(qualifiedAsObjectType)) {
+            // It's an object type - return null to let normal path handle it
+            // (TypeConverter will handle schema.type correctly)
+            return null;
+        }
+
+        // Also check if firstPart.secondPart could be schema.objecttype
+        String potentialObjectType = firstPart.toLowerCase() + "." + secondPart.toLowerCase();
+        if (isObjectType(potentialObjectType)) {
+            // It's a schema-qualified object type - let TypeConverter handle it
+            return null;
+        }
+
+        // STEP 2: Not an object type - treat as package.type
+        String packageName = firstPart;
+        String typeName = secondPart;
+
+        // STEP 3: Check if it's an Oracle compatibility package
+        if (isOracleCompatibilityPackage(packageName)) {
+            // Oracle compat types go to oracle_compat schema
+            String flattenedType = "oracle_compat." + packageName.toLowerCase() + "__" + typeName.toLowerCase();
+            return PackageTypeResolution.ofType(flattenedType);
+        }
+
+        // STEP 4: Resolve package name via synonym lookup to find actual schema
+        // This handles cases like: functionName → packageName.functionName
+        String resolvedSchema = currentSchema.toLowerCase();
+        String resolvedPackageName = packageName.toLowerCase();
+
+        String synonymTarget = resolveSynonym(packageName);
+        if (synonymTarget != null) {
+            // Synonym resolved to "schema.package" or just "package"
+            String[] synonymParts = synonymTarget.toLowerCase().split("\\.");
+            if (synonymParts.length == 2) {
+                // "schema.package" format
+                resolvedSchema = synonymParts[0];
+                resolvedPackageName = synonymParts[1];
+            } else if (synonymParts.length == 1) {
+                // Just "package" - use current schema
+                resolvedPackageName = synonymParts[0];
+            }
+        }
+
+        // STEP 5: Try to resolve from PackageContext (inline type like RECORD, TABLE OF)
+        // Use resolved package name for lookup
+        PackageContext pkgCtx = getPackageContext(resolvedPackageName);
+        if (pkgCtx != null && pkgCtx.hasType(typeName)) {
+            // Found as inline type - return jsonb with the inline type definition
+            InlineTypeDefinition inlineType = pkgCtx.getType(typeName);
+            return PackageTypeResolution.ofInlineType(inlineType);
+        }
+
+        // STEP 6: Package type not found in PackageContext
+        // This handles SUBTYPEs, TYPE aliases, and other unextracted package types.
+        // Following the "all complex types to jsonb" strategy, we default to jsonb.
+        // Most Oracle package types (RECORD, SUBTYPE of RECORD, etc.) are structure-like
+        // and jsonb is a safe, universal representation.
+        System.err.println("Warning: Package type '" + packageName + "." + typeName +
+            "' not found in PackageContext. Defaulting to jsonb.");
+        return PackageTypeResolution.ofType("jsonb");
+    }
 }

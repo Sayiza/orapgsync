@@ -97,7 +97,18 @@ public class VisitFunctionBody {
         if (ctx.type_spec() != null) {
             // Get Oracle type text and convert to PostgreSQL type
             String oracleType = ctx.type_spec().getText();
-            returnType = TypeConverter.toPostgre(oracleType);
+
+            // Check for package-qualified type (e.g., packageName.typeName)
+            TransformationContext.PackageTypeResolution pkgTypeResolution =
+                b.getContext().resolvePackageQualifiedType(oracleType);
+
+            if (pkgTypeResolution != null) {
+                // Package-qualified type resolved
+                returnType = pkgTypeResolution.postgresType();
+            } else {
+                // Regular type - use TypeConverter
+                returnType = TypeConverter.toPostgre(oracleType);
+            }
         } else {
             // Fallback if type_spec is missing (shouldn't happen for valid Oracle functions)
             returnType = "numeric";
@@ -277,7 +288,19 @@ public class VisitFunctionBody {
 
         // Extract parameter type
         String oracleType = paramCtx.type_spec().getText();
-        String postgresType = TypeConverter.toPostgre(oracleType);
+
+        // Check for package-qualified type (e.g., packageName.typeName)
+        TransformationContext context = b.getContext();
+        TransformationContext.PackageTypeResolution pkgTypeResolution = context.resolvePackageQualifiedType(oracleType);
+
+        String postgresType;
+        if (pkgTypeResolution != null) {
+            // Package-qualified type resolved
+            postgresType = pkgTypeResolution.postgresType();
+        } else {
+            // Regular type - use TypeConverter
+            postgresType = TypeConverter.toPostgre(oracleType);
+        }
 
         // Parameters are never CONSTANT in the DECLARE sense (though they may be IN parameters)
         // Parameters typically don't have default values in the body scope (default values are in signature)
@@ -290,7 +313,7 @@ public class VisitFunctionBody {
             null    // parameters are simple types, not inline types
         );
 
-        b.getContext().registerVariable(paramName, paramDef);
+        context.registerVariable(paramName, paramDef);
     }
 }
 

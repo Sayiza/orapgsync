@@ -2,6 +2,7 @@ package me.christianrobert.orapgsync.transformer.builder;
 
 import me.christianrobert.orapgsync.antlr.PlSqlParser;
 import me.christianrobert.orapgsync.core.tools.TypeConverter;
+import me.christianrobert.orapgsync.transformer.context.TransformationContext;
 
 /**
  * Static helper for visiting PL/SQL function/procedure parameters.
@@ -88,9 +89,20 @@ public class VisitParameter {
             // Get Oracle type text from AST
             String oracleType = ctx.type_spec().getText();
 
-            // Convert to PostgreSQL type
-            // TODO: Handle %TYPE, %ROWTYPE, REF types
-            String postgresType = TypeConverter.toPostgre(oracleType);
+            // Check for package-qualified type (e.g., packageName.typeName)
+            // This handles Oracle compatibility packages and package types that should be jsonb
+            TransformationContext context = b.getContext();
+            TransformationContext.PackageTypeResolution pkgTypeResolution = context.resolvePackageQualifiedType(oracleType);
+
+            String postgresType;
+            if (pkgTypeResolution != null) {
+                // Package-qualified type resolved
+                postgresType = pkgTypeResolution.postgresType();
+            } else {
+                // Regular type - use TypeConverter
+                // TODO: Handle %TYPE, %ROWTYPE, REF types
+                postgresType = TypeConverter.toPostgre(oracleType);
+            }
             result.append(postgresType);
         } else {
             // Type might be missing in some Oracle syntax variants

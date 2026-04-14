@@ -4,7 +4,6 @@ import me.christianrobert.orapgsync.antlr.PlSqlParser;
 import me.christianrobert.orapgsync.core.tools.TypeConverter;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
 import me.christianrobert.orapgsync.transformer.inline.InlineTypeDefinition;
-import me.christianrobert.orapgsync.transformer.packagevariable.PackageContext;
 
 /**
  * Static helper for visiting PL/SQL variable declarations.
@@ -113,13 +112,13 @@ public class VisitVariable_declaration {
             // Extract and use the actual PostgreSQL type
             postgresType = resolveSimpleTypeFromReference(oracleType, context, varName);
         } else {
-            // STEP 3d: Check for package-qualified type (e.g., puDocProcess.Process)
-            PackageTypeResolution pkgTypeResolution = resolvePackageQualifiedType(oracleType, context);
+            // STEP 3d: Check for package-qualified type (e.g., packageName.typeName)
+            TransformationContext.PackageTypeResolution pkgTypeResolution = context.resolvePackageQualifiedType(oracleType);
 
             if (pkgTypeResolution != null) {
-                if (pkgTypeResolution.inlineType != null) {
+                if (pkgTypeResolution.inlineType() != null) {
                     // Package inline type (RECORD, TABLE OF) → jsonb
-                    inlineType = pkgTypeResolution.inlineType;
+                    inlineType = pkgTypeResolution.inlineType();
                     postgresType = "jsonb";
 
                     // Add automatic initialization if no explicit default
@@ -127,8 +126,8 @@ public class VisitVariable_declaration {
                         autoInitializer = inlineType.getInitializer();
                     }
                 } else {
-                    // Package composite type → flattened name
-                    postgresType = pkgTypeResolution.postgresType;
+                    // Package composite type → flattened name or jsonb default
+                    postgresType = pkgTypeResolution.postgresType();
                 }
             } else {
                 // REGULAR TYPE: Convert using TypeConverter
@@ -493,126 +492,4 @@ public class VisitVariable_declaration {
         return TypeConverter.toPostgre(oracleType);
     }
 
-    // ========== Package-Qualified Type Resolution ==========
-
-    /**
-     * Result of package-qualified type resolution.
-     *
-     * <p>Either contains an inline type definition (for RECORD, TABLE OF, etc.)
-     * or a PostgreSQL type string (for composite types).</p>
-     */
-    private record PackageTypeResolution(String postgresType, InlineTypeDefinition inlineType) {
-        static PackageTypeResolution ofType(String postgresType) {
-            return new PackageTypeResolution(postgresType, null);
-        }
-
-        static PackageTypeResolution ofInlineType(InlineTypeDefinition inlineType) {
-            return new PackageTypeResolution("jsonb", inlineType);
-        }
-    }
-
-    /**
-     * Resolves a package-qualified type reference like "puDocProcess.Process".
-     *
-     * <p>This method distinguishes between:</p>
-     * <ul>
-     *   <li>Schema-qualified object types (e.g., "HR.ADDRESS_TYPE") → use qualifyTypeName()</li>
-     *   <li>Package-qualified types (e.g., "puDocProcess.Process") → flatten to schema.package__type</li>
-     *   <li>Oracle compatibility package types (e.g., "HTP.PageType") → oracle_compat.htp__pagetype</li>
-     * </ul>
-     *
-     * <p>Resolution order:</p>
-     * <ol>
-     *   <li>Check if type contains "." (dotted notation)</li>
-     *   <li>Check if it's a known object type (schema.type) → return null (use normal path)</li>
-     *   <li>Check if it's an Oracle compatibility package → oracle_compat.package__type</li>
-     *   <li>Resolve package name via synonym lookup to find actual schema</li>
-     *   <li>Try to resolve from PackageContext (inline type like RECORD) → jsonb</li>
-     *   <li>Assume composite type → schema.package__type (flattened)</li>
-     * </ol>
-     *
-     * @param oracleType Oracle type specification (e.g., "puDocProcess.Process")
-     * @param context Transformation context
-     * @return PackageTypeResolution or null if not a package-qualified type
-     */
-    private static PackageTypeResolution resolvePackageQualifiedType(String oracleType,
-                                                                      TransformationContext context) {
-        // Only applies to dotted types (package.type syntax)
-        if (oracleType == null || !oracleType.contains(".")) {
-            return null;
-        }
-
-        // Skip if contains % (e.g., table.column%TYPE) - handled separately
-        if (oracleType.toUpperCase().contains("%")) {
-            return null;
-        }
-
-        String[] parts = oracleType.split("\\.", 2);
-        if (parts.length != 2) {
-            return null;
-        }
-
-        String firstPart = parts[0].trim();
-        String secondPart = parts[1].trim();
-
-        // STEP 1: Check if this is a schema-qualified object type (e.g., "HR.ADDRESS_TYPE")
-        // Object types are defined at schema level, not inside packages
-        String qualifiedAsObjectType = context.qualifyTypeName(oracleType);
-        if (context.isObjectType(qualifiedAsObjectType)) {
-            // It's an object type - return null to let normal path handle it
-            // (TypeConverter will handle schema.type correctly)
-            return null;
-        }
-
-        // Also check if firstPart.secondPart could be schema.objecttype
-        String potentialObjectType = firstPart.toLowerCase() + "." + secondPart.toLowerCase();
-        if (context.isObjectType(potentialObjectType)) {
-            // It's a schema-qualified object type - let TypeConverter handle it
-            return null;
-        }
-
-        // STEP 2: Not an object type - treat as package.type
-        String packageName = firstPart;
-        String typeName = secondPart;
-
-        // STEP 3: Check if it's an Oracle compatibility package
-        if (context.isOracleCompatibilityPackage(packageName)) {
-            // Oracle compat types go to oracle_compat schema
-            String flattenedType = "oracle_compat." + packageName.toLowerCase() + "__" + typeName.toLowerCase();
-            return PackageTypeResolution.ofType(flattenedType);
-        }
-
-        // STEP 4: Resolve package name via synonym lookup to find actual schema
-        // This handles cases like: puDocProcess → co_sys_libs.pudocprocess
-        String resolvedSchema = context.getCurrentSchema().toLowerCase();
-        String resolvedPackageName = packageName.toLowerCase();
-
-        String synonymTarget = context.resolveSynonym(packageName);
-        if (synonymTarget != null) {
-            // Synonym resolved to "schema.package" or just "package"
-            String[] synonymParts = synonymTarget.toLowerCase().split("\\.");
-            if (synonymParts.length == 2) {
-                // "schema.package" format
-                resolvedSchema = synonymParts[0];
-                resolvedPackageName = synonymParts[1];
-            } else if (synonymParts.length == 1) {
-                // Just "package" - use current schema
-                resolvedPackageName = synonymParts[0];
-            }
-        }
-
-        // STEP 5: Try to resolve from PackageContext (inline type like RECORD, TABLE OF)
-        // Use resolved package name for lookup
-        PackageContext pkgCtx = context.getPackageContext(resolvedPackageName);
-        if (pkgCtx != null && pkgCtx.hasType(typeName)) {
-            // Found as inline type - return jsonb with the inline type definition
-            InlineTypeDefinition inlineType = pkgCtx.getType(typeName);
-            return PackageTypeResolution.ofInlineType(inlineType);
-        }
-
-        // STEP 6: Package type not found as inline - assume composite type
-        // Flatten to schema.package__type using resolved schema
-        String flattenedType = resolvedSchema + "." + resolvedPackageName + "__" + typeName.toLowerCase();
-        return PackageTypeResolution.ofType(flattenedType);
-    }
 }
