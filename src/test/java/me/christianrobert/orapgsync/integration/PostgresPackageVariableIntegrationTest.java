@@ -557,4 +557,573 @@ public class PostgresPackageVariableIntegrationTest extends PostgresSqlValidatio
         System.out.println("✓ Calculated total: 120");
         System.out.println("\n✅ COMPLEX EXPRESSION TEST PASSED!");
     }
+
+    // =========================================================================
+    // Phase 6: Complex Type Integration Tests (RECORD, TABLE OF, INDEX BY)
+    // =========================================================================
+
+    /**
+     * Test 5: RECORD type package variable - field access and assignment.
+     *
+     * <p>Validates:
+     * <ul>
+     *   <li>RECORD type extraction from package spec</li>
+     *   <li>RECORD variable getter returns jsonb</li>
+     *   <li>RECORD variable setter accepts jsonb</li>
+     *   <li>Field access transformation (->> with type cast)</li>
+     *   <li>Field assignment transformation (jsonb_set)</li>
+     *   <li>End-to-end execution in PostgreSQL</li>
+     * </ul>
+     */
+    @Test
+    void recordTypeVariable_fieldAccessAndAssignment() throws SQLException {
+        // Oracle package with RECORD type
+        String oraclePackageSpec = """
+            CREATE OR REPLACE PACKAGE hr.salary_pkg AS
+              TYPE salary_range_t IS RECORD (
+                min_sal NUMBER,
+                max_sal NUMBER,
+                currency VARCHAR2(3)
+              );
+
+              g_range salary_range_t;
+
+              FUNCTION get_min_salary RETURN NUMBER;
+              FUNCTION get_max_salary RETURN NUMBER;
+              PROCEDURE set_salary_range(p_min NUMBER, p_max NUMBER);
+              FUNCTION get_range_info RETURN VARCHAR2;
+            END salary_pkg;
+            """;
+
+        System.out.println("\n=== RECORD TYPE INTEGRATION TEST ===");
+
+        // Extract package context (should include RECORD type)
+        PackageContextExtractor extractor = new PackageContextExtractor(new me.christianrobert.orapgsync.transformer.parser.AntlrParser());
+        PackageContext packageContext = extractor.extractContext("hr", "salary_pkg", oraclePackageSpec);
+
+        // Verify type extraction
+        assertNotNull(packageContext.getType("salary_range_t"), "Should extract RECORD type");
+        assertTrue(packageContext.hasVariable("g_range"), "Should have g_range variable");
+
+        System.out.println("✓ Extracted RECORD type: salary_range_t");
+        System.out.println("✓ Extracted variable: g_range");
+
+        // Generate and execute helpers
+        PackageHelperGenerator generator = new PackageHelperGenerator();
+        List<String> helperSqls = generator.generateHelperSql(packageContext);
+        System.out.println("\n=== Generated Helper Functions ===");
+        for (String sql : helperSqls) {
+            System.out.println(sql);
+            System.out.println("---");
+            executeUpdate(sql);
+        }
+
+        // Build package context cache
+        Map<String, PackageContext> packageContextCache = new HashMap<>();
+        packageContextCache.put("hr.salary_pkg", packageContext);
+
+        // Transform get_min_salary (field access on RHS)
+        String getMinSalaryOracle = """
+            FUNCTION get_min_salary RETURN NUMBER IS
+            BEGIN
+              RETURN g_range.min_sal;
+            END;
+            """;
+
+        TransformationResult getMinResult = transformationService.transformFunction(
+            getMinSalaryOracle, "hr", indices, packageContextCache, "get_min_salary", "salary_pkg"
+        );
+        assertTrue(getMinResult.isSuccess(), "get_min_salary transformation should succeed: " + getMinResult.getErrorMessage());
+
+        System.out.println("\n=== Transformed get_min_salary ===");
+        System.out.println(getMinResult.getPostgresSql());
+
+        // Verify field access transformation
+        assertTrue(getMinResult.getPostgresSql().contains("salary_pkg__get_g_range()"),
+            "Should use getter for g_range");
+        assertTrue(getMinResult.getPostgresSql().contains("->>'min_sal'"),
+            "Should access min_sal field with ->>");
+        assertTrue(getMinResult.getPostgresSql().contains("::numeric"),
+            "Should cast to numeric");
+
+        executeUpdate(getMinResult.getPostgresSql());
+
+        // Transform set_salary_range (field assignment on LHS)
+        String setSalaryRangeOracle = """
+            PROCEDURE set_salary_range(p_min NUMBER, p_max NUMBER) IS
+            BEGIN
+              g_range.min_sal := p_min;
+              g_range.max_sal := p_max;
+              g_range.currency := 'USD';
+            END;
+            """;
+
+        TransformationResult setRangeResult = transformationService.transformProcedure(
+            setSalaryRangeOracle, "hr", indices, packageContextCache, "set_salary_range", "salary_pkg"
+        );
+        assertTrue(setRangeResult.isSuccess(), "set_salary_range transformation should succeed: " + setRangeResult.getErrorMessage());
+
+        System.out.println("\n=== Transformed set_salary_range ===");
+        System.out.println(setRangeResult.getPostgresSql());
+
+        // Verify field assignment transformation
+        assertTrue(setRangeResult.getPostgresSql().contains("PERFORM"),
+            "Should use PERFORM for setter");
+        assertTrue(setRangeResult.getPostgresSql().contains("salary_pkg__set_g_range"),
+            "Should use setter");
+        assertTrue(setRangeResult.getPostgresSql().contains("jsonb_set"),
+            "Should use jsonb_set for field assignment");
+
+        executeUpdate(setRangeResult.getPostgresSql());
+
+        // Execute and verify
+        System.out.println("\n=== Executing and Verifying ===");
+
+        connection.setAutoCommit(false);
+        try {
+            // Set salary range
+            executeUpdate("SELECT hr.salary_pkg__set_salary_range(1000, 5000)");
+
+            // Get min salary
+            List<Map<String, Object>> minResult = executeQuery(
+                "SELECT hr.salary_pkg__get_min_salary() AS min_sal"
+            );
+            assertEquals(1000, ((Number) minResult.get(0).get("min_sal")).intValue(),
+                "Min salary should be 1000");
+            System.out.println("✓ Min salary: 1000");
+
+            // Verify the full RECORD via getter
+            List<Map<String, Object>> rangeResult = executeQuery(
+                "SELECT hr.salary_pkg__get_g_range() AS g_range"
+            );
+            // Note: PostgreSQL jsonb returns as PGobject, use toString()
+            String rangeJson = rangeResult.get(0).get("g_range").toString();
+            System.out.println("✓ Full range JSON: " + rangeJson);
+            assertTrue(rangeJson.contains("\"min_sal\""), "Should have min_sal field");
+            assertTrue(rangeJson.contains("\"max_sal\""), "Should have max_sal field");
+            assertTrue(rangeJson.contains("\"currency\""), "Should have currency field");
+
+            connection.commit();
+        } finally {
+            connection.setAutoCommit(true);
+        }
+
+        System.out.println("\n✅ RECORD TYPE INTEGRATION TEST PASSED!");
+    }
+
+    /**
+     * Test 6: TABLE OF type package variable - element access and assignment.
+     *
+     * <p>Validates:
+     * <ul>
+     *   <li>TABLE OF type extraction from package spec</li>
+     *   <li>Array variable getter returns jsonb</li>
+     *   <li>Element access transformation (->index with 1-based to 0-based)</li>
+     *   <li>Element assignment transformation (jsonb_set)</li>
+     *   <li>End-to-end execution in PostgreSQL</li>
+     * </ul>
+     */
+    @Test
+    void tableOfVariable_elementAccessAndAssignment() throws SQLException {
+        // Oracle package with TABLE OF type
+        String oraclePackageSpec = """
+            CREATE OR REPLACE PACKAGE hr.scores_pkg AS
+              TYPE num_list_t IS TABLE OF NUMBER INDEX BY PLS_INTEGER;
+
+              g_scores num_list_t;
+
+              FUNCTION get_score(p_index NUMBER) RETURN NUMBER;
+              PROCEDURE set_score(p_index NUMBER, p_value NUMBER);
+              FUNCTION get_total RETURN NUMBER;
+            END scores_pkg;
+            """;
+
+        System.out.println("\n=== TABLE OF TYPE INTEGRATION TEST ===");
+
+        // Extract package context
+        PackageContextExtractor extractor = new PackageContextExtractor(new me.christianrobert.orapgsync.transformer.parser.AntlrParser());
+        PackageContext packageContext = extractor.extractContext("hr", "scores_pkg", oraclePackageSpec);
+
+        // Verify type extraction
+        assertNotNull(packageContext.getType("num_list_t"), "Should extract TABLE OF type");
+        assertTrue(packageContext.hasVariable("g_scores"), "Should have g_scores variable");
+
+        System.out.println("✓ Extracted TABLE OF type: num_list_t");
+        System.out.println("✓ Extracted variable: g_scores");
+
+        // Generate and execute helpers
+        PackageHelperGenerator generator = new PackageHelperGenerator();
+        List<String> helperSqls = generator.generateHelperSql(packageContext);
+        for (String sql : helperSqls) {
+            executeUpdate(sql);
+        }
+
+        // Build package context cache
+        Map<String, PackageContext> packageContextCache = new HashMap<>();
+        packageContextCache.put("hr.scores_pkg", packageContext);
+
+        // Transform get_score (element access on RHS)
+        String getScoreOracle = """
+            FUNCTION get_score(p_index NUMBER) RETURN NUMBER IS
+            BEGIN
+              RETURN g_scores(p_index);
+            END;
+            """;
+
+        TransformationResult getScoreResult = transformationService.transformFunction(
+            getScoreOracle, "hr", indices, packageContextCache, "get_score", "scores_pkg"
+        );
+        assertTrue(getScoreResult.isSuccess(), "get_score transformation should succeed: " + getScoreResult.getErrorMessage());
+
+        System.out.println("\n=== Transformed get_score ===");
+        System.out.println(getScoreResult.getPostgresSql());
+
+        // Verify element access transformation
+        assertTrue(getScoreResult.getPostgresSql().contains("scores_pkg__get_g_scores()"),
+            "Should use getter for g_scores");
+        assertTrue(getScoreResult.getPostgresSql().contains("p_index - 1"),
+            "Should convert 1-based to 0-based index");
+
+        executeUpdate(getScoreResult.getPostgresSql());
+
+        // Transform set_score (element assignment on LHS)
+        String setScoreOracle = """
+            PROCEDURE set_score(p_index NUMBER, p_value NUMBER) IS
+            BEGIN
+              g_scores(p_index) := p_value;
+            END;
+            """;
+
+        TransformationResult setScoreResult = transformationService.transformProcedure(
+            setScoreOracle, "hr", indices, packageContextCache, "set_score", "scores_pkg"
+        );
+        assertTrue(setScoreResult.isSuccess(), "set_score transformation should succeed: " + setScoreResult.getErrorMessage());
+
+        System.out.println("\n=== Transformed set_score ===");
+        System.out.println(setScoreResult.getPostgresSql());
+
+        // Verify element assignment transformation
+        assertTrue(setScoreResult.getPostgresSql().contains("PERFORM"),
+            "Should use PERFORM for setter");
+        assertTrue(setScoreResult.getPostgresSql().contains("scores_pkg__set_g_scores"),
+            "Should use setter");
+        assertTrue(setScoreResult.getPostgresSql().contains("jsonb_set"),
+            "Should use jsonb_set for element assignment");
+        assertTrue(setScoreResult.getPostgresSql().contains("p_index - 1"),
+            "Should convert index in assignment");
+
+        executeUpdate(setScoreResult.getPostgresSql());
+
+        // Execute and verify
+        System.out.println("\n=== Executing and Verifying ===");
+
+        connection.setAutoCommit(false);
+        try {
+            // Set scores (1-based Oracle indices)
+            executeUpdate("SELECT hr.scores_pkg__set_score(1, 85)");
+            executeUpdate("SELECT hr.scores_pkg__set_score(2, 90)");
+            executeUpdate("SELECT hr.scores_pkg__set_score(3, 95)");
+
+            // Get score at index 2
+            List<Map<String, Object>> score2Result = executeQuery(
+                "SELECT hr.scores_pkg__get_score(2) AS score"
+            );
+            assertEquals(90, ((Number) score2Result.get(0).get("score")).intValue(),
+                "Score at index 2 should be 90");
+            System.out.println("✓ Score at index 2: 90");
+
+            // Get score at index 1
+            List<Map<String, Object>> score1Result = executeQuery(
+                "SELECT hr.scores_pkg__get_score(1) AS score"
+            );
+            assertEquals(85, ((Number) score1Result.get(0).get("score")).intValue(),
+                "Score at index 1 should be 85");
+            System.out.println("✓ Score at index 1: 85");
+
+            connection.commit();
+        } finally {
+            connection.setAutoCommit(true);
+        }
+
+        System.out.println("\n✅ TABLE OF TYPE INTEGRATION TEST PASSED!");
+    }
+
+    /**
+     * Test 7: INDEX BY VARCHAR2 type package variable - map access and assignment.
+     *
+     * <p>Validates:
+     * <ul>
+     *   <li>INDEX BY VARCHAR2 type extraction (associative array with string keys)</li>
+     *   <li>Map variable getter returns jsonb</li>
+     *   <li>Map element access transformation (->> with string key)</li>
+     *   <li>Map element assignment transformation (jsonb_set)</li>
+     *   <li>End-to-end execution in PostgreSQL</li>
+     * </ul>
+     */
+    @Test
+    void indexByVarchar2Variable_mapAccessAndAssignment() throws SQLException {
+        // Oracle package with INDEX BY VARCHAR2 type (associative array / map)
+        String oraclePackageSpec = """
+            CREATE OR REPLACE PACKAGE hr.dept_pkg AS
+              TYPE dept_map_t IS TABLE OF VARCHAR2(100) INDEX BY VARCHAR2(20);
+
+              g_dept_names dept_map_t;
+
+              FUNCTION get_dept_name(p_code VARCHAR2) RETURN VARCHAR2;
+              PROCEDURE set_dept_name(p_code VARCHAR2, p_name VARCHAR2);
+            END dept_pkg;
+            """;
+
+        System.out.println("\n=== INDEX BY VARCHAR2 (MAP) TYPE INTEGRATION TEST ===");
+
+        // Extract package context
+        PackageContextExtractor extractor = new PackageContextExtractor(new me.christianrobert.orapgsync.transformer.parser.AntlrParser());
+        PackageContext packageContext = extractor.extractContext("hr", "dept_pkg", oraclePackageSpec);
+
+        // Verify type extraction
+        assertNotNull(packageContext.getType("dept_map_t"), "Should extract INDEX BY type");
+        assertTrue(packageContext.hasVariable("g_dept_names"), "Should have g_dept_names variable");
+
+        System.out.println("✓ Extracted INDEX BY VARCHAR2 type: dept_map_t");
+        System.out.println("✓ Extracted variable: g_dept_names");
+
+        // Generate and execute helpers
+        PackageHelperGenerator generator = new PackageHelperGenerator();
+        List<String> helperSqls = generator.generateHelperSql(packageContext);
+        for (String sql : helperSqls) {
+            executeUpdate(sql);
+        }
+
+        // Build package context cache
+        Map<String, PackageContext> packageContextCache = new HashMap<>();
+        packageContextCache.put("hr.dept_pkg", packageContext);
+
+        // Transform get_dept_name (map access on RHS)
+        String getDeptNameOracle = """
+            FUNCTION get_dept_name(p_code VARCHAR2) RETURN VARCHAR2 IS
+            BEGIN
+              RETURN g_dept_names(p_code);
+            END;
+            """;
+
+        TransformationResult getDeptResult = transformationService.transformFunction(
+            getDeptNameOracle, "hr", indices, packageContextCache, "get_dept_name", "dept_pkg"
+        );
+        assertTrue(getDeptResult.isSuccess(), "get_dept_name transformation should succeed: " + getDeptResult.getErrorMessage());
+
+        System.out.println("\n=== Transformed get_dept_name ===");
+        System.out.println(getDeptResult.getPostgresSql());
+
+        // Verify map access transformation (string key, no index conversion)
+        assertTrue(getDeptResult.getPostgresSql().contains("dept_pkg__get_g_dept_names()"),
+            "Should use getter for g_dept_names");
+        assertTrue(getDeptResult.getPostgresSql().contains("->>") && getDeptResult.getPostgresSql().contains("p_code"),
+            "Should access with ->> and string key");
+
+        executeUpdate(getDeptResult.getPostgresSql());
+
+        // Transform set_dept_name (map assignment on LHS)
+        String setDeptNameOracle = """
+            PROCEDURE set_dept_name(p_code VARCHAR2, p_name VARCHAR2) IS
+            BEGIN
+              g_dept_names(p_code) := p_name;
+            END;
+            """;
+
+        TransformationResult setDeptResult = transformationService.transformProcedure(
+            setDeptNameOracle, "hr", indices, packageContextCache, "set_dept_name", "dept_pkg"
+        );
+        assertTrue(setDeptResult.isSuccess(), "set_dept_name transformation should succeed: " + setDeptResult.getErrorMessage());
+
+        System.out.println("\n=== Transformed set_dept_name ===");
+        System.out.println(setDeptResult.getPostgresSql());
+
+        // Verify map assignment transformation
+        assertTrue(setDeptResult.getPostgresSql().contains("PERFORM"),
+            "Should use PERFORM for setter");
+        assertTrue(setDeptResult.getPostgresSql().contains("dept_pkg__set_g_dept_names"),
+            "Should use setter");
+        assertTrue(setDeptResult.getPostgresSql().contains("jsonb_set"),
+            "Should use jsonb_set for map assignment");
+
+        executeUpdate(setDeptResult.getPostgresSql());
+
+        // Execute and verify
+        System.out.println("\n=== Executing and Verifying ===");
+
+        connection.setAutoCommit(false);
+        try {
+            // Set department names
+            executeUpdate("SELECT hr.dept_pkg__set_dept_name('HR', 'Human Resources')");
+            executeUpdate("SELECT hr.dept_pkg__set_dept_name('IT', 'Information Technology')");
+            executeUpdate("SELECT hr.dept_pkg__set_dept_name('FIN', 'Finance')");
+
+            // Get department name
+            List<Map<String, Object>> hrResult = executeQuery(
+                "SELECT hr.dept_pkg__get_dept_name('HR') AS name"
+            );
+            assertEquals("Human Resources", hrResult.get(0).get("name"),
+                "HR department should be Human Resources");
+            System.out.println("✓ HR = Human Resources");
+
+            List<Map<String, Object>> itResult = executeQuery(
+                "SELECT hr.dept_pkg__get_dept_name('IT') AS name"
+            );
+            assertEquals("Information Technology", itResult.get(0).get("name"),
+                "IT department should be Information Technology");
+            System.out.println("✓ IT = Information Technology");
+
+            connection.commit();
+        } finally {
+            connection.setAutoCommit(true);
+        }
+
+        System.out.println("\n✅ INDEX BY VARCHAR2 (MAP) TYPE INTEGRATION TEST PASSED!");
+    }
+
+    /**
+     * Test 8: Mixed complex types - RECORD with collection fields.
+     *
+     * <p>Validates:
+     * <ul>
+     *   <li>Package with multiple complex types working together</li>
+     *   <li>Nested field access (RECORD field that is itself a collection)</li>
+     *   <li>Mixed scalar and complex type operations</li>
+     *   <li>End-to-end execution in PostgreSQL</li>
+     * </ul>
+     */
+    @Test
+    void mixedComplexTypes_recordFieldAccess() throws SQLException {
+        // Oracle package with mixed complex types
+        String oraclePackageSpec = """
+            CREATE OR REPLACE PACKAGE hr.employee_pkg AS
+              TYPE address_t IS RECORD (
+                street VARCHAR2(100),
+                city VARCHAR2(50),
+                zip_code VARCHAR2(10)
+              );
+
+              TYPE employee_t IS RECORD (
+                name VARCHAR2(100),
+                salary NUMBER,
+                address address_t
+              );
+
+              g_current_employee employee_t;
+              g_employee_count INTEGER := 0;
+
+              FUNCTION get_employee_name RETURN VARCHAR2;
+              FUNCTION get_employee_salary RETURN NUMBER;
+              PROCEDURE set_employee_info(p_name VARCHAR2, p_salary NUMBER);
+              PROCEDURE increment_count;
+            END employee_pkg;
+            """;
+
+        System.out.println("\n=== MIXED COMPLEX TYPES INTEGRATION TEST ===");
+
+        // Extract package context
+        PackageContextExtractor extractor = new PackageContextExtractor(new me.christianrobert.orapgsync.transformer.parser.AntlrParser());
+        PackageContext packageContext = extractor.extractContext("hr", "employee_pkg", oraclePackageSpec);
+
+        // Verify extraction
+        assertNotNull(packageContext.getType("address_t"), "Should extract address_t type");
+        assertNotNull(packageContext.getType("employee_t"), "Should extract employee_t type");
+        assertTrue(packageContext.hasVariable("g_current_employee"), "Should have g_current_employee");
+        assertTrue(packageContext.hasVariable("g_employee_count"), "Should have g_employee_count");
+
+        System.out.println("✓ Extracted types: address_t, employee_t");
+        System.out.println("✓ Extracted variables: g_current_employee (RECORD), g_employee_count (INTEGER)");
+
+        // Generate and execute helpers
+        PackageHelperGenerator generator = new PackageHelperGenerator();
+        List<String> helperSqls = generator.generateHelperSql(packageContext);
+        for (String sql : helperSqls) {
+            executeUpdate(sql);
+        }
+
+        // Build package context cache
+        Map<String, PackageContext> packageContextCache = new HashMap<>();
+        packageContextCache.put("hr.employee_pkg", packageContext);
+
+        // Transform get_employee_name (RECORD field access)
+        String getNameOracle = """
+            FUNCTION get_employee_name RETURN VARCHAR2 IS
+            BEGIN
+              RETURN g_current_employee.name;
+            END;
+            """;
+
+        TransformationResult getNameResult = transformationService.transformFunction(
+            getNameOracle, "hr", indices, packageContextCache, "get_employee_name", "employee_pkg"
+        );
+        assertTrue(getNameResult.isSuccess(), "get_employee_name transformation should succeed");
+
+        System.out.println("\n=== Transformed get_employee_name ===");
+        System.out.println(getNameResult.getPostgresSql());
+        executeUpdate(getNameResult.getPostgresSql());
+
+        // Transform set_employee_info (RECORD field assignment)
+        String setInfoOracle = """
+            PROCEDURE set_employee_info(p_name VARCHAR2, p_salary NUMBER) IS
+            BEGIN
+              g_current_employee.name := p_name;
+              g_current_employee.salary := p_salary;
+            END;
+            """;
+
+        TransformationResult setInfoResult = transformationService.transformProcedure(
+            setInfoOracle, "hr", indices, packageContextCache, "set_employee_info", "employee_pkg"
+        );
+        assertTrue(setInfoResult.isSuccess(), "set_employee_info transformation should succeed");
+
+        System.out.println("\n=== Transformed set_employee_info ===");
+        System.out.println(setInfoResult.getPostgresSql());
+        executeUpdate(setInfoResult.getPostgresSql());
+
+        // Transform increment_count (scalar variable)
+        String incrementOracle = """
+            PROCEDURE increment_count IS
+            BEGIN
+              g_employee_count := g_employee_count + 1;
+            END;
+            """;
+
+        TransformationResult incrementResult = transformationService.transformProcedure(
+            incrementOracle, "hr", indices, packageContextCache, "increment_count", "employee_pkg"
+        );
+        assertTrue(incrementResult.isSuccess(), "increment_count transformation should succeed");
+        executeUpdate(incrementResult.getPostgresSql());
+
+        // Execute and verify
+        System.out.println("\n=== Executing and Verifying ===");
+
+        connection.setAutoCommit(false);
+        try {
+            // Set employee info
+            executeUpdate("SELECT hr.employee_pkg__set_employee_info('John Doe', 75000)");
+            executeUpdate("SELECT hr.employee_pkg__increment_count()");
+
+            // Get employee name
+            List<Map<String, Object>> nameResult = executeQuery(
+                "SELECT hr.employee_pkg__get_employee_name() AS name"
+            );
+            assertEquals("John Doe", nameResult.get(0).get("name"),
+                "Employee name should be John Doe");
+            System.out.println("✓ Employee name: John Doe");
+
+            // Get employee count
+            List<Map<String, Object>> countResult = executeQuery(
+                "SELECT hr.employee_pkg__get_g_employee_count() AS count"
+            );
+            assertEquals(1, ((Number) countResult.get(0).get("count")).intValue(),
+                "Employee count should be 1");
+            System.out.println("✓ Employee count: 1");
+
+            connection.commit();
+        } finally {
+            connection.setAutoCommit(true);
+        }
+
+        System.out.println("\n✅ MIXED COMPLEX TYPES INTEGRATION TEST PASSED!");
+    }
 }

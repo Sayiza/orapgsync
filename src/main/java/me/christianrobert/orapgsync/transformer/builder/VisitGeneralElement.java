@@ -7,6 +7,9 @@ import me.christianrobert.orapgsync.transformer.builder.objectfield.ObjectFieldA
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
 import me.christianrobert.orapgsync.transformer.context.TransformationException;
 import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
+import me.christianrobert.orapgsync.transformer.inline.FieldDefinition;
+import me.christianrobert.orapgsync.transformer.inline.InlineTypeDefinition;
+import me.christianrobert.orapgsync.transformer.packagevariable.PackageContext;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -145,6 +148,19 @@ public class VisitGeneralElement {
       }
     }
 
+    // STEP 0.3: Check for package variable FIELD access (Phase: Complex Types) - RHS only
+    // Patterns:
+    //   - 2+ parts inside package: g_rec.field (unqualified, uses current package)
+    //   - 3+ parts: pkg.g_rec.field (package-qualified)
+    //   - 4+ parts: schema.pkg.g_rec.field (schema-qualified)
+    // Transform to: (pkg__get_g_rec()->>'field')::type
+    if (!b.isInAssignmentTarget() && parts.size() >= 2) {
+      String pkgFieldAccess = tryTransformPackageVariableFieldAccess(parts, b);
+      if (pkgFieldAccess != null) {
+        return pkgFieldAccess;
+      }
+    }
+
     // STEP 0.5: Check for inline type field access (Phase 1B.5) - RHS only
     // Pattern: variable.field → (variable->>'field')::type
     // Pattern: variable.field1.field2 → variable->'field1'->>'field2'
@@ -234,6 +250,16 @@ public class VisitGeneralElement {
     // Get the last part to check if it's a function call
     PlSqlParser.General_element_partContext lastPart = parts.get(parts.size() - 1);
     boolean isFunctionCall = lastPart.function_argument() != null && !lastPart.function_argument().isEmpty();
+
+    // STEP 0.8: Check for package variable COLLECTION element access (Phase 4: Complex Types)
+    // Pattern: pkg.g_array(i) looks like a function call but is collection element access
+    // Must be checked BEFORE handlePackageFunctionCall() to disambiguate
+    if (isFunctionCall && !b.isInAssignmentTarget() && parts.size() >= 2) {
+      String collectionAccess = tryTransformPackageVariableCollectionAccess(parts, b);
+      if (collectionAccess != null) {
+        return collectionAccess;
+      }
+    }
 
     if (isFunctionCall) {
       // Could be:
@@ -590,6 +616,16 @@ public class VisitGeneralElement {
         String elementAccess = tryTransformCollectionElementAccess(partCtx, b, context);
         if (elementAccess != null) {
           return elementAccess;
+        }
+      }
+
+      // PHASE 4: Check if this is UNQUALIFIED package variable collection access (Complex Types)
+      // Oracle: g_array(1) (inside package function) → (pkg__get_g_array()->>0)::type
+      // NOTE: This handles the unqualified case; qualified cases (pkg.g_array(1)) go through handleDotNavigation
+      if (context != null && !b.isInAssignmentTarget() && context.isInPackageMember()) {
+        String pkgCollectionAccess = tryTransformUnqualifiedPackageVariableCollectionAccess(partCtx, b, context);
+        if (pkgCollectionAccess != null) {
+          return pkgCollectionAccess;
         }
       }
 
@@ -1045,7 +1081,7 @@ public class VisitGeneralElement {
    * @param fieldName Field name to search for (case-insensitive)
    * @return InlineTypeDefinition with matching field, or null if none found
    */
-  private static me.christianrobert.orapgsync.transformer.inline.InlineTypeDefinition findInlineTypeWithField(
+  private static InlineTypeDefinition findInlineTypeWithField(
       TransformationContext context,
       String fieldName) {
 
@@ -1060,6 +1096,503 @@ public class VisitGeneralElement {
     // We'll rely on the assignment statement transformation for LHS field access
     // RHS field access will need to be addressed in Phase 1B.5 with proper variable tracking
     return null;
+  }
+
+  /**
+   * Tries to transform package variable field access to jsonb operations (Phase: Complex Types).
+   *
+   * <p>Detects and transforms package variable RECORD field access patterns:
+   * <ul>
+   *   <li>Unqualified (inside package): {@code g_rec.field} → {@code (pkg__get_g_rec()->>'field')::type}</li>
+   *   <li>Package-qualified: {@code pkg.g_rec.field} → {@code (pkg__get_g_rec()->>'field')::type}</li>
+   *   <li>Schema-qualified: {@code schema.pkg.g_rec.field} → {@code (schema.pkg__get_g_rec()->>'field')::type}</li>
+   *   <li>Nested fields: {@code pkg.g_rec.addr.city} → {@code (pkg__get_g_rec()->'addr'->>'city')::type}</li>
+   * </ul>
+   *
+   * @param parts Dot-separated parts of the expression
+   * @param b PostgreSQL code builder
+   * @return Transformed jsonb field access expression, or null if not a package variable field access
+   */
+  private static String tryTransformPackageVariableFieldAccess(
+      List<PlSqlParser.General_element_partContext> parts,
+      PostgresCodeBuilder b) {
+
+    TransformationContext context = b.getContext();
+    if (context == null) {
+      return null;
+    }
+
+    // Determine the pattern based on number of parts and context
+    String schemaPrefix;
+    String packageName;
+    String variableName;
+    int fieldStartIndex;
+
+    if (parts.size() >= 2) {
+      // Try Pattern 1: Unqualified inside package function (g_rec.field)
+      // Only applies when we're inside a package member
+      if (context.isInPackageMember()) {
+        String firstPart = parts.get(0).id_expression().getText();
+        String currentPackage = context.getCurrentPackageName();
+
+        if (currentPackage != null && b.isPackageVariable(currentPackage, firstPart)) {
+          // Check if it's a complex type
+          PackageContext pkgContext = context.getPackageContext(currentPackage);
+          if (pkgContext != null) {
+            PackageContext.PackageVariable pkgVar = pkgContext.getVariable(firstPart);
+            if (pkgVar != null) {
+              InlineTypeDefinition inlineType = pkgContext.getType(pkgVar.getDataType());
+              if (inlineType != null && inlineType.isRecord()) {
+                // IT'S UNQUALIFIED PACKAGE VARIABLE FIELD ACCESS!
+                schemaPrefix = context.getCurrentSchema().toLowerCase() + ".";
+                packageName = currentPackage;
+                variableName = firstPart;
+                fieldStartIndex = 1;
+                return buildPackageVariableFieldAccess(
+                    schemaPrefix, packageName, variableName, fieldStartIndex, parts, pkgContext, b);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    if (parts.size() >= 3) {
+      // Try Pattern 2: Package-qualified (pkg.g_rec.field)
+      String firstPart = parts.get(0).id_expression().getText();
+      String secondPart = parts.get(1).id_expression().getText();
+
+      if (b.isPackageVariable(firstPart, secondPart)) {
+        PackageContext pkgContext = context.getPackageContext(firstPart);
+        if (pkgContext != null) {
+          PackageContext.PackageVariable pkgVar = pkgContext.getVariable(secondPart);
+          if (pkgVar != null) {
+            InlineTypeDefinition inlineType = pkgContext.getType(pkgVar.getDataType());
+            if (inlineType != null && inlineType.isRecord()) {
+              // IT'S PACKAGE-QUALIFIED VARIABLE FIELD ACCESS!
+              schemaPrefix = context.getCurrentSchema().toLowerCase() + ".";
+              packageName = firstPart;
+              variableName = secondPart;
+              fieldStartIndex = 2;
+              return buildPackageVariableFieldAccess(
+                  schemaPrefix, packageName, variableName, fieldStartIndex, parts, pkgContext, b);
+            }
+          }
+        }
+      }
+    }
+
+    if (parts.size() >= 4) {
+      // Try Pattern 3: Schema-qualified (schema.pkg.g_rec.field)
+      String firstPart = parts.get(0).id_expression().getText();
+      String secondPart = parts.get(1).id_expression().getText();
+      String thirdPart = parts.get(2).id_expression().getText();
+      String currentSchema = context.getCurrentSchema();
+
+      // Check if first part is the current schema
+      if (firstPart.equalsIgnoreCase(currentSchema) && b.isPackageVariable(secondPart, thirdPart)) {
+        PackageContext pkgContext = context.getPackageContext(secondPart);
+        if (pkgContext != null) {
+          PackageContext.PackageVariable pkgVar = pkgContext.getVariable(thirdPart);
+          if (pkgVar != null) {
+            InlineTypeDefinition inlineType = pkgContext.getType(pkgVar.getDataType());
+            if (inlineType != null && inlineType.isRecord()) {
+              // IT'S SCHEMA-QUALIFIED VARIABLE FIELD ACCESS!
+              schemaPrefix = currentSchema.toLowerCase() + ".";
+              packageName = secondPart;
+              variableName = thirdPart;
+              fieldStartIndex = 3;
+              return buildPackageVariableFieldAccess(
+                  schemaPrefix, packageName, variableName, fieldStartIndex, parts, pkgContext, b);
+            }
+          }
+        }
+      }
+    }
+
+    // Not a package variable field access
+    return null;
+  }
+
+  /**
+   * Builds the PostgreSQL expression for package variable field access.
+   *
+   * <p>Transforms to: {@code (schema.pkg__get_varname()->>'field')::type}
+   * or for nested: {@code (schema.pkg__get_varname()->'field1'->>'field2')::type}
+   *
+   * @param schemaPrefix Schema prefix with dot (e.g., "hr.")
+   * @param packageName Package name
+   * @param variableName Variable name
+   * @param fieldStartIndex Index where field path starts in parts
+   * @param parts All dot-separated parts
+   * @param pkgContext Package context for type lookup
+   * @param b PostgreSQL code builder
+   * @return Transformed PostgreSQL expression
+   */
+  private static String buildPackageVariableFieldAccess(
+      String schemaPrefix,
+      String packageName,
+      String variableName,
+      int fieldStartIndex,
+      List<PlSqlParser.General_element_partContext> parts,
+      PackageContext pkgContext,
+      PostgresCodeBuilder b) {
+
+    // Build getter call
+    String getterCall = schemaPrefix + packageName.toLowerCase() + "__get_" + variableName.toLowerCase() + "()";
+
+    // Get variable's inline type for field resolution
+    PackageContext.PackageVariable pkgVar = pkgContext.getVariable(variableName);
+    InlineTypeDefinition inlineType = pkgContext.getType(pkgVar.getDataType());
+
+    StringBuilder result = new StringBuilder();
+    result.append("( ").append(getterCall);
+
+    // Navigate through fields
+    InlineTypeDefinition currentType = inlineType;
+    FieldDefinition finalField = null;
+
+    for (int i = fieldStartIndex; i < parts.size(); i++) {
+      String fieldName = parts.get(i).id_expression().getText();
+      boolean isLastField = (i == parts.size() - 1);
+
+      if (isLastField) {
+        // Last field: use ->> to extract as text
+        result.append("->>'").append(fieldName).append("'");
+
+        // Look up final field for type casting
+        if (currentType != null) {
+          finalField = findField(currentType, fieldName);
+        }
+      } else {
+        // Intermediate field: use -> to keep as jsonb
+        result.append("->'").append(fieldName).append("'");
+
+        // Try to resolve nested type for next iteration
+        if (currentType != null) {
+          FieldDefinition field = findField(currentType, fieldName);
+          if (field != null && field.getOracleType() != null) {
+            // Check if this field is itself a RECORD type (could be package-level or inline)
+            InlineTypeDefinition nestedType = pkgContext.getType(field.getOracleType());
+            if (nestedType == null) {
+              // Try context-level types
+              TransformationContext context = b.getContext();
+              if (context != null) {
+                nestedType = context.resolveInlineType(field.getOracleType());
+              }
+            }
+            if (nestedType != null && nestedType.isRecord()) {
+              currentType = nestedType;
+            } else {
+              currentType = null;
+            }
+          } else {
+            currentType = null;
+          }
+        }
+      }
+    }
+
+    result.append(" )");
+
+    // Add type cast if we know the field type
+    if (finalField != null) {
+      result.append("::").append(finalField.getPostgresType());
+    }
+
+    return result.toString();
+  }
+
+  /**
+   * Tries to transform package variable collection element access to jsonb operations (Phase 4: Complex Types).
+   *
+   * <p>Detects and transforms package variable collection access patterns where the access
+   * looks like a function call but is actually element access on a collection-typed variable:
+   * <ul>
+   *   <li>Package-qualified: {@code pkg.g_array(1)} → {@code (pkg__get_g_array()->>0)::type}</li>
+   *   <li>Unqualified (inside package): {@code g_array(1)} → {@code (pkg__get_g_array()->>0)::type}</li>
+   *   <li>Schema-qualified: {@code schema.pkg.g_array(1)} → {@code (schema.pkg__get_g_array()->>0)::type}</li>
+   *   <li>Map access: {@code pkg.g_map('key')} → {@code (pkg__get_g_map()->>'key')}</li>
+   * </ul>
+   *
+   * @param parts Dot-separated parts of the expression (last part has function arguments)
+   * @param b PostgreSQL code builder
+   * @return Transformed jsonb collection access expression, or null if not a package variable collection access
+   */
+  private static String tryTransformPackageVariableCollectionAccess(
+      List<PlSqlParser.General_element_partContext> parts,
+      PostgresCodeBuilder b) {
+
+    TransformationContext context = b.getContext();
+    if (context == null) {
+      return null;
+    }
+
+    // Last part is the one with function arguments (which might be collection element access)
+    PlSqlParser.General_element_partContext lastPart = parts.get(parts.size() - 1);
+    String memberName = lastPart.id_expression().getText();
+
+    // Get the index/key argument
+    List<PlSqlParser.Function_argumentContext> funcArgList = lastPart.function_argument();
+    if (funcArgList == null || funcArgList.isEmpty()) {
+      return null;
+    }
+
+    PlSqlParser.Function_argumentContext funcArgCtx = funcArgList.get(0);
+    List<PlSqlParser.ArgumentContext> arguments = funcArgCtx.argument();
+    if (arguments == null || arguments.size() != 1) {
+      return null;  // Collection access has exactly one argument
+    }
+
+    String argValue = b.visit(arguments.get(0).expression());
+
+    // Determine the pattern based on number of parts and context
+    String schemaPrefix;
+    String packageName;
+    String variableName = memberName;
+
+    if (parts.size() == 1) {
+      // Single part with args: g_array(1) - unqualified inside package
+      if (!context.isInPackageMember()) {
+        return null;  // Must be inside a package
+      }
+      packageName = context.getCurrentPackageName();
+      schemaPrefix = context.getCurrentSchema().toLowerCase() + ".";
+    } else if (parts.size() == 2) {
+      // Two parts: pkg.g_array(1) - package-qualified
+      packageName = parts.get(0).id_expression().getText();
+      schemaPrefix = context.getCurrentSchema().toLowerCase() + ".";
+    } else if (parts.size() == 3) {
+      // Three parts: schema.pkg.g_array(1) - schema-qualified
+      String firstPart = parts.get(0).id_expression().getText();
+      String currentSchema = context.getCurrentSchema();
+
+      if (!firstPart.equalsIgnoreCase(currentSchema)) {
+        return null;  // Cross-schema not supported
+      }
+      schemaPrefix = currentSchema.toLowerCase() + ".";
+      packageName = parts.get(1).id_expression().getText();
+    } else {
+      return null;  // Too many parts for collection access
+    }
+
+    // Check if this is actually a package variable (not a function)
+    if (!b.isPackageVariable(packageName, variableName)) {
+      return null;
+    }
+
+    // Get the collection type
+    PackageContext pkgContext = context.getPackageContext(packageName);
+    if (pkgContext == null) {
+      return null;
+    }
+
+    PackageContext.PackageVariable pkgVar = pkgContext.getVariable(variableName);
+    if (pkgVar == null) {
+      return null;
+    }
+
+    InlineTypeDefinition inlineType = pkgContext.getType(pkgVar.getDataType());
+    if (inlineType == null || !inlineType.isCollection()) {
+      return null;  // Not a collection type
+    }
+
+    // IT'S PACKAGE VARIABLE COLLECTION ACCESS!
+    return buildPackageVariableCollectionAccess(
+        schemaPrefix, packageName, variableName, argValue, inlineType, b);
+  }
+
+  /**
+   * Builds the PostgreSQL expression for package variable collection element access.
+   *
+   * <p>Transforms to:
+   * <ul>
+   *   <li>Array (TABLE OF, VARRAY, INDEX BY PLS_INTEGER): {@code (schema.pkg__get_varname()->>0)::type}</li>
+   *   <li>Map (INDEX BY VARCHAR2): {@code (schema.pkg__get_varname()->>'key')}</li>
+   * </ul>
+   *
+   * @param schemaPrefix Schema prefix with dot (e.g., "hr.")
+   * @param packageName Package name
+   * @param variableName Variable name
+   * @param argValue Index/key argument (already transformed)
+   * @param inlineType Inline type definition for the collection
+   * @param b PostgreSQL code builder
+   * @return Transformed PostgreSQL expression
+   */
+  private static String buildPackageVariableCollectionAccess(
+      String schemaPrefix,
+      String packageName,
+      String variableName,
+      String argValue,
+      InlineTypeDefinition inlineType,
+      PostgresCodeBuilder b) {
+
+    // Build getter call
+    String getterCall = schemaPrefix + packageName.toLowerCase() + "__get_" + variableName.toLowerCase() + "()";
+
+    if (inlineType.isAssociativeArray()) {
+      // INDEX BY (both VARCHAR2 and PLS_INTEGER) → object key access with ->>
+      // Stored as object: {"0": val0, "1": val1, ...} or {"key1": val1, ...}
+      if (isStringIndexKeyType(inlineType.getIndexKeyType())) {
+        // String key: direct access, no index conversion
+        return "( " + getterCall + " ->> " + argValue + " )";
+      } else {
+        // Numeric key: convert 1-based to 0-based and use as string key
+        return buildNumericObjectKeyAccessForPackageVar(getterCall, argValue, inlineType);
+      }
+    } else {
+      // TABLE OF, VARRAY → real jsonb array access
+      return buildNumericArrayAccessForPackageVar(getterCall, argValue, inlineType);
+    }
+  }
+
+  /**
+   * Builds PostgreSQL jsonb array access expression for package variables with 1-based to 0-based index conversion.
+   *
+   * @param getterCall The getter function call (e.g., "hr.pkg__get_g_array()")
+   * @param argValue Index argument expression (already transformed)
+   * @param inlineType Inline type definition for the collection
+   * @return PostgreSQL jsonb array access expression with type cast
+   */
+  private static String buildNumericArrayAccessForPackageVar(
+      String getterCall,
+      String argValue,
+      InlineTypeDefinition inlineType) {
+
+    // Check if argument is a simple numeric literal
+    boolean isNumericLiteral = argValue.matches("\\d+");
+
+    String indexExpression;
+    if (isNumericLiteral) {
+      // Simple numeric literal: pkg.g_array(1) → getter()->0
+      int oracleIndex = Integer.parseInt(argValue);
+      int postgresIndex = oracleIndex - 1;
+      indexExpression = String.valueOf(postgresIndex);
+    } else {
+      // Variable or expression: pkg.g_array(i) → getter()->(i-1)::int
+      indexExpression = "( " + argValue + " - 1 )::int";
+    }
+
+    // Get PostgreSQL element type for casting
+    String oracleElementType = inlineType.getElementType();
+    String pgElementType;
+    if (oracleElementType != null) {
+      pgElementType = me.christianrobert.orapgsync.core.tools.TypeConverter.toPostgre(oracleElementType);
+    } else {
+      pgElementType = "text";
+    }
+
+    // Build array access with proper type casting:
+    // (getter()->>index)::type
+    return "( " + getterCall + "->>" + indexExpression + " )::" + pgElementType;
+  }
+
+  /**
+   * Builds PostgreSQL jsonb object key access for INDEX BY PLS_INTEGER package variables.
+   *
+   * <p>INDEX BY PLS_INTEGER types are stored as jsonb objects with string keys: {"0": val0, "1": val1}.
+   * This method builds the access expression using string key syntax (->>key) with proper
+   * 1-based to 0-based index conversion.
+   *
+   * @param getterCall The getter function call (e.g., "hr.pkg__get_g_array()")
+   * @param argValue Index argument expression (already transformed)
+   * @param inlineType Inline type definition for the collection
+   * @return PostgreSQL jsonb object key access expression with type cast
+   */
+  private static String buildNumericObjectKeyAccessForPackageVar(
+      String getterCall,
+      String argValue,
+      InlineTypeDefinition inlineType) {
+
+    // Check if argument is a simple numeric literal
+    boolean isNumericLiteral = argValue.matches("\\d+");
+
+    String keyExpression;
+    if (isNumericLiteral) {
+      // Simple numeric literal: pkg.g_array(1) → getter()->>'0'
+      int oracleIndex = Integer.parseInt(argValue);
+      int postgresIndex = oracleIndex - 1;
+      keyExpression = "'" + postgresIndex + "'";
+    } else {
+      // Variable or expression: pkg.g_array(i) → getter()->>((i-1)::text)
+      keyExpression = "( " + argValue + " - 1 )::text";
+    }
+
+    // Get PostgreSQL element type for casting
+    String oracleElementType = inlineType.getElementType();
+    String pgElementType;
+    if (oracleElementType != null) {
+      pgElementType = me.christianrobert.orapgsync.core.tools.TypeConverter.toPostgre(oracleElementType);
+    } else {
+      pgElementType = "text";
+    }
+
+    // Build object key access with proper type casting:
+    // (getter()->>key)::type
+    return "( " + getterCall + " ->> " + keyExpression + " )::" + pgElementType;
+  }
+
+  /**
+   * Tries to transform unqualified package variable collection access inside a package function.
+   *
+   * <p>Pattern: {@code g_array(1)} inside a package function → {@code (pkg__get_g_array()->>0)::type}
+   *
+   * <p>This handles the case where a collection-typed package variable is accessed without
+   * the package name prefix (i.e., just the variable name with parentheses for element access).
+   *
+   * @param partCtx General element part context (identifier with function arguments)
+   * @param b PostgreSQL code builder
+   * @param context Transformation context (must be inside a package member)
+   * @return Transformed jsonb collection access expression, or null if not a package variable
+   */
+  private static String tryTransformUnqualifiedPackageVariableCollectionAccess(
+      PlSqlParser.General_element_partContext partCtx,
+      PostgresCodeBuilder b,
+      TransformationContext context) {
+
+    // Get variable name
+    String variableName = partCtx.id_expression().getText();
+
+    // Get the index/key argument
+    List<PlSqlParser.Function_argumentContext> funcArgList = partCtx.function_argument();
+    if (funcArgList == null || funcArgList.isEmpty()) {
+      return null;
+    }
+
+    PlSqlParser.Function_argumentContext funcArgCtx = funcArgList.get(0);
+    List<PlSqlParser.ArgumentContext> arguments = funcArgCtx.argument();
+    if (arguments == null || arguments.size() != 1) {
+      return null;  // Collection access has exactly one argument
+    }
+
+    // Check if this is a package variable in the current package
+    String currentPackage = context.getCurrentPackageName();
+    if (!b.isPackageVariable(currentPackage, variableName)) {
+      return null;
+    }
+
+    // Get the collection type
+    PackageContext pkgContext = context.getPackageContext(currentPackage);
+    if (pkgContext == null) {
+      return null;
+    }
+
+    PackageContext.PackageVariable pkgVar = pkgContext.getVariable(variableName);
+    if (pkgVar == null) {
+      return null;
+    }
+
+    InlineTypeDefinition inlineType = pkgContext.getType(pkgVar.getDataType());
+    if (inlineType == null || !inlineType.isCollection()) {
+      return null;  // Not a collection type
+    }
+
+    // IT'S UNQUALIFIED PACKAGE VARIABLE COLLECTION ACCESS!
+    String argValue = b.visit(arguments.get(0).expression());
+    String schemaPrefix = context.getCurrentSchema().toLowerCase() + ".";
+
+    return buildPackageVariableCollectionAccess(
+        schemaPrefix, currentPackage, variableName, argValue, inlineType, b);
   }
 
   /**

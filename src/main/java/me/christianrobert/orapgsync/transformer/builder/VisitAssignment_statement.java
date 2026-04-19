@@ -1,6 +1,10 @@
 package me.christianrobert.orapgsync.transformer.builder;
 
 import me.christianrobert.orapgsync.antlr.PlSqlParser;
+import me.christianrobert.orapgsync.transformer.context.TransformationContext;
+import me.christianrobert.orapgsync.transformer.inline.FieldDefinition;
+import me.christianrobert.orapgsync.transformer.inline.InlineTypeDefinition;
+import me.christianrobert.orapgsync.transformer.packagevariable.PackageContext;
 
 /**
  * Static helper for visiting PL/SQL assignment statements.
@@ -80,6 +84,26 @@ public class VisitAssignment_statement {
             // Transform to setter call
             String rightSide = b.visit(ctx.expression());
             return "PERFORM " + pkgVar.getSetterCall(rightSide);
+        }
+
+        // STEP 2.5: Check if LHS is a package variable FIELD assignment (Phase: Complex Types)
+        // Pattern: pkg.g_rec.field := value or g_rec.field := value (inside package)
+        // Transform: PERFORM pkg__set_g_rec(jsonb_set(pkg__get_g_rec(), '{field}', to_jsonb(value)))
+        if (ctx.general_element() != null) {
+            String pkgFieldAssignment = tryTransformPackageVariableFieldAssignment(ctx.general_element(), ctx, b);
+            if (pkgFieldAssignment != null) {
+                return pkgFieldAssignment;
+            }
+        }
+
+        // STEP 2.7: Check if LHS is a package variable COLLECTION element assignment (Phase 5: Complex Types)
+        // Pattern: pkg.g_array(1) := value or g_array(1) := value (inside package)
+        // Transform: PERFORM pkg__set_g_array(jsonb_set(pkg__get_g_array(), '{0}', to_jsonb(value)))
+        if (ctx.general_element() != null) {
+            String pkgCollectionAssignment = tryTransformPackageVariableCollectionAssignment(ctx.general_element(), ctx, b);
+            if (pkgCollectionAssignment != null) {
+                return pkgCollectionAssignment;
+            }
         }
 
         // STEP 3: Check if LHS is an inline type field assignment (Phase 1B)
@@ -388,5 +412,413 @@ public class VisitAssignment_statement {
 
         String trimmed = value.trim();
         return trimmed.startsWith("'") && trimmed.endsWith("'");
+    }
+
+    /**
+     * Tries to transform a package variable field assignment to setter with jsonb_set.
+     *
+     * <p>Detects and transforms package variable RECORD field assignment patterns:
+     * <ul>
+     *   <li>Unqualified (inside package): {@code g_rec.field := value} →
+     *       {@code PERFORM pkg__set_g_rec(jsonb_set(pkg__get_g_rec(), '{field}', to_jsonb(value)))}</li>
+     *   <li>Package-qualified: {@code pkg.g_rec.field := value} →
+     *       {@code PERFORM pkg__set_g_rec(jsonb_set(pkg__get_g_rec(), '{field}', to_jsonb(value)))}</li>
+     *   <li>Schema-qualified: {@code schema.pkg.g_rec.field := value} →
+     *       {@code PERFORM schema.pkg__set_g_rec(jsonb_set(schema.pkg__get_g_rec(), '{field}', to_jsonb(value)))}</li>
+     *   <li>Nested fields: {@code pkg.g_rec.addr.city := value} →
+     *       {@code PERFORM pkg__set_g_rec(jsonb_set(pkg__get_g_rec(), '{addr,city}', to_jsonb(value), true))}</li>
+     * </ul>
+     *
+     * @param elemCtx General element context (LHS)
+     * @param assignCtx Assignment statement context (for RHS)
+     * @param b PostgreSQL code builder
+     * @return Transformed PERFORM setter call, or null if not a package variable field assignment
+     */
+    private static String tryTransformPackageVariableFieldAssignment(
+            PlSqlParser.General_elementContext elemCtx,
+            PlSqlParser.Assignment_statementContext assignCtx,
+            PostgresCodeBuilder b) {
+
+        // Must have nested general_element (dotted access)
+        if (elemCtx.general_element() == null) {
+            return null;
+        }
+
+        java.util.List<PlSqlParser.General_element_partContext> parts = collectAllParts(elemCtx);
+        if (parts.size() < 2) {
+            return null; // Need at least var.field
+        }
+
+        TransformationContext context = b.getContext();
+        if (context == null) {
+            return null;
+        }
+
+        // Determine the pattern based on number of parts and context
+        String schemaPrefix;
+        String packageName;
+        String variableName;
+        int fieldStartIndex;
+        PackageContext pkgContext = null;
+
+        // Try Pattern 1: Unqualified inside package function (g_rec.field)
+        if (parts.size() >= 2 && context.isInPackageMember()) {
+            String firstPart = parts.get(0).id_expression().getText();
+            String currentPackage = context.getCurrentPackageName();
+
+            if (currentPackage != null && b.isPackageVariable(currentPackage, firstPart)) {
+                pkgContext = context.getPackageContext(currentPackage);
+                if (pkgContext != null) {
+                    PackageContext.PackageVariable pkgVar = pkgContext.getVariable(firstPart);
+                    if (pkgVar != null) {
+                        InlineTypeDefinition inlineType = pkgContext.getType(pkgVar.getDataType());
+                        if (inlineType != null && inlineType.isRecord()) {
+                            schemaPrefix = context.getCurrentSchema().toLowerCase() + ".";
+                            packageName = currentPackage;
+                            variableName = firstPart;
+                            fieldStartIndex = 1;
+                            return buildPackageVariableFieldAssignment(
+                                schemaPrefix, packageName, variableName, fieldStartIndex,
+                                parts, pkgContext, assignCtx, b);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Try Pattern 2: Package-qualified (pkg.g_rec.field)
+        if (parts.size() >= 3) {
+            String firstPart = parts.get(0).id_expression().getText();
+            String secondPart = parts.get(1).id_expression().getText();
+
+            if (b.isPackageVariable(firstPart, secondPart)) {
+                pkgContext = context.getPackageContext(firstPart);
+                if (pkgContext != null) {
+                    PackageContext.PackageVariable pkgVar = pkgContext.getVariable(secondPart);
+                    if (pkgVar != null) {
+                        InlineTypeDefinition inlineType = pkgContext.getType(pkgVar.getDataType());
+                        if (inlineType != null && inlineType.isRecord()) {
+                            schemaPrefix = context.getCurrentSchema().toLowerCase() + ".";
+                            packageName = firstPart;
+                            variableName = secondPart;
+                            fieldStartIndex = 2;
+                            return buildPackageVariableFieldAssignment(
+                                schemaPrefix, packageName, variableName, fieldStartIndex,
+                                parts, pkgContext, assignCtx, b);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Try Pattern 3: Schema-qualified (schema.pkg.g_rec.field)
+        if (parts.size() >= 4) {
+            String firstPart = parts.get(0).id_expression().getText();
+            String secondPart = parts.get(1).id_expression().getText();
+            String thirdPart = parts.get(2).id_expression().getText();
+            String currentSchema = context.getCurrentSchema();
+
+            if (firstPart.equalsIgnoreCase(currentSchema) && b.isPackageVariable(secondPart, thirdPart)) {
+                pkgContext = context.getPackageContext(secondPart);
+                if (pkgContext != null) {
+                    PackageContext.PackageVariable pkgVar = pkgContext.getVariable(thirdPart);
+                    if (pkgVar != null) {
+                        InlineTypeDefinition inlineType = pkgContext.getType(pkgVar.getDataType());
+                        if (inlineType != null && inlineType.isRecord()) {
+                            schemaPrefix = currentSchema.toLowerCase() + ".";
+                            packageName = secondPart;
+                            variableName = thirdPart;
+                            fieldStartIndex = 3;
+                            return buildPackageVariableFieldAssignment(
+                                schemaPrefix, packageName, variableName, fieldStartIndex,
+                                parts, pkgContext, assignCtx, b);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Not a package variable field assignment
+        return null;
+    }
+
+    /**
+     * Builds the PostgreSQL PERFORM statement for package variable field assignment.
+     *
+     * <p>Transforms to:
+     * {@code PERFORM schema.pkg__set_varname(jsonb_set(schema.pkg__get_varname(), '{field}', to_jsonb(value)))}
+     *
+     * @param schemaPrefix Schema prefix with dot (e.g., "hr.")
+     * @param packageName Package name
+     * @param variableName Variable name
+     * @param fieldStartIndex Index where field path starts in parts
+     * @param parts All dot-separated parts
+     * @param pkgContext Package context for type lookup
+     * @param assignCtx Assignment statement context (for RHS)
+     * @param b PostgreSQL code builder
+     * @return Transformed PERFORM statement
+     */
+    private static String buildPackageVariableFieldAssignment(
+            String schemaPrefix,
+            String packageName,
+            String variableName,
+            int fieldStartIndex,
+            java.util.List<PlSqlParser.General_element_partContext> parts,
+            PackageContext pkgContext,
+            PlSqlParser.Assignment_statementContext assignCtx,
+            PostgresCodeBuilder b) {
+
+        String pkgLower = packageName.toLowerCase();
+        String varLower = variableName.toLowerCase();
+
+        // Build getter and setter names
+        String getterCall = schemaPrefix + pkgLower + "__get_" + varLower + "()";
+        String setterName = schemaPrefix + pkgLower + "__set_" + varLower;
+
+        // Build field path for jsonb_set: '{field1,field2,...}'
+        StringBuilder fieldPath = new StringBuilder();
+        fieldPath.append("'{ ");
+        for (int i = fieldStartIndex; i < parts.size(); i++) {
+            if (i > fieldStartIndex) {
+                fieldPath.append(" , ");
+            }
+            fieldPath.append(parts.get(i).id_expression().getText());
+        }
+        fieldPath.append(" }'");
+
+        // Transform RHS expression
+        String rightSide = b.visit(assignCtx.expression());
+        String castedValue = addExplicitCastForLiterals(rightSide);
+
+        // Build: PERFORM setter(jsonb_set(getter(), '{path}', to_jsonb(value), true))
+        StringBuilder result = new StringBuilder();
+        result.append("PERFORM ").append(setterName).append("( ");
+        result.append("jsonb_set( ");
+        result.append(getterCall);
+        result.append(" , ");
+        result.append(fieldPath);
+        result.append(" , to_jsonb( ");
+        result.append(castedValue);
+        result.append(" )");
+
+        // Add 'true' flag for nested paths (creates missing intermediate objects)
+        int fieldCount = parts.size() - fieldStartIndex;
+        if (fieldCount > 1) {
+            result.append(" , true");
+        }
+
+        result.append(" ) )");
+
+        return result.toString();
+    }
+
+    /**
+     * Tries to transform a package variable collection element assignment to setter with jsonb_set.
+     *
+     * <p>Detects and transforms package variable collection element assignment patterns:
+     * <ul>
+     *   <li>Package-qualified: {@code pkg.g_array(1) := value} →
+     *       {@code PERFORM pkg__set_g_array(jsonb_set(pkg__get_g_array(), '{0}', to_jsonb(value)))}</li>
+     *   <li>Unqualified (inside package): {@code g_array(1) := value} →
+     *       {@code PERFORM pkg__set_g_array(jsonb_set(pkg__get_g_array(), '{0}', to_jsonb(value)))}</li>
+     *   <li>Schema-qualified: {@code schema.pkg.g_array(1) := value} →
+     *       {@code PERFORM schema.pkg__set_g_array(jsonb_set(schema.pkg__get_g_array(), '{0}', to_jsonb(value)))}</li>
+     *   <li>Map: {@code pkg.g_map('key') := value} →
+     *       {@code PERFORM pkg__set_g_map(jsonb_set(pkg__get_g_map(), '{key}', to_jsonb(value)))}</li>
+     * </ul>
+     *
+     * @param elemCtx General element context (LHS)
+     * @param assignCtx Assignment statement context (for RHS)
+     * @param b PostgreSQL code builder
+     * @return Transformed PERFORM setter call, or null if not a package variable collection assignment
+     */
+    private static String tryTransformPackageVariableCollectionAssignment(
+            PlSqlParser.General_elementContext elemCtx,
+            PlSqlParser.Assignment_statementContext assignCtx,
+            PostgresCodeBuilder b) {
+
+        TransformationContext context = b.getContext();
+        if (context == null) {
+            return null;
+        }
+
+        // Collect all parts - we need to find the pattern with function arguments
+        java.util.List<PlSqlParser.General_element_partContext> parts = collectAllParts(elemCtx);
+        if (parts.isEmpty()) {
+            return null;
+        }
+
+        // Last part should have function arguments (the collection element access)
+        PlSqlParser.General_element_partContext lastPart = parts.get(parts.size() - 1);
+        java.util.List<PlSqlParser.Function_argumentContext> funcArgList = lastPart.function_argument();
+        if (funcArgList == null || funcArgList.isEmpty()) {
+            return null;  // No function arguments - not collection element access
+        }
+
+        PlSqlParser.Function_argumentContext funcArgCtx = funcArgList.get(0);
+        java.util.List<PlSqlParser.ArgumentContext> arguments = funcArgCtx.argument();
+        if (arguments == null || arguments.size() != 1) {
+            return null;  // Collection access has exactly one argument
+        }
+
+        String argValue = b.visit(arguments.get(0).expression());
+
+        // Determine the pattern based on number of parts and context
+        String schemaPrefix;
+        String packageName;
+        String variableName = lastPart.id_expression().getText();
+        PackageContext pkgContext = null;
+
+        if (parts.size() == 1) {
+            // Pattern 1: Unqualified inside package function (g_array(1))
+            if (!context.isInPackageMember()) {
+                return null;  // Must be inside a package
+            }
+            packageName = context.getCurrentPackageName();
+            if (packageName == null || !b.isPackageVariable(packageName, variableName)) {
+                return null;
+            }
+            schemaPrefix = context.getCurrentSchema().toLowerCase() + ".";
+            pkgContext = context.getPackageContext(packageName);
+        } else if (parts.size() == 2) {
+            // Pattern 2: Package-qualified (pkg.g_array(1))
+            packageName = parts.get(0).id_expression().getText();
+            if (!b.isPackageVariable(packageName, variableName)) {
+                return null;
+            }
+            schemaPrefix = context.getCurrentSchema().toLowerCase() + ".";
+            pkgContext = context.getPackageContext(packageName);
+        } else if (parts.size() == 3) {
+            // Pattern 3: Schema-qualified (schema.pkg.g_array(1))
+            String firstPart = parts.get(0).id_expression().getText();
+            String currentSchema = context.getCurrentSchema();
+            if (!firstPart.equalsIgnoreCase(currentSchema)) {
+                return null;  // Cross-schema not supported
+            }
+            packageName = parts.get(1).id_expression().getText();
+            if (!b.isPackageVariable(packageName, variableName)) {
+                return null;
+            }
+            schemaPrefix = currentSchema.toLowerCase() + ".";
+            pkgContext = context.getPackageContext(packageName);
+        } else {
+            return null;  // Too many parts for collection access
+        }
+
+        // Verify it's a collection type
+        if (pkgContext == null) {
+            return null;
+        }
+
+        PackageContext.PackageVariable pkgVar = pkgContext.getVariable(variableName);
+        if (pkgVar == null) {
+            return null;
+        }
+
+        InlineTypeDefinition inlineType = pkgContext.getType(pkgVar.getDataType());
+        if (inlineType == null || !inlineType.isCollection()) {
+            return null;  // Not a collection type
+        }
+
+        // IT'S PACKAGE VARIABLE COLLECTION ELEMENT ASSIGNMENT!
+        return buildPackageVariableCollectionAssignment(
+            schemaPrefix, packageName, variableName, argValue, inlineType, assignCtx, b);
+    }
+
+    /**
+     * Builds the PostgreSQL PERFORM statement for package variable collection element assignment.
+     *
+     * <p>Transforms to:
+     * {@code PERFORM schema.pkg__set_varname(jsonb_set(schema.pkg__get_varname(), '{index}', to_jsonb(value)))}
+     *
+     * @param schemaPrefix Schema prefix with dot (e.g., "hr.")
+     * @param packageName Package name
+     * @param variableName Variable name
+     * @param argValue Index/key argument (already transformed)
+     * @param inlineType Inline type definition for the collection
+     * @param assignCtx Assignment statement context (for RHS)
+     * @param b PostgreSQL code builder
+     * @return Transformed PERFORM statement
+     */
+    private static String buildPackageVariableCollectionAssignment(
+            String schemaPrefix,
+            String packageName,
+            String variableName,
+            String argValue,
+            InlineTypeDefinition inlineType,
+            PlSqlParser.Assignment_statementContext assignCtx,
+            PostgresCodeBuilder b) {
+
+        String pkgLower = packageName.toLowerCase();
+        String varLower = variableName.toLowerCase();
+
+        // Build getter and setter names
+        String getterCall = schemaPrefix + pkgLower + "__get_" + varLower + "()";
+        String setterName = schemaPrefix + pkgLower + "__set_" + varLower;
+
+        // Transform RHS expression
+        String rightSide = b.visit(assignCtx.expression());
+        String castedValue = addExplicitCastForLiterals(rightSide);
+
+        // Determine path expression based on collection type
+        // IMPORTANT: jsonb_set requires text[] for path. Use ARRAY[] for dynamic paths
+        // and explicit ::text[] cast for static paths to avoid "function does not exist" errors.
+        String pathExpression;
+        if (inlineType.isAssociativeArray() && isStringIndexKeyType(inlineType.getIndexKeyType())) {
+            // MAP: Use string key as-is
+            if (isStringLiteral(argValue)) {
+                // Extract key value (remove quotes): 'key' → key
+                // Static key: use text array literal with explicit cast
+                String keyValue = argValue.substring(1, argValue.length() - 1);
+                pathExpression = "'{" + keyValue + "}'::text[]";
+            } else {
+                // Variable key: build dynamic path using ARRAY constructor
+                pathExpression = "ARRAY[" + argValue + "]";
+            }
+        } else {
+            // ARRAY: Apply 1-based → 0-based index conversion
+            boolean isNumericLiteral = argValue.matches("\\d+");
+
+            if (isNumericLiteral) {
+                int oracleIndex = Integer.parseInt(argValue);
+                int postgresIndex = oracleIndex - 1;
+                // Static index: use text array literal with explicit cast
+                pathExpression = "'{" + postgresIndex + "}'::text[]";
+            } else {
+                // Variable index: build dynamic path using ARRAY constructor
+                // Cast to text for jsonb_set path requirement
+                pathExpression = "ARRAY[( " + argValue + " - 1 )::text]";
+            }
+        }
+
+        // Build: PERFORM setter(jsonb_set(getter(), '{path}', to_jsonb(value)))
+        StringBuilder result = new StringBuilder();
+        result.append("PERFORM ").append(setterName).append("( ");
+        result.append("jsonb_set( ");
+        result.append(getterCall);
+        result.append(" , ");
+        result.append(pathExpression);
+        result.append(" , to_jsonb( ");
+        result.append(castedValue);
+        result.append(" ) ) )");
+
+        return result.toString();
+    }
+
+    /**
+     * Checks if the INDEX BY key type is string-based.
+     *
+     * @param indexKeyType Index key type from InlineTypeDefinition
+     * @return true if string-based key type
+     */
+    private static boolean isStringIndexKeyType(String indexKeyType) {
+        if (indexKeyType == null) {
+            return false;
+        }
+        String upperType = indexKeyType.toUpperCase();
+        return upperType.startsWith("VARCHAR2") ||
+               upperType.startsWith("VARCHAR") ||
+               upperType.startsWith("STRING") ||
+               upperType.startsWith("CHAR");
     }
 }

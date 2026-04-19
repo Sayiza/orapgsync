@@ -1,6 +1,7 @@
 package me.christianrobert.orapgsync.transformer.packagevariable;
 
 import me.christianrobert.orapgsync.core.tools.TypeConverter;
+import me.christianrobert.orapgsync.transformer.inline.InlineTypeDefinition;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -88,7 +89,19 @@ public class PackageHelperGenerator {
         sql.append("  -- Initialize all package variables with defaults\n");
         for (PackageContext.PackageVariable var : context.getVariables().values()) {
             String configKey = schema + "." + pkgName + "." + var.getVariableName().toLowerCase();
-            String pgDefaultValue = transformDefaultValue(var.getDefaultValue(), var.getDataType());
+
+            // Check if variable type is a known inline type (RECORD, TABLE OF, etc.)
+            InlineTypeDefinition inlineType = context.getType(var.getDataType());
+            String pgDefaultValue;
+
+            if (inlineType != null) {
+                // Complex type → use raw JSON value (e.g., "{}" or "[]")
+                // set_config stores as TEXT, so we don't need ::jsonb cast
+                pgDefaultValue = getJsonbDefaultValue(inlineType);
+            } else {
+                // Scalar type → use default value transformation
+                pgDefaultValue = transformDefaultValue(var.getDefaultValue(), var.getDataType());
+            }
 
             sql.append("  PERFORM set_config('").append(configKey).append("', '")
                .append(escapeQuotes(pgDefaultValue)).append("', true);\n");
@@ -106,13 +119,36 @@ public class PackageHelperGenerator {
     /**
      * Generates a getter function for a package variable.
      * Pattern: pkg__get_varname() RETURNS type
+     *
+     * <p>For complex types (RECORD, TABLE OF, VARRAY, INDEX BY), returns jsonb.
+     * For scalar types, returns the appropriate PostgreSQL type.
      */
     private String generateGetterFunction(PackageContext context, PackageContext.PackageVariable var) {
         StringBuilder sql = new StringBuilder();
         String schema = context.getSchema().toLowerCase();
         String pkgName = context.getPackageName().toLowerCase();
         String varName = var.getVariableName().toLowerCase();
-        String pgType = TypeConverter.toPostgre(var.getDataType());
+
+        // Check if variable type is a known inline type (RECORD, TABLE OF, etc.)
+        InlineTypeDefinition inlineType = context.getType(var.getDataType());
+
+        String pgType;
+        String defaultValue;
+
+        // For complex types (RECORD, TABLE OF, etc.), use jsonb with proper JSON defaults
+        // For scalar types, use TypeConverter
+        String defaultValueLiteral;  // The raw JSON/value without SQL escaping (e.g., "{}" or "[]")
+
+        if (inlineType != null) {
+            // Complex type → jsonb
+            pgType = "jsonb";
+            // Get raw JSON value without quotes or cast (e.g., "{}" not "'{}'::jsonb")
+            defaultValueLiteral = getJsonbDefaultValue(inlineType);
+        } else {
+            // Scalar type → use TypeConverter
+            pgType = TypeConverter.toPostgre(var.getDataType());
+            defaultValueLiteral = transformDefaultValue(var.getDefaultValue(), var.getDataType());
+        }
 
         // Function signature
         sql.append("CREATE OR REPLACE FUNCTION ")
@@ -123,15 +159,17 @@ public class PackageHelperGenerator {
         sql.append("BEGIN\n");
 
         // Return current value with default fallback
+        // IMPORTANT: current_setting returns '' (empty string) when not found, not NULL.
+        // We must use NULLIF to convert '' to NULL before casting, especially for jsonb
+        // where '' is invalid JSON and would cause "invalid input syntax for type json" errors.
         String configKey = schema + "." + pkgName + "." + varName;
-        String defaultValue = transformDefaultValue(var.getDefaultValue(), var.getDataType());
 
         sql.append("  RETURN COALESCE(\n");
-        sql.append("    current_setting('").append(configKey).append("', true)::").append(pgType).append(",\n");
-        sql.append("    '").append(escapeQuotes(defaultValue)).append("'::").append(pgType).append("\n");
+        sql.append("    NULLIF(current_setting('").append(configKey).append("', true), '')::").append(pgType).append(",\n");
+        sql.append("    '").append(escapeQuotes(defaultValueLiteral)).append("'::").append(pgType).append("\n");
         sql.append("  );\n");
         sql.append("EXCEPTION WHEN OTHERS THEN\n");
-        sql.append("  RETURN '").append(escapeQuotes(defaultValue)).append("'::").append(pgType).append(";\n");
+        sql.append("  RETURN '").append(escapeQuotes(defaultValueLiteral)).append("'::").append(pgType).append(";\n");
         sql.append("END;\n");
         sql.append("$$;");
 
@@ -141,13 +179,19 @@ public class PackageHelperGenerator {
     /**
      * Generates a setter function for a package variable (not for constants).
      * Pattern: pkg__set_varname(p_value type) RETURNS void
+     *
+     * <p>For complex types (RECORD, TABLE OF, VARRAY, INDEX BY), accepts jsonb.
+     * For scalar types, accepts the appropriate PostgreSQL type.
      */
     private String generateSetterFunction(PackageContext context, PackageContext.PackageVariable var) {
         StringBuilder sql = new StringBuilder();
         String schema = context.getSchema().toLowerCase();
         String pkgName = context.getPackageName().toLowerCase();
         String varName = var.getVariableName().toLowerCase();
-        String pgType = TypeConverter.toPostgre(var.getDataType());
+
+        // Check if variable type is a known inline type (RECORD, TABLE OF, etc.)
+        InlineTypeDefinition inlineType = context.getType(var.getDataType());
+        String pgType = (inlineType != null) ? "jsonb" : TypeConverter.toPostgre(var.getDataType());
 
         // Function signature
         sql.append("CREATE OR REPLACE FUNCTION ")
@@ -251,5 +295,26 @@ public class PackageHelperGenerator {
             return "";
         }
         return value.replace("'", "''");
+    }
+
+    /**
+     * Returns raw JSON default value for complex types (without quotes or ::jsonb cast).
+     * Used for set_config storage and COALESCE defaults.
+     *
+     * <p>This is separate from InlineTypeDefinition.getInitializer() which returns
+     * SQL-ready values like '{}'::jsonb. For set_config we need just the raw JSON.
+     */
+    private String getJsonbDefaultValue(InlineTypeDefinition inlineType) {
+        switch (inlineType.getCategory()) {
+            case RECORD:
+            case INDEX_BY:
+            case ROWTYPE:
+                return "{}";  // Empty object
+            case TABLE_OF:
+            case VARRAY:
+                return "[]";  // Empty array
+            default:
+                return "{}";
+        }
     }
 }
