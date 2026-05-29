@@ -494,8 +494,8 @@ public class JobResource {
                     response.put("typeMethodCount", typeMethods.size());
                     response.put("result", result);
                 } else if (jobType.contains("TRIGGER")
-                        && !jobType.contains("TRIGGER_IMPLEMENTATION")
-                        && !jobType.contains("TRIGGER_VERIFICATION")) {
+                        && !jobType.contains("TRIGGER_IMPLEMENTATION")) {
+                    // Handle both TRIGGER extraction and TRIGGER_VERIFICATION
                     @SuppressWarnings("unchecked")
                     List<TriggerMetadata> triggers = (List<TriggerMetadata>) result;
                     Map<String, Object> summary = TriggerResource.generateTriggerSummary(triggers);

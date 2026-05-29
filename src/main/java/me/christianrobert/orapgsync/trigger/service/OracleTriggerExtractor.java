@@ -106,7 +106,7 @@ public class OracleTriggerExtractor {
     private static TriggerMetadata extractSingleTrigger(ResultSet rs) throws SQLException {
         String schema = rs.getString("owner").toLowerCase();
         String triggerName = rs.getString("trigger_name").toLowerCase();
-        String tableOwner = rs.getString("table_owner");
+        String tableOwner = rs.getString("table_owner").toLowerCase();
         String tableName = rs.getString("table_name").toLowerCase();
         String triggerType = rs.getString("trigger_type");
         String triggeringEvent = rs.getString("triggering_event");
@@ -115,8 +115,8 @@ public class OracleTriggerExtractor {
         String whenClause = rs.getString("when_clause");
         String description = rs.getString("description");
 
-        // Create metadata object
-        TriggerMetadata metadata = new TriggerMetadata(schema, triggerName, tableName);
+        // Create metadata object with separate table schema
+        TriggerMetadata metadata = new TriggerMetadata(schema, triggerName, tableOwner, tableName);
 
         // Parse trigger type (e.g., "BEFORE EACH ROW" -> type="BEFORE", level="ROW")
         parseTriggerType(triggerType, metadata);
@@ -138,7 +138,7 @@ public class OracleTriggerExtractor {
         }
 
         log.debug("Extracted trigger: {}.{} on {}.{} ({})",
-            schema, triggerName, schema, tableName, metadata.getTriggerType());
+            schema, triggerName, tableOwner, tableName, metadata.getTriggerType());
 
         return metadata;
     }

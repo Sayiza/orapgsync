@@ -256,12 +256,12 @@ public class PostgresTriggerImplementationJob extends AbstractDatabaseWriteJob<T
         String dropSql = String.format(
             "DROP TRIGGER IF EXISTS %s ON %s.%s",
             trigger.getTriggerName(),
-            trigger.getSchema(),
+            trigger.getTableSchema(),
             trigger.getTableName()
         );
 
         log.debug("Dropping existing trigger (if exists): {} on {}.{}",
-            trigger.getTriggerName(), trigger.getSchema(), trigger.getTableName());
+            trigger.getTriggerName(), trigger.getTableSchema(), trigger.getTableName());
         log.trace("Drop SQL: {}", dropSql);
 
         executeDdl(pgConnection, dropSql);

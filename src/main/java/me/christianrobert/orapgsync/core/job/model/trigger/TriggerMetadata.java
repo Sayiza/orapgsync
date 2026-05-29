@@ -7,10 +7,11 @@ import java.util.Objects;
  * Represents trigger information extracted from Oracle or PostgreSQL databases.
  */
 public class TriggerMetadata {
-    private String schema;
+    private String schema;        // Trigger's owning schema
     private String triggerName;
+    private String tableSchema;   // Table's schema (may differ from trigger schema)
     private String tableName;
-    private String triggerType;  // BEFORE/AFTER/INSTEAD OF
+    private String triggerType;   // BEFORE/AFTER/INSTEAD OF
     private String triggerEvent;  // INSERT/UPDATE/DELETE
     private String triggerLevel;  // ROW/STATEMENT
     private String whenClause;    // Optional WHEN condition
@@ -27,6 +28,14 @@ public class TriggerMetadata {
     public TriggerMetadata(String schema, String triggerName, String tableName) {
         this.schema = schema;
         this.triggerName = triggerName;
+        this.tableSchema = schema; // Default to trigger schema for backwards compatibility
+        this.tableName = tableName;
+    }
+
+    public TriggerMetadata(String schema, String triggerName, String tableSchema, String tableName) {
+        this.schema = schema;
+        this.triggerName = triggerName;
+        this.tableSchema = tableSchema;
         this.tableName = tableName;
     }
 
@@ -53,6 +62,21 @@ public class TriggerMetadata {
 
     public void setTableName(String tableName) {
         this.tableName = tableName;
+    }
+
+    public String getTableSchema() {
+        return tableSchema;
+    }
+
+    public void setTableSchema(String tableSchema) {
+        this.tableSchema = tableSchema;
+    }
+
+    /**
+     * Returns the qualified table name (table_schema.table_name).
+     */
+    public String getQualifiedTableName() {
+        return tableSchema + "." + tableName;
     }
 
     public String getTriggerType() {
@@ -130,7 +154,7 @@ public class TriggerMetadata {
      * Returns a display name for the trigger.
      */
     public String getDisplayName() {
-        return triggerName + " ON " + tableName;
+        return triggerName + " ON " + getQualifiedTableName();
     }
 
     @Override
@@ -149,7 +173,7 @@ public class TriggerMetadata {
 
     @Override
     public String toString() {
-        return String.format("TriggerMetadata{schema='%s', trigger='%s', table='%s', type='%s', event='%s', level='%s'}",
-                schema, triggerName, tableName, triggerType, triggerEvent, triggerLevel);
+        return String.format("TriggerMetadata{schema='%s', trigger='%s', tableSchema='%s', table='%s', type='%s', event='%s', level='%s'}",
+                schema, triggerName, tableSchema, tableName, triggerType, triggerEvent, triggerLevel);
     }
 }

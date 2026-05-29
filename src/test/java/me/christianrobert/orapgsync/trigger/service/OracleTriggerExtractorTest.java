@@ -23,9 +23,22 @@ class OracleTriggerExtractorTest {
 
     /**
      * Helper to create a mock ResultSet with trigger data.
+     * Uses the same schema for trigger and table (same-schema trigger).
      */
     private ResultSet createMockResultSet(
             String owner, String triggerName, String tableName,
+            String triggerType, String triggeringEvent, String status,
+            String triggerBody, String whenClause, String description) throws SQLException {
+        return createMockResultSet(owner, triggerName, owner, tableName,
+                triggerType, triggeringEvent, status, triggerBody, whenClause, description);
+    }
+
+    /**
+     * Helper to create a mock ResultSet with trigger data.
+     * Supports cross-schema triggers (trigger in one schema, table in another).
+     */
+    private ResultSet createMockResultSet(
+            String owner, String triggerName, String tableOwner, String tableName,
             String triggerType, String triggeringEvent, String status,
             String triggerBody, String whenClause, String description) throws SQLException {
 
@@ -34,7 +47,7 @@ class OracleTriggerExtractorTest {
         when(rs.next()).thenReturn(true, false); // One row, then done
         when(rs.getString("owner")).thenReturn(owner);
         when(rs.getString("trigger_name")).thenReturn(triggerName);
-        when(rs.getString("table_owner")).thenReturn(owner);
+        when(rs.getString("table_owner")).thenReturn(tableOwner);
         when(rs.getString("table_name")).thenReturn(tableName);
         when(rs.getString("trigger_type")).thenReturn(triggerType);
         when(rs.getString("triggering_event")).thenReturn(triggeringEvent);
@@ -75,6 +88,7 @@ class OracleTriggerExtractorTest {
         TriggerMetadata trigger = triggers.get(0);
         assertEquals("hr", trigger.getSchema());
         assertEquals("audit_insert_trg", trigger.getTriggerName());
+        assertEquals("hr", trigger.getTableSchema());
         assertEquals("employees", trigger.getTableName());
         assertEquals("BEFORE", trigger.getTriggerType());
         assertEquals("ROW", trigger.getTriggerLevel());
@@ -82,6 +96,31 @@ class OracleTriggerExtractorTest {
         assertEquals("ENABLED", trigger.getStatus());
         assertNotNull(trigger.getTriggerBody());
         assertTrue(trigger.getTriggerBody().contains("BEGIN"));
+    }
+
+    @Test
+    void testCrossSchemaTriger() throws SQLException {
+        // Trigger in AUDIT schema, table in HR schema
+        String triggerBody = "BEGIN\n  INSERT INTO audit.audit_log VALUES (:NEW.id);\nEND;";
+
+        ResultSet rs = createMockResultSet(
+                "AUDIT", "AUDIT_INSERT_TRG", "HR", "EMPLOYEES",
+                "BEFORE EACH ROW", "INSERT", "ENABLED",
+                triggerBody, null, null);
+
+        Connection conn = createMockConnection(rs);
+        List<TriggerMetadata> triggers = OracleTriggerExtractor.extractAllTriggers(conn, List.of("AUDIT"));
+
+        assertEquals(1, triggers.size());
+        TriggerMetadata trigger = triggers.get(0);
+        assertEquals("audit", trigger.getSchema());  // Trigger's schema
+        assertEquals("hr", trigger.getTableSchema()); // Table's schema (different!)
+        assertEquals("audit_insert_trg", trigger.getTriggerName());
+        assertEquals("employees", trigger.getTableName());
+        assertEquals("hr.employees", trigger.getQualifiedTableName());
+        assertEquals("BEFORE", trigger.getTriggerType());
+        assertEquals("ROW", trigger.getTriggerLevel());
+        assertEquals("INSERT", trigger.getTriggerEvent());
     }
 
     @Test

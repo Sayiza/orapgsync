@@ -58,29 +58,35 @@ public class PostgresTriggerExtractor {
         List<TriggerMetadata> triggers = new ArrayList<>();
 
         // PostgreSQL stores trigger metadata in pg_trigger table
-        // We need to join with pg_class (for table info), pg_namespace (for schema),
-        // and pg_proc (for function source code)
+        // We need to join with pg_class (for table info), pg_namespace (for table schema),
+        // pg_proc (for function source code), and function namespace (for trigger function schema)
+        //
+        // For cross-schema triggers, the trigger function may be in a different schema than the table.
+        // We search for triggers where EITHER the table OR the function is in the specified schema.
         String sql = """
-            SELECT
-                n.nspname AS schema_name,
+            SELECT DISTINCT
+                n.nspname AS table_schema,
                 t.tgname AS trigger_name,
                 c.relname AS table_name,
                 t.tgtype AS trigger_type_bits,
                 t.tgenabled AS trigger_enabled,
                 pg_get_triggerdef(t.oid) AS trigger_definition,
                 p.proname AS function_name,
-                pg_get_functiondef(p.oid) AS function_definition
+                pg_get_functiondef(p.oid) AS function_definition,
+                fn.nspname AS function_schema
             FROM pg_trigger t
                 JOIN pg_class c ON t.tgrelid = c.oid
                 JOIN pg_namespace n ON c.relnamespace = n.oid
                 LEFT JOIN pg_proc p ON t.tgfoid = p.oid
-            WHERE n.nspname = ?
+                LEFT JOIN pg_namespace fn ON p.pronamespace = fn.oid
+            WHERE (n.nspname = ? OR fn.nspname = ?)
               AND NOT t.tgisinternal
             ORDER BY t.tgname
             """;
 
         try (PreparedStatement ps = pgConnection.prepareStatement(sql)) {
             ps.setString(1, schema);
+            ps.setString(2, schema);  // Same schema for both table and function namespace check
 
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
@@ -107,7 +113,7 @@ public class PostgresTriggerExtractor {
      * @throws SQLException if database operations fail
      */
     private static TriggerMetadata extractSingleTrigger(ResultSet rs) throws SQLException {
-        String schema = rs.getString("schema_name");
+        String tableSchema = rs.getString("table_schema");
         String triggerName = rs.getString("trigger_name");
         String tableName = rs.getString("table_name");
         int tgtype = rs.getInt("trigger_type_bits");
@@ -115,9 +121,14 @@ public class PostgresTriggerExtractor {
         String triggerDef = rs.getString("trigger_definition");
         String functionName = rs.getString("function_name");
         String functionDef = rs.getString("function_definition");
+        String functionSchema = rs.getString("function_schema");
 
-        // Create metadata object
-        TriggerMetadata metadata = new TriggerMetadata(schema, triggerName, tableName);
+        // Use function schema as trigger schema (where the trigger function lives)
+        // Fall back to table schema if function schema is not available
+        String triggerSchema = functionSchema != null ? functionSchema : tableSchema;
+
+        // Create metadata object with separate table schema
+        TriggerMetadata metadata = new TriggerMetadata(triggerSchema, triggerName, tableSchema, tableName);
 
         // Decode trigger type from bitmask
         decodeTriggerType(tgtype, metadata);
@@ -147,8 +158,9 @@ public class PostgresTriggerExtractor {
             metadata.setPostgresTriggerDdl(triggerDef);
         }
 
-        log.debug("Extracted trigger: {}.{} on {}.{} ({}) [function: {}]",
-            schema, triggerName, schema, tableName, metadata.getTriggerType(), functionName);
+        log.debug("Extracted trigger: {}.{} on {}.{} ({}) [function: {}.{}]",
+            triggerSchema, triggerName, tableSchema, tableName, metadata.getTriggerType(),
+            functionSchema, functionName);
 
         return metadata;
     }

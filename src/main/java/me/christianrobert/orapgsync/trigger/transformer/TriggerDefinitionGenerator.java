@@ -54,6 +54,7 @@ public class TriggerDefinitionGenerator {
 
         String schema = metadata.getSchema();
         String triggerName = metadata.getTriggerName();
+        String tableSchema = metadata.getTableSchema();
         String tableName = metadata.getTableName();
         String triggerType = metadata.getTriggerType();
         String triggerEvent = metadata.getTriggerEvent();
@@ -75,9 +76,9 @@ public class TriggerDefinitionGenerator {
            .append(triggerEvent)
            .append("\n");
 
-        // ON schema.table_name
+        // ON table_schema.table_name (table may be in different schema than trigger)
         ddl.append("  ON ")
-           .append(schema)
+           .append(tableSchema)
            .append(".")
            .append(tableName)
            .append("\n");
@@ -119,6 +120,10 @@ public class TriggerDefinitionGenerator {
 
         if (metadata.getTriggerName() == null || metadata.getTriggerName().isEmpty()) {
             throw new IllegalArgumentException("Trigger name cannot be null or empty");
+        }
+
+        if (metadata.getTableSchema() == null || metadata.getTableSchema().isEmpty()) {
+            throw new IllegalArgumentException("Table schema cannot be null or empty");
         }
 
         if (metadata.getTableName() == null || metadata.getTableName().isEmpty()) {
