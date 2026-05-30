@@ -3,6 +3,13 @@ package me.christianrobert.orapgsync.transformer.builder;
 import me.christianrobert.orapgsync.antlr.PlSqlParser;
 import me.christianrobert.orapgsync.transformer.builder.functions.DateFunctionTransformer;
 import me.christianrobert.orapgsync.transformer.builder.functions.StringFunctionTransformer;
+import me.christianrobert.orapgsync.transformer.builder.generalelement.CollectionMethodTransformer;
+import me.christianrobert.orapgsync.transformer.builder.generalelement.DotNavigationDispatcher;
+import me.christianrobert.orapgsync.transformer.builder.generalelement.GeneralElementResult;
+import me.christianrobert.orapgsync.transformer.builder.generalelement.InlineTypeFieldTransformer;
+import me.christianrobert.orapgsync.transformer.builder.generalelement.ObjectFieldAccessAdapter;
+import me.christianrobert.orapgsync.transformer.builder.generalelement.PackageVariableTransformer;
+import me.christianrobert.orapgsync.transformer.builder.generalelement.SequenceCallTransformer;
 import me.christianrobert.orapgsync.transformer.builder.objectfield.ObjectFieldAccessTransformer;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
 import me.christianrobert.orapgsync.transformer.context.TransformationException;
@@ -16,6 +23,31 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 public class VisitGeneralElement {
+
+  /**
+   * Static dispatcher with registered transformers in priority order.
+   * Transformers are added incrementally during refactoring.
+   */
+  private static final DotNavigationDispatcher DISPATCHER = createDispatcher();
+
+  private static DotNavigationDispatcher createDispatcher() {
+    DotNavigationDispatcher dispatcher = new DotNavigationDispatcher();
+    // Priority order follows the plan's disambiguation logic:
+    // 1. PackageVariable - pkg.g_var (before function calls - same syntax)
+    dispatcher.addTransformer(new PackageVariableTransformer());
+    // 2. InlineTypeField - local_rec.field (before table column)
+    dispatcher.addTransformer(new InlineTypeFieldTransformer());
+    // 3. CollectionMethod - v.COUNT (before generic method)
+    dispatcher.addTransformer(new CollectionMethodTransformer());
+    // 4. SequenceCall - seq.NEXTVAL (special - no parentheses)
+    dispatcher.addTransformer(new SequenceCallTransformer());
+    // 5. ObjectFieldAccess - table.col.field (before function)
+    dispatcher.addTransformer(new ObjectFieldAccessAdapter());
+    // Remaining: PackageVariableField, PackageCollectionAccess, FunctionCall
+    // handled by fallback code in handleDotNavigation
+    return dispatcher;
+  }
+
   public static String v(PlSqlParser.General_elementContext ctx, PostgresCodeBuilder b) {
 
     // Check for parenthesized general_element
@@ -91,64 +123,16 @@ public class VisitGeneralElement {
       List<PlSqlParser.General_element_partContext> parts,
       PostgresCodeBuilder b) {
 
-    // STEP 0: Check for package variable references (unless in assignment target)
-    // Three Oracle patterns for package variable references:
-    //   1. Unqualified (1 part):        g_counter
-    //   2. Package-qualified (2 parts): pkg.g_counter
-    //   3. Schema-qualified (3 parts):  hr.pkg.g_counter
-    if (!b.isInAssignmentTarget()) {
-      PlSqlParser.General_element_partContext lastPart = parts.get(parts.size() - 1);
-      boolean hasArguments = lastPart.function_argument() != null && !lastPart.function_argument().isEmpty();
-
-      if (!hasArguments) {
-        // Pattern 1: Unqualified variable in current package (1 part)
-        // Oracle:     g_counter (inside package function)
-        // PostgreSQL: schema.pkg__get_g_counter()
-        if (parts.size() == 1) {
-          String variableName = parts.get(0).id_expression().getText();
-          String currentPackage = b.getContext().getCurrentPackageName();
-
-          // Only check if we're inside a package context
-          if (currentPackage != null && b.isPackageVariable(currentPackage, variableName)) {
-            // Transform to getter call using current package
-            return b.transformToPackageVariableGetter(currentPackage, variableName);
-          }
-        }
-
-        // Pattern 2: Package-qualified variable (2 parts)
-        // Oracle:     pkg.g_counter
-        // PostgreSQL: schema.pkg__get_g_counter()
-        if (parts.size() == 2) {
-          String packageName = parts.get(0).id_expression().getText();
-          String variableName = parts.get(1).id_expression().getText();
-
-          // Check if this is a package variable
-          if (b.isPackageVariable(packageName, variableName)) {
-            // Transform to getter call
-            return b.transformToPackageVariableGetter(packageName, variableName);
-          }
-        }
-
-        // Pattern 3: Schema-qualified variable (3 parts)
-        // Oracle:     hr.pkg.g_counter
-        // PostgreSQL: schema.pkg__get_g_counter()
-        if (parts.size() == 3) {
-          String schemaName = parts.get(0).id_expression().getText();
-          String packageName = parts.get(1).id_expression().getText();
-          String variableName = parts.get(2).id_expression().getText();
-
-          // Verify schema matches current schema (Oracle doesn't allow cross-schema package refs)
-          String currentSchema = b.getContext().getCurrentSchema();
-          if (schemaName.equalsIgnoreCase(currentSchema) &&
-              b.isPackageVariable(packageName, variableName)) {
-            // Transform to getter call (schema prefix not needed in getter name)
-            return b.transformToPackageVariableGetter(packageName, variableName);
-          }
-        }
-      }
+    // DISPATCHER: Try registered transformers in priority order
+    // Handles: PackageVariable, InlineTypeField, CollectionMethod, SequenceCall, ObjectFieldAccess
+    GeneralElementResult dispatcherResult = DISPATCHER.dispatch(parts, b);
+    if (dispatcherResult.isHandled()) {
+      return dispatcherResult.getResult();
     }
 
-    // STEP 0.3: Check for package variable FIELD access (Phase: Complex Types) - RHS only
+    // FALLBACK: Handle patterns not yet extracted to transformers
+
+    // Package variable FIELD access (Phase: Complex Types) - RHS only
     // Patterns:
     //   - 2+ parts inside package: g_rec.field (unqualified, uses current package)
     //   - 3+ parts: pkg.g_rec.field (package-qualified)
@@ -158,92 +142,6 @@ public class VisitGeneralElement {
       String pkgFieldAccess = tryTransformPackageVariableFieldAccess(parts, b);
       if (pkgFieldAccess != null) {
         return pkgFieldAccess;
-      }
-    }
-
-    // STEP 0.5: Check for inline type field access (Phase 1B.5) - RHS only
-    // Pattern: variable.field → (variable->>'field')::type
-    // Pattern: variable.field1.field2 → variable->'field1'->>'field2'
-    // Only process if not in assignment target (LHS handled by VisitAssignment_statement)
-    if (!b.isInAssignmentTarget() && parts.size() >= 2) {
-      // DETERMINISTIC LOOKUP (Phase 1B.5 - uses variable scope tracking)
-      // Check if first part is a local RECORD variable
-      String variableName = parts.get(0).id_expression().getText();
-      TransformationContext context = b.getContext();
-
-      // Context can be null in SQL-only transformations (no PL/SQL)
-      if (context != null) {
-        me.christianrobert.orapgsync.transformer.context.TransformationContext.VariableDefinition varDef =
-            context.lookupVariable(variableName);
-
-        if (varDef != null && varDef.isRecord()) {
-          // IT'S INLINE TYPE FIELD ACCESS!
-          // We have definitive knowledge:
-          // - It's a registered variable (not a table)
-          // - It has a RECORD inline type
-          // - We can safely transform as field access
-          return handleInlineTypeFieldAccess(parts, b, varDef);
-        }
-      }
-    }
-
-    // STEP 0.7: Check for collection method calls (Phase 1E) - RHS only
-    // Pattern: variable.COUNT, variable.EXISTS(i), variable.FIRST, variable.LAST, variable.DELETE(i)
-    // Only process if not in assignment target (collections methods are read-only operations)
-    if (!b.isInAssignmentTarget() && parts.size() == 2) {
-      // DETERMINISTIC LOOKUP (Phase 1E - uses variable scope tracking)
-      // Check if first part is a local collection variable
-      String variableName = parts.get(0).id_expression().getText();
-      TransformationContext context = b.getContext();
-
-      // Context can be null in SQL-only transformations (no PL/SQL)
-      if (context != null) {
-        me.christianrobert.orapgsync.transformer.context.TransformationContext.VariableDefinition varDef =
-            context.lookupVariable(variableName);
-
-        if (varDef != null && varDef.isCollection()) {
-          // IT'S A COLLECTION METHOD CALL!
-          // We have definitive knowledge:
-          // - It's a registered variable (not a table)
-          // - It has a collection inline type (TABLE OF, VARRAY, or INDEX BY)
-          // - We can safely check for collection methods
-          String methodName = parts.get(1).id_expression().getText().toUpperCase();
-          PlSqlParser.General_element_partContext methodPart = parts.get(1);
-          boolean hasArguments = methodPart.function_argument() != null && !methodPart.function_argument().isEmpty();
-
-          if (isCollectionMethod(methodName, hasArguments)) {
-            return handleCollectionMethod(variableName, methodName, methodPart, b);
-          }
-        }
-      }
-    }
-
-    // Check for sequence NEXTVAL/CURRVAL calls (before function call check)
-    // Pattern: sequence_name.NEXTVAL or schema.sequence_name.NEXTVAL
-    if (isSequenceCall(parts)) {
-      return handleSequenceCall(parts, b);
-    }
-
-    // STEP 1: Check for object type field access (before function call check)
-    // Pattern: table.column.field or table.column.field1.field2
-    // PostgreSQL requires parentheses: (table.column).field or ((table.column).field1).field2
-    // This must come BEFORE function call check because:
-    //   - Field access has no parentheses: table.col.field
-    //   - Method calls have parentheses: table.col.method()
-    TransformationContext transformContext = b.getContext();
-    if (transformContext != null && parts.size() >= 3) {
-      // Build full identifier chain from parts
-      String identifierChain = parts.stream()
-          .map(p -> p.id_expression().getText())
-          .collect(Collectors.joining("."));
-
-      // Attempt object field access transformation
-      ObjectFieldAccessTransformer fieldTransformer = new ObjectFieldAccessTransformer(transformContext);
-      String fieldAccessResult = fieldTransformer.transform(identifierChain);
-
-      if (fieldAccessResult != null) {
-        // Successfully transformed as object field access!
-        return fieldAccessResult;
       }
     }
 
