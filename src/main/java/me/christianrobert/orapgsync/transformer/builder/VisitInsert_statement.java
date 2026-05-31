@@ -197,6 +197,7 @@ public class VisitInsert_statement {
 
     /**
      * Transforms VALUES clause.
+     * Package-private so it can be reused by VisitMerge_statement.
      *
      * Grammar:
      * <pre>
@@ -214,7 +215,7 @@ public class VisitInsert_statement {
      * @param b PostgresCodeBuilder instance
      * @return PostgreSQL VALUES clause
      */
-    private static String visitValuesClause(PlSqlParser.Values_clauseContext ctx, PostgresCodeBuilder b) {
+    static String visitValuesClause(PlSqlParser.Values_clauseContext ctx, PostgresCodeBuilder b) {
         if (ctx == null) {
             throw new IllegalArgumentException("Values_clauseContext cannot be null");
         }

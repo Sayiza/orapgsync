@@ -98,9 +98,10 @@ public class TriggerReturnInjector {
      */
     private static boolean hasReturnStatement(String body) {
         // Simple pattern: RETURN followed by space, semicolon, or end of string
+        // Use (?s) flag to make . match newlines (DOTALL mode)
         String upperBody = body.toUpperCase();
-        return upperBody.matches(".*\\bRETURN\\s+.*") ||
-               upperBody.matches(".*\\bRETURN;.*");
+        return upperBody.matches("(?s).*\\bRETURN\\s+.*") ||
+               upperBody.matches("(?s).*\\bRETURN;.*");
     }
 
     /**
@@ -135,18 +136,21 @@ public class TriggerReturnInjector {
     }
 
     /**
-     * Inserts a RETURN statement before the last END keyword.
+     * Inserts RETURN statement(s) to ensure all execution paths have a RETURN.
      *
      * <p>Algorithm:
      * <ol>
-     *   <li>Find the last occurrence of END (case-insensitive)</li>
-     *   <li>Determine proper indentation from the END line</li>
-     *   <li>Insert "RETURN value;" with same indentation before END</li>
+     *   <li>If there's an EXCEPTION block, insert RETURN before EXCEPTION (normal path)
+     *       AND before the final END (exception path)</li>
+     *   <li>If there's no EXCEPTION block, insert RETURN before the final END</li>
      * </ol>
+     *
+     * <p>This ensures that both normal execution and exception handling paths
+     * have a RETURN statement, which PostgreSQL requires.</p>
      *
      * @param body Trigger body
      * @param returnValue Value to return ("NEW" or "NULL")
-     * @return Body with RETURN statement inserted
+     * @return Body with RETURN statement(s) inserted
      * @throws IllegalArgumentException if no END statement found
      */
     private static String insertBeforeLastEnd(String body, String returnValue) {
@@ -159,17 +163,94 @@ public class TriggerReturnInjector {
             throw new IllegalArgumentException("No END statement found in trigger body");
         }
 
-        // Determine indentation from the END line
-        String indentation = detectIndentation(body, lastEndIndex);
+        // Check if there's an EXCEPTION block
+        int exceptionIndex = findExceptionKeyword(upperBody);
 
-        // Build the RETURN statement with proper indentation
+        if (exceptionIndex != -1 && exceptionIndex < lastEndIndex) {
+            // Has EXCEPTION block - need RETURN on both paths
+            return insertReturnWithException(body, returnValue, exceptionIndex, lastEndIndex);
+        } else {
+            // No EXCEPTION block - single RETURN before END
+            return insertSingleReturn(body, returnValue, lastEndIndex);
+        }
+    }
+
+    /**
+     * Inserts a single RETURN statement before the final END.
+     * Used when there is no EXCEPTION block.
+     */
+    private static String insertSingleReturn(String body, String returnValue, int lastEndIndex) {
+        String indentation = detectIndentation(body, lastEndIndex);
         String returnStatement = indentation + "RETURN " + returnValue + ";\n";
 
-        // Insert RETURN before END
         String beforeEnd = body.substring(0, lastEndIndex);
         String fromEnd = body.substring(lastEndIndex);
 
         return beforeEnd + returnStatement + fromEnd;
+    }
+
+    /**
+     * Inserts RETURN statements for both normal and exception paths.
+     * Used when there is an EXCEPTION block.
+     *
+     * <p>Structure:</p>
+     * <pre>
+     * BEGIN
+     *   statements...
+     *   RETURN value;  -- inserted for normal path
+     * EXCEPTION
+     *   WHEN OTHERS THEN
+     *     handler statements...
+     *   RETURN value;  -- inserted for exception path
+     * END;
+     * </pre>
+     */
+    private static String insertReturnWithException(String body, String returnValue,
+                                                     int exceptionIndex, int lastEndIndex) {
+        // Insert RETURN before EXCEPTION (normal path)
+        String indentationBeforeException = detectIndentation(body, exceptionIndex);
+        String returnBeforeException = indentationBeforeException + "RETURN " + returnValue + ";\n";
+
+        // Insert RETURN before END (exception path)
+        // Note: lastEndIndex will shift after first insertion, so we calculate the offset
+        String indentationBeforeEnd = detectIndentation(body, lastEndIndex);
+        String returnBeforeEnd = indentationBeforeEnd + "RETURN " + returnValue + ";\n";
+
+        // Build the result: before EXCEPTION + RETURN + from EXCEPTION to before END + RETURN + from END
+        StringBuilder result = new StringBuilder();
+        result.append(body.substring(0, exceptionIndex));
+        result.append(returnBeforeException);
+        result.append(body.substring(exceptionIndex, lastEndIndex));
+        result.append(returnBeforeEnd);
+        result.append(body.substring(lastEndIndex));
+
+        return result.toString();
+    }
+
+    /**
+     * Finds the EXCEPTION keyword in the trigger body.
+     *
+     * <p>Looks for standalone EXCEPTION keyword (not part of another word).</p>
+     *
+     * @param upperBody Trigger body in uppercase
+     * @return Index of EXCEPTION keyword, or -1 if not found
+     */
+    private static int findExceptionKeyword(String upperBody) {
+        int index = upperBody.indexOf("EXCEPTION");
+        while (index != -1) {
+            // Check word boundaries
+            boolean validStart = index == 0 || !Character.isLetterOrDigit(upperBody.charAt(index - 1));
+            boolean validEnd = index + 9 >= upperBody.length() ||
+                               !Character.isLetterOrDigit(upperBody.charAt(index + 9));
+
+            if (validStart && validEnd) {
+                return index;
+            }
+
+            // Try to find next occurrence
+            index = upperBody.indexOf("EXCEPTION", index + 1);
+        }
+        return -1;
     }
 
     /**

@@ -975,6 +975,11 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
     }
 
     @Override
+    public String visitBlock(PlSqlParser.BlockContext ctx) {
+        return VisitBlock.v(ctx, this);
+    }
+
+    @Override
     public String visitSeq_of_statements(PlSqlParser.Seq_of_statementsContext ctx) {
         return VisitSeq_of_statements.v(ctx, this);
     }
@@ -1114,5 +1119,10 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
     @Override
     public String visitDelete_statement(PlSqlParser.Delete_statementContext ctx) {
         return VisitDelete_statement.v(ctx, this);
+    }
+
+    @Override
+    public String visitMerge_statement(PlSqlParser.Merge_statementContext ctx) {
+        return VisitMerge_statement.v(ctx, this);
     }
 }

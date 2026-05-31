@@ -18,6 +18,10 @@ public class TriggerMetadata {
     private String triggerBody;   // PL/SQL or PL/pgSQL code
     private String status;        // ENABLED/DISABLED
 
+    // REFERENCING clause aliases (default to standard NEW/OLD)
+    private String newAlias = "NEW";  // Oracle REFERENCING NEW AS xxx
+    private String oldAlias = "OLD";  // Oracle REFERENCING OLD AS xxx
+
     // PostgreSQL-specific DDL (for verification and manual review)
     private String postgresFunctionDdl;  // CREATE OR REPLACE FUNCTION ... (full function DDL)
     private String postgresTriggerDdl;   // CREATE TRIGGER ... (trigger definition DDL)
@@ -127,6 +131,30 @@ public class TriggerMetadata {
         this.status = status;
     }
 
+    public String getNewAlias() {
+        return newAlias;
+    }
+
+    public void setNewAlias(String newAlias) {
+        this.newAlias = newAlias != null ? newAlias : "NEW";
+    }
+
+    public String getOldAlias() {
+        return oldAlias;
+    }
+
+    public void setOldAlias(String oldAlias) {
+        this.oldAlias = oldAlias != null ? oldAlias : "OLD";
+    }
+
+    /**
+     * Returns true if this trigger uses custom REFERENCING aliases.
+     * Custom aliases require transformation from :alias to NEW/OLD.
+     */
+    public boolean hasCustomAliases() {
+        return !"NEW".equalsIgnoreCase(newAlias) || !"OLD".equalsIgnoreCase(oldAlias);
+    }
+
     public String getPostgresFunctionDdl() {
         return postgresFunctionDdl;
     }
@@ -173,7 +201,11 @@ public class TriggerMetadata {
 
     @Override
     public String toString() {
-        return String.format("TriggerMetadata{schema='%s', trigger='%s', tableSchema='%s', table='%s', type='%s', event='%s', level='%s'}",
+        String base = String.format("TriggerMetadata{schema='%s', trigger='%s', tableSchema='%s', table='%s', type='%s', event='%s', level='%s'",
                 schema, triggerName, tableSchema, tableName, triggerType, triggerEvent, triggerLevel);
+        if (hasCustomAliases()) {
+            base += String.format(", newAlias='%s', oldAlias='%s'", newAlias, oldAlias);
+        }
+        return base + "}";
     }
 }

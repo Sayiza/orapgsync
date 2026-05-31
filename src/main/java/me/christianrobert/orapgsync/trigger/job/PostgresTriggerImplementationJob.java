@@ -144,7 +144,7 @@ public class PostgresTriggerImplementationJob extends AbstractDatabaseWriteJob<T
                 } catch (Exception e) {
                     log.error("Failed to implement trigger: " + qualifiedName, e);
                     result.addError(qualifiedName, "Implementation failed: " + e.getMessage(),
-                            trigger.getTriggerBody());
+                            "-- Oracle trigger body (implementation failed unexpectedly):\n" + trigger.getTriggerBody());
                 }
 
                 processedTriggers++;
@@ -195,10 +195,12 @@ public class PostgresTriggerImplementationJob extends AbstractDatabaseWriteJob<T
 
         log.debug("Transforming trigger: {}", qualifiedName);
 
+        // Track the generated DDL for error reporting
+        TriggerTransformer.TriggerDdlPair ddl = null;
+
         try {
             // Transform trigger using TriggerTransformer
-            TriggerTransformer.TriggerDdlPair ddl =
-                triggerTransformer.transformTrigger(trigger, indices);
+            ddl = triggerTransformer.transformTrigger(trigger, indices);
 
             // Step 1: Drop existing trigger (if exists)
             // This ensures idempotency - job can be run multiple times without errors
@@ -221,20 +223,21 @@ public class PostgresTriggerImplementationJob extends AbstractDatabaseWriteJob<T
             log.info("Successfully implemented trigger: {}", qualifiedName);
 
         } catch (TriggerTransformer.TriggerTransformationException e) {
-            // Transformation error
+            // Transformation error - show Oracle body since no PostgreSQL DDL was generated
             log.error("Transformation failed for trigger {}: {}", qualifiedName, e.getMessage());
             result.addError(qualifiedName, "Transformation failed: " + e.getMessage(),
-                    trigger.getTriggerBody());
+                    "-- Oracle trigger body (transformation failed):\n" + trigger.getTriggerBody());
         } catch (SQLException e) {
-            // SQL execution error
+            // SQL execution error - show the generated PostgreSQL DDL that failed
             log.error("SQL execution failed for trigger {}: {}", qualifiedName, e.getMessage());
-            result.addError(qualifiedName, "SQL execution failed: " + e.getMessage(),
-                    trigger.getTriggerBody());
+            String postgresDdl = formatPostgresDdl(ddl);
+            result.addError(qualifiedName, "SQL execution failed: " + e.getMessage(), postgresDdl);
         } catch (Exception e) {
-            // Unexpected error
+            // Unexpected error - show PostgreSQL DDL if available, otherwise Oracle body
             log.error("Unexpected error implementing trigger: " + qualifiedName, e);
-            result.addError(qualifiedName, "Unexpected error: " + e.getMessage(),
-                    trigger.getTriggerBody());
+            String sqlToShow = (ddl != null) ? formatPostgresDdl(ddl)
+                    : "-- Oracle trigger body:\n" + trigger.getTriggerBody();
+            result.addError(qualifiedName, "Unexpected error: " + e.getMessage(), sqlToShow);
         }
     }
 
@@ -274,6 +277,22 @@ public class PostgresTriggerImplementationJob extends AbstractDatabaseWriteJob<T
         try (PreparedStatement ps = pgConnection.prepareStatement(ddl)) {
             ps.executeUpdate();
         }
+    }
+
+    /**
+     * Formats the generated PostgreSQL DDL for error display.
+     * Combines both function and trigger DDL into a single string for debugging.
+     */
+    private String formatPostgresDdl(TriggerTransformer.TriggerDdlPair ddl) {
+        if (ddl == null) {
+            return "-- No PostgreSQL DDL generated";
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("-- Generated PostgreSQL Function:\n");
+        sb.append(ddl.getFunctionDdl());
+        sb.append("\n\n-- Generated PostgreSQL Trigger:\n");
+        sb.append(ddl.getTriggerDdl());
+        return sb.toString();
     }
 
     /**

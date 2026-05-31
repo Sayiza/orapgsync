@@ -27,6 +27,11 @@ public class VisitSeq_of_statements {
             if (statement != null) {
                 String stmtCode = b.visit(statement);
 
+                // Skip null results (unsupported statement types)
+                if (stmtCode == null) {
+                    continue;
+                }
+
                 // Add statement with proper indentation
                 result.append("  ").append(stmtCode);
 

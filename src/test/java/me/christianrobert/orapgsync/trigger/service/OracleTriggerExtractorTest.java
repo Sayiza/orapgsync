@@ -382,4 +382,152 @@ class OracleTriggerExtractorTest {
 
         assertEquals(0, triggers.size());
     }
+
+    // ==================== REFERENCING CLAUSE TESTS ====================
+
+    @Test
+    void testReferencingClause_CustomNewAndOldAliases() throws SQLException {
+        String triggerBody = "BEGIN\n  INSERT INTO audit VALUES (:pNew.id, :pOld.id);\nEND;";
+        String description = """
+            CREATE OR REPLACE TRIGGER hr.audit_trg
+              AFTER UPDATE ON hr.employees
+              REFERENCING NEW AS pNew OLD AS pOld
+              FOR EACH ROW
+            """;
+
+        ResultSet rs = createMockResultSet(
+                "HR", "AUDIT_TRG", "EMPLOYEES",
+                "AFTER EACH ROW", "UPDATE", "ENABLED",
+                triggerBody, null, description);
+
+        Connection conn = createMockConnection(rs);
+        List<TriggerMetadata> triggers = OracleTriggerExtractor.extractAllTriggers(conn, List.of("HR"));
+
+        assertEquals(1, triggers.size());
+        TriggerMetadata trigger = triggers.get(0);
+        assertEquals("PNEW", trigger.getNewAlias());
+        assertEquals("POLD", trigger.getOldAlias());
+        assertTrue(trigger.hasCustomAliases());
+    }
+
+    @Test
+    void testReferencingClause_OnlyNewAlias() throws SQLException {
+        String triggerBody = "BEGIN\n  INSERT INTO audit VALUES (:n.id);\nEND;";
+        String description = """
+            CREATE OR REPLACE TRIGGER hr.audit_trg
+              AFTER INSERT ON hr.employees
+              REFERENCING NEW AS n
+              FOR EACH ROW
+            """;
+
+        ResultSet rs = createMockResultSet(
+                "HR", "AUDIT_TRG", "EMPLOYEES",
+                "AFTER EACH ROW", "INSERT", "ENABLED",
+                triggerBody, null, description);
+
+        Connection conn = createMockConnection(rs);
+        List<TriggerMetadata> triggers = OracleTriggerExtractor.extractAllTriggers(conn, List.of("HR"));
+
+        assertEquals(1, triggers.size());
+        TriggerMetadata trigger = triggers.get(0);
+        assertEquals("N", trigger.getNewAlias());
+        assertEquals("OLD", trigger.getOldAlias()); // Default
+        assertTrue(trigger.hasCustomAliases());
+    }
+
+    @Test
+    void testReferencingClause_OnlyOldAlias() throws SQLException {
+        String triggerBody = "BEGIN\n  INSERT INTO audit VALUES (:o.id);\nEND;";
+        String description = """
+            CREATE OR REPLACE TRIGGER hr.audit_trg
+              AFTER DELETE ON hr.employees
+              REFERENCING OLD AS o
+              FOR EACH ROW
+            """;
+
+        ResultSet rs = createMockResultSet(
+                "HR", "AUDIT_TRG", "EMPLOYEES",
+                "AFTER EACH ROW", "DELETE", "ENABLED",
+                triggerBody, null, description);
+
+        Connection conn = createMockConnection(rs);
+        List<TriggerMetadata> triggers = OracleTriggerExtractor.extractAllTriggers(conn, List.of("HR"));
+
+        assertEquals(1, triggers.size());
+        TriggerMetadata trigger = triggers.get(0);
+        assertEquals("NEW", trigger.getNewAlias()); // Default
+        assertEquals("O", trigger.getOldAlias());
+        assertTrue(trigger.hasCustomAliases());
+    }
+
+    @Test
+    void testReferencingClause_OldBeforeNew() throws SQLException {
+        // Test with OLD AS before NEW AS (reverse order)
+        String triggerBody = "BEGIN\n  NULL;\nEND;";
+        String description = """
+            CREATE OR REPLACE TRIGGER hr.audit_trg
+              AFTER UPDATE ON hr.employees
+              REFERENCING OLD AS oldRow NEW AS newRow
+              FOR EACH ROW
+            """;
+
+        ResultSet rs = createMockResultSet(
+                "HR", "AUDIT_TRG", "EMPLOYEES",
+                "AFTER EACH ROW", "UPDATE", "ENABLED",
+                triggerBody, null, description);
+
+        Connection conn = createMockConnection(rs);
+        List<TriggerMetadata> triggers = OracleTriggerExtractor.extractAllTriggers(conn, List.of("HR"));
+
+        assertEquals(1, triggers.size());
+        TriggerMetadata trigger = triggers.get(0);
+        assertEquals("NEWROW", trigger.getNewAlias());
+        assertEquals("OLDROW", trigger.getOldAlias());
+        assertTrue(trigger.hasCustomAliases());
+    }
+
+    @Test
+    void testReferencingClause_NoReferencingClause() throws SQLException {
+        // Standard trigger without REFERENCING clause
+        String triggerBody = "BEGIN\n  INSERT INTO audit VALUES (:NEW.id);\nEND;";
+        String description = """
+            CREATE OR REPLACE TRIGGER hr.audit_trg
+              AFTER INSERT ON hr.employees
+              FOR EACH ROW
+            """;
+
+        ResultSet rs = createMockResultSet(
+                "HR", "AUDIT_TRG", "EMPLOYEES",
+                "AFTER EACH ROW", "INSERT", "ENABLED",
+                triggerBody, null, description);
+
+        Connection conn = createMockConnection(rs);
+        List<TriggerMetadata> triggers = OracleTriggerExtractor.extractAllTriggers(conn, List.of("HR"));
+
+        assertEquals(1, triggers.size());
+        TriggerMetadata trigger = triggers.get(0);
+        assertEquals("NEW", trigger.getNewAlias()); // Default
+        assertEquals("OLD", trigger.getOldAlias()); // Default
+        assertFalse(trigger.hasCustomAliases());
+    }
+
+    @Test
+    void testReferencingClause_NullDescription() throws SQLException {
+        // Trigger without description field
+        String triggerBody = "BEGIN\n  INSERT INTO audit VALUES (:NEW.id);\nEND;";
+
+        ResultSet rs = createMockResultSet(
+                "HR", "AUDIT_TRG", "EMPLOYEES",
+                "AFTER EACH ROW", "INSERT", "ENABLED",
+                triggerBody, null, null); // description is null
+
+        Connection conn = createMockConnection(rs);
+        List<TriggerMetadata> triggers = OracleTriggerExtractor.extractAllTriggers(conn, List.of("HR"));
+
+        assertEquals(1, triggers.size());
+        TriggerMetadata trigger = triggers.get(0);
+        assertEquals("NEW", trigger.getNewAlias()); // Default
+        assertEquals("OLD", trigger.getOldAlias()); // Default
+        assertFalse(trigger.hasCustomAliases());
+    }
 }

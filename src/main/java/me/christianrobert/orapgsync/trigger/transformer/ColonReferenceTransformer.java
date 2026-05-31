@@ -9,18 +9,27 @@ import java.util.regex.Pattern;
  * <p>Oracle uses :NEW and :OLD (with colons) to reference row values in triggers.
  * PostgreSQL uses NEW and OLD (without colons).</p>
  *
- * <p><strong>Examples:</strong></p>
+ * <p><strong>Standard Examples:</strong></p>
  * <pre>
  * :NEW.salary → NEW.salary
  * :OLD.employee_id → OLD.employee_id
  * :new.status → new.status (case-preserving)
  * </pre>
  *
+ * <p><strong>Custom Alias Examples (via REFERENCING clause):</strong></p>
+ * <pre>
+ * -- Oracle: REFERENCING NEW AS pNew OLD AS pOld
+ * :pNew.salary → NEW.salary
+ * :pOld.employee_id → OLD.employee_id
+ * </pre>
+ *
  * <p><strong>Usage:</strong></p>
  * <pre>
- * String oracleTriggerBody = "INSERT INTO audit VALUES (:NEW.id, :OLD.name);";
- * String postgresTriggerBody = ColonReferenceTransformer.removeColonReferences(oracleTriggerBody);
- * // Result: "INSERT INTO audit VALUES (NEW.id, OLD.name);"
+ * // Standard NEW/OLD
+ * String result = ColonReferenceTransformer.removeColonReferences(code);
+ *
+ * // Custom aliases (e.g., REFERENCING NEW AS pNew OLD AS pOld)
+ * String result = ColonReferenceTransformer.removeColonReferences(code, "PNEW", "POLD");
  * </pre>
  *
  * <p><strong>Note:</strong> This transformer should be used AFTER removing comments
@@ -29,9 +38,12 @@ import java.util.regex.Pattern;
  */
 public class ColonReferenceTransformer {
 
-    // Patterns for matching :NEW and :OLD with word boundaries
-    private static final Pattern NEW_PATTERN = Pattern.compile("\\b:NEW\\b", Pattern.CASE_INSENSITIVE);
-    private static final Pattern OLD_PATTERN = Pattern.compile("\\b:OLD\\b", Pattern.CASE_INSENSITIVE);
+    // Patterns for matching :NEW and :OLD
+    // Uses negative lookbehind to ensure no word character before the colon
+    // and word boundary after to ensure complete token match
+    // Matches: :NEW.column, :NEW , (:NEW, but NOT :NEWRECORD
+    private static final Pattern NEW_PATTERN = Pattern.compile("(?<!\\w):NEW\\b", Pattern.CASE_INSENSITIVE);
+    private static final Pattern OLD_PATTERN = Pattern.compile("(?<!\\w):OLD\\b", Pattern.CASE_INSENSITIVE);
 
     /**
      * Removes colons from :NEW and :OLD references in Oracle trigger PL/SQL code.
@@ -53,19 +65,79 @@ public class ColonReferenceTransformer {
      * @return PostgreSQL PL/pgSQL trigger body (without colons)
      */
     public static String removeColonReferences(String plsqlCode) {
+        return removeColonReferences(plsqlCode, "NEW", "OLD");
+    }
+
+    /**
+     * Removes colons from :NEW/:OLD references, supporting custom aliases from REFERENCING clause.
+     *
+     * <p>Oracle's REFERENCING clause allows custom aliases:</p>
+     * <pre>
+     * REFERENCING NEW AS pNew OLD AS pOld
+     * </pre>
+     *
+     * <p>This method transforms these custom aliases to PostgreSQL's standard NEW/OLD:</p>
+     * <ul>
+     *   <li>:pNew → NEW (when newAlias="PNEW")</li>
+     *   <li>:pOld → OLD (when oldAlias="POLD")</li>
+     *   <li>:pNew.column → NEW.column</li>
+     *   <li>:pOld.column → OLD.column</li>
+     * </ul>
+     *
+     * @param plsqlCode Oracle PL/SQL trigger body (with colons)
+     * @param newAlias The alias used for NEW (e.g., "PNEW", "NEW", "N")
+     * @param oldAlias The alias used for OLD (e.g., "POLD", "OLD", "O")
+     * @return PostgreSQL PL/pgSQL trigger body with standard NEW/OLD references
+     */
+    public static String removeColonReferences(String plsqlCode, String newAlias, String oldAlias) {
         if (plsqlCode == null || plsqlCode.isEmpty()) {
             return plsqlCode;
         }
 
         String result = plsqlCode;
 
-        // Replace :NEW with NEW (case-preserving)
-        result = replaceCasePreserving(result, NEW_PATTERN, "NEW");
+        // Normalize aliases (handle null/empty)
+        String effectiveNewAlias = (newAlias != null && !newAlias.isEmpty()) ? newAlias : "NEW";
+        String effectiveOldAlias = (oldAlias != null && !oldAlias.isEmpty()) ? oldAlias : "OLD";
 
-        // Replace :OLD with OLD (case-preserving)
+        // If using custom aliases, replace them first
+        if (!"NEW".equalsIgnoreCase(effectiveNewAlias)) {
+            // Replace :customNewAlias with NEW
+            // Pattern: no word char before colon, alias, word boundary after
+            Pattern customNewPattern = Pattern.compile(
+                    "(?<!\\w):" + Pattern.quote(effectiveNewAlias) + "\\b",
+                    Pattern.CASE_INSENSITIVE);
+            result = replaceWithTarget(result, customNewPattern, "NEW");
+        }
+
+        if (!"OLD".equalsIgnoreCase(effectiveOldAlias)) {
+            // Replace :customOldAlias with OLD
+            // Pattern: no word char before colon, alias, word boundary after
+            Pattern customOldPattern = Pattern.compile(
+                    "(?<!\\w):" + Pattern.quote(effectiveOldAlias) + "\\b",
+                    Pattern.CASE_INSENSITIVE);
+            result = replaceWithTarget(result, customOldPattern, "OLD");
+        }
+
+        // Also handle standard :NEW and :OLD (in case they're mixed or it's the default)
+        result = replaceCasePreserving(result, NEW_PATTERN, "NEW");
         result = replaceCasePreserving(result, OLD_PATTERN, "OLD");
 
         return result;
+    }
+
+    /**
+     * Replaces all occurrences of a pattern with the target string.
+     * Used for custom alias replacement where we always want uppercase NEW/OLD.
+     *
+     * @param text Text to transform
+     * @param pattern Pattern to match
+     * @param target Target replacement (e.g., "NEW" or "OLD")
+     * @return Transformed text
+     */
+    private static String replaceWithTarget(String text, Pattern pattern, String target) {
+        Matcher matcher = pattern.matcher(text);
+        return matcher.replaceAll(target);
     }
 
     /**

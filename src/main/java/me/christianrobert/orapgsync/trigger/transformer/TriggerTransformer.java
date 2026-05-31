@@ -117,8 +117,16 @@ public class TriggerTransformer {
             String transformedBody = unwrapTransformedBody(transformationResult.getPostgresSql());
             log.trace("Transformed body for {}: {}", qualifiedName, transformedBody);
 
-            // Step 6: Remove colons from :NEW/:OLD
-            String withoutColons = ColonReferenceTransformer.removeColonReferences(transformedBody);
+            // Step 6: Remove colons from :NEW/:OLD (or custom aliases like :pNew/:pOld)
+            String withoutColons = ColonReferenceTransformer.removeColonReferences(
+                transformedBody,
+                metadata.getNewAlias(),
+                metadata.getOldAlias()
+            );
+            if (metadata.hasCustomAliases()) {
+                log.debug("Replaced custom aliases for {}: NEW AS {}, OLD AS {}",
+                    qualifiedName, metadata.getNewAlias(), metadata.getOldAlias());
+            }
             log.trace("After colon removal for {}: {}", qualifiedName, withoutColons);
 
             // Step 7: Inject RETURN statement
@@ -163,19 +171,37 @@ public class TriggerTransformer {
      * ANTLR's PL/SQL parser expects a full procedure definition with PROCEDURE name IS BEGIN...END.
      * This method wraps the trigger body so ANTLR can parse it.</p>
      *
+     * <p><strong>Important:</strong> In Oracle PL/SQL procedure syntax, the DECLARE keyword
+     * is NOT used. Variables are declared directly after IS/AS and before BEGIN. So:</p>
+     * <pre>
+     * -- Trigger body:          -- Wrapped procedure:
+     * DECLARE                   PROCEDURE trigger_temp_wrapper IS
+     *   v_count NUMBER;           v_count NUMBER;
+     * BEGIN                     BEGIN
+     *   ...                       ...
+     * END;                      END;
+     * </pre>
+     *
      * @param triggerBody Trigger body (may start with DECLARE or BEGIN)
      * @return Wrapped procedure definition
      */
     private String wrapTriggerBodyForParsing(String triggerBody) {
         String trimmed = triggerBody.trim();
 
-        // If body starts with DECLARE, keep it
-        // Otherwise, just prepend the procedure wrapper before BEGIN
         if (trimmed.toUpperCase().startsWith("DECLARE")) {
-            // PROCEDURE trigger_temp_wrapper IS
-            // DECLARE ... BEGIN ... END
-            return "PROCEDURE trigger_temp_wrapper IS\n" + trimmed;
+            // Remove DECLARE keyword - in procedure syntax, variables come directly after IS
+            // Find position after DECLARE (handling potential whitespace)
+            int declareEnd = "DECLARE".length();
+            String afterDeclare = trimmed.substring(declareEnd);
+
+            // PROCEDURE name IS
+            //   variable declarations...
+            // BEGIN
+            //   statements...
+            // END;
+            return "PROCEDURE trigger_temp_wrapper IS\n" + afterDeclare.trim();
         } else {
+            // Body starts with BEGIN - no declarations
             // PROCEDURE trigger_temp_wrapper IS
             // BEGIN ... END
             return "PROCEDURE trigger_temp_wrapper IS\n" + trimmed;

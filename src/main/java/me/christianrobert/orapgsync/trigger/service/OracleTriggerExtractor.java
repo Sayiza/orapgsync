@@ -11,6 +11,8 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Service for extracting trigger metadata from Oracle database.
@@ -19,6 +21,19 @@ import java.util.List;
 public class OracleTriggerExtractor {
 
     private static final Logger log = LoggerFactory.getLogger(OracleTriggerExtractor.class);
+
+    // Pattern to match REFERENCING clause with NEW AS and/or OLD AS aliases
+    // Examples:
+    //   REFERENCING NEW AS pNew OLD AS pOld
+    //   REFERENCING OLD AS o NEW AS n
+    //   REFERENCING NEW AS newRow
+    private static final Pattern REFERENCING_PATTERN = Pattern.compile(
+            "REFERENCING\\s+(?:" +
+                    "(?:NEW\\s+AS\\s+(\\w+)\\s*)?(?:OLD\\s+AS\\s+(\\w+)\\s*)?" +  // NEW first, then OLD
+                    "|" +
+                    "(?:OLD\\s+AS\\s+(\\w+)\\s*)?(?:NEW\\s+AS\\s+(\\w+)\\s*)?" +  // OLD first, then NEW
+                    ")",
+            Pattern.CASE_INSENSITIVE);
 
     /**
      * Extracts all triggers for the specified schemas from Oracle.
@@ -135,6 +150,11 @@ public class OracleTriggerExtractor {
         if (whenClause != null && !whenClause.trim().isEmpty()) {
             String cleanedWhen = cleanWhenClause(whenClause);
             metadata.setWhenClause(cleanedWhen);
+        }
+
+        // Parse REFERENCING clause for NEW/OLD aliases
+        if (description != null && !description.trim().isEmpty()) {
+            parseReferencingClause(description, metadata);
         }
 
         log.debug("Extracted trigger: {}.{} on {}.{} ({})",
@@ -341,5 +361,84 @@ public class OracleTriggerExtractor {
         }
 
         return body;
+    }
+
+    /**
+     * Parses the REFERENCING clause from the trigger DDL to extract NEW/OLD aliases.
+     *
+     * <p>Oracle allows custom aliases for NEW and OLD pseudo-records:</p>
+     * <pre>
+     * REFERENCING NEW AS pNew OLD AS pOld
+     * REFERENCING OLD AS oldRow NEW AS newRow
+     * REFERENCING NEW AS n
+     * </pre>
+     *
+     * <p>PostgreSQL doesn't support custom aliases - it always uses NEW and OLD.
+     * We extract these aliases so the transformation can replace :pNew with NEW, etc.</p>
+     *
+     * @param description Oracle trigger description (full DDL header)
+     * @param metadata TriggerMetadata to update with aliases
+     */
+    private static void parseReferencingClause(String description, TriggerMetadata metadata) {
+        if (description == null || description.trim().isEmpty()) {
+            return;
+        }
+
+        // First check if REFERENCING keyword exists
+        if (!description.toUpperCase().contains("REFERENCING")) {
+            return;
+        }
+
+        // Use a simpler approach: find NEW AS and OLD AS separately
+        String upper = description.toUpperCase();
+
+        // Find NEW AS alias
+        int newAsIndex = upper.indexOf("NEW AS ");
+        if (newAsIndex != -1) {
+            String afterNewAs = description.substring(newAsIndex + 7).trim();
+            String newAlias = extractIdentifier(afterNewAs);
+            if (newAlias != null && !newAlias.isEmpty()) {
+                metadata.setNewAlias(newAlias.toUpperCase());
+                log.debug("Found NEW alias '{}' for trigger {}", newAlias, metadata.getTriggerName());
+            }
+        }
+
+        // Find OLD AS alias
+        int oldAsIndex = upper.indexOf("OLD AS ");
+        if (oldAsIndex != -1) {
+            String afterOldAs = description.substring(oldAsIndex + 7).trim();
+            String oldAlias = extractIdentifier(afterOldAs);
+            if (oldAlias != null && !oldAlias.isEmpty()) {
+                metadata.setOldAlias(oldAlias.toUpperCase());
+                log.debug("Found OLD alias '{}' for trigger {}", oldAlias, metadata.getTriggerName());
+            }
+        }
+
+        if (metadata.hasCustomAliases()) {
+            log.info("Trigger {} uses custom REFERENCING aliases: NEW AS {}, OLD AS {}",
+                    metadata.getTriggerName(), metadata.getNewAlias(), metadata.getOldAlias());
+        }
+    }
+
+    /**
+     * Extracts the first identifier (word) from a string.
+     *
+     * @param text Text starting with an identifier
+     * @return The identifier, or null if not found
+     */
+    private static String extractIdentifier(String text) {
+        if (text == null || text.isEmpty()) {
+            return null;
+        }
+
+        StringBuilder sb = new StringBuilder();
+        for (char c : text.toCharArray()) {
+            if (Character.isLetterOrDigit(c) || c == '_' || c == '$') {
+                sb.append(c);
+            } else {
+                break;
+            }
+        }
+        return sb.length() > 0 ? sb.toString() : null;
     }
 }
