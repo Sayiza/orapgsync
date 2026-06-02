@@ -76,19 +76,19 @@ docker run --name pgtest -e POSTGRES_PASSWORD=secret -e PGDATA=/var/lib/postgres
 # ... Run your DDL, insert data, etc. (or your 8-hour job) ...
 
 # 2. Commit the full state (data IS included now)
-docker commit pgtest trunkdevpg:2025-11-24
+docker commit pgtest mydevpg:2025-11-24
 
 # 3. Later, start from the saved image (data restores instantly)
 docker rm -f pgtest
-docker run --name pgtest -e POSTGRES_PASSWORD=secret -e PGDATA=/var/lib/postgresql/pgdata -p 5433:5432 -d trunkdevpg:2025-12-07
+docker run --name pgtest -e POSTGRES_PASSWORD=secret -e PGDATA=/var/lib/postgresql/pgdata -p 5433:5432 -d mydevpg:2025-12-07
 
 use the postgres with new profile: mvn quarkus:dev -Dquarkus.profile=postgres
 ```
-# Remove the old container (if running)
+## Remove the old container (if running)
 docker rm -f pgtest
 
-# Run the container from your saved snapshot
-docker run --name pgtest -p 5432:5432 -d trunkdevpg:2025-11-22
+## Run the container from your saved snapshot
+docker run --name pgtest -p 5432:5432 -d mydevpg:2025-11-22
 
 
 **Clean up disk space:**
@@ -165,15 +165,8 @@ curl "http://localhost:8080/api/jobs/{jobId}/status"
 
 ---
 
-## Documentation
-
-- **[CLAUDE.md](CLAUDE.md)** - Complete architecture, development guide, module documentation
-- **[TRANSFORMATION.md](TRANSFORMATION.md)** - SQL/PL-SQL transformation module (ANTLR implementation)
-- **[CTE_IMPLEMENTATION_PLAN.md](documentation/completed/CTE_IMPLEMENTATION_PLAN.md)** - CTE (WITH clause) implementation details
-- **[CONNECT_BY_IMPLEMENTATION_PLAN.md](CONNECT_BY_IMPLEMENTATION_PLAN.md)** - Hierarchical query transformation
-
 Example use case with Web-Gateway (mod-plsql simulator):
-http://localhost:8090/pls/myapp/user_robert.test.wbstart
+http://localhost:8090/pls/myapp/mypackage.myprocedure
 ---
 
 ## License
