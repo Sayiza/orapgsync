@@ -122,11 +122,32 @@ public class TransformationService {
         log.debug("Transforming SQL for schema: {}", schema);
         log.trace("Oracle SQL: {}", oracleSql);
 
-        try {
-            // STEP 1: Parse Oracle SQL using ANTLR
-            log.debug("Step 1: Parsing Oracle SQL");
-            ParseResult parseResult = parser.parseSelectStatement(oracleSql);
+        // STEP 1: Parse Oracle SQL using ANTLR
+        log.debug("Step 1: Parsing Oracle SQL");
+        ParseResult parseResult = parser.parseSelectStatement(oracleSql);
 
+        return transformParsedSql(parseResult, schema, indices, includeAst);
+    }
+
+    /**
+     * Transforms an already parsed Oracle SELECT statement to PostgreSQL.
+     *
+     * <p>Callers that need the parse tree themselves (for example the pre-flight compatibility
+     * report, which detects Oracle constructs in the AST) use this entry point to avoid parsing
+     * the same source twice. {@link #transformSql(String, String, TransformationIndices, boolean)}
+     * delegates here after parsing.</p>
+     *
+     * @param parseResult result of parsing the Oracle SQL with {@link AntlrParser#parseSelectStatement}
+     * @param schema Schema context for synonym and name resolution
+     * @param indices Pre-built metadata indices for lookups
+     * @param includeAst Whether to include AST tree in result (for debugging)
+     * @return TransformationResult containing transformed SQL and optionally AST tree
+     */
+    public TransformationResult transformParsedSql(ParseResult parseResult, String schema,
+                                                   TransformationIndices indices, boolean includeAst) {
+        String oracleSql = parseResult.getOriginalSql();
+
+        try {
             // Check for parse errors
             if (parseResult.hasErrors()) {
                 String errorMsg = "Parse errors: " + parseResult.getErrorMessage();

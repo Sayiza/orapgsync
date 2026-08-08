@@ -32,10 +32,10 @@ Items in priority order.
 The frontend is inconsistent between features and becomes very slow when thousands of
 tables/views are involved.
 
-**Current state (evidence):**
-- Failed view transformations surface only as a "!" badge / error count
-  (`orchestration-service.js`, `pollCountBadge`); the root cause (which SQL construct
-  failed, which line) is only in the server log.
+**Current state (evidence, re-checked 2026-08-08):**
+- Failed view transformations *do* surface in the view panel with error message and failing
+  SQL (`view-service.js`, `displayViewImplementationResults`) — the plan was too pessimistic
+  here. What is missing is the failing *construct*, the source line, and the Oracle source.
 - Status endpoints return full object lists; the UI renders all rows — no pagination,
   aggregation, or virtualization.
 
@@ -49,9 +49,12 @@ tables/views are involved.
 - [ ] Audit frontend polling: avoid re-fetching and re-rendering full lists on every poll tick.
 - [ ] Consistency pass over the feature panels (same badge semantics, same detail view,
       same toggle behavior across tables/views/functions/triggers).
-- [ ] **Pre-flight compatibility report**: one job that parses all extracted views (and
-      optionally functions) and produces a categorized report of unsupported constructs
-      *before* anything is created. This is also the data source for item 5.
+- [x] **Pre-flight compatibility report** (done 2026-08-08, views only): one job that parses
+      all extracted views and produces a categorized report of unsupported constructs *before*
+      anything is created. This is also the data source for item 5.
+      See "Pre-Flight Compatibility Report" below.
+- [ ] Extend the pre-flight report to functions/procedures (needs package context, so it is a
+      separate step from the view analysis).
 
 **Acceptance:** A failed object's root cause is reachable in ≤2 clicks; the UI stays
 responsive with 5,000+ tables/views.
@@ -110,11 +113,21 @@ ignored while the function is reported as successfully transformed. Silent seman
 corruption is worse than a loud failure, and it undermines trust in the transformer's
 otherwise real coverage.
 
-**Known silent paths (from review, verify and extend during implementation):**
-- `VisitSeq_of_statements` — silently skips statements that transform to null
-- `VisitPragma_declaration` — silently ignores `AUTONOMOUS_TRANSACTION` (changes commit semantics!)
+**Known silent paths (verified still present 2026-08-08):**
+- **Unanchored grammar entry rules — the worst one, found by the pre-flight work.**
+  `select_statement` / `function_body` are not anchored to EOF, so when the parser hits a
+  construct it cannot place, it ends the rule early, leaves the rest of the source unread and
+  reports **no error**. Measured: `SELECT ... FROM sales_view MODEL PARTITION BY ...` consumes
+  49 of 149 characters, reads `MODEL` as a table alias, and transforms "successfully" into a
+  truncated view. Every construct outside the grammar's reach fails this way, silently.
+  → Detection exists now (`ParseCompleteness`, reported as `TRUNCATED_PARSE`); making the
+  *transformer* reject truncated parses is the open decision — it will convert an unknown
+  number of currently "successful" views into loud failures, so run the report first.
+- `VisitSeq_of_statements:31` — silently `continue`s on statements that transform to null
+- `VisitPragma_declaration:69` — silently ignores `AUTONOMOUS_TRANSACTION` (changes commit
+  semantics!); now at least *reported* by the pre-flight construct catalog
 - `VisitGeneralElement` — returns null for unsupported cross-schema references
-- Audit the full transformer for further `return null` / silent-skip patterns
+- 166 `return null` sites in `transformer/` still to audit
 
 **Approach:**
 - [ ] Policy: every unsupported construct either throws `TransformationException` (function
@@ -139,6 +152,8 @@ position/occurrence > 1, `ORDER SIBLINGS BY`, RETURNING clause, cursor expressio
 
 **Approach — explicitly demand-driven, not coverage-driven:**
 - [ ] Run the pre-flight compatibility report (item 1) against the real project's views.
+      **This is the immediate next action** — the report exists now, so the ranking that
+      decides this item's order can be produced instead of guessed.
 - [ ] Rank failing constructs by *frequency in the actual codebase*; fix top-down.
 - [ ] For each fixed construct: add both a string-comparison test and (where feasible) an
       execution test against PostgreSQL (Testcontainers pattern from
@@ -149,6 +164,48 @@ position/occurrence > 1, `ORDER SIBLINGS BY`, RETURNING clause, cursor expressio
 categorized reason visible in the UI.
 
 **Effort:** ongoing, sized per construct after the report exists.
+
+---
+
+## Pre-Flight Compatibility Report (implemented 2026-08-08)
+
+Analyses every extracted Oracle view in memory — **no database connection, nothing created** —
+and answers "what will fail, why, and how often" before a migration run.
+
+**Modules:**
+- `transformer/analysis/` — pure, transformer-side detection:
+  - `ConstructCatalog` — the constructs worth reporting (PIVOT, UNPIVOT, MODEL, CURSOR(),
+    flashback, SAMPLE, GROUPING SETS, ROLLUP/CUBE, XMLTABLE, JSON_TABLE, ORDER SIBLINGS BY,
+    FORALL, BULK COLLECT, EXECUTE IMMEDIATE, PRAGMA AUTONOMOUS_TRANSACTION).
+    Support status is **derived by reflection** from the visit methods `PostgresCodeBuilder`
+    actually declares, so the catalog cannot go stale when a visitor is added. Only constructs
+    that have a visitor but are dropped inside it carry a hand-maintained `IGNORED` override.
+  - `ConstructDetector` — walks the parse tree and reports occurrences with line + snippet.
+    Independent of the transformation outcome, which is what makes *silent* losses visible.
+  - `ParseCompleteness` — detects source the parser never read (see item 4).
+- `preflight/` — `OracleCompatibilityReportJob` (extraction job, type `COMPATIBILITY_REPORT`),
+  `ViewCompatibilityAnalyzer`, `CompatibilityReportAggregator`, `PreFlightResource`.
+- `core/job/model/preflight/` — `CompatibilityFinding`, `CompatibilityStatus`,
+  `CompatibilityReport`, `ConstructStat`, `FailureStat`.
+
+**Statuses:** `OK`, `OK_WITH_WARNINGS` (transformed but contains an unhandled construct),
+`TRUNCATED_PARSE`, `PARSE_ERROR`, `TRANSFORM_ERROR`, `NO_SOURCE`.
+
+**Ranking:** constructs are ranked by the number of *failing* views they appear in, not by raw
+occurrences — that is the number that decides what is worth implementing. A construct that is
+unhandled but appears in *passing* views is flagged as a **silent loss**.
+
+**REST API:**
+- `POST /api/preflight/oracle/analyze` — start the analysis (requires extracted Oracle views)
+- `GET /api/preflight/report` — aggregate: status counts, ranked constructs, failure groups
+- `GET /api/preflight/report/findings?status=&construct=&signature=&limit=&offset=` — per-object
+  detail, filtered and paginated so the UI never pulls thousands of rows
+
+**Frontend:** "Pre-Flight Compatibility Report" panel in `index.html` / `preflight-service.js`.
+Aggregate first; the objects behind a construct or failure group load lazily on expand.
+
+**Not covered yet:** functions/procedures (need package context), and the transformer still
+accepts truncated parses — the report only reports them.
 
 ---
 

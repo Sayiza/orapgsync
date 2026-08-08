@@ -6,34 +6,30 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Oracle-to-PostgreSQL migration tool built with Quarkus (Java 18). Uses CDI-based plugin architecture for extensible database object migration with centralized state management.
 
-## Strategic Direction (Updated March 2026)
+## Strategic Direction (Updated August 2026)
 
-**PL/SQL to PL/pgSQL Transformation - ACTIVE**
+**Consolidation of Established Features - ACTIVE**
 
-**Status:** PL/SQL to PL/pgSQL transformation work is **active** and receiving continued development.
+**Status:** Primary effort goes to consolidating the features that are actually used in the
+real migration (DDL migration, view transformation, data transfer). PL/SQL transformation moves
+to **maintenance and hardening**; the mod_plsql web gateway is **deferred**.
 
-**Current Focus: Mod-PL/SQL Web Gateway**
+See [CONSOLIDATION_PLAN.md](documentation/CONSOLIDATION_PLAN.md) for the full plan and rationale.
 
-A major new initiative is underway to support Oracle mod_plsql web applications:
-- **Oracle Compatibility Layer** - HTP/HTF/OWA functions for web page generation
-- **Quarkus Web Gateway** - Java application replacing Apache mod_plsql module
-- **Iterative Implementation** - Starting with HTP.P (95% of usage), expanding incrementally
+**What's Active (Phase 1, priority order):**
+1. **Error transparency & frontend performance** - per-object error detail, aggregate-first UI
+   - ✅ Pre-flight compatibility report (2026-08-08) - see Phase 3C below
+2. **Parallel data transfer** - transfer N tables concurrently (currently strictly sequential)
+3. **Index migration** - only FK-supporting indexes are created today; all others are lost
+4. **Transformer hardening** - no new features; eliminate silent statement drops
+5. **View transformation gaps** - demand-driven, ranked by the pre-flight report
 
-See [MOD_PLSQL_IMPLEMENTATION_PLAN.md](documentation/MOD_PLSQL_IMPLEMENTATION_PLAN.md) for details.
-
-**What's Active:**
-- ✅ **Data Transfer** - Proven highly valuable and will continue to receive improvements
-- ✅ **SQL/View Transformation** - Proven highly valuable (90% coverage) and will continue to receive improvements
-- ✅ **Structural Migration** - Schema, tables, sequences, object types, constraints remain fully supported
-- ✅ **PL/SQL Functions/Procedures/Triggers/Type Methods** - Active development for mod_plsql support
-- 🔄 **Mod-PL/SQL Web Gateway** - New feature in development
-
-**Development Focus:**
-1. Mod-PL/SQL compatibility layer (HTP, HTF, OWA_UTIL packages)
-2. Quarkus web gateway for serving PL/SQL-generated web pages
-3. Continued PL/SQL transformation improvements as needed
-4. Fine-tuning data transfer capabilities
-5. Improving SQL and view transformation quality and coverage
+**What's Deferred:**
+- 🔒 **PL/SQL long tail** (BULK COLLECT, collections, %ROWTYPE, dynamic SQL, autonomous
+  transactions) - decide with report data after Phase 1, not by intuition
+- 🔒 **Mod-PL/SQL Web Gateway** - paused; nice-to-have only while PL/SQL is migrated to Java
+  piecewise. See [MOD_PLSQL_IMPLEMENTATION_PLAN.md](documentation/MOD_PLSQL_IMPLEMENTATION_PLAN.md)
+- 🔒 **State persistence / resume** - transfers run all-or-nothing in practice; not needed
 
 ## Build and Development Commands
 
@@ -104,6 +100,7 @@ Each database element type is completely independent. Common pattern: `{Element}
 
 **Support Layers:**
 - **Oracle Compatibility Layer** - PostgreSQL equivalents for Oracle built-in packages (DBMS_OUTPUT, DBMS_UTILITY, UTL_FILE, DBMS_LOB), three-tier support (FULL/PARTIAL/STUB), flattened naming (`oracle_compat.dbms_output__put_line`)
+- **Pre-Flight Compatibility Report** (`preflight/`, `transformer/analysis/`) - analyses extracted Oracle views in memory (no DB connection) and ranks the Oracle constructs that block or silently truncate transformation
 
 #### 4. **Cross-Cutting Concerns** (`core/`)
 - `TypeConverter`: Oracle-to-PostgreSQL data type mapping
@@ -280,18 +277,39 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
     - ✅ Oracle extraction and PostgreSQL transformation completed
     - ✅ Idempotent implementation with drop and recreate
 
-### 🔄 Phase 4: Mod-PL/SQL Web Gateway (New - March 2026)
+### ✅ Phase 3C: Pre-Flight Compatibility Report (August 2026)
+
+16. **Pre-Flight Compatibility Report**: ✅ **COMPLETE (views)** - Analyse before you migrate
+    - Transforms every extracted Oracle view **in memory**; no connection, nothing created
+    - Reports per view: OK / OK_WITH_WARNINGS / TRUNCATED_PARSE / PARSE_ERROR / TRANSFORM_ERROR / NO_SOURCE
+    - Ranks Oracle constructs by the number of **failing** views they appear in — the data
+      source for demand-driven view/PL-SQL work (Phase 1 items 4 and 5, and the Phase 2 decision)
+    - **Silent loss detection**: flags constructs that are dropped in views that transformed
+      *without* an error
+    - **`TRUNCATED_PARSE`**: the grammar entry rules are not anchored to EOF, so the parser can
+      end a statement early and leave the rest unread with no error at all — the transformation
+      then "succeeds" on a fragment. `ParseCompleteness` makes this visible.
+    - Construct support status is **derived by reflection** from `PostgresCodeBuilder`'s visit
+      methods, so the catalog cannot go stale when a visitor is added
+    - Modules: `transformer/analysis/`, `preflight/`, `core/job/model/preflight/`
+    - REST: `POST /api/preflight/oracle/analyze`, `GET /api/preflight/report`,
+      `GET /api/preflight/report/findings` (filtered + paginated)
+    - Frontend: "Pre-Flight Compatibility Report" panel (`preflight-service.js`)
+    - Not covered yet: functions/procedures (need package context)
+    - See [CONSOLIDATION_PLAN.md](documentation/CONSOLIDATION_PLAN.md)
+
+### 🔒 Phase 4: Mod-PL/SQL Web Gateway (DEFERRED - paused August 2026)
 
 **Status:** New feature in development to support Oracle mod_plsql web application migration.
 
-16. **HTP/HTF Compatibility Layer**: 📋 **PLANNED** - PostgreSQL equivalents for web output packages
+17. **HTP/HTF Compatibility Layer**: 📋 **PLANNED** - PostgreSQL equivalents for web output packages
     - 📋 HTP package (htp__p, htp__print, htp__prn, HTML helpers)
     - 📋 HTF package (htf__bold, htf__anchor, htf__img, etc.)
     - 📋 OWA_UTIL package (get_cgi_env, redirect_url)
     - 📋 Temp table buffer for HTTP response accumulation
     - See [MOD_PLSQL_IMPLEMENTATION_PLAN.md](documentation/MOD_PLSQL_IMPLEMENTATION_PLAN.md)
 
-17. **Quarkus Web Gateway**: 📋 **PLANNED** - Java application replacing Apache mod_plsql
+18. **Quarkus Web Gateway**: 📋 **PLANNED** - Java application replacing Apache mod_plsql
     - 📋 URL → PostgreSQL function routing
     - 📋 CGI environment initialization
     - 📋 Parameter passing (GET, POST, arrays)
@@ -344,6 +362,7 @@ The application uses a **two-tier REST API architecture**:
 - **Status**: Various status endpoints for monitoring extraction progress
 - **SQL Transformation**: `/api/transformation/sql` - Transform Oracle SQL to PostgreSQL (development/testing)
 - **Oracle Compatibility**: `/api/oracle-compat/*` - Install and verify Oracle compatibility layer
+- **Pre-Flight Report**: `/api/preflight/*` - Analyse extracted Oracle views for transformation compatibility before migrating
 
 ### SQL Transformation REST Endpoint
 
