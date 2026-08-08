@@ -37,6 +37,10 @@ public class ConfigService {
         configuration.put("postgre.username", "postgres");
         configuration.put("postgre.password", "xxx");
 
+        // Data transfer: number of tables transferred concurrently, one Oracle/PostgreSQL
+        // connection pair per worker. Clamped to [1, 32] by ParallelTableTransferService.
+        configuration.put("transfer.parallel-workers", 4);
+
         // Web Gateway configuration
         configuration.put("web-gateway.output-path", "/tmp/web-gateway");
         configuration.put("web-gateway.dad-name", "myapp");

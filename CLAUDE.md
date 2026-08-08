@@ -19,7 +19,8 @@ See [CONSOLIDATION_PLAN.md](documentation/CONSOLIDATION_PLAN.md) for the full pl
 **What's Active (Phase 1, priority order):**
 1. **Error transparency & frontend performance** - per-object error detail, aggregate-first UI
    - ✅ Pre-flight compatibility report (2026-08-08) - see Phase 3C below
-2. **Parallel data transfer** - transfer N tables concurrently (currently strictly sequential)
+2. **Parallel data transfer** - ✅ **COMPLETE** (2026-08-08) - N tables transferred concurrently,
+   configurable via `transfer.parallel-workers` (default 4) - see "Parallel Data Transfer" below
 3. **Index migration** - only FK-supporting indexes are created today; all others are lost
 4. **Transformer hardening** - no new features; eliminate silent statement drops
 5. **View transformation gaps** - demand-driven, ranked by the pre-flight report
@@ -216,6 +217,7 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
    - Complex Oracle system types (ANYDATA, XMLTYPE, AQ$_*, etc.) → jsonb with metadata
    - BLOB/CLOB → hex/text encoding
    - Piped streaming for memory efficiency
+   - ✅ **Parallel transfer** (2026-08-08) - see below
 6. **Constraints**: Dependency-ordered creation (PK → UK → FK → CHECK)
 
 ### ✅ Phase 2: Structural Stubs (Completed)
@@ -586,6 +588,43 @@ To prevent divergence between code and documentation:
 - `CsvDataTransferService` - LOB staging column lifecycle
 - `PostgresTableCreationJob.isComplexOracleSystemType()` - Detects complex system types
 - `OracleComplexTypeSerializer` - Handles all complex type serialization (objects, LOBs, system types)
+
+## Parallel Data Transfer
+
+**Status:** ✅ Complete (2026-08-08) - 19 tests
+
+Tables are transferred N at a time. Parallelism is **across tables only** — the per-table
+producer/consumer pipe, LOB staging workflow and per-table transaction in `CsvDataTransferService`
+are used unchanged.
+
+**Modules:**
+- `ParallelTableTransferService` - worker pool, result aggregation (`transfer/service/`)
+- `TransferOrdering` - largest-first scheduling, pure and dependency-free
+- `TableTransferOutcome` - one outcome per table (`core/job/model/transfer/`)
+- `DataTransferJob` - orders, resolves worker count, delegates
+
+**Design:**
+- **Worker loop, not task-per-table**: each worker opens *one* Oracle + one PostgreSQL connection
+  and pulls tables off a shared queue. Caps connections at the worker count and self-balances —
+  a worker on a large table simply takes fewer tables.
+- **Thread confinement instead of locking**: workers only publish outcomes; all aggregation into
+  `DataTransferResult` and all progress reporting run on the calling thread, so no existing class
+  needed synchronization.
+- **Largest first**: uses row counts already in state; unknown counts sort last, ties break on
+  qualified name (deterministic across runs).
+- **No table can vanish**: exactly one outcome per table. Failed table → rollback + continue;
+  worker that cannot connect → its tables go to other workers; worker killed by an `Error` →
+  publishes a failure for the in-flight table; all workers dead → remaining tables reported as
+  failures rather than the job hanging (the coordinator's wait is bounded).
+
+**Why concurrent writes are safe:** each worker's statements (TRUNCATE, COPY, LOB staging DDL)
+target only its own table, and data transfer runs *before* constraint creation in the migration
+order, so there are no cross-table foreign keys to violate or deadlock on.
+
+**Configuration:** `transfer.parallel-workers` (default 4, clamped to [1, 32] and to the table
+count), settable in the UI under "Data Transfer Settings".
+
+**Documentation:** [CONSOLIDATION_PLAN.md](documentation/CONSOLIDATION_PLAN.md) Phase 1 item 2.
 
 ## Synonym Resolution
 

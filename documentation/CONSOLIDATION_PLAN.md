@@ -68,12 +68,12 @@ databases. Tables are currently transferred strictly sequentially over a single
 Oracle/PostgreSQL connection pair (`CsvDataTransferService` / `DataTransferJob`).
 
 **Approach:**
-- [ ] Transfer N tables concurrently (worker pool, N configurable, default ~4–8) with one
-      Oracle read connection + one PostgreSQL COPY connection per worker.
-- [ ] Keep the existing per-table producer/consumer pipe and LOB staging workflow unchanged
+- [x] Transfer N tables concurrently (worker pool, N configurable, default 4) with one
+      Oracle read connection + one PostgreSQL COPY connection per worker. *(done 2026-08-08)*
+- [x] Keep the existing per-table producer/consumer pipe and LOB staging workflow unchanged
       inside each worker (it is correct and tested); parallelism is *across* tables only.
-- [ ] Schedule largest tables first (row counts are already in state) to avoid a long tail.
-- [ ] Aggregate progress reporting across workers (ties into item 1's UI work).
+- [x] Schedule largest tables first (row counts are already in state) to avoid a long tail.
+- [x] Aggregate progress reporting across workers (ties into item 1's UI work).
 - [ ] Secondary optimizations, only if still needed after parallelism:
       adaptive batch sizes (currently hard-coded 10K–50K, LOB 50) and deferring FK-index
       creation until after all tables are loaded.
@@ -83,6 +83,8 @@ roughly linearly with worker count; failures in one table do not abort other wor
 per-table error reporting unchanged.
 
 **Effort:** M
+
+**Implementation (2026-08-08):** see "Parallel Data Transfer" below.
 
 ### 3. Index Migration (beyond FK indexes)
 
@@ -206,6 +208,57 @@ Aggregate first; the objects behind a construct or failure group load lazily on 
 
 **Not covered yet:** functions/procedures (need package context), and the transformer still
 accepts truncated parses — the report only reports them.
+
+---
+
+## Parallel Data Transfer (implemented 2026-08-08)
+
+Tables are transferred N at a time instead of strictly sequentially. Parallelism is **across
+tables only** — the per-table producer/consumer pipe, LOB staging workflow and per-table
+transaction in `CsvDataTransferService` are used unchanged, so the tested and correct part of
+the pipeline was not touched.
+
+**Modules:**
+- `transfer/service/ParallelTableTransferService` — worker pool and result aggregation
+- `transfer/service/TransferOrdering` — largest-first scheduling (pure, no dependencies)
+- `core/job/model/transfer/TableTransferOutcome` — one outcome per table
+- `transfer/job/DataTransferJob` — now orders, configures and delegates
+
+**Worker loop, not one task per table.** Each worker opens *one* Oracle + one PostgreSQL
+connection and pulls tables off a shared queue until it is empty. This caps connections at the
+worker count (a task-per-table pool would open a pair per table), and it self-balances: a worker
+stuck on a large table simply takes fewer tables.
+
+**Thread confinement instead of locking.** Workers only publish `TableTransferOutcome`s to a
+queue; *all* aggregation into `DataTransferResult` and *all* progress reporting happen on the
+calling thread. Neither the result object nor the progress callback had to become thread-safe,
+so no existing class needed synchronization added.
+
+**Largest first.** `TransferOrdering.largestFirst()` uses the row counts already in state.
+Tables with unknown row counts sort last, ties break on qualified name — deterministic ordering
+across runs, per the project's result-ordering principle.
+
+**No table can silently vanish.** Every table produces exactly one outcome:
+- a table that fails → error outcome, transaction rolled back, worker continues
+- a worker that cannot open its connections → exits; its tables are taken by the other workers
+- a worker killed by an `Error` (e.g. OOM on a LOB table) → publishes a failure for the table
+  that was in flight before it dies
+- if *all* workers die, the coordinator's wait is bounded and the remaining tables are reported
+  as `No transfer worker available` rather than the job hanging
+
+**Why concurrent writes are safe here:** each worker's statements (TRUNCATE, COPY, LOB staging
+DDL) target only its own table, and data transfer runs *before* constraint creation in the
+migration order, so there are no cross-table foreign keys to violate or deadlock on.
+
+**Configuration:** `transfer.parallel-workers` (default 4, clamped to [1, 32] and to the table
+count), settable in the UI under "Data Transfer Settings".
+
+**Tests:** 19 new tests. `ParallelTableTransferServiceTest` drives the real worker loop through a
+package-private `WorkerContext` seam with a fake, covering: every table transferred exactly once,
+actual concurrency (latch-based — the test times out if the transfer is sequential), failure
+isolation, per-table rollback, progress reported once per table on a single thread, one
+connection pair per worker, and the all-workers-dead path. Verified by mutation: forcing the
+worker count to 1 fails 4 of these tests.
 
 ---
 

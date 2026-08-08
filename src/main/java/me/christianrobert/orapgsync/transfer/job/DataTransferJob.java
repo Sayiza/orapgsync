@@ -7,14 +7,11 @@ import me.christianrobert.orapgsync.core.job.model.JobProgress;
 import me.christianrobert.orapgsync.core.job.model.table.TableMetadata;
 import me.christianrobert.orapgsync.core.job.model.transfer.DataTransferResult;
 import me.christianrobert.orapgsync.core.tools.TableMetadataNormalizer;
-import me.christianrobert.orapgsync.database.service.OracleConnectionService;
-import me.christianrobert.orapgsync.database.service.PostgresConnectionService;
-import me.christianrobert.orapgsync.transfer.service.CsvDataTransferService;
+import me.christianrobert.orapgsync.transfer.service.ParallelTableTransferService;
+import me.christianrobert.orapgsync.transfer.service.TransferOrdering;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.sql.Connection;
-import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
@@ -22,20 +19,24 @@ import java.util.function.Consumer;
 /**
  * Job for transferring data from Oracle to PostgreSQL.
  * This is the main data transfer job that coordinates the migration of table data.
+ *
+ * <p>Tables are transferred concurrently by {@link ParallelTableTransferService}; the number of
+ * workers comes from the {@value #WORKER_COUNT_CONFIG_KEY} configuration value.</p>
  */
 @Dependent
 public class DataTransferJob extends AbstractDatabaseWriteJob<DataTransferResult> {
 
     private static final Logger log = LoggerFactory.getLogger(DataTransferJob.class);
 
-    @Inject
-    private OracleConnectionService oracleConnectionService;
+    public static final String WORKER_COUNT_CONFIG_KEY = "transfer.parallel-workers";
+    public static final int DEFAULT_WORKER_COUNT = 4;
+
+    /** Progress span reserved for the table transfers themselves. */
+    private static final int PROGRESS_TRANSFER_START = 30;
+    private static final int PROGRESS_TRANSFER_SPAN = 65;
 
     @Inject
-    private PostgresConnectionService postgresConnectionService;
-
-    @Inject
-    private CsvDataTransferService csvDataTransferService;
+    private ParallelTableTransferService parallelTableTransferService;
 
     @Inject
     private TableMetadataNormalizer tableMetadataNormalizer;
@@ -87,69 +88,28 @@ public class DataTransferJob extends AbstractDatabaseWriteJob<DataTransferResult
         updateProgress(progressCallback, 15, "Analyzing tables",
                 String.format("Normalized %d tables for data transfer", normalizedTables.size()));
 
-        DataTransferResult result = new DataTransferResult();
-
         if (normalizedTables.isEmpty()) {
             updateProgress(progressCallback, 100, "No valid tables", "No valid Oracle tables to transfer");
-            return result;
+            return new DataTransferResult();
         }
 
-        updateProgress(progressCallback, 20, "Connecting to databases", "Establishing database connections");
+        // Largest tables first so the run does not end with one worker on a huge table while the
+        // others idle
+        List<TableMetadata> orderedTables = TransferOrdering.largestFirst(
+                normalizedTables, stateService.getOracleRowCountMetadata());
 
-        try (Connection oracleConnection = oracleConnectionService.getConnection();
-             Connection postgresConnection = postgresConnectionService.getConnection()) {
+        int workerCount = resolveWorkerCount();
+        int totalTables = orderedTables.size();
 
-            // Disable auto-commit for batch operations
-            postgresConnection.setAutoCommit(false);
+        updateProgress(progressCallback, PROGRESS_TRANSFER_START, "Transferring data",
+                String.format("Transferring %d tables with %d parallel workers", totalTables, workerCount));
 
-            updateProgress(progressCallback, 30, "Connected", "Successfully connected to both databases");
-
-            log.debug("Data transfer job initialized successfully");
-            log.debug("Ready to transfer data for {} tables", normalizedTables.size());
-
-            int totalTables = normalizedTables.size();
-            int processedTables = 0;
-
-            for (TableMetadata table : normalizedTables) {
-                String qualifiedTableName = table.getSchema() + "." + table.getTableName();
-
-                updateProgress(progressCallback,
-                        30 + (processedTables * 65 / totalTables),
-                        "Transferring: " + qualifiedTableName,
-                        String.format("Table %d of %d", processedTables + 1, totalTables));
-
-                try {
-                    // Attempt to transfer the table
-                    long rowsTransferred = csvDataTransferService.transferTable(
-                            oracleConnection, postgresConnection, table);
-
-                    if (rowsTransferred == 0) {
-                        result.addSkippedTable(qualifiedTableName);
-                        log.debug("Table {} skipped (no data or already transferred)", qualifiedTableName);
-                    } else {
-                        result.addTransferredTable(qualifiedTableName, rowsTransferred);
-                        log.debug("Table {} transferred: {} rows", qualifiedTableName, rowsTransferred);
-                    }
-
-                } catch (Exception e) {
-                    // Log error and continue with next table (skip tables with errors)
-                    log.error("Failed to transfer table: {}", qualifiedTableName, e);
-                    result.addError(qualifiedTableName, e.getMessage());
-
-                    // CRITICAL: Rollback the transaction to reset PostgreSQL connection state
-                    // PostgreSQL aborts the current transaction after any error, so we must
-                    // rollback and start fresh for the next table
-                    try {
-                        postgresConnection.rollback();
-                        log.debug("Rolled back transaction after error for table {}", qualifiedTableName);
-                    } catch (SQLException rollbackException) {
-                        log.error("Failed to rollback transaction after error: {}", rollbackException.getMessage());
-                        // Even if rollback fails, continue trying other tables
-                    }
-                }
-
-                processedTables++;
-            }
+        try {
+            DataTransferResult result = parallelTableTransferService.transferTables(orderedTables, workerCount,
+                    (completed, total, outcome) -> updateProgress(progressCallback,
+                            PROGRESS_TRANSFER_START + (completed * PROGRESS_TRANSFER_SPAN / total),
+                            "Transferred: " + outcome.qualifiedTableName(),
+                            String.format("Table %d of %d", completed, total)));
 
             updateProgress(progressCallback, 95, "Finalizing", "Data transfer operation completed");
 
@@ -161,6 +121,25 @@ public class DataTransferJob extends AbstractDatabaseWriteJob<DataTransferResult
             updateProgress(progressCallback, -1, "Failed", "Data transfer failed: " + e.getMessage());
             log.error("Data transfer job failed", e);
             throw e;
+        }
+    }
+
+    /**
+     * Reads the configured worker count, falling back to the default if it is missing or not a
+     * number. Out-of-range values are clamped by the transfer service.
+     */
+    private int resolveWorkerCount() {
+        Object configured = configService.getConfigValue(WORKER_COUNT_CONFIG_KEY);
+        if (configured == null) {
+            return DEFAULT_WORKER_COUNT;
+        }
+
+        try {
+            return Integer.parseInt(configured.toString().trim());
+        } catch (NumberFormatException e) {
+            log.warn("Invalid {} value '{}', falling back to {}",
+                    WORKER_COUNT_CONFIG_KEY, configured, DEFAULT_WORKER_COUNT);
+            return DEFAULT_WORKER_COUNT;
         }
     }
 
