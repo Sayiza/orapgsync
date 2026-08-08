@@ -430,6 +430,32 @@
             </div>
           </td>
         </tr>
+        <tr class="synonym-replacement-row">
+          <td style="text-align: center; vertical-align: middle;">
+            <input type="checkbox" class="step-checkbox" data-step="synonym-replacement" checked title="Enable/disable synonym replacement view creation">
+          </td>
+          <td class="source-cell">
+            <div class="component-info" id="oracle-synonym-replacement">
+              <span class="count-badge">-</span>
+              <span class="component-text">N/A - see Synonyms above</span>
+            </div>
+          </td>
+          <td class="target-cell">
+            <div class="component-info" id="postgres-synonym-replacement">
+              <span class="count-badge">-</span>
+              <span class="component-text">Synonym replacement views created</span>
+              <button class="action-btn" onclick="createPostgresSynonymReplacementViews()" title="Create PostgreSQL views to replace Oracle synonyms">Create Synonym Views</button>
+              <div class="table-creation-results" id="postgres-synonym-replacement-creation-results" style="display: none;">
+                <div class="table-creation-header" onclick="toggleSynonymReplacementViewCreationResults()">
+                  <span class="toggle-indicator">▼</span> Synonym Replacement View Creation Results
+                </div>
+                <div class="table-creation-details" id="postgres-synonym-replacement-creation-details">
+                  <!-- Synonym replacement view creation results will be populated here -->
+                </div>
+              </div>
+            </div>
+          </td>
+        </tr>
         <tr class="functions-row">
           <td style="text-align: center; vertical-align: middle;">
             <input type="checkbox" class="step-checkbox" data-step="functions" checked title="Enable/disable function stub creation">
@@ -713,32 +739,6 @@
                 </div>
                 <div class="table-creation-details" id="postgres-trigger-implementation-details">
                   <!-- Trigger implementation creation results will be populated here -->
-                </div>
-              </div>
-            </div>
-          </td>
-        </tr>
-        <tr class="synonym-replacement-row">
-          <td style="text-align: center; vertical-align: middle;">
-            <input type="checkbox" class="step-checkbox" data-step="synonym-replacement" checked title="Enable/disable synonym replacement view creation">
-          </td>
-          <td class="source-cell">
-            <div class="component-info" id="oracle-synonym-replacement">
-              <span class="count-badge">-</span>
-              <span class="component-text">N/A - see Synonyms above</span>
-            </div>
-          </td>
-          <td class="target-cell">
-            <div class="component-info" id="postgres-synonym-replacement">
-              <span class="count-badge">-</span>
-              <span class="component-text">Synonym replacement views created</span>
-              <button class="action-btn" onclick="createPostgresSynonymReplacementViews()" title="Create PostgreSQL views to replace Oracle synonyms">Create Synonym Views</button>
-              <div class="table-creation-results" id="postgres-synonym-replacement-creation-results" style="display: none;">
-                <div class="table-creation-header" onclick="toggleSynonymReplacementViewCreationResults()">
-                  <span class="toggle-indicator">▼</span> Synonym Replacement View Creation Results
-                </div>
-                <div class="table-creation-details" id="postgres-synonym-replacement-creation-details">
-                  <!-- Synonym replacement view creation results will be populated here -->
                 </div>
               </div>
             </div>

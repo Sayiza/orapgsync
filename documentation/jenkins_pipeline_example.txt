@@ -96,7 +96,7 @@ pipeline {
                         -X POST "http://localhost:${APP_PORT}/api/config" \
                         -H 'Content-Type: application/json' \
                         --data-raw '{
-                            "do.all-schemas": false,
+                            "do.all-schemas": true,
                             "do.only-test-schema": "exampleschema,userschema2",
                             "oracle.url": "'"${ORACLE_URL}"'",
                             "oracle.user": "'"${ORACLE_USER}"'",
@@ -1252,6 +1252,83 @@ pipeline {
                     fi
 
                     # ══════════════════════════════════════════════════════════════════════════
+                    # SYNONYM REPLACEMENT VIEWS
+                    # Must run after view stubs (targets must exist) but before view/trigger
+                    # implementations, which may reference synonym names the transformer
+                    # could not resolve inline.
+                    # ══════════════════════════════════════════════════════════════════════════
+                    echo ""
+                    echo "Starting PostgreSQL synonym replacement view creation job..."
+                    echo "Creating views to emulate Oracle synonym behavior"
+
+                    RESPONSE=$(curl -s -w "\\n%{http_code}" \
+                        -X POST "http://localhost:${APP_PORT}/api/synonyms/postgres/replacement-views/create" \
+                        -H 'Content-Type: application/json')
+
+                    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+                    BODY=$(echo "$RESPONSE" | head -n-1)
+
+                    echo "Start request HTTP code: $HTTP_CODE"
+
+                    if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+                        echo "ERROR: Failed to start synonym replacement view creation job"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    JOB_ID=$(echo "$BODY" | jq -r '.jobId // empty')
+
+                    if [ -z "$JOB_ID" ]; then
+                        echo "ERROR: No jobId found in response"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    echo "Synonym replacement view creation job started. Job ID: $JOB_ID"
+                    echo "Polling status every 20 seconds (max 120 attempts = ~40 min)"
+
+                    ATTEMPT=0
+                    MAX_ATTEMPTS=120
+
+                    while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+                        ATTEMPT=$((ATTEMPT + 1))
+
+                        STATUS_RESP=$(curl -s "http://localhost:${APP_PORT}/api/jobs/${JOB_ID}/status")
+
+                        STATUS=$(echo "$STATUS_RESP" | jq -r '.status // "UNKNOWN"')
+                        IS_COMPLETE=$(echo "$STATUS_RESP" | jq -r '.isComplete // "false"')
+                        PERCENTAGE=$(echo "$STATUS_RESP" | jq -r '.progress.percentage // 0')
+                        DETAILS=$(echo "$STATUS_RESP" | jq -r '.progress.details // "No details"')
+
+                        echo "Synonym Views $ATTEMPT/$MAX_ATTEMPTS | Status: $STATUS | $PERCENTAGE% | $DETAILS"
+
+                        if [ "$IS_COMPLETE" = "true" ]; then
+                            if [ "$STATUS" = "COMPLETED" ]; then
+                                echo "SUCCESS: Synonym replacement view creation completed"
+                                break
+                            else
+                                echo "ERROR: Synonym replacement view creation job finished with status: $STATUS"
+                                echo "$STATUS_RESP"
+                                exit 1
+                            fi
+                        fi
+
+                        if [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "ERROR" ] || [ "$STATUS" = "CANCELLED" ]; then
+                            echo "ERROR: Synonym replacement view creation job entered failure state: $STATUS"
+                            echo "$STATUS_RESP"
+                            exit 1
+                        fi
+
+                        sleep 20
+                    done
+
+                    if [ "$IS_COMPLETE" != "true" ]; then
+                        echo "ERROR: Synonym replacement view creation timeout after $MAX_ATTEMPTS attempts"
+                        echo "$STATUS_RESP"
+                        exit 1
+                    fi
+
+                    # ══════════════════════════════════════════════════════════════════════════
                     # VIEW IMPLEMENTATION (Full SQL transformation)
                     # ══════════════════════════════════════════════════════════════════════════
                     echo ""
@@ -1321,80 +1398,6 @@ pipeline {
 
                     if [ "$IS_COMPLETE" != "true" ]; then
                         echo "ERROR: View implementation timeout after $MAX_ATTEMPTS attempts"
-                        echo "$STATUS_RESP"
-                        exit 1
-                    fi
-
-                    # ══════════════════════════════════════════════════════════════════════════
-                    # SYNONYM REPLACEMENT VIEWS
-                    # ══════════════════════════════════════════════════════════════════════════
-                    echo ""
-                    echo "Starting PostgreSQL synonym replacement view creation job..."
-                    echo "Creating views to emulate Oracle synonym behavior"
-
-                    RESPONSE=$(curl -s -w "\\n%{http_code}" \
-                        -X POST "http://localhost:${APP_PORT}/api/synonyms/postgres/replacement-views/create" \
-                        -H 'Content-Type: application/json')
-
-                    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-                    BODY=$(echo "$RESPONSE" | head -n-1)
-
-                    echo "Start request HTTP code: $HTTP_CODE"
-
-                    if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
-                        echo "ERROR: Failed to start synonym replacement view creation job"
-                        echo "$BODY"
-                        exit 1
-                    fi
-
-                    JOB_ID=$(echo "$BODY" | jq -r '.jobId // empty')
-
-                    if [ -z "$JOB_ID" ]; then
-                        echo "ERROR: No jobId found in response"
-                        echo "$BODY"
-                        exit 1
-                    fi
-
-                    echo "Synonym replacement view creation job started. Job ID: $JOB_ID"
-                    echo "Polling status every 20 seconds (max 120 attempts = ~40 min)"
-
-                    ATTEMPT=0
-                    MAX_ATTEMPTS=120
-
-                    while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
-                        ATTEMPT=$((ATTEMPT + 1))
-
-                        STATUS_RESP=$(curl -s "http://localhost:${APP_PORT}/api/jobs/${JOB_ID}/status")
-
-                        STATUS=$(echo "$STATUS_RESP" | jq -r '.status // "UNKNOWN"')
-                        IS_COMPLETE=$(echo "$STATUS_RESP" | jq -r '.isComplete // "false"')
-                        PERCENTAGE=$(echo "$STATUS_RESP" | jq -r '.progress.percentage // 0')
-                        DETAILS=$(echo "$STATUS_RESP" | jq -r '.progress.details // "No details"')
-
-                        echo "Synonym Views $ATTEMPT/$MAX_ATTEMPTS | Status: $STATUS | $PERCENTAGE% | $DETAILS"
-
-                        if [ "$IS_COMPLETE" = "true" ]; then
-                            if [ "$STATUS" = "COMPLETED" ]; then
-                                echo "SUCCESS: Synonym replacement view creation completed"
-                                break
-                            else
-                                echo "ERROR: Synonym replacement view creation job finished with status: $STATUS"
-                                echo "$STATUS_RESP"
-                                exit 1
-                            fi
-                        fi
-
-                        if [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "ERROR" ] || [ "$STATUS" = "CANCELLED" ]; then
-                            echo "ERROR: Synonym replacement view creation job entered failure state: $STATUS"
-                            echo "$STATUS_RESP"
-                            exit 1
-                        fi
-
-                        sleep 20
-                    done
-
-                    if [ "$IS_COMPLETE" != "true" ]; then
-                        echo "ERROR: Synonym replacement view creation timeout after $MAX_ATTEMPTS attempts"
                         echo "$STATUS_RESP"
                         exit 1
                     fi

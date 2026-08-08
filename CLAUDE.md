@@ -234,7 +234,9 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
     - ✅ Three-tier support system: FULL, PARTIAL, STUB
     - ✅ Installed into `oracle_compat` schema with flattened naming (e.g., `dbms_output__put_line`)
     - ✅ Extensible catalog system for future additions
-    - ✅ Integrated as Step 23/28 in orchestration workflow
+    - ✅ Integrated as Step 24/30 in orchestration workflow
+
+    **Note on step ordering (2026-07-08):** Synonym replacement views moved from the end of the workflow to Step 19, directly after view stubs. Transformed views may reference synonym names the transformer could not resolve inline (fallback schema-qualification), and `CREATE VIEW` validates all referenced relations at creation time — a real-world case failed with the old ordering.
     - See `oraclecompat/` module and [TRANSFORMATION.md](documentation/TRANSFORMATION.md) Phase 4.5
 
 11. **View SQL Transformation**: ✅ **90% COMPLETE - ACTIVE** - ANTLR-based Oracle→PostgreSQL SQL conversion

@@ -6,7 +6,7 @@
  * executing each step in sequence with proper error handling and progress tracking.
  *
  * Main Functions:
- * - startAll(): Orchestrates the complete 29-step migration workflow
+ * - startAll(): Orchestrates the complete 30-step migration workflow
  * - resetAll(): Resets all application state to initial conditions
  *
  * Dependencies:
@@ -235,118 +235,120 @@ async function startAll() {
             updateOrchestrationProgress(80, 'Steps 17-18: View Stubs skipped');
         }
 
-        // Step 19-20: Function Stubs
+        // Step 19: Synonym Replacement Views
+        // Must run after view stubs (targets must exist) but before view/function/trigger
+        // implementations, which may reference synonym names the transformer could not resolve.
+        if (isStepEnabled('synonym-replacement')) {
+            // Step 19: Create PostgreSQL synonym replacement views
+            updateOrchestrationProgress(80, 'Step 19/30: Creating PostgreSQL synonym replacement views...');
+            await createPostgresSynonymReplacementViews();
+            await pollCountBadge('postgres-synonym-replacement', { requirePositive: false, allowZero: true });
+            updateOrchestrationProgress(81, 'Synonym replacement view creation completed');
+        } else {
+            console.log('Step 19: Synonym Replacement Views - SKIPPED (disabled by user)');
+            updateOrchestrationProgress(81, 'Step 19: Synonym Replacement Views skipped');
+        }
+
+        // Step 20-21: Function Stubs
         if (isStepEnabled('functions')) {
-            // Step 19: Extract Oracle functions/procedures
-            updateOrchestrationProgress(81, 'Step 19/30: Extracting Oracle functions and procedures...');
+            // Step 20: Extract Oracle functions/procedures
+            updateOrchestrationProgress(81, 'Step 20/30: Extracting Oracle functions and procedures...');
             await extractOracleFunctions();
             await pollCountBadge('oracle-functions', { requirePositive: false, allowZero: true });
             updateOrchestrationProgress(82, 'Oracle functions/procedures extracted');
 
-            // Step 20: Create PostgreSQL function/procedure stubs
-            updateOrchestrationProgress(83, 'Step 20/30: Creating PostgreSQL function stubs...');
+            // Step 21: Create PostgreSQL function/procedure stubs
+            updateOrchestrationProgress(83, 'Step 21/30: Creating PostgreSQL function stubs...');
             await createPostgresFunctionStubs();
             await pollCountBadge('postgres-functions', { requirePositive: false, allowZero: true });
             updateOrchestrationProgress(85, 'Function stub creation completed');
         } else {
-            console.log('Step 19-20: Function Stubs - SKIPPED (disabled by user)');
-            updateOrchestrationProgress(85, 'Steps 19-20: Function Stubs skipped');
+            console.log('Step 20-21: Function Stubs - SKIPPED (disabled by user)');
+            updateOrchestrationProgress(85, 'Steps 20-21: Function Stubs skipped');
         }
 
-        // Step 21-22: Type Method Stubs
+        // Step 22-23: Type Method Stubs
         if (isStepEnabled('type-methods')) {
-            // Step 21: Extract Oracle type methods
-            updateOrchestrationProgress(87, 'Step 21/30: Extracting Oracle type methods...');
+            // Step 22: Extract Oracle type methods
+            updateOrchestrationProgress(87, 'Step 22/30: Extracting Oracle type methods...');
             await extractOracleTypeMethods();
             await pollCountBadge('oracle-type-methods', { requirePositive: false, allowZero: true });
             updateOrchestrationProgress(89, 'Oracle type methods extracted');
 
-            // Step 22: Create PostgreSQL type method stubs
-            updateOrchestrationProgress(90, 'Step 22/30: Creating PostgreSQL type method stubs...');
+            // Step 23: Create PostgreSQL type method stubs
+            updateOrchestrationProgress(90, 'Step 23/30: Creating PostgreSQL type method stubs...');
             await createPostgresTypeMethodStubs();
             await pollCountBadge('postgres-type-methods', { requirePositive: false, allowZero: true });
             updateOrchestrationProgress(91, 'Type method stub creation completed');
         } else {
-            console.log('Step 21-22: Type Method Stubs - SKIPPED (disabled by user)');
-            updateOrchestrationProgress(91, 'Steps 21-22: Type Method Stubs skipped');
+            console.log('Step 22-23: Type Method Stubs - SKIPPED (disabled by user)');
+            updateOrchestrationProgress(91, 'Steps 22-23: Type Method Stubs skipped');
         }
 
-        // Step 23: Oracle Compatibility Layer
+        // Step 24: Oracle Compatibility Layer
         if (isStepEnabled('oracle-compat')) {
-            // Step 23: Install Oracle compatibility layer
-            updateOrchestrationProgress(92, 'Step 23/30: Installing Oracle compatibility layer...');
+            // Step 24: Install Oracle compatibility layer
+            updateOrchestrationProgress(92, 'Step 24/30: Installing Oracle compatibility layer...');
             await installOracleCompat();
             await pollCountBadge('postgres-oracle-compat', { requirePositive: false, allowZero: false });
             updateOrchestrationProgress(93, 'Oracle compatibility layer installed');
         } else {
-            console.log('Step 23: Oracle Compatibility Layer - SKIPPED (disabled by user)');
-            updateOrchestrationProgress(93, 'Step 23: Oracle Compatibility Layer skipped');
+            console.log('Step 24: Oracle Compatibility Layer - SKIPPED (disabled by user)');
+            updateOrchestrationProgress(93, 'Step 24: Oracle Compatibility Layer skipped');
         }
 
-        // Step 24: View Implementation (SQL Transformation - ACTIVE)
+        // Step 25: View Implementation (SQL Transformation - ACTIVE)
         if (isStepEnabled('view-implementation')) {
-            // Step 24: Create PostgreSQL views (view implementation - replaces stubs with actual SQL)
-            updateOrchestrationProgress(94, 'Step 24/30: Creating PostgreSQL views...');
+            // Step 25: Create PostgreSQL views (view implementation - replaces stubs with actual SQL)
+            updateOrchestrationProgress(94, 'Step 25/30: Creating PostgreSQL views...');
             await createPostgresViewImplementation();
             await pollCountBadge('postgres-view-implementation', { requirePositive: false, allowZero: true });
             updateOrchestrationProgress(95, 'View implementation completed');
         } else {
-            console.log('Step 24: View Implementation - SKIPPED (disabled by user)');
-            updateOrchestrationProgress(95, 'Step 24: View Implementation skipped');
+            console.log('Step 25: View Implementation - SKIPPED (disabled by user)');
+            updateOrchestrationProgress(95, 'Step 25: View Implementation skipped');
         }
 
-        // Step 25: Function Implementation (PL/SQL Transformation - FROZEN)
+        // Step 26: Function Implementation (PL/SQL Transformation - FROZEN)
         if (isStepEnabled('function-implementation')) {
-            // Step 25: Create PostgreSQL standalone functions (function implementation - replaces stubs with actual PL/pgSQL)
-            updateOrchestrationProgress(96, 'Step 25/30: Creating PostgreSQL standalone functions...');
+            // Step 26: Create PostgreSQL standalone functions (function implementation - replaces stubs with actual PL/pgSQL)
+            updateOrchestrationProgress(96, 'Step 26/30: Creating PostgreSQL standalone functions...');
             await createPostgresStandaloneFunctionImplementation();
             await pollCountBadge('postgres-standalone-function-implementation', { requirePositive: false, allowZero: true });
             updateOrchestrationProgress(97, 'Standalone function implementation completed');
         } else {
-            console.log('Step 25: Function Implementation - SKIPPED (disabled by user)');
-            updateOrchestrationProgress(97, 'Step 25: Function Implementation skipped');
+            console.log('Step 26: Function Implementation - SKIPPED (disabled by user)');
+            updateOrchestrationProgress(97, 'Step 26: Function Implementation skipped');
         }
 
-        // Step 26: Type Method Implementation (PL/SQL Transformation - FROZEN)
+        // Step 27: Type Method Implementation (PL/SQL Transformation - FROZEN)
         if (isStepEnabled('type-method-implementation')) {
-            // Step 26: Create PostgreSQL type methods (type method implementation - replaces stubs with actual PL/pgSQL)
-            updateOrchestrationProgress(97, 'Step 26/30: Creating PostgreSQL type methods...');
+            // Step 27: Create PostgreSQL type methods (type method implementation - replaces stubs with actual PL/pgSQL)
+            updateOrchestrationProgress(97, 'Step 27/30: Creating PostgreSQL type methods...');
             await createPostgresTypeMethodImplementation();
             await pollCountBadge('postgres-type-method-implementation', { requirePositive: false, allowZero: true });
             updateOrchestrationProgress(98, 'Type method implementation completed');
         } else {
-            console.log('Step 26: Type Method Implementation - SKIPPED (disabled by user)');
-            updateOrchestrationProgress(98, 'Step 26: Type Method Implementation skipped');
+            console.log('Step 27: Type Method Implementation - SKIPPED (disabled by user)');
+            updateOrchestrationProgress(98, 'Step 27: Type Method Implementation skipped');
         }
 
-        // Step 27-28: Triggers (PL/SQL Transformation - FROZEN)
+        // Step 28-29: Triggers (PL/SQL Transformation - FROZEN)
         if (isStepEnabled('triggers')) {
-            // Step 27: Extract Oracle triggers
-            updateOrchestrationProgress(95, 'Step 27/30: Extracting Oracle triggers...');
+            // Step 28: Extract Oracle triggers
+            updateOrchestrationProgress(95, 'Step 28/30: Extracting Oracle triggers...');
             await extractOracleTriggers();
             await pollCountBadge('oracle-triggers', { requirePositive: false, allowZero: true });
             updateOrchestrationProgress(96, 'Oracle triggers extracted');
 
-            // Step 28: Create PostgreSQL triggers (trigger implementation)
-            updateOrchestrationProgress(97, 'Step 28/30: Creating PostgreSQL triggers...');
+            // Step 29: Create PostgreSQL triggers (trigger implementation)
+            updateOrchestrationProgress(97, 'Step 29/30: Creating PostgreSQL triggers...');
             await createPostgresTriggers();
             await pollCountBadge('postgres-triggers', { requirePositive: false, allowZero: true });
             updateOrchestrationProgress(98, 'Trigger implementation completed');
         } else {
-            console.log('Step 27-28: Triggers - SKIPPED (disabled by user)');
-            updateOrchestrationProgress(98, 'Steps 27-28: Triggers skipped');
-        }
-
-        // Step 29: Synonym Replacement Views
-        if (isStepEnabled('synonym-replacement')) {
-            // Step 29: Create PostgreSQL synonym replacement views
-            updateOrchestrationProgress(97, 'Step 29/30: Creating PostgreSQL synonym replacement views...');
-            await createPostgresSynonymReplacementViews();
-            await pollCountBadge('postgres-synonym-replacement', { requirePositive: false, allowZero: true });
-            updateOrchestrationProgress(98, 'Synonym replacement view creation completed');
-        } else {
-            console.log('Step 29: Synonym Replacement Views - SKIPPED (disabled by user)');
-            updateOrchestrationProgress(98, 'Step 29: Synonym Replacement Views skipped');
+            console.log('Step 28-29: Triggers - SKIPPED (disabled by user)');
+            updateOrchestrationProgress(98, 'Steps 28-29: Triggers skipped');
         }
 
         // Step 30: Web Gateway Generation
