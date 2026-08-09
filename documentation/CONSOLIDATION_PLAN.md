@@ -92,21 +92,27 @@ per-table error reporting unchanged.
 lost, so the migrated database silently underperforms.
 
 **Approach:**
-- [ ] `OracleIndexExtractionJob`: extract from `ALL_INDEXES` / `ALL_IND_COLUMNS` /
+- [x] `OracleIndexExtractionJob`: extract from `ALL_INDEXES` / `ALL_IND_COLUMNS` /
       `ALL_IND_EXPRESSIONS` — normal, unique, composite, function-based; skip indexes
       auto-created for PK/UK constraints (already covered by constraint creation).
-- [ ] `PostgresIndexCreationJob`: B-tree equivalents; transform function-based index
+- [x] `PostgresIndexCreationJob`: B-tree equivalents; transform function-based index
       expressions through the existing SQL expression transformer where possible, report
       (not fail) the ones that don't transform.
-- [ ] Handle: DESC columns, reverse key (→ plain B-tree + note), bitmap (→ plain B-tree),
+- [x] Handle: DESC columns, reverse key (→ plain B-tree + note), bitmap (→ plain B-tree),
       domain/text indexes (report as unsupported).
-- [ ] Create indexes **after** data transfer in the orchestration order (also benefits item 2).
+- [x] Create indexes **after** data transfer in the orchestration order (also benefits item 2).
 - [ ] Verification job comparing index coverage per table, surfaced in the UI.
+      *Not built: the creation result already reports every index with its outcome and reason,
+      which is what the verification job was for. Revisit only if a real run shows the two
+      diverging.*
 
 **Acceptance:** For a real schema, ≥90% of non-constraint indexes exist in PostgreSQL
 after migration; the rest are explicitly listed with reasons.
+**Not yet measured** — needs a run against the real schema.
 
 **Effort:** M
+
+**Implementation (2026-08-08):** see "Index Migration" below.
 
 ### 4. Transformer Hardening (no new features)
 
@@ -259,6 +265,88 @@ actual concurrency (latch-based — the test times out if the transfer is sequen
 isolation, per-table rollback, progress reported once per table on a single thread, one
 connection pair per worker, and the all-workers-dead path. Verified by mutation: forcing the
 worker count to 1 fails 4 of these tests.
+
+---
+
+## Index Migration (implemented 2026-08-08)
+
+Oracle indexes that are not backed by a primary key or unique constraint are extracted and
+recreated. Constraint-backed indexes are excluded — PostgreSQL creates those itself during
+constraint creation.
+
+**Modules:**
+- `index/service/OracleIndexExtractor`, `index/job/OracleIndexExtractionJob` — extraction
+- `index/service/IndexCreationPlanner` — decisions and name allocation (single-threaded)
+- `index/service/ParallelIndexCreationService` — worker pool execution
+- `index/service/IndexExpressionTransformer` — function-based index expressions
+- `index/job/PostgresIndexCreationJob`, `index/rest/IndexResource`
+- `core/job/model/index/` — `IndexMetadata`, `IndexKeyPart`, `IndexSignature`,
+  `PostgresIndexCatalog`, `IndexOutcome`, `IndexCreationResult`
+- `database/service/PostgresIndexCatalogService` — reads the existing PostgreSQL indexes
+
+**Design decisions taken before implementation:**
+
+1. **Separate step from FK index creation, and ordered after it.** The two answer different
+   questions — index migration asks "what did Oracle have?", FK gap-fill asks "what should
+   exist?" — from different sources. Neither database indexes FK columns automatically (the FK
+   job's javadoc claiming Oracle does was wrong; both index only PK/UK constraints), so those
+   indexes are the migration's own invention. Real schemas usually index FK columns by hand, so
+   gap-fill now runs *after* migration and skips anything already covered. Running it first would
+   duplicate every hand-made FK index under a generated `idx_fk_*` name.
+
+2. **Signature-based matching everywhere, never name-based.** Oracle's `PK_EMP` is PostgreSQL's
+   `emp_pkey`; a name check would miss every constraint index and duplicate it. `IndexSignature`
+   compares table, uniqueness and ordered keys under **two distinct rules**: exact match for
+   reproducing an Oracle index (fidelity — a wider index is not the same index), leading-prefix
+   coverage for FK gap-fill (performance — a wider index does serve the lookup). Direction is
+   compatible when all keys match or all are exactly inverted, which is exactly when a B-tree can
+   substitute.
+
+3. **Standalone `IndexMetadata` in state**, not attached to `TableMetadata` — that model is
+   consumed by the data transfer path and its normalizer.
+
+4. **Worker pool for creation**, following the parallel data transfer: one connection per worker
+   pulling off a shared queue. Plain `CREATE INDEX`, not `CONCURRENTLY` (nothing else uses the
+   database during a migration and the concurrent build is strictly slower). Auto-commit on, so
+   each index is its own transaction.
+
+5. **Plan then execute.** Name allocation is stateful — two indexes can want the same name — so
+   all decisions happen single-threaded in the planner and workers receive finished SQL. No
+   shared state in the workers, and the full report exists before the first statement runs.
+
+6. **Report, don't pre-check, for `IMMUTABLE`.** PostgreSQL requires index expressions to be
+   immutable and migrated Oracle functions usually are not. Rather than a volatility pre-check,
+   such an index fails at `CREATE INDEX` and is reported with PostgreSQL's own message.
+
+**Oracle traps handled:** descending indexes (stored as function-based indexes over hidden
+`SYS_NC0000n$` columns — the real column is recovered from `ALL_IND_EXPRESSIONS`);
+`COLUMN_EXPRESSION` being a `LONG` (selected and read last); PostgreSQL sharing one namespace
+across relation kinds while Oracle gives indexes their own (names preserved but disambiguated on
+collision); bitmap and reverse key downgraded to B-tree with a note; domain indexes reported as
+unsupported; `UNUSABLE`, recycle-bin, IOT and cluster indexes skipped at extraction.
+
+**No index can vanish:** every extracted index yields exactly one outcome — `CREATED`, `SKIPPED`,
+`UNSUPPORTED` or `ERROR` — each with a reason. Includes the all-workers-dead path, where
+remaining indexes are reported as failures rather than the job hanging.
+
+**Configuration:** `index.parallel-workers` (default 4, clamped to [1, 32] and to the index
+count), settable in the UI under "Index Creation Settings".
+
+**Orchestration:** Steps 16–17 (extract, create), FK gap-fill moved to Step 18. Total step count
+went from 30 to 32.
+
+**Tests:** 65 new tests. `IndexSignatureTest` pins both matching rules; `IndexCreationPlannerTest`
+pins the skip/unsupported/rename decisions and generated SQL; `ParallelIndexCreationServiceTest`
+drives the real worker loop through a package-private seam, covering concurrency (latch-based —
+times out if sequential), failure isolation, single-threaded progress, one connection per worker
+and the all-workers-dead path; `OracleIndexExtractorTest` pins the descending-index fold-back.
+Verified by mutation: forcing the worker count to 1 fails 4 tests, and removing the uniqueness
+rule from `makesRedundant` fails the test that says a non-unique index cannot stand in for a
+unique one.
+
+**Not done:** the separate verification job. The creation result already reports every index with
+its outcome and reason, which is what verification was for. Acceptance (≥90% of non-constraint
+indexes present) is **not yet measured** — that needs a run against the real schema.
 
 ---
 

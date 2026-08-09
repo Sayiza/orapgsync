@@ -6,31 +6,42 @@ import me.christianrobert.orapgsync.core.job.AbstractDatabaseWriteJob;
 import me.christianrobert.orapgsync.core.job.model.JobProgress;
 import me.christianrobert.orapgsync.core.job.model.table.ConstraintMetadata;
 import me.christianrobert.orapgsync.core.job.model.table.FKIndexCreationResult;
+import me.christianrobert.orapgsync.core.job.model.index.PostgresIndexCatalog;
 import me.christianrobert.orapgsync.core.job.model.table.TableMetadata;
 import me.christianrobert.orapgsync.core.tools.PostgresIdentifierNormalizer;
 import me.christianrobert.orapgsync.database.service.PostgresConnectionService;
+import me.christianrobert.orapgsync.database.service.PostgresIndexCatalogService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
-import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.*;
 import java.util.function.Consumer;
 
 /**
- * Creates indexes on foreign key columns in PostgreSQL.
+ * Fills the gaps in foreign key index coverage.
  *
- * Oracle automatically creates indexes on foreign key columns, but PostgreSQL does not.
- * This job creates B-tree indexes on FK source columns to:
- * 1. Match Oracle's behavior
- * 2. Improve query performance for FK lookups
- * 3. Prevent lock escalation during FK constraint operations
+ * <p>Neither Oracle nor PostgreSQL indexes foreign key columns automatically - both create
+ * indexes only for primary key and unique constraints. Unindexed FK columns make referential
+ * lookups and cascading operations expensive and widen the locks taken during them, so this job
+ * adds a B-tree index wherever nothing already covers the FK columns.</p>
  *
- * Index Naming Convention: idx_fk_{table}_{column1}_{column2}_...
+ * <h2>Gap-fill, not migration</h2>
  *
- * This job should be run AFTER constraint creation (Step 7 in the migration process).
+ * <p>These indexes are the migration's own invention: they need not have existed in Oracle. That
+ * is why this job runs <em>after</em> {@code PostgresIndexCreationJob}, which reproduces the
+ * indexes Oracle actually had. Many schemas already index their FK columns by hand; creating a
+ * second index over the same columns under a generated name would cost write throughput and disk
+ * for nothing.</p>
+ *
+ * <p>Coverage is therefore decided against {@link PostgresIndexCatalog} by signature rather than
+ * by index name - an existing index called anything at all counts, and a wider index counts too
+ * as long as the FK columns are a leading prefix of its keys, since that is exactly when a B-tree
+ * can serve the lookup.</p>
+ *
+ * <p>Index Naming Convention: idx_fk_{table}_{column1}_{column2}_...</p>
  */
 @Dependent
 public class PostgresForeignKeyIndexCreationJob extends AbstractDatabaseWriteJob<FKIndexCreationResult> {
@@ -39,6 +50,9 @@ public class PostgresForeignKeyIndexCreationJob extends AbstractDatabaseWriteJob
 
     @Inject
     private PostgresConnectionService postgresConnectionService;
+
+    @Inject
+    private PostgresIndexCatalogService postgresIndexCatalogService;
 
     @Override
     public String getTargetDatabase() {
@@ -104,14 +118,16 @@ public class PostgresForeignKeyIndexCreationJob extends AbstractDatabaseWriteJob
         try (Connection postgresConnection = postgresConnectionService.getConnection()) {
             updateProgress(progressCallback, 25, "Connected", "Successfully connected to PostgreSQL database");
 
-            // Get existing PostgreSQL indexes
-            Map<String, Set<String>> existingPostgresIndexes = getExistingPostgresIndexes(postgresConnection);
+            // Read what PostgreSQL already has, by signature rather than by name - see the class
+            // comment for why an index called something else still counts as coverage.
+            PostgresIndexCatalog existingIndexes = postgresIndexCatalogService.load(postgresConnection);
 
             updateProgress(progressCallback, 30, "Checking existing indexes",
-                    String.format("Found existing indexes on %d tables", existingPostgresIndexes.size()));
+                    String.format("Found %d existing indexes across %d tables",
+                            existingIndexes.getIndexCount(), existingIndexes.getTableCount()));
 
             // Create FK indexes
-            createFKIndexes(postgresConnection, fkIndexSpecs, existingPostgresIndexes, result, progressCallback);
+            createFKIndexes(postgresConnection, fkIndexSpecs, existingIndexes, result, progressCallback);
 
             updateProgress(progressCallback, 90, "Creation complete",
                     String.format("Created %d indexes, skipped %d existing, %d errors",
@@ -189,46 +205,8 @@ public class PostgresForeignKeyIndexCreationJob extends AbstractDatabaseWriteJob
         return PostgresIdentifierNormalizer.normalizeIdentifier(fullName);
     }
 
-    /**
-     * Gets existing PostgreSQL indexes organized by table.
-     * Returns a map: qualified_table_name -> Set of index_names
-     */
-    private Map<String, Set<String>> getExistingPostgresIndexes(Connection connection) throws SQLException {
-        Map<String, Set<String>> indexes = new HashMap<>();
-
-        String sql = """
-            SELECT
-                n.nspname AS schema_name,
-                c.relname AS table_name,
-                i.relname AS index_name
-            FROM pg_index idx
-            JOIN pg_class i ON i.oid = idx.indexrelid
-            JOIN pg_class c ON c.oid = idx.indrelid
-            JOIN pg_namespace n ON c.relnamespace = n.oid
-            WHERE n.nspname NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
-            """;
-
-        try (PreparedStatement stmt = connection.prepareStatement(sql);
-             ResultSet rs = stmt.executeQuery()) {
-
-            while (rs.next()) {
-                String schemaName = rs.getString("schema_name");
-                String tableName = rs.getString("table_name");
-                String indexName = rs.getString("index_name");
-
-                String qualifiedTableName = String.format("%s.%s", schemaName, tableName).toLowerCase();
-
-                indexes.computeIfAbsent(qualifiedTableName, k -> new HashSet<>())
-                       .add(indexName.toLowerCase());
-            }
-        }
-
-        log.debug("Found existing indexes on {} PostgreSQL tables", indexes.size());
-        return indexes;
-    }
-
     private void createFKIndexes(Connection connection, List<FKIndexSpec> fkIndexSpecs,
-                                 Map<String, Set<String>> existingIndexes,
+                                 PostgresIndexCatalog existingIndexes,
                                  FKIndexCreationResult result, Consumer<JobProgress> progressCallback) throws SQLException {
         int totalIndexes = fkIndexSpecs.size();
         int processedIndexes = 0;
@@ -242,12 +220,13 @@ public class PostgresForeignKeyIndexCreationJob extends AbstractDatabaseWriteJob
                             spec.indexName, qualifiedTableName),
                     String.format("Index %d of %d", processedIndexes + 1, totalIndexes));
 
-            // Check if index already exists
-            Set<String> tableIndexes = existingIndexes.get(qualifiedTableName);
-            if (tableIndexes != null && tableIndexes.contains(spec.indexName.toLowerCase())) {
+            // An existing index covers this FK when the FK columns are a leading prefix of its
+            // keys - whatever that index is called, and whether or not Oracle had it.
+            if (existingIndexes.coversLookup(qualifiedTableName, spec.columns)) {
                 result.addSkippedIndex(qualifiedTableName, spec.indexName, spec.columns,
-                        "Index already exists");
-                log.info("Index '{}' already exists on table '{}', skipping", spec.indexName, qualifiedTableName);
+                        "Foreign key columns already covered by an existing index");
+                log.info("FK columns {} on '{}' already covered by an existing index, skipping",
+                        spec.columns, qualifiedTableName);
                 processedIndexes++;
                 continue;
             }

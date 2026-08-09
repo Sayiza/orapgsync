@@ -261,6 +261,8 @@ function collectConfigurationData() {
         'postgre-password': 'postgre.password',
         // Data transfer settings
         'transfer-parallel-workers': 'transfer.parallel-workers',
+        // Index creation settings
+        'index-parallel-workers': 'index.parallel-workers',
         // Web Gateway settings
         'web-gateway-output-path': 'web-gateway.output-path',
         'web-gateway-dad-name': 'web-gateway.dad-name',
@@ -316,6 +318,8 @@ function populateConfigurationForm(config) {
         'postgre-password': 'postgre.password',
         // Data transfer settings
         'transfer-parallel-workers': 'transfer.parallel-workers',
+        // Index creation settings
+        'index-parallel-workers': 'index.parallel-workers',
         // Web Gateway settings
         'web-gateway-output-path': 'web-gateway.output-path',
         'web-gateway-dad-name': 'web-gateway.dad-name',

@@ -16,7 +16,10 @@ import me.christianrobert.orapgsync.core.job.model.sequence.SequenceCreationResu
 import me.christianrobert.orapgsync.core.job.model.sequence.SequenceMetadata;
 import me.christianrobert.orapgsync.core.job.model.table.ConstraintCreationResult;
 import me.christianrobert.orapgsync.core.job.model.table.ConstraintMetadata;
+import me.christianrobert.orapgsync.core.job.model.index.IndexCreationResult;
+import me.christianrobert.orapgsync.core.job.model.index.IndexMetadata;
 import me.christianrobert.orapgsync.core.job.model.table.FKIndexCreationResult;
+import me.christianrobert.orapgsync.index.rest.IndexResource;
 import me.christianrobert.orapgsync.core.job.model.table.TableCreationResult;
 import me.christianrobert.orapgsync.core.job.model.table.TableMetadata;
 import me.christianrobert.orapgsync.core.job.model.transfer.DataTransferResult;
@@ -188,7 +191,17 @@ public class JobResource {
             String jobType = execution.getJob().getJobType();
 
             // Check result object type first (more specific), then fall back to jobType string matching for Lists
-            if (result instanceof FKIndexCreationResult) {
+            if (result instanceof IndexCreationResult) {
+                IndexCreationResult indexResult = (IndexCreationResult) result;
+                Map<String, Object> summary = IndexResource.generateIndexCreationSummary(indexResult);
+                response.put("summary", summary);
+                response.put("createdCount", indexResult.getCreatedCount());
+                response.put("skippedCount", indexResult.getSkippedCount());
+                response.put("unsupportedCount", indexResult.getUnsupportedCount());
+                response.put("errorCount", indexResult.getErrorCount());
+                response.put("isSuccessful", indexResult.isSuccessful());
+                response.put("result", result);
+            } else if (result instanceof FKIndexCreationResult) {
                 FKIndexCreationResult fkIndexResult = (FKIndexCreationResult) result;
                 Map<String, Object> summary = ConstraintResource.generateFKIndexCreationSummary(fkIndexResult);
                 response.put("summary", summary);
@@ -421,7 +434,14 @@ public class JobResource {
                 }
             } else if (result instanceof List<?>) {
                 // Handle List results based on jobType
-                if (jobType.contains("SCHEMA") && !jobType.contains("SCHEMA_CREATION")) {
+                if (jobType.contains("INDEX")) {
+                    @SuppressWarnings("unchecked")
+                    List<IndexMetadata> indexMetadata = (List<IndexMetadata>) result;
+                    Map<String, Object> summary = IndexResource.generateIndexExtractionSummary(indexMetadata);
+                    response.put("summary", summary);
+                    response.put("indexCount", indexMetadata.size());
+                    response.put("result", result);
+                } else if (jobType.contains("SCHEMA") && !jobType.contains("SCHEMA_CREATION")) {
                     @SuppressWarnings("unchecked")
                     List<String> schemas = (List<String>) result;
                     Map<String, Object> summary = SchemaResource.generateSchemaExtractionSummary(schemas);

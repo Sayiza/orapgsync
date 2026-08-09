@@ -360,9 +360,36 @@
             </div>
           </td>
         </tr>
+        <tr class="indexes-row">
+          <td style="text-align: center; vertical-align: middle;">
+            <input type="checkbox" class="step-checkbox" data-step="indexes" checked title="Enable/disable index migration">
+          </td>
+          <td class="source-cell">
+            <div class="component-info" id="oracle-indexes">
+              <span class="count-badge">-</span>
+              <span class="component-text">Indexes extracted</span>
+              <button class="action-btn" onclick="extractOracleIndexes()" title="Extract non-constraint indexes from Oracle">Extract Indexes</button>
+            </div>
+          </td>
+          <td class="target-cell">
+            <div class="component-info" id="postgres-indexes">
+              <span class="count-badge">-</span>
+              <span class="component-text">Indexes created</span>
+              <button class="action-btn" onclick="createPostgresIndexes()" title="Create the migrated indexes in PostgreSQL">Create Indexes</button>
+              <div class="table-creation-results" id="postgres-index-creation-results" style="display: none;">
+                <div class="table-creation-header" onclick="toggleIndexCreationResults()">
+                  <span class="toggle-indicator">▼</span> Index Creation Results
+                </div>
+                <div class="table-creation-details" id="postgres-index-creation-details">
+                  <!-- Index creation results will be populated here -->
+                </div>
+              </div>
+            </div>
+          </td>
+        </tr>
         <tr class="fk-indexes-row">
           <td style="text-align: center; vertical-align: middle;">
-            <input type="checkbox" class="step-checkbox" data-step="fk-indexes" checked title="Enable/disable FK index creation">
+            <input type="checkbox" class="step-checkbox" data-step="fk-indexes" checked title="Enable/disable FK index gap-fill">
           </td>
           <td class="source-cell">
             <div class="component-info" id="oracle-fk-indexes">
@@ -882,6 +909,17 @@
           <span class="config-help">Tables transferred concurrently (1-32). Each worker uses one Oracle and one PostgreSQL connection</span>
         </div>
 
+        <!-- Index Creation Configuration -->
+        <div class="config-group" style="grid-column: 1 / -1; border-top: 1px solid #ddd; padding-top: 1rem; margin-top: 0.5rem;">
+          <h3 style="margin: 0 0 0.5rem 0; font-size: 1rem; color: #555;">Index Creation Settings</h3>
+        </div>
+
+        <div class="config-group">
+          <label class="config-label" for="index-parallel-workers">Parallel Workers</label>
+          <input type="number" id="index-parallel-workers" class="config-input" min="1" max="32" value="4">
+          <span class="config-help">Indexes built concurrently (1-32). Each worker uses one PostgreSQL connection</span>
+        </div>
+
         <!-- Web Gateway Configuration -->
         <div class="config-group" style="grid-column: 1 / -1; border-top: 1px solid #ddd; padding-top: 1rem; margin-top: 0.5rem;">
           <h3 style="margin: 0 0 0.5rem 0; font-size: 1rem; color: #555;">Web Gateway Settings</h3>
@@ -965,6 +1003,7 @@
 <script src="table-service.js"></script>
 <script src="data-transfer-service.js"></script>
 <script src="constraint-service.js"></script>
+<script src="index-migration-service.js"></script>
 <script src="fk-index-service.js"></script>
 <script src="view-service.js"></script>
 <script src="function-service.js"></script>

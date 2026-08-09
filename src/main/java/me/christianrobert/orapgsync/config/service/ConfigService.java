@@ -41,6 +41,10 @@ public class ConfigService {
         // connection pair per worker. Clamped to [1, 32] by ParallelTableTransferService.
         configuration.put("transfer.parallel-workers", 4);
 
+        // Index creation: number of indexes built concurrently, one PostgreSQL connection per
+        // worker. Clamped to [1, 32] by ParallelIndexCreationService.
+        configuration.put("index.parallel-workers", 4);
+
         // Web Gateway configuration
         configuration.put("web-gateway.output-path", "/tmp/web-gateway");
         configuration.put("web-gateway.dad-name", "myapp");

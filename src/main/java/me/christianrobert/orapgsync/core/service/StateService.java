@@ -10,6 +10,8 @@ import me.christianrobert.orapgsync.core.job.model.transfer.DataTransferResult;
 import me.christianrobert.orapgsync.core.job.model.transfer.RowCountMetadata;
 import me.christianrobert.orapgsync.core.job.model.schema.SchemaCreationResult;
 import me.christianrobert.orapgsync.core.job.model.table.ConstraintCreationResult;
+import me.christianrobert.orapgsync.core.job.model.index.IndexCreationResult;
+import me.christianrobert.orapgsync.core.job.model.index.IndexMetadata;
 import me.christianrobert.orapgsync.core.job.model.table.FKIndexCreationResult;
 import me.christianrobert.orapgsync.core.job.model.table.TableCreationResult;
 import me.christianrobert.orapgsync.core.job.model.table.TableMetadata;
@@ -100,6 +102,11 @@ public class StateService {
     OracleCompatVerificationResult oracleCompatVerificationResult;
 
     ConstraintCreationResult constraintCreationResult;
+
+    // Indexes are held separately from TableMetadata: that model is consumed by the data
+    // transfer path and its normalizer, and index migration has no business mutating it.
+    List<IndexMetadata> oracleIndexMetadata = new ArrayList<>();
+    IndexCreationResult indexCreationResult;
 
     FKIndexCreationResult fkIndexCreationResult;
 
@@ -474,6 +481,22 @@ public class StateService {
         this.constraintCreationResult = constraintCreationResult;
     }
 
+    public List<IndexMetadata> getOracleIndexMetadata() {
+        return oracleIndexMetadata;
+    }
+
+    public void setOracleIndexMetadata(List<IndexMetadata> oracleIndexMetadata) {
+        this.oracleIndexMetadata = oracleIndexMetadata;
+    }
+
+    public IndexCreationResult getIndexCreationResult() {
+        return indexCreationResult;
+    }
+
+    public void setIndexCreationResult(IndexCreationResult indexCreationResult) {
+        this.indexCreationResult = indexCreationResult;
+    }
+
     public FKIndexCreationResult getFkIndexCreationResult() {
         return fkIndexCreationResult;
     }
@@ -656,6 +679,8 @@ public class StateService {
         this.oracleCompatInstallationResult = null;
         this.oracleCompatVerificationResult = null;
         this.constraintCreationResult = null;
+        this.oracleIndexMetadata = new ArrayList<>();
+        this.indexCreationResult = null;
         this.fkIndexCreationResult = null;
         this.dataTransferResult = null;
 

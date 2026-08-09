@@ -21,7 +21,9 @@ See [CONSOLIDATION_PLAN.md](documentation/CONSOLIDATION_PLAN.md) for the full pl
    - ✅ Pre-flight compatibility report (2026-08-08) - see Phase 3C below
 2. **Parallel data transfer** - ✅ **COMPLETE** (2026-08-08) - N tables transferred concurrently,
    configurable via `transfer.parallel-workers` (default 4) - see "Parallel Data Transfer" below
-3. **Index migration** - only FK-supporting indexes are created today; all others are lost
+3. **Index migration** - ✅ **COMPLETE** (2026-08-08) - non-constraint Oracle indexes extracted
+   and recreated; FK index creation demoted to signature-based gap-fill, configurable via
+   `index.parallel-workers` (default 4) - see "Index Migration" below
 4. **Transformer hardening** - no new features; eliminate silent statement drops
 5. **View transformation gaps** - demand-driven, ranked by the pre-flight report
 
@@ -91,6 +93,8 @@ Each database element type is completely independent. Common pattern: `{Element}
 **Data Structures:**
 - **Tables** - Structure creation with columns and type mapping
 - **Constraints** - Dependency-ordered creation (PK → UK → FK → CHECK) via `ConstraintDependencyAnalyzer`
+- **Indexes** - Non-constraint Oracle indexes recreated after data transfer; signature-based
+  matching, parallel creation, FK gap-fill as a separate later step
 - **Data Transfer** - CSV-based bulk transfer via PostgreSQL COPY, supports all types (LOBs, user-defined, complex system types → jsonb)
 
 **Code Objects (Two-Phase Migration: Stubs → Implementation):**
@@ -219,6 +223,9 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
    - Piped streaming for memory efficiency
    - ✅ **Parallel transfer** (2026-08-08) - see below
 6. **Constraints**: Dependency-ordered creation (PK → UK → FK → CHECK)
+7. **Indexes**: ✅ **Complete** (2026-08-08) - non-constraint Oracle indexes recreated after
+   constraints; signature-based skip, parallel creation, FK gap-fill demoted to a later step -
+   see "Index Migration" below
 
 ### ✅ Phase 2: Structural Stubs (Completed)
 7. **View Stubs**: Empty result set views with correct column structure (`WHERE false` pattern)
@@ -233,7 +240,7 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
     - ✅ Three-tier support system: FULL, PARTIAL, STUB
     - ✅ Installed into `oracle_compat` schema with flattened naming (e.g., `dbms_output__put_line`)
     - ✅ Extensible catalog system for future additions
-    - ✅ Integrated as Step 24/30 in orchestration workflow
+    - ✅ Integrated as Step 26/32 in orchestration workflow (was 24/30 before index migration added two steps)
 
     **Note on step ordering (2026-07-08):** Synonym replacement views moved from the end of the workflow to Step 19, directly after view stubs. Transformed views may reference synonym names the transformer could not resolve inline (fallback schema-qualification), and `CREATE VIEW` validates all referenced relations at creation time — a real-world case failed with the old ordering.
     - See `oraclecompat/` module and [TRANSFORMATION.md](documentation/TRANSFORMATION.md) Phase 4.5
@@ -625,6 +632,78 @@ order, so there are no cross-table foreign keys to violate or deadlock on.
 count), settable in the UI under "Data Transfer Settings".
 
 **Documentation:** [CONSOLIDATION_PLAN.md](documentation/CONSOLIDATION_PLAN.md) Phase 1 item 2.
+
+## Index Migration
+
+**Status:** ✅ Complete (2026-08-08) - 65 tests
+
+Oracle indexes that are **not** backed by a primary key or unique constraint are extracted and
+recreated in PostgreSQL. Constraint-backed indexes are excluded: PostgreSQL creates those itself
+during constraint creation, so migrating them too would duplicate every key.
+
+**Modules:**
+- `index/service/OracleIndexExtractor` + `index/job/OracleIndexExtractionJob` - extraction
+- `index/service/IndexCreationPlanner` - decides what to create, under what name (single-threaded)
+- `index/service/ParallelIndexCreationService` - executes the plan on a worker pool
+- `index/service/IndexExpressionTransformer` - function-based index expressions
+- `index/job/PostgresIndexCreationJob`, `index/rest/IndexResource`
+- `core/job/model/index/` - `IndexMetadata`, `IndexKeyPart`, `IndexSignature`,
+  `PostgresIndexCatalog`, `IndexOutcome`, `IndexCreationResult`
+- `database/service/PostgresIndexCatalogService` - reads existing PostgreSQL indexes
+
+**Two separate steps, deliberately:**
+
+| | Index migration (Step 16-17) | FK index gap-fill (Step 18) |
+|---|---|---|
+| Source | `ALL_INDEXES` | derived from constraint metadata |
+| Question | "what *did* Oracle have?" | "what *should* exist?" |
+| Matching rule | exact signature match | leading-prefix coverage |
+
+FK index creation was **demoted** to run *after* index migration. Neither Oracle nor PostgreSQL
+indexes FK columns automatically (both index only PK/UK constraints - the old javadoc claiming
+otherwise was wrong), so those indexes are the migration's own invention. Many schemas already
+index FK columns by hand; running gap-fill first would create a second index over the same
+columns under a generated `idx_fk_*` name.
+
+**Everything is matched by signature, never by name:** Oracle's `PK_EMP` becomes PostgreSQL's
+`emp_pkey`, so a name comparison would miss every constraint index and duplicate it.
+`IndexSignature` compares table, uniqueness and ordered key parts, with two distinct rules -
+exact match for reproducing an Oracle index (fidelity), leading-prefix coverage for FK gap-fill
+(performance). Direction is compatible when all keys match or all are exactly inverted, which is
+precisely when a B-tree can substitute.
+
+**Plan then execute:** name allocation is stateful (two indexes can want the same name), so all
+decisions happen single-threaded in the planner and workers receive finished SQL. This removes
+shared state from the workers entirely and means the full report exists before the first
+statement runs.
+
+**Oracle specifics handled:**
+- **Descending indexes** - Oracle stores these as function-based indexes over hidden
+  `SYS_NC0000n$` columns; the real column is recovered from `ALL_IND_EXPRESSIONS` and folded back
+  into a plain descending key. Emitting the hidden name verbatim would reference a column that
+  does not exist.
+- **`ALL_IND_EXPRESSIONS.COLUMN_EXPRESSION` is a `LONG`** - selected and read last, as
+  `OracleViewExtractionJob` does for `ALL_VIEWS.TEXT`.
+- **Name collisions** - PostgreSQL keeps indexes in the same namespace as tables, views and
+  sequences; Oracle gives indexes their own. An Oracle index named after a table is legal at the
+  source and collides here, so names are preserved but disambiguated when taken.
+- **Bitmap / reverse key** → plain B-tree, recorded as a note on the outcome.
+- **Domain indexes** → reported as `UNSUPPORTED`, not silently dropped.
+- **Function-based indexes** → transformed through the SQL transformer via a probe query; if the
+  result does not match the probe shape exactly it is reported as `UNSUPPORTED` rather than
+  guessed at. PostgreSQL additionally requires index expressions to be `IMMUTABLE` - that is not
+  pre-checked, so such an index fails at `CREATE INDEX` and is reported with PostgreSQL's message.
+- Skipped at extraction: `UNUSABLE`, recycle bin (`BIN$%`), IOT and cluster indexes.
+
+**Every index produces exactly one outcome** (`CREATED` / `SKIPPED` / `UNSUPPORTED` / `ERROR`),
+each with a reason, so an index can never vanish between extraction and the report.
+
+**Configuration:** `index.parallel-workers` (default 4, clamped to [1, 32] and to the index
+count), settable in the UI under "Index Creation Settings".
+
+**REST:** `POST /api/indexes/oracle/extract`, `POST /api/indexes/postgres/create`
+
+**Documentation:** [CONSOLIDATION_PLAN.md](documentation/CONSOLIDATION_PLAN.md) Phase 1 item 3.
 
 ## Synonym Resolution
 
