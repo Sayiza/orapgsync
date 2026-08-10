@@ -505,4 +505,4 @@ When Oracle metadata structure changes:
 **References:**
 - [TRANSFORMATION.md](TRANSFORMATION.md) - SQL transformation module documentation
 - [CTE_IMPLEMENTATION_PLAN.md](documentation/completed/CTE_IMPLEMENTATION_PLAN.md) - CTE implementation details
-- [CONNECT_BY_IMPLEMENTATION_PLAN.md](CONNECT_BY_IMPLEMENTATION_PLAN.md) - CONNECT BY implementation details
+- [CONNECT_BY_IMPLEMENTATION_PLAN.md](completed/CONNECT_BY_IMPLEMENTATION_PLAN.md) - CONNECT BY implementation details

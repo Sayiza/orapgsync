@@ -97,7 +97,7 @@ This document describes the ANTLR-based transformation module that converts Orac
 - **Effort:** ~8 hours (vs. estimated 5-7 days)
 - **Coverage Gain:** +8 percentage points (82% → 90%)
 - **Test Coverage:** 24/24 tests passing (13 basic + 11 complex integration)
-- **Details:** See [CONNECT_BY_IMPLEMENTATION_PLAN.md](CONNECT_BY_IMPLEMENTATION_PLAN.md)
+- **Details:** See [CONNECT_BY_IMPLEMENTATION_PLAN.md](completed/CONNECT_BY_IMPLEMENTATION_PLAN.md)
 
 ### Why Implementations Were Faster Than Estimated
 
@@ -294,7 +294,7 @@ This document describes the ANTLR-based transformation module that converts Orac
 - Nested field access: `x := v.addr.city` → `x := (v->'addr'->>'city')::type`
 - Uses deterministic variable scope tracking for RECORD detection
 - Complete support for inline RECORD types (both LHS assignment and RHS reading)
-- See [INLINE_TYPE_IMPLEMENTATION_PLAN.md](INLINE_TYPE_IMPLEMENTATION_PLAN.md) Phase 1B.5
+- See [INLINE_TYPE_IMPLEMENTATION_PLAN.md](completed/INLINE_TYPE_IMPLEMENTATION_PLAN.md) Phase 1B.5
 
 **✅ %ROWTYPE and %TYPE Support** (Phase 1F - Completed 2025-11-07):
 - %ROWTYPE declarations: `v_emp employees%ROWTYPE` → `v_emp jsonb := '{}'::jsonb;`
@@ -305,7 +305,7 @@ This document describes the ANTLR-based transformation module that converts Orac
 - Metadata resolution: Uses TransformationIndices for table column type lookup
 - Circular reference detection: `v_x v_x%TYPE` → IllegalStateException
 - **Test Coverage:** 12/12 tests passing, zero regressions (1064 total tests)
-- See [INLINE_TYPE_IMPLEMENTATION_PLAN.md](INLINE_TYPE_IMPLEMENTATION_PLAN.md) Phase 1F
+- See [INLINE_TYPE_IMPLEMENTATION_PLAN.md](completed/INLINE_TYPE_IMPLEMENTATION_PLAN.md) Phase 1F
 
 PostgresCodeBuilder extended with 20 PL/SQL visitors:
 - ✅ VisitFunctionBody, VisitProcedureBody, VisitBody
@@ -400,7 +400,7 @@ ViewTransformationService (CDI @ApplicationScoped)
 - **Solution:** Lightweight function boundary scanner (FunctionBoundaryScanner) replaces full ANTLR parse
 - **Benefits:** 800x memory reduction, 42x speedup, 90% real-world coverage
 - **Location:** `transformer/parser/FunctionBoundaryScanner.java`, `PackageBodySegments.java`
-- **Documentation:** [PACKAGE_SEGMENTATION_IMPLEMENTATION_PLAN.md](PACKAGE_SEGMENTATION_IMPLEMENTATION_PLAN.md)
+- **Documentation:** [PACKAGE_SEGMENTATION_IMPLEMENTATION_PLAN.md](completed/PACKAGE_SEGMENTATION_IMPLEMENTATION_PLAN.md)
 
 **Type Method Segmentation (2025-11-11):**
 - **Problem:** Private type methods not visible in Oracle data dictionary (ALL_TYPE_METHODS only shows public methods)
@@ -409,7 +409,7 @@ ViewTransformationService (CDI @ApplicationScoped)
 - **Key Advantage:** Extracts private methods missed by data dictionary for complete coverage
 - **Location:** `transformer/parser/TypeMethodBoundaryScanner.java`, `TypeBodySegments.java`, `TypeMethodStubGenerator.java`
 - **Status:** ✅ Complete (Phases 1-3) - Ready for use in Step 26
-- **Documentation:** [TYPE_METHOD_SEGMENTATION_IMPLEMENTATION_PLAN.md](TYPE_METHOD_SEGMENTATION_IMPLEMENTATION_PLAN.md)
+- **Documentation:** [TYPE_METHOD_SEGMENTATION_IMPLEMENTATION_PLAN.md](completed/TYPE_METHOD_SEGMENTATION_IMPLEMENTATION_PLAN.md)
 
 **Segmentation Pipeline:**
 1. **Extraction Phase:** Lightweight scanner identifies method/function boundaries
@@ -624,7 +624,7 @@ FROM employees_hierarchy
 - SYS_CONNECT_BY_PATH → path string concatenation
 - WHERE clause distribution (applied to both base and recursive cases)
 
-**See:** [CONNECT_BY_IMPLEMENTATION_PLAN.md](CONNECT_BY_IMPLEMENTATION_PLAN.md)
+**See:** [CONNECT_BY_IMPLEMENTATION_PLAN.md](completed/CONNECT_BY_IMPLEMENTATION_PLAN.md)
 
 ### Date/Time Functions
 
@@ -836,7 +836,7 @@ Detailed implementation documentation:
   - Automatic RECURSIVE keyword detection
   - 38/38 tests passing
 
-- **[CONNECT_BY_IMPLEMENTATION_PLAN.md](CONNECT_BY_IMPLEMENTATION_PLAN.md)** - Hierarchical queries (COMPLETED)
+- **[CONNECT_BY_IMPLEMENTATION_PLAN.md](completed/CONNECT_BY_IMPLEMENTATION_PLAN.md)** - Hierarchical queries (COMPLETED)
   - Transformation to recursive CTEs
   - LEVEL pseudo-column, SYS_CONNECT_BY_PATH
   - 24/24 tests passing
@@ -874,7 +874,7 @@ Detailed implementation documentation:
   - Function overload resolution (choose correct PostgreSQL function signature)
   - Type-based optimizations (eliminate unnecessary casts)
 - 📋 Planned: Complex expressions (CASE), PL/SQL variables, collections, additional integrations
-- See [TYPE_INFERENCE_IMPLEMENTATION_PLAN.md](TYPE_INFERENCE_IMPLEMENTATION_PLAN.md) for details
+- See [TYPE_INFERENCE_IMPLEMENTATION_PLAN.md](completed/TYPE_INFERENCE_IMPLEMENTATION_PLAN.md) for details
 
 **2. Function/Procedure Implementation (Unified)** 🔄 **85-95% COMPLETE**
 - ✅ Infrastructure complete (ANTLR parsing, two-pass architecture, PostgreSQL execution)

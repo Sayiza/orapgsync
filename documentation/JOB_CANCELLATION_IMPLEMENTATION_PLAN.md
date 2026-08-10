@@ -1043,7 +1043,7 @@ public class CancellationToken {
 ### Related Documentation
 - [CLAUDE.md](../CLAUDE.md) - Project architecture overview
 - [TRANSFORMATION.md](TRANSFORMATION.md) - SQL/PL-SQL transformation details
-- [PACKAGE_SEGMENTATION_IMPLEMENTATION_PLAN.md](PACKAGE_SEGMENTATION_IMPLEMENTATION_PLAN.md) - Memory optimization strategy
+- [PACKAGE_SEGMENTATION_IMPLEMENTATION_PLAN.md](completed/PACKAGE_SEGMENTATION_IMPLEMENTATION_PLAN.md) - Memory optimization strategy
 
 ### Java Concurrency Resources
 - [Java Concurrency in Practice](https://jcip.net/) - Chapter 7: Cancellation and Shutdown

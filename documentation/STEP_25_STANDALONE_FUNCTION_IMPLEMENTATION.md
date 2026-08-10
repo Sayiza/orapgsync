@@ -785,7 +785,7 @@ END;
    - **Impact:** Foundational infrastructure for all variable-dependent features now in place
 
 2. ✅ **RECORD RHS Field Access** (Phase 1B.5) - **COMPLETE** (2025-11-07)
-   - See: [INLINE_TYPE_IMPLEMENTATION_PLAN.md](INLINE_TYPE_IMPLEMENTATION_PLAN.md) Phase 1B.5
+   - See: [INLINE_TYPE_IMPLEMENTATION_PLAN.md](completed/INLINE_TYPE_IMPLEMENTATION_PLAN.md) Phase 1B.5
    - ✅ **Implemented:** `x := v.field` transformations for inline RECORD types
    - ✅ Uses deterministic variable lookup via `context.lookupVariable()`
    - ✅ All 7 integration tests passing (previously 3 failed due to missing RHS)

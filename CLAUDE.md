@@ -1,851 +1,435 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code (claude.ai/code) when working in this repository.
 
 ## Project Overview
 
-Oracle-to-PostgreSQL migration tool built with Quarkus (Java 18). Uses CDI-based plugin architecture for extensible database object migration with centralized state management.
+Oracle-to-PostgreSQL migration tool built with Quarkus (Java 18). CDI-based plugin architecture
+for extensible database object migration with centralized in-memory state.
 
-## Strategic Direction (Updated August 2026)
+It is **in production use** on a real migration, where PL/SQL is being rewritten to Java
+piecewise. That context drives every priority call below.
 
-**Consolidation of Established Features - ACTIVE**
+## Current Focus (August 2026)
 
-**Status:** Primary effort goes to consolidating the features that are actually used in the
-real migration (DDL migration, view transformation, data transfer). PL/SQL transformation moves
-to **maintenance and hardening**; the mod_plsql web gateway is **deferred**.
+**Consolidating the features actually used in the real migration** — DDL migration, view
+transformation, data transfer. Full plan and rationale:
+[CONSOLIDATION_PLAN.md](documentation/CONSOLIDATION_PLAN.md).
 
-See [CONSOLIDATION_PLAN.md](documentation/CONSOLIDATION_PLAN.md) for the full plan and rationale.
+| Priority | Item | Status |
+|---|---|---|
+| 1 | Error transparency & frontend performance (per-object error detail, aggregate-first UI) | 🔄 active |
+| 2 | Parallel data transfer | ✅ done |
+| 3 | Index migration | ✅ done |
+| 4 | Transformer hardening — eliminate silent statement drops, no new features | 🔄 next |
+| 5 | View transformation gaps, ranked by the pre-flight report | 🔄 demand-driven |
 
-**What's Active (Phase 1, priority order):**
-1. **Error transparency & frontend performance** - per-object error detail, aggregate-first UI
-   - ✅ Pre-flight compatibility report (2026-08-08) - see Phase 3C below
-2. **Parallel data transfer** - ✅ **COMPLETE** (2026-08-08) - N tables transferred concurrently,
-   configurable via `transfer.parallel-workers` (default 4) - see "Parallel Data Transfer" below
-3. **Index migration** - ✅ **COMPLETE** (2026-08-08) - non-constraint Oracle indexes extracted
-   and recreated; FK index creation demoted to signature-based gap-fill, configurable via
-   `index.parallel-workers` (default 4) - see "Index Migration" below
-4. **Transformer hardening** - no new features; eliminate silent statement drops
-5. **View transformation gaps** - demand-driven, ranked by the pre-flight report
-
-**What's Deferred:**
-- 🔒 **PL/SQL long tail** (BULK COLLECT, collections, %ROWTYPE, dynamic SQL, autonomous
-  transactions) - decide with report data after Phase 1, not by intuition
-- 🔒 **Mod-PL/SQL Web Gateway** - paused; nice-to-have only while PL/SQL is migrated to Java
-  piecewise. See [MOD_PLSQL_IMPLEMENTATION_PLAN.md](documentation/MOD_PLSQL_IMPLEMENTATION_PLAN.md)
-- 🔒 **State persistence / resume** - transfers run all-or-nothing in practice; not needed
+**Deferred — do not invest here without an explicit decision:**
+- 🔒 PL/SQL long tail (BULK COLLECT, collections, `%ROWTYPE`, dynamic SQL, autonomous
+  transactions). Decide with pre-flight report data after Phase 1, not by intuition.
+- 🔒 Mod-PL/SQL web gateway (`web/`, orchestration step 32). Partially built, paused.
+- 🔒 State persistence / resume. Transfers run all-or-nothing in practice; not needed.
 
 ## Build and Development Commands
 
-### Core Development
-- **Build project**: `mvn clean compile`
-- **Run in development mode**: `mvn quarkus:dev`
-- **Run tests**: `mvn test`
-- **Generate ANTLR parsers**: `mvn antlr4:antlr4` (generates from `src/main/antlr4/`)
-- **Package application**: `mvn clean package`
+- **Build**: `mvn clean compile`
+- **Dev mode**: `mvn quarkus:dev`
+- **Test**: `mvn test` (~1,590 tests across 126 test classes)
+- **Generate ANTLR parsers**: `mvn antlr4:antlr4` (from `src/main/antlr4/` → `target/generated-sources/antlr4/`)
+- **Package**: `mvn clean package`
 
-### Build System
-- **Maven**: Uses Quarkus 3.15.1 platform
-- **Java version**: 18
-- **ANTLR version**: 4.13.2 for PL/SQL parsing
+Quarkus 3.15.1 · Java 18 · ANTLR 4.13.2 · ojdbc11 23.5.0.24.07 · postgresql 42.7.1.
 
-## Architecture Overview
+## Architecture
 
-### State Management Architecture
+### State Management (`core/service/StateService`)
 
-The application uses a centralized state management approach for storing metadata:
+`StateService` is the single store for all migration metadata: Oracle/PostgreSQL schema lists,
+table/object-type/sequence/index metadata, row counts, synonyms (dual-map for resolution), and
+all creation/transfer results. Jobs update it directly via injection — no event bus, no
+intermediate managers.
 
-#### 1. **State Management** (`core/state/`)
-- **Centralized service**: `StateService` manages all application state
-- **Simple setters/getters**: Direct state updates via service methods
-- **Separation of concerns**: Different state types are clearly organized
+### Plugin-Based Job System (`core/job/`)
 
-**State Service Properties:**
-- Oracle/PostgreSQL schema lists
-- Oracle/PostgreSQL table metadata (includes constraint metadata)
-- Oracle/PostgreSQL object type metadata
-- Oracle/PostgreSQL sequence metadata
-- Oracle/PostgreSQL row count data
-- Oracle synonyms (dual-map structure for efficient resolution)
-- Creation results (schemas, tables, object types, sequences, constraints)
-- Data transfer results
+- `JobRegistry` — CDI auto-discovery of all jobs
+- `JobService` — execution and lifecycle (async via `CompletableFuture`)
+- `JobResource` — generic REST endpoints for any job type
+- `DatabaseExtractionJob<T>` / `AbstractDatabaseExtractionJob<T>` — typed job contract
 
-#### 2. **Plugin-Based Job System** (`core/job/`)
-- **Auto-discovery**: Jobs are automatically discovered via CDI
-- **Registry pattern**: `JobRegistry` manages all available extraction jobs
-- **Generic interfaces**: `DatabaseExtractionJob<T>` for type-safe job contracts
-- **Base functionality**: `AbstractDatabaseExtractionJob<T>` provides common behavior
+New job types need **no** core changes; they are discovered automatically.
 
-**Job Architecture:**
-- `JobRegistry`: CDI-based discovery and creation of jobs
-- `JobService`: Job execution and lifecycle management
-- `JobResource`: Generic REST endpoints for any job type
-- Job classes: Extend `AbstractDatabaseExtractionJob<T>` with `@Dependent` scope
+### Domain Modules
 
-#### 3. **Database Element Modules** (Independent & Extensible)
-Each database element type is completely independent. Common pattern: `{Element}Metadata` (data model), `Oracle{Element}ExtractionJob` (CDI-managed), `Postgres{Element}CreationJob` (CDI-managed).
+Each database element type is an independent module depending only on `core/`, `database/`,
+`config/`. No circular dependencies between domain modules.
 
-**Foundational Objects:**
-- **Schemas** - Schema discovery and creation
-- **Synonyms** - Oracle synonym resolution (current schema → PUBLIC fallback), used for type resolution
-- **Object Types** - Composite types with dependency ordering via `TypeDependencyAnalyzer`
-- **Sequences** - Full Oracle property extraction and PostgreSQL creation
+| Module | Scope | Status |
+|---|---|---|
+| `schema/` | discovery + creation | ✅ |
+| `synonym/` | Oracle synonym resolution (current schema → PUBLIC) | ✅ |
+| `objectdatatype/` | composite types, dependency-ordered (`TypeDependencyAnalyzer`) | ✅ |
+| `sequence/` | full Oracle property extraction + creation | ✅ |
+| `table/` | columns, type mapping, NOT NULL | ✅ |
+| `transfer/` | CSV bulk transfer via PostgreSQL COPY, parallel | ✅ |
+| `constraint/` | dependency-ordered PK → UK → FK → CHECK (`ConstraintDependencyAnalyzer`) | ✅ |
+| `index/` | non-constraint Oracle indexes, signature-matched, parallel | ✅ |
+| `view/` | stubs + SQL transformation | ✅ stubs · ~90% transformation |
+| `function/` | stubs + PL/SQL transformation, standalone **and** package members | ✅ stubs · 85–95% transformation |
+| `typemethod/` | stubs + PL/SQL transformation | ✅ |
+| `trigger/` | extraction + transformation, idempotent drop-and-recreate | ✅ |
+| `oraclecompat/` | PostgreSQL equivalents for Oracle built-ins | ✅ |
+| `preflight/` | pre-migration compatibility analysis (views) | ✅ |
+| `web/` | mod_plsql gateway project generator | 🔒 deferred |
 
-**Data Structures:**
-- **Tables** - Structure creation with columns and type mapping
-- **Constraints** - Dependency-ordered creation (PK → UK → FK → CHECK) via `ConstraintDependencyAnalyzer`
-- **Indexes** - Non-constraint Oracle indexes recreated after data transfer; signature-based
-  matching, parallel creation, FK gap-fill as a separate later step
-- **Data Transfer** - CSV-based bulk transfer via PostgreSQL COPY, supports all types (LOBs, user-defined, complex system types → jsonb)
+### Transformer (`transformer/`)
 
-**Code Objects (Two-Phase Migration: Stubs → Implementation):**
-- **Views** - Stub creation (`WHERE false` pattern), SQL transformation in progress (90% complete, 662+ tests)
-- **Functions/Procedures** - Stub creation, PL/SQL transformation 85-95% complete (882 tests), package segmentation optimization active
-- **Type Methods** - Stub creation, type method segmentation optimization ✅ complete (ready for Step 26 transformation)
-- **Triggers** - Framework complete, ready for extraction and PL/SQL transformation
+**Package:** `me.christianrobert.orapgsync.transformer` (note: *transformer*, not *transformation*).
 
-**Support Layers:**
-- **Oracle Compatibility Layer** - PostgreSQL equivalents for Oracle built-in packages (DBMS_OUTPUT, DBMS_UTILITY, UTL_FILE, DBMS_LOB), three-tier support (FULL/PARTIAL/STUB), flattened naming (`oracle_compat.dbms_output__put_line`)
-- **Pre-Flight Compatibility Report** (`preflight/`, `transformer/analysis/`) - analyses extracted Oracle views in memory (no DB connection) and ranks the Oracle constructs that block or silently truncate transformation
-
-#### 4. **Cross-Cutting Concerns** (`core/`)
-- `TypeConverter`: Oracle-to-PostgreSQL data type mapping
-- `OracleTypeClassifier`: Identifies complex Oracle system types requiring jsonb
-- `PostgreSqlIdentifierUtils`: PostgreSQL naming conventions
-- `UserExcluder`: Schema filtering logic
-- `NameNormalizer`, `CodeCleaner`: Data processing utilities
-- `StateService.resolveSynonym()`: Oracle synonym resolution logic
-
-#### 5. **Database Connectivity** (`database/`)
-- `OracleConnectionService`: Oracle database connections
-- `PostgresConnectionService`: PostgreSQL database connections
-- Connection testing and validation
-
-#### 6. **Configuration Management** (`config/`)
-- `ConfigService`: Application configuration management
-- REST endpoints for configuration updates
-
-### ANTLR Integration
-- **Grammar files**: `PlSqlParser.g4`, `PlSqlLexer.g4` in `src/main/antlr4/`
-- **Generated parsers**: Output to `target/generated-sources/antlr4/`
-- **Base classes**: `PlSqlParserBase`, `PlSqlLexerBase` for grammar extensions
-
-### Frontend
-- **Location**: `src/main/resources/META-INF/resources/`
-- **Technology**: Vanilla JavaScript (no frameworks)
-- **Purpose**: Database connection configuration and migration monitoring
-- **API Integration**: Consumes REST endpoints for job management and status
-
-## Key Architectural Principles
-
-### 1. **Dependency Independence**
-- Database elements (tables, objects) are completely independent
-- Core modules only depend on cross-cutting concerns
-- No circular dependencies between domain modules
-
-### 2. **Direct State Access**
-- Jobs update state directly via `StateService`
-- Simple and straightforward data flow
-- Clear ownership of state updates
-
-### 3. **Plugin Architecture**
-- New extraction types are automatically discovered
-- Jobs implement `DatabaseExtractionJob<T>` interface
-- No code changes needed in core infrastructure for new job types
-
-### 4. **Type Safety**
-- Generic interfaces ensure compile-time type safety
-- `DatabaseExtractionJob<TableMetadata>` vs `DatabaseExtractionJob<ObjectDataTypeMetaData>`
-- State managers typed to specific data models
-
-### 5. **CDI Best Practices**
-- Proper scoping: `@ApplicationScoped` for singletons, `@Dependent` for jobs
-- Dependency injection: `@Inject` for service dependencies
-- Service-based state management
-
-## Adding New Database Elements
-
-To add a new database element type (e.g., row counts, views, indexes):
-
-### 1. Create Data Model
-```java
-// In new package: src/main/java/.../rowcount/model/
-public class RowCountMetadata {
-    private String schema;
-    private String tableName;
-    private long rowCount;
-    // constructors, getters, toString
-}
+```
+Oracle SQL/PL-SQL → AntlrParser → PostgresCodeBuilder → PostgreSQL SQL/PL-pgSQL
 ```
 
-### 2. Create Extraction Jobs
+- `parser/AntlrParser` — ANTLR wrapper; also hosts the boundary scanners and stub generators
+- `builder/PostgresCodeBuilder` — main visitor; one static helper class per ANTLR rule
+  (`VisitXxx`, ~80 in `builder/` plus sub-packages for connectby, cte, functions,
+  generalelement, objectfield, outerjoin, rownum, tablereference)
+- `context/TransformationContext` + `TransformationIndices` — metadata indices for O(1) lookups,
+  passed as a **parameter**, never CDI-injected into the visitor layer
+- `service/TransformationService` — high-level CDI API
+- `type/` — two-pass type inference · `analysis/` — pre-flight construct detection
+- `inline/`, `packagevariable/` — inline type definitions, package variable getter/setters
+
+**Design principles:** direct transformation (visitors return PostgreSQL strings, no intermediate
+semantic tree); metadata-driven disambiguation (e.g. `emp.address.get_street()` type method vs.
+`emp_pkg.get_salary()` package function); visitor layer stays pure so it is unit-testable with
+mocked metadata.
+
+### Cross-Cutting (`core/`)
+
+`core/tools/` — `TypeConverter` (Oracle→PostgreSQL types), `OracleTypeClassifier` (complex system
+types), `PostgreSqlIdentifierUtils`, `UserExcluder`, `NameNormalizer`, `CodeCleaner`.
+`core/service/` — `StateService` (incl. `resolveSynonym()`).
+
+### Database & Config
+
+`database/` — `OracleConnectionService`, `PostgresConnectionService`, `PostgresIndexCatalogService`.
+`config/` — `ConfigService` + REST; connections are configured at **runtime** via UI/REST, not
+in `application.properties`.
+
+### Frontend (`src/main/resources/META-INF/resources/`)
+
+Vanilla JavaScript, no frameworks. One `{feature}-service.js` per module, `orchestration-service.js`
+drives the full run. Each feature row follows the same shape: ⟳ `refresh-btn` per side reads that
+database's current state into a count badge + schema-grouped list, `action-btn` performs creation,
+plus an expandable results panel.
+
+## Migration Workflow (32 steps)
+
+Driven by `orchestration-service.js`. **Order matters** — the notes are the non-obvious constraints.
+
+| # | Step | Note |
+|---|---|---|
+| 1–2 | Test Oracle / PostgreSQL connections | |
+| 3–4 | Extract / create schemas | |
+| 5 | Extract synonyms | needed for type resolution |
+| 6–7 | Extract / create object types | dependency-ordered |
+| 8–9 | Extract / create sequences | **before** tables — a column default can be a sequence |
+| 10–11 | Extract / create tables | columns only, no constraints |
+| 12–13 | Extract row counts / transfer data | row counts feed largest-first scheduling |
+| 14–15 | Extract / create constraints | after data — no per-row validation cost |
+| 16–17 | Extract / create indexes | after constraints, so constraint indexes already exist |
+| 18 | FK index gap-fill | **after** index migration — see "Index Migration" |
+| 19–20 | Extract views / create view stubs | |
+| 21 | Create synonym replacement views | **must precede** view implementation — `CREATE VIEW` validates every referenced relation, and transformed views may reference unresolved synonym names |
+| 22–23 | Extract functions / create function stubs | |
+| 24–25 | Extract type methods / create type method stubs | |
+| 26 | Install Oracle compatibility layer | before any code implementation |
+| 27 | Implement views | `CREATE OR REPLACE VIEW` preserves dependencies |
+| 28 | Implement standalone + package functions | |
+| 29 | Implement type methods | |
+| 30–31 | Extract / create triggers | |
+| 32 | Generate web gateway project | 🔒 deferred feature |
+
+Every step is individually skippable in the UI.
+
+## Adding a New Database Element
+
+1. **Model** — `core/job/model/{feature}/{Feature}Metadata`, pure data, no service dependencies.
+2. **Jobs** — extend `AbstractDatabaseExtractionJob<T>`, `@Dependent` scope:
+
 ```java
-// Oracle job
 @Dependent
 public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<RowCountMetadata> {
-    @Override
-    public String getSourceDatabase() { return "ORACLE"; }
-
-    @Override
-    public String getExtractionType() { return "ROW_COUNT"; }
-
-    @Override
-    public Class<RowCountMetadata> getResultType() { return RowCountMetadata.class; }
-
-    @Override
-    protected void saveResultsToState(List<RowCountMetadata> results) {
-        stateService.setOracleRowCountMetadata(results);
-    }
-
-    @Override
-    protected List<RowCountMetadata> performExtraction(Consumer<JobProgress> progressCallback) {
-        // Implementation
-    }
+    @Override public String getSourceDatabase() { return "ORACLE"; }
+    @Override public String getExtractionType() { return "ROW_COUNT"; }
+    @Override public Class<RowCountMetadata> getResultType() { return RowCountMetadata.class; }
+    @Override protected void saveResultsToState(List<RowCountMetadata> r) { stateService.setOracleRowCountMetadata(r); }
+    @Override protected List<RowCountMetadata> performExtraction(Consumer<JobProgress> cb) { /* ... */ }
 }
 ```
 
-### 3. Done!
-- Jobs are automatically discovered by `JobRegistry`
-- REST endpoints work immediately: `POST /api/jobs/oracle/row-count/extract`
-- State is updated directly in `StateService`
-- Progress tracking and error handling included
+3. **Done** — auto-discovered by `JobRegistry`; `POST /api/jobs/oracle/row-count/extract` works
+   immediately, with progress tracking and error handling included.
 
-## Migration Status
+## Conventions
 
-### ✅ Phase 1: Foundational Objects (Completed)
-1. **Schemas**: Creation and discovery
-2. **Object Types**: Composite type creation with dependency ordering and synonym resolution
-3. **Sequences**: Full extraction and creation with all Oracle properties
-4. **Tables**: Structure creation (columns with type mapping, NOT NULL constraints)
-5. **Data Transfer**: CSV-based bulk transfer via PostgreSQL COPY
-   - User-defined types → PostgreSQL composite format
-   - Complex Oracle system types (ANYDATA, XMLTYPE, AQ$_*, etc.) → jsonb with metadata
-   - BLOB/CLOB → hex/text encoding
-   - Piped streaming for memory efficiency
-   - ✅ **Parallel transfer** (2026-08-08) - see below
-6. **Constraints**: Dependency-ordered creation (PK → UK → FK → CHECK)
-7. **Indexes**: ✅ **Complete** (2026-08-08) - non-constraint Oracle indexes recreated after
-   constraints; signature-based skip, parallel creation, FK gap-fill demoted to a later step -
-   see "Index Migration" below
+**Package structure:** `{feature}/` with `job/`, `rest/`, `service/` sub-packages.
 
-### ✅ Phase 2: Structural Stubs (Completed)
-7. **View Stubs**: Empty result set views with correct column structure (`WHERE false` pattern)
-8. **Function/Procedure Stubs**: Signatures with empty implementations (return NULL / empty body)
-   - Package members flattened: `packagename__functionname`
-9. **Type Method Stubs**: Object type member functions/procedures with empty implementations
-   - Pattern: `typename__methodname`
+**Class names:** `Oracle{Feature}ExtractionJob`, `Postgres{Feature}StubCreationJob`,
+`Postgres{Feature}ImplementationJob`, `Postgres{Feature}StubVerificationJob`,
+`{Feature}Metadata`, `{Feature}CreationResult`.
 
-### ✅ Phase 3A: SQL Transformation (Active - Ongoing Improvements)
-10. **Oracle Compatibility Layer**: ✅ **COMPLETE** - PostgreSQL equivalents for Oracle built-in packages
-    - ✅ Priority packages: DBMS_OUTPUT, DBMS_UTILITY, UTL_FILE, DBMS_LOB
-    - ✅ Three-tier support system: FULL, PARTIAL, STUB
-    - ✅ Installed into `oracle_compat` schema with flattened naming (e.g., `dbms_output__put_line`)
-    - ✅ Extensible catalog system for future additions
-    - ✅ Integrated as Step 26/32 in orchestration workflow (was 24/30 before index migration added two steps)
+**ExtractionType constants** are phase-explicit: `"VIEW"`, `"VIEW_STUB_CREATION"`,
+`"VIEW_STUB_VERIFICATION"`, `"VIEW_IMPLEMENTATION"`.
 
-    **Note on step ordering (2026-07-08):** Synonym replacement views moved from the end of the workflow to Step 19, directly after view stubs. Transformed views may reference synonym names the transformer could not resolve inline (fallback schema-qualification), and `CREATE VIEW` validates all referenced relations at creation time — a real-world case failed with the old ordering.
-    - See `oraclecompat/` module and [TRANSFORMATION.md](documentation/TRANSFORMATION.md) Phase 4.5
+**StateService fields:** `{database}{Feature}Metadata` (e.g. `oracleViewMetadata`).
 
-11. **View SQL Transformation**: ✅ **90% COMPLETE - ACTIVE** - ANTLR-based Oracle→PostgreSQL SQL conversion
-    - ✅ **662+ tests passing** across 42+ test classes
-    - ✅ **90% real-world view coverage achieved**
-    - ✅ Direct AST approach with 37 static visitor helpers
-    - ✅ Complete SELECT support, CTEs, CONNECT BY, Oracle-specific functions
-    - ✅ PostgresViewImplementationJob with CREATE OR REPLACE VIEW (preserves dependencies)
-    - ✅ **Explicit column list support** (2025-11-15) - Handles Oracle views with column renaming
-    - ✅ **Query depth tracking** (2025-12-02) - Prevents view column casts from being applied to subqueries
-    - ✅ **CTE depth tracking** (2025-12-02) - Prevents view column casts from being applied to CTE definitions
-    - 🎯 **Future focus:** Continued improvements to SQL transformation quality and coverage
-    - **See [TRANSFORMATION.md](documentation/TRANSFORMATION.md) for detailed feature list and implementation history**
+**Frontend:** dash-separated files and DOM ids (`view-service.js`, `oracle-views`), camelCase
+functions (`extractOracleViews()`).
 
-### 🔄 Phase 3B: PL/SQL Transformation (Active - March 2026)
+### REST API
 
-**Status:** PL/SQL transformation is **active** and receiving continued development, primarily to support mod_plsql web application migration.
+Two tiers:
 
-12. **Type Inference System**: 🔄 **42% COMPLETE** - Two-pass type analysis for PL/SQL transformation
-    - ✅ Phase 1: Foundation - Literals and simple expressions (18/18 tests)
-    - ✅ Phase 2: Column References - Metadata integration with TransformationIndices (13/14 tests)
-    - ✅ Phase 3: Built-in Functions - 50+ Oracle functions with polymorphic support (36/36 tests)
-    - ✅ **Architecture Refactored** - TypeAnalysisVisitor (498 lines) + 5 static helper classes
-    - See [TYPE_INFERENCE_IMPLEMENTATION_PLAN.md](documentation/TYPE_INFERENCE_IMPLEMENTATION_PLAN.md)
+1. **Generic job API** — `/api/jobs/{database}/{feature}-{phase}/{action}`, dash-separated.
+   For standard extraction/creation/verification. Examples: `POST /api/jobs/oracle/view/extract`,
+   `POST /api/jobs/postgres/view-stub/create`, `POST /api/jobs/postgres/constraint/create`.
+2. **Specialized resources** — `/api/{resource}/{database}/{operation}`, for operations that
+   don't fit the job pattern: `/api/oracle-compat/*`, `/api/preflight/*`, `/api/indexes/*`,
+   `/api/transformation/sql`, `/api/web-gateway/*`.
 
-13. **Function/Procedure Implementation**: 🔄 **85-95% COMPLETE** - PL/SQL→PL/pgSQL transformation
-    - ✅ **882 tests passing** (PL/SQL transformation validation tests)
-    - ✅ Handles **both standalone and package functions** in single unified job
-    - ✅ **20 PL/SQL visitors**: Signatures, variables, control flow, cursors, exceptions, DML
-    - ✅ **Package variables**: On-demand parsing, getter/setter generation (26 tests)
-    - ✅ **Package private functions**: Extracted from package bodies via ANTLR parsing
-    - 🔄 **Active:** Continued development for mod_plsql support
-    - See [STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md](documentation/STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md)
+Swagger UI at `/q/swagger-ui`.
 
-14. **Type Method Implementation**: ✅ **COMPLETE** - PL/SQL→PL/pgSQL transformation for type methods
-    - ✅ Full implementation completed
-    - ✅ Type method segmentation with 800x memory reduction
-    - See [TYPE_METHOD_SEGMENTATION_IMPLEMENTATION_PLAN.md](documentation/TYPE_METHOD_SEGMENTATION_IMPLEMENTATION_PLAN.md)
-
-15. **Triggers**: ✅ **COMPLETE** - Full extraction and transformation
-    - ✅ Oracle extraction and PostgreSQL transformation completed
-    - ✅ Idempotent implementation with drop and recreate
-
-### ✅ Phase 3C: Pre-Flight Compatibility Report (August 2026)
-
-16. **Pre-Flight Compatibility Report**: ✅ **COMPLETE (views)** - Analyse before you migrate
-    - Transforms every extracted Oracle view **in memory**; no connection, nothing created
-    - Reports per view: OK / OK_WITH_WARNINGS / TRUNCATED_PARSE / PARSE_ERROR / TRANSFORM_ERROR / NO_SOURCE
-    - Ranks Oracle constructs by the number of **failing** views they appear in — the data
-      source for demand-driven view/PL-SQL work (Phase 1 items 4 and 5, and the Phase 2 decision)
-    - **Silent loss detection**: flags constructs that are dropped in views that transformed
-      *without* an error
-    - **`TRUNCATED_PARSE`**: the grammar entry rules are not anchored to EOF, so the parser can
-      end a statement early and leave the rest unread with no error at all — the transformation
-      then "succeeds" on a fragment. `ParseCompleteness` makes this visible.
-    - Construct support status is **derived by reflection** from `PostgresCodeBuilder`'s visit
-      methods, so the catalog cannot go stale when a visitor is added
-    - Modules: `transformer/analysis/`, `preflight/`, `core/job/model/preflight/`
-    - REST: `POST /api/preflight/oracle/analyze`, `GET /api/preflight/report`,
-      `GET /api/preflight/report/findings` (filtered + paginated)
-    - Frontend: "Pre-Flight Compatibility Report" panel (`preflight-service.js`)
-    - Not covered yet: functions/procedures (need package context)
-    - See [CONSOLIDATION_PLAN.md](documentation/CONSOLIDATION_PLAN.md)
-
-### 🔒 Phase 4: Mod-PL/SQL Web Gateway (DEFERRED - paused August 2026)
-
-**Status:** New feature in development to support Oracle mod_plsql web application migration.
-
-17. **HTP/HTF Compatibility Layer**: 📋 **PLANNED** - PostgreSQL equivalents for web output packages
-    - 📋 HTP package (htp__p, htp__print, htp__prn, HTML helpers)
-    - 📋 HTF package (htf__bold, htf__anchor, htf__img, etc.)
-    - 📋 OWA_UTIL package (get_cgi_env, redirect_url)
-    - 📋 Temp table buffer for HTTP response accumulation
-    - See [MOD_PLSQL_IMPLEMENTATION_PLAN.md](documentation/MOD_PLSQL_IMPLEMENTATION_PLAN.md)
-
-18. **Quarkus Web Gateway**: 📋 **PLANNED** - Java application replacing Apache mod_plsql
-    - 📋 URL → PostgreSQL function routing
-    - 📋 CGI environment initialization
-    - 📋 Parameter passing (GET, POST, arrays)
-    - 📋 Buffer extraction and HTTP response
-    - See [MOD_PLSQL_IMPLEMENTATION_PLAN.md](documentation/MOD_PLSQL_IMPLEMENTATION_PLAN.md)
-
-## Database Configuration
-
-### Oracle Connection
-- **Driver**: `com.oracle.database.jdbc:ojdbc11:23.5.0.24.07`
-- **Configuration**: Runtime configurable via REST API or UI
-- **Features**: Connection testing, schema discovery, metadata extraction
-
-### PostgreSQL Connection
-- **Driver**: `org.postgresql:postgresql:42.7.1`
-- **Configuration**: Runtime configurable via REST API or UI
-- **Features**: Connection testing, schema creation, data import
-
-## API Documentation
-
-### REST API Design Pattern
-
-The application uses a **two-tier REST API architecture**:
-
-1. **Generic Job API** (`/api/jobs/*`) - For standard extraction/creation/verification jobs
-   - Pattern: `/api/jobs/{database}/{feature}-{phase}/{action}`
-   - Examples:
-     - `POST /api/jobs/oracle/view/extract`
-     - `POST /api/jobs/postgres/view-stub/create`
-     - `POST /api/jobs/postgres/constraint/create`
-   - All jobs follow the plugin pattern and are auto-discovered by JobRegistry
-
-2. **Specialized Resource APIs** - For complex operations requiring custom logic
-   - Pattern: `/api/{resource}/{database}/{operation}`
-   - Examples:
-     - `POST /api/oracle-compat/postgres/install` - Install Oracle compatibility layer
-     - `POST /api/oracle-compat/postgres/verify` - Verify compatibility layer
-     - `POST /api/transformation/sql` - Transform Oracle SQL to PostgreSQL
-   - Used when operations don't fit the standard job pattern (e.g., ad-hoc transformations)
-
-**When to Use Each:**
-- **Generic Job API**: Standard extraction, creation, verification workflows
-- **Specialized API**: Complex orchestration, development tools, or operations requiring special parameters
-
-### API Endpoints
-
-- **Swagger UI**: Available at `/q/swagger-ui` when running
-- **Job Management**: `/api/jobs/*` - Generic endpoints for any job type
-- **Configuration**: `/api/config/*` - Database connection configuration
-- **Status**: Various status endpoints for monitoring extraction progress
-- **SQL Transformation**: `/api/transformation/sql` - Transform Oracle SQL to PostgreSQL (development/testing)
-- **Oracle Compatibility**: `/api/oracle-compat/*` - Install and verify Oracle compatibility layer
-- **Pre-Flight Report**: `/api/preflight/*` - Analyse extracted Oracle views for transformation compatibility before migrating
-
-### SQL Transformation REST Endpoint
-
-Direct access to the SQL transformation service for development testing and future dynamic SQL conversion.
-
-**Endpoint:** `POST /api/transformation/sql`
-
-**Purpose:**
-- Development testing - quickly test SQL transformations without modifying test files
-- Interactive debugging - see transformed SQL immediately
-- Future use case - dynamic SQL conversion in PL/pgSQL migration
-
-**Usage Examples:**
+**`POST /api/transformation/sql`** — ad-hoc Oracle→PostgreSQL SQL transformation for development
+testing and future dynamic SQL conversion. Body is `text/plain`, optional `?schema=HR` (defaults
+to the first schema in state). Requires Oracle metadata to be extracted first.
+Always returns HTTP 200 — check the `success` field; a failed transformation is a valid business
+outcome, not an HTTP error.
 
 ```bash
-# Transform SQL with default schema (first in state)
-curl -X POST "http://localhost:8080/api/transformation/sql" \
-  -H "Content-Type: text/plain" \
-  --data "SELECT empno, ename FROM emp WHERE dept_id = 10"
-
-# Transform SQL with specific schema
 curl -X POST "http://localhost:8080/api/transformation/sql?schema=HR" \
-  -H "Content-Type: text/plain" \
-  --data "SELECT * FROM employees"
-
-# Transform SQL from file
-curl -X POST "http://localhost:8080/api/transformation/sql" \
-  -H "Content-Type: text/plain" \
-  --data @query.sql
+  -H "Content-Type: text/plain" --data "SELECT empno FROM emp WHERE dept_id = 10"
+# → {"success":true,"oracleSql":"...","postgresSql":"...","errorMessage":null}
 ```
 
-**Response Format (JSON):**
-```json
-{
-  "success": true,
-  "oracleSql": "SELECT empno FROM emp",
-  "postgresSql": "SELECT empno FROM hr.emp",
-  "errorMessage": null
-}
-```
+## Domain Rules
 
-**Notes:**
-- Always returns HTTP 200. Check `success` field in response.
-- Transformation failure is a valid business outcome, not an HTTP error.
-- Requires Oracle metadata to be extracted first (builds indices from StateService).
-- Schema defaults to first schema in state if not specified.
+These are the decisions that are expensive to re-derive from the code.
 
-## Naming Conventions and Module Organization
+### Type Mapping — four categories
 
-### Two-Phase Migration Strategy
-Complex database objects (views, functions, type methods) follow a two-phase pattern:
-1. **Stub Creation** - Structural placeholders with correct signatures, empty implementations
-2. **Implementation** - Replace stubs with actual SQL/PL/pgSQL logic via ANTLR transformation
+1. **Built-in Oracle types** → direct mapping via `TypeConverter.toPostgre()`
+   (`NUMBER`→`numeric`, `VARCHAR2`→`text`, `DATE`→`timestamp`).
+2. **LOB types** → PostgreSQL `oid` (Large Object references), for Java `@Lob` /
+   `ResultSet.getBlob()` compatibility: `BLOB`/`CLOB`/`NCLOB` → `oid`. The obsolete types keep
+   their direct mapping: `LONG` → `varchar`, `LONG RAW` → `bytea`.
+3. **User-defined object types** → PostgreSQL composite types (`HR.ADDRESS_TYPE` → `hr.address_type`),
+   serialized to composite literal format during transfer.
+4. **Complex Oracle system types** → `jsonb` with a metadata wrapper:
+   `{"oracleType": "SYS.ANYDATA", "value": {...}}`. Covers `SYS.ANYDATA`, `SYS.XMLTYPE`,
+   `SYS.AQ$_*`, `SYS.SDO_GEOMETRY`. Preserves type information for later code transformation.
+   May appear under owner `SYS` **or** `PUBLIC` (public synonyms).
 
-### Core Naming Patterns
+Key classes: `TypeConverter.toPostgre()`, `PostgresTableCreationJob.isComplexOracleSystemType()`,
+`OracleComplexTypeSerializer`.
 
-**Package Structure:** `{feature}/` (e.g., `view/`, `function/`, `typemethod/`)
-- Jobs: `Oracle{Feature}ExtractionJob`, `Postgres{Feature}StubCreationJob`, `Postgres{Feature}ImplementationJob`
-- Models: `{Feature}Metadata`, `{Feature}StubCreationResult`, `{Feature}ImplementationResult`
-- Services: `Oracle{Feature}Extractor` (if needed)
+### LOB→OID Staging Workflow
 
-**ExtractionType Constants:** Phase-explicit strings
-- Extraction: `"VIEW"`, `"FUNCTION"`, `"TYPE_METHOD"`
-- Stub Creation: `"VIEW_STUB_CREATION"`, `"FUNCTION_STUB_CREATION"`, etc.
-- Verification: `"VIEW_STUB_VERIFICATION"`, `"FUNCTION_STUB_VERIFICATION"`, etc.
-- Implementation: `"VIEW_IMPLEMENTATION"`, `"FUNCTION_IMPLEMENTATION"`, etc.
+PostgreSQL `oid` columns hold Large Object references (integers), so hex-encoded LOB data cannot
+be COPYed into them directly. `CsvDataTransferService` therefore, per table and inside the table's
+transaction: adds `{column}_staging bytea` columns → COPYs into staging →
+`UPDATE t SET c = lo_from_bytea(0, c_staging)` → drops the staging columns → commits.
 
-**REST API:** `/api/jobs/{database}/{feature}-{phase}/{action}` (dash-separated)
-- Examples: `/api/jobs/oracle/view/extract`, `/api/jobs/postgres/view-stub/create`, `/api/jobs/postgres/view-implementation/create`
+Self-contained, repeatable, and transactional — on failure the staging columns survive for
+debugging. Methods: `detectOidColumns`, `addStagingColumns`, `convertStagingToLargeObjects`,
+`dropStagingColumns`. Plan: [LOB_TO_OID_MIGRATION_PLAN.md](documentation/completed/LOB_TO_OID_MIGRATION_PLAN.md).
 
-**Frontend:** Dash-separated files (`view-service.js`), camelCase functions (`extractOracleViews()`), dash-separated IDs (`oracle-views`)
+### Synonym Resolution
 
-**StateService:** `{database}{Feature}Metadata` (e.g., `oracleViewMetadata`, `postgresFunctionMetadata`)
+PostgreSQL has no synonyms. `StateService.resolveSynonym()`: current schema → PUBLIC → null.
+Used by `PostgresObjectTypeCreationJob.normalizeObjectTypes()` and `TypeDependencyAnalyzer`.
+Only relevant for object type **attributes** — table columns already store actual type names.
 
-### Recent Refactoring
+### Two-Phase Migration: Stubs → Implementation
 
-**Status:** ✅ Completed
+Views, functions and type methods get structural placeholders first, so circular references
+(function → view → function) resolve and structural migration stays separate from logic conversion.
 
-**Standardized naming across all modules:**
-- Module renaming: `viewdefinition/` → `view/`
-- Class renaming: `ViewDefinitionMetadata` → `ViewMetadata`
-- ExtractionType constants: `"VIEW_STUB_VERIFICATION"`, `"FUNCTION_STUB_VERIFICATION"`, etc.
-- API endpoints: Consistent pattern `/api/jobs/{database}/{feature}-{phase}/{action}`
-- Frontend: CSS selectors, toggle functions, API fetch URLs all standardized
+- **View stubs:** `SELECT NULL::type AS col1, ... WHERE false`, columns from `ALL_TAB_COLUMNS`.
+- **Function/procedure stubs:** signatures from `ALL_ARGUMENTS`. Package members are flattened to
+  `packagename__functionname`. **Always created as PostgreSQL `FUNCTION`s, never `PROCEDURE`s**, so
+  implementation can use `CREATE OR REPLACE`. RETURNS is derived: no OUT/INOUT → `void`;
+  one OUT/INOUT → that type; several → `RECORD`.
+- **Type method stubs:** `typename__methodname`, from `ALL_TYPE_METHODS` / `ALL_METHOD_RESULTS`,
+  handling MEMBER vs STATIC.
+
+**Package private functions** are invisible in `ALL_PROCEDURES` (spec-only), so package bodies are
+parsed with ANTLR to extract them; they are marked `isPackagePrivate = true`.
+
+### Code Segmentation
+
+Large Oracle packages (5000+ lines) caused OutOfMemoryErrors under a full ANTLR parse. Lightweight
+boundary scanners (`FunctionBoundaryScanner`, `TypeMethodBoundaryScanner`) replace it during
+extraction: ~800× less memory, ~42× faster, ~90% real-world coverage. Type bodies are the simpler
+case (no variables). Private type methods are likewise invisible in `ALL_TYPE_METHODS`, which is
+why the type body is scanned rather than queried.
+
+### Parallel Data Transfer
+
+Tables are transferred N at a time; parallelism is **across tables only** — the per-table
+producer/consumer pipe, LOB staging and transaction in `CsvDataTransferService` are unchanged.
+
+- **Worker loop, not task-per-table** — each worker holds one Oracle + one PostgreSQL connection
+  and pulls from a shared queue. Caps connections at the worker count and self-balances.
+- **Thread confinement instead of locking** — workers only publish outcomes; all aggregation and
+  progress reporting run on the calling thread, so no existing class needed synchronization.
+- **Largest first** (`TransferOrdering`), unknown row counts last, ties broken on qualified name.
+- **No table can vanish** — exactly one `TableTransferOutcome` per table, including the
+  worker-died and all-workers-died paths (the coordinator's wait is bounded).
+- **Concurrent writes are safe** because each worker touches only its own table and transfer runs
+  *before* constraint creation — no cross-table FKs to violate or deadlock on.
+
+Config: `transfer.parallel-workers` (default 4, clamped to [1, 32] and to the table count).
+
+### Index Migration
+
+Oracle indexes **not** backed by a PK/UK constraint are extracted and recreated; constraint-backed
+ones are excluded because PostgreSQL creates them during constraint creation.
+
+- **Signature-based matching, never name-based** — Oracle's `PK_EMP` is PostgreSQL's `emp_pkey`,
+  so a name check would miss and duplicate every constraint index. `IndexSignature` applies two
+  distinct rules: **exact match** for reproducing an Oracle index (fidelity), **leading-prefix
+  coverage** for FK gap-fill (performance). Directions are compatible when all keys match or all
+  are exactly inverted — precisely when a B-tree can substitute.
+- **FK gap-fill is a separate, later step (18).** Different source (constraint metadata vs.
+  `ALL_INDEXES`) and different question ("what *should* exist?" vs. "what *did* Oracle have?").
+  Neither database indexes FK columns automatically, so these indexes are the migration's own
+  invention; most schemas index them by hand, and running gap-fill first would duplicate every one
+  under a generated `idx_fk_*` name.
+- **Plan then execute** — name allocation is stateful, so `IndexCreationPlanner` makes all
+  decisions single-threaded and workers receive finished SQL. The full report exists before the
+  first statement runs.
+- **Oracle traps handled:** descending indexes (stored as function-based indexes over hidden
+  `SYS_NC0000n$` columns — the real column is recovered from `ALL_IND_EXPRESSIONS`);
+  `COLUMN_EXPRESSION` is a `LONG`, so it is selected and read last (as `ALL_VIEWS.TEXT` is);
+  PostgreSQL shares one namespace across relation kinds while Oracle gives indexes their own, so
+  names are preserved but disambiguated on collision; bitmap/reverse-key → plain B-tree with a
+  note; domain indexes → `UNSUPPORTED`; `UNUSABLE`, recycle-bin, IOT and cluster indexes skipped.
+- **Not pre-checked:** PostgreSQL requires index expressions to be `IMMUTABLE`. Such an index is
+  allowed to fail at `CREATE INDEX` and is reported with PostgreSQL's own message.
+- **No index can vanish** — one outcome each (`CREATED` / `SKIPPED` / `UNSUPPORTED` / `ERROR`) with
+  a reason.
+
+Config: `index.parallel-workers` (default 4, clamped to [1, 32] and to the index count).
+
+### Oracle Compatibility Layer
+
+PostgreSQL equivalents for Oracle built-in packages, installed into the `oracle_compat` schema with
+flattened names (`oracle_compat.dbms_output__put_line`). Three support tiers: FULL / PARTIAL / STUB.
+Implemented: DBMS_OUTPUT, DBMS_UTILITY, UTL_FILE, DBMS_LOB, plus HTP/OWA/OWA_UTIL for the deferred
+gateway. The catalog is extensible — register in `oraclecompat/catalog/OracleBuiltinCatalog`, add
+the SQL in `oraclecompat/implementations/`.
+
+### Pre-Flight Compatibility Report
+
+Transforms every extracted Oracle view **in memory** — no connection, nothing created — and answers
+"what will fail, why, and how often" before a run. Per view:
+`OK` / `OK_WITH_WARNINGS` / `TRUNCATED_PARSE` / `PARSE_ERROR` / `TRANSFORM_ERROR` / `NO_SOURCE`.
+
+- Constructs are ranked by the number of **failing** views they appear in — that is the number that
+  decides what is worth implementing. This is the data source for the demand-driven view work.
+- **Silent loss detection:** flags constructs dropped in views that transformed *without* an error.
+- **`TRUNCATED_PARSE`:** grammar entry rules are not anchored to EOF, so the parser can end a
+  statement early, leave the rest unread, and report no error — the transformation then "succeeds"
+  on a fragment. `ParseCompleteness` makes this visible. The transformer still *accepts* truncated
+  parses; making it reject them is an open decision (item 4) because it will convert an unknown
+  number of currently "successful" views into loud failures.
+- Support status is **derived by reflection** from `PostgresCodeBuilder`'s visit methods, so the
+  catalog cannot go stale when a visitor is added.
+- Not covered yet: functions/procedures (need package context).
+
+REST: `POST /api/preflight/oracle/analyze`, `GET /api/preflight/report`,
+`GET /api/preflight/report/findings` (filtered + paginated).
 
 ## Development Guidelines
 
-### Code Organization
-- **Domain modules**: Independent, only depend on `core/`, `database/`, `config/`
-- **Pure data models**: No service dependencies in model classes
-- **CDI annotations**: Use `@ApplicationScoped` for services, `@Dependent` for jobs
-- **State management**: Jobs update StateService directly via injected dependency
-- **Naming**: Follow the two-phase naming conventions documented above
-
 ### Design Philosophy
 
-**Prefer Rigorous Solutions Over Heuristics:**
-- When planning new features, always think about rigorous, deterministic solutions first
-- Invest in proper infrastructure (scope tracking, type analysis, metadata indices) rather than quick heuristic shortcuts
-- **Example:** Variable scope tracking replaced heuristic variable detection, fixing critical function call misidentification bugs
+**Prefer rigorous solutions over heuristics.** Invest in real infrastructure (scope tracking, type
+analysis, metadata indices) rather than quick pattern-matching. Example: variable scope tracking
+replaced heuristic variable detection and fixed critical function-call misidentification bugs.
 
-**Result Set Ordering (2025-11-13):**
-- **Design principle**: Always sort extraction results before returning, even if SQL query has ORDER BY, to ensure deterministic ordering across different execution plans
+**Fail loudly, never silently.** A dropped statement or ignored pragma that still reports success
+is worse than an error — it is silent semantic corruption. Every unsupported construct must either
+throw `TransformationException` or emit an explicit marker plus a warning in the result.
 
-**Manual Tracking Tools:**
-- `TODO.md` is for manual tracking by the user only - **DO NOT update it automatically**
+**Deterministic ordering.** Always sort extraction results before returning, even when the SQL has
+an `ORDER BY`, so output does not vary with the execution plan.
+
+### Code Organization
+
+- Domain modules depend only on `core/`, `database/`, `config/`
+- Models are pure data — no service dependencies
+- `@ApplicationScoped` for services, `@Dependent` for jobs
+- Jobs write to `StateService` directly via injection
+
+### Testing
+
+JUnit 5 + Mockito. Test job logic, state management and extraction; mock connections and
+`StateService` for unit tests. Execution tests against real PostgreSQL use Testcontainers — see
+`PostgresPlSqlCursorAttributesValidationTest` for the pattern. For a transformation fix, add both
+a string-comparison test and, where feasible, an execution test.
+Details: [TESTING.md](documentation/TESTING.md).
+
+Concurrency tests drive the real worker loop through a package-private seam with a fake, and are
+latch-based so they time out if execution is sequential. Verify them by mutation (forcing worker
+count to 1 must fail them).
 
 ### Documentation Policy
 
-**CRITICAL: Always update documentation when completing implementation steps**
-
-To prevent divergence between code and documentation:
-
-1. **After completing ANY implementation step:**
-   - Update CLAUDE.md with a summary of what was implemented
-   - Update TRANSFORMATION.md if it's a SQL/PL-SQL transformation feature, or other plan file that is being work with
-
-2. **Document these aspects:**
-   - What was implemented (module, classes, key features)
-   - REST API endpoints (if any)
-   - Integration points (orchestration workflow step number, dependencies)
-   - Support levels or limitations (if applicable)
-
-3. **Keep documentation synchronized:**
-   - Mark completed phases with ✅ in both CLAUDE.md and TRANSFORMATION.md
-   - Update migration status sections
-   - Update "Next Steps" or roadmap sections
-   - Cross-reference between documentation files
-
-4. **Documentation is part of "done":**
-   - An implementation is not complete until documentation is updated
-   - Documentation updates should happen in the same session as code completion
-   - Review both code and docs together before considering task complete
-
-### Testing Strategy
-- **Framework**: JUnit 5 with Mockito
-- **Focus**: Test job logic, state management, data extraction
-- **Integration**: Test complete job execution flows
-- **Mocking**: Mock database connections and state service for unit tests
-
-### Performance Considerations
-- **State management**: Simple in-memory storage via StateService
-- **Job execution**: Asynchronous with CompletableFuture
-- **Memory**: Efficient data structures for metadata storage
-- **Connection pooling**: Managed by Quarkus datasource configuration
-
-### Code Segmentation Optimizations
-
-**Package Segmentation (2025-11-09):**
-- **Problem:** Large Oracle packages (5000+ lines, 100+ functions) caused OutOfMemoryErrors
-- **Solution:** Lightweight function boundary scanner (FunctionBoundaryScanner) replaces full ANTLR parse during extraction
-- **Benefits:** 800x memory reduction, 42x speedup, 90% real-world coverage
-- **Documentation:** [PACKAGE_SEGMENTATION_IMPLEMENTATION_PLAN.md](documentation/PACKAGE_SEGMENTATION_IMPLEMENTATION_PLAN.md)
-
-**Type Method Segmentation (2025-11-11):**
-- **Problem:** Private type methods not visible in Oracle data dictionary (ALL_TYPE_METHODS only shows public methods from type spec)
-- **Solution:** Lightweight type method boundary scanner (TypeMethodBoundaryScanner) extracts all methods from type bodies
-- **Benefits:** Same performance as package segmentation (800x memory, 42x speed), simpler (no variables in type bodies)
-- **Status:** ✅ Complete (Phases 1-3) - Ready for use in Step 26
-- **Documentation:** [TYPE_METHOD_SEGMENTATION_IMPLEMENTATION_PLAN.md](documentation/TYPE_METHOD_SEGMENTATION_IMPLEMENTATION_PLAN.md)
-
-## Type Mapping Strategy
-
-### Four Data Type Categories
-
-1. **Built-in Oracle Types**: Direct mapping via `TypeConverter.toPostgre()`
-   - `NUMBER` → `numeric`, `VARCHAR2` → `text`, `DATE` → `timestamp`, etc.
-
-2. **LOB Types (Large Objects)**: PostgreSQL oid (Large Object references) ✅ **Updated 2025-12-01**
-   - **Purpose**: Java `@Lob` annotation compatibility (requires JDBC `Blob` API)
-   - **Type mappings**:
-     - `BLOB` → `oid` (was: `bytea`)
-     - `CLOB` → `oid` (was: `text`)
-     - `NCLOB` → `oid` (was: `text`)
-     - `LONG` → `varchar` (unchanged, obsolete type)
-     - `LONG RAW` → `bytea` (unchanged, obsolete type)
-   - **Data transfer**: Two-phase staging column workflow (see below)
-
-3. **User-Defined Object Types**: PostgreSQL composite types
-   - Oracle `HR.ADDRESS_TYPE` → PostgreSQL `hr.address_type`
-   - Serialized to PostgreSQL composite literal format during data transfer
-
-4. **Complex Oracle System Types**: jsonb with metadata wrapper
-   - `SYS.ANYDATA`, `SYS.XMLTYPE`, `SYS.AQ$_*`, `SYS.SDO_GEOMETRY`, etc.
-   - JSON format: `{"oracleType": "SYS.ANYDATA", "value": {...}}`
-   - Preserves type information for future PL/SQL code transformation
-   - Note: May appear as owner `"SYS"` or `"PUBLIC"` (PUBLIC synonyms)
-
-### LOB→OID Staging Column Workflow
-
-**Problem**: PostgreSQL `oid` columns store Large Object references (integers), not binary data. Cannot COPY hex-encoded BLOB data directly into `oid` columns.
-
-**Solution**: Temporary staging columns for data transfer:
-
-1. **Table Creation**: Tables created with `oid` columns (via TypeConverter)
-2. **Before COPY**: Add temporary `{column}_staging bytea` columns
-3. **During COPY**: Load hex-encoded BLOB/CLOB data into staging columns
-4. **After COPY**: Convert to Large Objects:
-   ```sql
-   UPDATE table SET doc_content = lo_from_bytea(0, doc_content_staging)
-   ```
-5. **Cleanup**: Drop staging columns
-6. **Commit**: Transaction committed with final oid columns
-
-**Key Benefits**:
-- ✅ Java `@Lob` compatibility (`ResultSet.getBlob()` works)
-- ✅ Self-contained (staging lifecycle managed within data transfer step)
-- ✅ Repeatable (re-running data transfer works identically)
-- ✅ Transactional (rollback on failure, staging columns remain for debugging)
-
-**Implementation**: See `CsvDataTransferService` methods:
-- `detectOidColumns()` - Query PostgreSQL metadata for oid columns
-- `addStagingColumns()` - Create temporary bytea columns
-- `convertStagingToLargeObjects()` - Use PostgreSQL `lo_from_bytea()` function
-- `dropStagingColumns()` - Cleanup after successful conversion
-
-**Documentation**: See `documentation/LOB_TO_OID_MIGRATION_PLAN.md` for detailed implementation plan.
-
-### Key Implementation Classes
-- `TypeConverter.toPostgre()` - Built-in type mapping (includes LOB→oid)
-- `CsvDataTransferService` - LOB staging column lifecycle
-- `PostgresTableCreationJob.isComplexOracleSystemType()` - Detects complex system types
-- `OracleComplexTypeSerializer` - Handles all complex type serialization (objects, LOBs, system types)
-
-## Parallel Data Transfer
-
-**Status:** ✅ Complete (2026-08-08) - 19 tests
-
-Tables are transferred N at a time. Parallelism is **across tables only** — the per-table
-producer/consumer pipe, LOB staging workflow and per-table transaction in `CsvDataTransferService`
-are used unchanged.
-
-**Modules:**
-- `ParallelTableTransferService` - worker pool, result aggregation (`transfer/service/`)
-- `TransferOrdering` - largest-first scheduling, pure and dependency-free
-- `TableTransferOutcome` - one outcome per table (`core/job/model/transfer/`)
-- `DataTransferJob` - orders, resolves worker count, delegates
-
-**Design:**
-- **Worker loop, not task-per-table**: each worker opens *one* Oracle + one PostgreSQL connection
-  and pulls tables off a shared queue. Caps connections at the worker count and self-balances —
-  a worker on a large table simply takes fewer tables.
-- **Thread confinement instead of locking**: workers only publish outcomes; all aggregation into
-  `DataTransferResult` and all progress reporting run on the calling thread, so no existing class
-  needed synchronization.
-- **Largest first**: uses row counts already in state; unknown counts sort last, ties break on
-  qualified name (deterministic across runs).
-- **No table can vanish**: exactly one outcome per table. Failed table → rollback + continue;
-  worker that cannot connect → its tables go to other workers; worker killed by an `Error` →
-  publishes a failure for the in-flight table; all workers dead → remaining tables reported as
-  failures rather than the job hanging (the coordinator's wait is bounded).
-
-**Why concurrent writes are safe:** each worker's statements (TRUNCATE, COPY, LOB staging DDL)
-target only its own table, and data transfer runs *before* constraint creation in the migration
-order, so there are no cross-table foreign keys to violate or deadlock on.
-
-**Configuration:** `transfer.parallel-workers` (default 4, clamped to [1, 32] and to the table
-count), settable in the UI under "Data Transfer Settings".
-
-**Documentation:** [CONSOLIDATION_PLAN.md](documentation/CONSOLIDATION_PLAN.md) Phase 1 item 2.
-
-## Index Migration
-
-**Status:** ✅ Complete (2026-08-08) - 65 tests
-
-Oracle indexes that are **not** backed by a primary key or unique constraint are extracted and
-recreated in PostgreSQL. Constraint-backed indexes are excluded: PostgreSQL creates those itself
-during constraint creation, so migrating them too would duplicate every key.
-
-**Modules:**
-- `index/service/OracleIndexExtractor` + `index/job/OracleIndexExtractionJob` - Oracle extraction
-- `index/job/PostgresIndexExtractionJob` - reads the indexes currently in PostgreSQL (the ⟳
-  target-state step every other object type has)
-- `index/service/IndexCreationPlanner` - decides what to create, under what name (single-threaded)
-- `index/service/ParallelIndexCreationService` - executes the plan on a worker pool
-- `index/service/IndexExpressionTransformer` - function-based index expressions
-- `index/job/PostgresIndexCreationJob`, `index/rest/IndexResource`
-- `core/job/model/index/` - `IndexMetadata`, `IndexKeyPart`, `IndexSignature`,
-  `PostgresIndexCatalog`, `IndexOutcome`, `IndexCreationResult`
-- `database/service/PostgresIndexCatalogService` - reads existing PostgreSQL indexes; one query
-  serves both the dedup catalog and the PostgreSQL-side extraction
-
-**Comparing the two sides:** the PostgreSQL extraction excludes constraint-backed indexes, so its
-count is directly comparable with the Oracle one. The *catalog* used for dedup deliberately
-includes them - otherwise every primary key would be migrated a second time.
-
-**Two separate steps, deliberately:**
-
-| | Index migration (Step 16-17) | FK index gap-fill (Step 18) |
-|---|---|---|
-| Source | `ALL_INDEXES` | derived from constraint metadata |
-| Question | "what *did* Oracle have?" | "what *should* exist?" |
-| Matching rule | exact signature match | leading-prefix coverage |
-
-FK index creation was **demoted** to run *after* index migration. Neither Oracle nor PostgreSQL
-indexes FK columns automatically (both index only PK/UK constraints - the old javadoc claiming
-otherwise was wrong), so those indexes are the migration's own invention. Many schemas already
-index FK columns by hand; running gap-fill first would create a second index over the same
-columns under a generated `idx_fk_*` name.
-
-**Everything is matched by signature, never by name:** Oracle's `PK_EMP` becomes PostgreSQL's
-`emp_pkey`, so a name comparison would miss every constraint index and duplicate it.
-`IndexSignature` compares table, uniqueness and ordered key parts, with two distinct rules -
-exact match for reproducing an Oracle index (fidelity), leading-prefix coverage for FK gap-fill
-(performance). Direction is compatible when all keys match or all are exactly inverted, which is
-precisely when a B-tree can substitute.
-
-**Plan then execute:** name allocation is stateful (two indexes can want the same name), so all
-decisions happen single-threaded in the planner and workers receive finished SQL. This removes
-shared state from the workers entirely and means the full report exists before the first
-statement runs.
-
-**Oracle specifics handled:**
-- **Descending indexes** - Oracle stores these as function-based indexes over hidden
-  `SYS_NC0000n$` columns; the real column is recovered from `ALL_IND_EXPRESSIONS` and folded back
-  into a plain descending key. Emitting the hidden name verbatim would reference a column that
-  does not exist.
-- **`ALL_IND_EXPRESSIONS.COLUMN_EXPRESSION` is a `LONG`** - selected and read last, as
-  `OracleViewExtractionJob` does for `ALL_VIEWS.TEXT`.
-- **Name collisions** - PostgreSQL keeps indexes in the same namespace as tables, views and
-  sequences; Oracle gives indexes their own. An Oracle index named after a table is legal at the
-  source and collides here, so names are preserved but disambiguated when taken.
-- **Bitmap / reverse key** → plain B-tree, recorded as a note on the outcome.
-- **Domain indexes** → reported as `UNSUPPORTED`, not silently dropped.
-- **Function-based indexes** → transformed through the SQL transformer via a probe query; if the
-  result does not match the probe shape exactly it is reported as `UNSUPPORTED` rather than
-  guessed at. PostgreSQL additionally requires index expressions to be `IMMUTABLE` - that is not
-  pre-checked, so such an index fails at `CREATE INDEX` and is reported with PostgreSQL's message.
-- Skipped at extraction: `UNUSABLE`, recycle bin (`BIN$%`), IOT and cluster indexes.
-
-**Every index produces exactly one outcome** (`CREATED` / `SKIPPED` / `UNSUPPORTED` / `ERROR`),
-each with a reason, so an index can never vanish between extraction and the report.
-
-**Configuration:** `index.parallel-workers` (default 4, clamped to [1, 32] and to the index
-count), settable in the UI under "Index Creation Settings".
-
-**REST:** `POST /api/indexes/oracle/extract`, `POST /api/indexes/postgres/extract`,
-`POST /api/indexes/postgres/create`
-
-**Frontend:** `index-migration-service.js`, "Indexes" row. Follows the same shape as the other
-rows: `refresh-btn` ⟳ on each side to read that database's current state into a count badge and
-a schema-grouped list, `action-btn` to create, plus an expandable creation-results panel.
-
-**Documentation:** [CONSOLIDATION_PLAN.md](documentation/CONSOLIDATION_PLAN.md) Phase 1 item 3.
-
-## Synonym Resolution
-
-Oracle synonyms provide alternative names. PostgreSQL doesn't have synonyms, so they must be resolved during migration.
-
-**Resolution Logic (`StateService.resolveSynonym()`):**
-1. Check current schema for synonym
-2. Fall back to PUBLIC schema
-3. Return null if not found
-
-**Usage:**
-- `PostgresObjectTypeCreationJob.normalizeObjectTypes()` - Resolves synonyms before creating composite types
-- `TypeDependencyAnalyzer` - Uses normalized metadata for dependency ordering
-- Note: Only relevant for object type attributes (table columns already store actual type names)
-
-## Stub Implementation Strategy
-
-**Purpose:** Create structural placeholders before implementing full logic to resolve circular dependencies.
-
-**Why Stubs?**
-- Enables functions to reference views and vice versa
-- Avoids "object does not exist" errors
-- Separates automated structural migration from manual logic conversion
-
-### View Stubs
-
-**Pattern:** `SELECT NULL::type AS col1, ... WHERE false`
-
-- Extracts column metadata from Oracle `ALL_TAB_COLUMNS`
-- Applies same type mapping as tables
-- Empty result set enables function/procedure references
-
-**Jobs:**
-- `OracleViewExtractionJob` - Extract Oracle view column metadata
-- `PostgresViewStubCreationJob` - Create PostgreSQL view stubs
-- `PostgresViewStubVerificationJob` - Verify created stubs
-
-### Function/Procedure Stubs
-
-**Pattern:** Correct signature with empty implementation (return NULL / empty body)
-
-- Extracts signatures from Oracle `ALL_ARGUMENTS`
-- Package members flattened: `packagename__functionname` (double underscore)
-- Handles IN/OUT/INOUT parameter modes
-- Same type mapping as tables
-- **Important:** All stubs created as PostgreSQL FUNCTIONs (not PROCEDUREs), even for Oracle procedures
-- RETURNS clause automatically calculated:
-  - No OUT/INOUT → `RETURNS void`
-  - Single OUT/INOUT → `RETURNS type`
-  - Multiple OUT/INOUT → `RETURNS RECORD`
-- Stub body uses `RETURN;` for procedures, `RETURN NULL;` for functions
-- Ensures stubs can be replaced with transformations via `CREATE OR REPLACE` (Phase 1 fix 2025-10-30)
-
-**✅ Package Private Functions (Completed - 2025-11-01):**
-- **Problem resolved**: `ALL_PROCEDURES` only shows public functions (in package spec)
-- **Solution implemented**: Parse package bodies with ANTLR to extract private functions
-- Private functions now marked with `isPackagePrivate = true` in FunctionMetadata
-- All package functions (public + private) extracted → stubs created → implementation works
-- See STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md for implementation details
-
-**Jobs:**
-- `OracleFunctionExtractionJob` - Extract Oracle function/procedure signatures
-- `PostgresFunctionStubCreationJob` - Create PostgreSQL stubs (always FUNCTION)
-- `PostgresFunctionStubVerificationJob` - Verify created stubs
-
-### Type Method Stubs
-
-**Pattern:** Object type member methods with empty implementations (return NULL / empty body)
-
-- Extracts signatures from Oracle `ALL_TYPE_METHODS` and `ALL_METHOD_RESULTS`
-- Flattened naming: `typename__methodname` (double underscore)
-- Handles MEMBER (instance) vs STATIC methods
-- Same type mapping as tables and functions
-
-**Jobs:**
-- `OracleTypeMethodExtractionJob` - Extract Oracle type method signatures
-- `PostgresTypeMethodStubCreationJob` - Create PostgreSQL stubs
-- `PostgresTypeMethodStubVerificationJob` - Verify created stubs
-
-**Metadata:**
-- `TypeMethodMetadata` - Schema, type name, method name, parameters, return type
-- Includes `isMemberMethod()`, `isStaticMethod()`, `isFunction()`, `isProcedure()`
-- State stored in `StateService.oracleTypeMethodMetadata` and `postgresTypeMethodMetadata`
-
-## SQL/PL-SQL Transformation Module
-
-**Status:** View SQL 90% complete (662+ tests), PL/SQL 85-95% complete (882 tests) ✅
-
-The transformation module converts Oracle SQL and PL/SQL to PostgreSQL using ANTLR-based direct AST transformation.
-
-### Architecture Overview
-
-**Core Pipeline:**
-```
-Oracle SQL/PL-SQL → ANTLR Parser → PostgresCodeBuilder → PostgreSQL SQL/PL/pgSQL
-                        ↓                  ↓                        ↓
-                   PlSqlParser    Static Visitor Helpers         String
-```
-
-**Key Design Principles:**
-- **Direct transformation**: Visitor returns PostgreSQL strings directly (no intermediate semantic tree)
-- **Static helper pattern**: Each ANTLR rule has a static helper class
-- **Metadata-driven**: Uses pre-built TransformationIndices for O(1) lookups
-- **Dependency boundaries**: TransformationContext passed as parameter (not CDI-injected)
-- **Quarkus-native**: Service layer uses CDI, visitor layer stays pure
-
-### Metadata Strategy
-
-**Two types of metadata required:**
-1. **Synonym resolution** (StateService) - Resolves Oracle synonyms to actual object names
-2. **Structural indices** (built from StateService) - Table/Column/Type mappings for disambiguation
-
-**Why metadata is needed:**
-- Disambiguate `emp.address.get_street()` (type method) vs `emp_pkg.get_salary()` (package function)
-- Both use dot notation in Oracle, different syntax in PostgreSQL
-
-**Benefits:**
-- ✅ Clean separation: Parse → Index → Transform
-- ✅ Testable with mocked metadata
-
-### Module Location
-
-**Package:** `me.christianrobert.orapgsync.transformation`
-
-**Key Classes:**
-- `AntlrParser` - ANTLR wrapper for parsing Oracle SQL/PL-SQL
-- `PostgresCodeBuilder` - Main visitor with 57+ static helper classes
-- `TransformationContext` - Metadata indices and resolution logic
-- `SqlTransformationService` - High-level transformation API
-
-**For detailed implementation status:**
-- **SQL Views**: See [TRANSFORMATION.md](documentation/TRANSFORMATION.md)
-- **PL/SQL Functions**: See [STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md](documentation/STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md)
+**An implementation is not complete until documentation is updated, in the same session.**
+
+- Update this file with a summary: what was implemented (module, classes, key decisions), REST
+  endpoints, orchestration step numbers, limitations.
+- Update the relevant plan file in `documentation/` — [TRANSFORMATION.md](documentation/TRANSFORMATION.md)
+  for SQL/PL-SQL transformation work, otherwise the plan being worked from.
+- Mark completed phases ✅ in both places and keep the status tables in sync.
+- **Keep this file lean.** Detailed narratives belong in the plan files; CLAUDE.md carries the
+  decisions and invariants a fresh session needs, and links out once for the rest.
+- Move a plan to `documentation/completed/` when its work is finished and no longer informs
+  current decisions.
+
+**`TODO.md` is the user's manual tracker — never update it automatically.**
+
+## Documentation Map
+
+Every plan document, listed once. Prefer linking here over copying content into this file.
+
+**Current plan**
+- [CONSOLIDATION_PLAN.md](documentation/CONSOLIDATION_PLAN.md) — the active plan; per-item status,
+  acceptance criteria, and full implementation write-ups for parallel transfer, index migration and
+  the pre-flight report
+
+**Living references**
+- [TRANSFORMATION.md](documentation/TRANSFORMATION.md) — SQL/view transformation feature list and history
+- [STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md](documentation/STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md) — PL/SQL function transformation
+- [TESTING.md](documentation/TESTING.md) — testing strategy
+
+**Open work**
+- [PLSQL_DML_STATEMENTS_IMPLEMENTATION_PLAN.md](documentation/PLSQL_DML_STATEMENTS_IMPLEMENTATION_PLAN.md) —
+  Phase 1 (INSERT/UPDATE/DELETE) done; **Phase 2 RETURNING clause open**
+- [VISIT_GENERAL_ELEMENT_REFACTORING_PLAN.md](documentation/VISIT_GENERAL_ELEMENT_REFACTORING_PLAN.md) —
+  Milestone A (structural refactor) done; **Milestone B open**: parameterless functions are still
+  misidentified
+
+**Designed but not built / deferred**
+- [AI_TRANSFORMATION_IMPLEMENTATION_PLAN.md](documentation/AI_TRANSFORMATION_IMPLEMENTATION_PLAN.md) —
+  AI-assisted transformation queue; the fallback if the PL/SQL long tail turns out to be genuinely long
+- [MOD_PLSQL_IMPLEMENTATION_PLAN.md](documentation/MOD_PLSQL_IMPLEMENTATION_PLAN.md) — web gateway
+- [JOB_CANCELLATION_IMPLEMENTATION_PLAN.md](documentation/JOB_CANCELLATION_IMPLEMENTATION_PLAN.md) — planning only
+
+**`documentation/completed/`** — finished plans and investigations, history only. Includes the
+detail behind sections above: `LOB_TO_OID_MIGRATION_PLAN.md` (staging workflow),
+`PACKAGE_SEGMENTATION_*` / `TYPE_METHOD_SEGMENTATION_*` (boundary scanners),
+`PACKAGE_VARIABLE_*`, `INLINE_TYPE_*`, `OBJECT_TYPE_FIELD_ACCESS_*`, `TRIGGER_*`,
+`PLSQL_CURSOR_ATTRIBUTES_*`, `PLSQL_EXCEPTION_HANDLING_ANALYSIS.md`.
