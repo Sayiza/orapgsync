@@ -367,15 +367,32 @@
           <td class="source-cell">
             <div class="component-info" id="oracle-indexes">
               <span class="count-badge">-</span>
-              <span class="component-text">Indexes extracted</span>
-              <button class="action-btn" onclick="extractOracleIndexes()" title="Extract non-constraint indexes from Oracle">Extract Indexes</button>
+              <span class="component-text">Indexes found</span>
+              <button class="refresh-btn" onclick="extractOracleIndexes()" title="Extract non-constraint indexes from Oracle">⟳</button>
+              <div class="table-list" id="oracle-index-list" style="display: none;">
+                <div class="table-list-header" onclick="toggleIndexList('oracle')">
+                  <span class="toggle-indicator">▼</span> Indexes by Table
+                </div>
+                <div class="table-items" id="oracle-index-items">
+                  <!-- Oracle index metadata will be populated here -->
+                </div>
+              </div>
             </div>
           </td>
           <td class="target-cell">
             <div class="component-info" id="postgres-indexes">
               <span class="count-badge">-</span>
-              <span class="component-text">Indexes created</span>
+              <span class="component-text">Indexes found</span>
+              <button class="refresh-btn" onclick="extractPostgresIndexes()" title="Read the non-constraint indexes currently in PostgreSQL">⟳</button>
               <button class="action-btn" onclick="createPostgresIndexes()" title="Create the migrated indexes in PostgreSQL">Create Indexes</button>
+              <div class="table-list" id="postgres-index-list" style="display: none;">
+                <div class="table-list-header" onclick="toggleIndexList('postgres')">
+                  <span class="toggle-indicator">▼</span> Indexes by Table
+                </div>
+                <div class="table-items" id="postgres-index-items">
+                  <!-- PostgreSQL index metadata will be populated here -->
+                </div>
+              </div>
               <div class="table-creation-results" id="postgres-index-creation-results" style="display: none;">
                 <div class="table-creation-header" onclick="toggleIndexCreationResults()">
                   <span class="toggle-indicator">▼</span> Index Creation Results

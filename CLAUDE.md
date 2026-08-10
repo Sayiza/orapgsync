@@ -642,14 +642,21 @@ recreated in PostgreSQL. Constraint-backed indexes are excluded: PostgreSQL crea
 during constraint creation, so migrating them too would duplicate every key.
 
 **Modules:**
-- `index/service/OracleIndexExtractor` + `index/job/OracleIndexExtractionJob` - extraction
+- `index/service/OracleIndexExtractor` + `index/job/OracleIndexExtractionJob` - Oracle extraction
+- `index/job/PostgresIndexExtractionJob` - reads the indexes currently in PostgreSQL (the ⟳
+  target-state step every other object type has)
 - `index/service/IndexCreationPlanner` - decides what to create, under what name (single-threaded)
 - `index/service/ParallelIndexCreationService` - executes the plan on a worker pool
 - `index/service/IndexExpressionTransformer` - function-based index expressions
 - `index/job/PostgresIndexCreationJob`, `index/rest/IndexResource`
 - `core/job/model/index/` - `IndexMetadata`, `IndexKeyPart`, `IndexSignature`,
   `PostgresIndexCatalog`, `IndexOutcome`, `IndexCreationResult`
-- `database/service/PostgresIndexCatalogService` - reads existing PostgreSQL indexes
+- `database/service/PostgresIndexCatalogService` - reads existing PostgreSQL indexes; one query
+  serves both the dedup catalog and the PostgreSQL-side extraction
+
+**Comparing the two sides:** the PostgreSQL extraction excludes constraint-backed indexes, so its
+count is directly comparable with the Oracle one. The *catalog* used for dedup deliberately
+includes them - otherwise every primary key would be migrated a second time.
 
 **Two separate steps, deliberately:**
 
@@ -701,7 +708,12 @@ each with a reason, so an index can never vanish between extraction and the repo
 **Configuration:** `index.parallel-workers` (default 4, clamped to [1, 32] and to the index
 count), settable in the UI under "Index Creation Settings".
 
-**REST:** `POST /api/indexes/oracle/extract`, `POST /api/indexes/postgres/create`
+**REST:** `POST /api/indexes/oracle/extract`, `POST /api/indexes/postgres/extract`,
+`POST /api/indexes/postgres/create`
+
+**Frontend:** `index-migration-service.js`, "Indexes" row. Follows the same shape as the other
+rows: `refresh-btn` ⟳ on each side to read that database's current state into a count badge and
+a schema-grouped list, `action-btn` to create, plus an expandable creation-results panel.
 
 **Documentation:** [CONSOLIDATION_PLAN.md](documentation/CONSOLIDATION_PLAN.md) Phase 1 item 3.
 

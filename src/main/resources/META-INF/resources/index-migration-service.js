@@ -8,96 +8,94 @@
  * Oracle need not have had, and runs after this one so it can see what was migrated here.
  *
  * Functions included:
- * - extractOracleIndexes(): Starts Oracle index extraction
- * - createPostgresIndexes(): Starts PostgreSQL index creation
- * - pollIndexJobStatus(): Monitors either job
+ * - extractOracleIndexes(): Reads the non-constraint indexes in Oracle
+ * - extractPostgresIndexes(): Reads the non-constraint indexes currently in PostgreSQL
+ * - createPostgresIndexes(): Creates the migrated indexes in PostgreSQL
+ * - pollIndexJobStatus(): Monitors any of the three jobs
+ * - populateIndexList(): Renders the index list grouped by schema
  * - displayIndexCreationResults(): Renders per-index outcomes
- * - toggleIndexCreationResults(): Toggles the results panel
+ * - toggleIndexList() / toggleIndexSchemaGroup() / toggleIndexCreationResults(): UI toggles
  */
 
 // ===== INDEX MIGRATION FUNCTIONS =====
 
 async function extractOracleIndexes() {
-    console.log('Starting Oracle index extraction job...');
+    return startIndexJob({
+        url: '/api/indexes/oracle/extract',
+        componentId: 'oracle-indexes',
+        buttonSelector: '#oracle-indexes .refresh-btn',
+        buttonLabel: '⟳',
+        kind: 'extraction',
+        database: 'oracle',
+        description: 'Oracle index extraction'
+    });
+}
 
-    updateComponentCount('oracle-indexes', '-');
-
-    const button = document.querySelector('#oracle-indexes .action-btn');
-    if (button) {
-        button.disabled = true;
-        button.innerHTML = '⏳';
-    }
-
-    updateMessage('Starting Oracle index extraction...');
-    updateProgress(0, 'Starting Oracle index extraction');
-
-    try {
-        const response = await fetch('/api/indexes/oracle/extract', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' }
-        });
-
-        const result = await response.json();
-        if (result.status === 'success') {
-            console.log('Oracle index extraction job started:', result.jobId);
-            updateMessage('Oracle index extraction job started successfully');
-            await pollIndexJobStatus(result.jobId, 'extraction');
-        } else {
-            throw new Error(result.message || 'Failed to start Oracle index extraction job');
-        }
-    } catch (error) {
-        console.error('Error starting Oracle index extraction job:', error);
-        updateMessage('Failed to start Oracle index extraction: ' + error.message);
-        updateProgress(0, 'Failed to start Oracle index extraction');
-        resetIndexButton('oracle-indexes', 'Extract Indexes');
-    }
+async function extractPostgresIndexes() {
+    return startIndexJob({
+        url: '/api/indexes/postgres/extract',
+        componentId: 'postgres-indexes',
+        buttonSelector: '#postgres-indexes .refresh-btn',
+        buttonLabel: '⟳',
+        kind: 'extraction',
+        database: 'postgres',
+        description: 'PostgreSQL index extraction'
+    });
 }
 
 async function createPostgresIndexes() {
-    console.log('Starting PostgreSQL index creation job...');
+    return startIndexJob({
+        url: '/api/indexes/postgres/create',
+        componentId: 'postgres-indexes',
+        buttonSelector: '#postgres-indexes .action-btn',
+        buttonLabel: 'Create Indexes',
+        kind: 'creation',
+        database: 'postgres',
+        description: 'PostgreSQL index creation'
+    });
+}
 
-    updateComponentCount('postgres-indexes', '-');
+/**
+ * Shared job launcher. The three index jobs differ only in endpoint and which element they
+ * report into, so the polling, button and error handling live in one place.
+ */
+async function startIndexJob(job) {
+    console.log(`Starting ${job.description} job...`);
 
-    const button = document.querySelector('#postgres-indexes .action-btn');
+    updateComponentCount(job.componentId, '-');
+
+    const button = document.querySelector(job.buttonSelector);
     if (button) {
         button.disabled = true;
         button.innerHTML = '⏳';
     }
 
-    updateMessage('Starting PostgreSQL index creation...');
-    updateProgress(0, 'Starting PostgreSQL index creation');
+    updateMessage(`Starting ${job.description}...`);
+    updateProgress(0, `Starting ${job.description}`);
 
     try {
-        const response = await fetch('/api/indexes/postgres/create', {
+        const response = await fetch(job.url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
         });
 
         const result = await response.json();
         if (result.status === 'success') {
-            console.log('PostgreSQL index creation job started:', result.jobId);
-            updateMessage('PostgreSQL index creation job started successfully');
-            await pollIndexJobStatus(result.jobId, 'creation');
+            console.log(`${job.description} job started:`, result.jobId);
+            updateMessage(`${job.description} job started successfully`);
+            await pollIndexJobStatus(result.jobId, job);
         } else {
-            throw new Error(result.message || 'Failed to start PostgreSQL index creation job');
+            throw new Error(result.message || `Failed to start ${job.description} job`);
         }
     } catch (error) {
-        console.error('Error starting PostgreSQL index creation job:', error);
-        updateMessage('Failed to start PostgreSQL index creation: ' + error.message);
-        updateProgress(0, 'Failed to start PostgreSQL index creation');
-        resetIndexButton('postgres-indexes', 'Create Indexes');
+        console.error(`Error starting ${job.description} job:`, error);
+        updateMessage(`Failed to start ${job.description}: ` + error.message);
+        updateProgress(0, `Failed to start ${job.description}`);
+        resetIndexButton(job);
     }
 }
 
-/**
- * @param {string} jobId
- * @param {string} kind - 'extraction' or 'creation'
- */
-async function pollIndexJobStatus(jobId, kind) {
-    const isExtraction = kind === 'extraction';
-    const componentId = isExtraction ? 'oracle-indexes' : 'postgres-indexes';
-    const buttonLabel = isExtraction ? 'Extract Indexes' : 'Create Indexes';
-
+async function pollIndexJobStatus(jobId, job) {
     return new Promise((resolve, reject) => {
         const pollOnce = async () => {
             try {
@@ -109,20 +107,20 @@ async function pollIndexJobStatus(jobId, kind) {
                 }
 
                 if (status.status === 'COMPLETED') {
-                    updateProgress(100, `Index ${kind} completed`);
-                    await getIndexJobResults(jobId, kind);
-                    resetIndexButton(componentId, buttonLabel);
+                    updateProgress(100, `${job.description} completed`);
+                    await getIndexJobResults(jobId, job);
+                    resetIndexButton(job);
                     resolve(status);
                 } else if (status.status === 'FAILED') {
-                    updateProgress(-1, `Index ${kind} failed`);
-                    updateMessage(`Index ${kind} failed: ` + (status.error || 'Unknown error'));
-                    resetIndexButton(componentId, buttonLabel);
-                    reject(new Error(status.error || `Index ${kind} failed`));
+                    updateProgress(-1, `${job.description} failed`);
+                    updateMessage(`${job.description} failed: ` + (status.error || 'Unknown error'));
+                    resetIndexButton(job);
+                    reject(new Error(status.error || `${job.description} failed`));
                 } else {
                     setTimeout(pollOnce, 1000);
                 }
             } catch (error) {
-                console.error(`Error polling index ${kind} job status:`, error);
+                console.error(`Error polling ${job.description} job status:`, error);
                 reject(error);
             }
         };
@@ -131,7 +129,7 @@ async function pollIndexJobStatus(jobId, kind) {
     });
 }
 
-async function getIndexJobResults(jobId, kind) {
+async function getIndexJobResults(jobId, job) {
     try {
         const response = await fetch(`/api/jobs/${jobId}/result`);
         const result = await response.json();
@@ -140,12 +138,8 @@ async function getIndexJobResults(jobId, kind) {
             throw new Error(result.message || 'Failed to get index job results');
         }
 
-        if (kind === 'extraction') {
-            const count = (result.summary && result.summary.indexCount) || 0;
-            updateComponentCount('oracle-indexes', count);
-            const summary = result.summary || {};
-            updateMessage(`Oracle: extracted ${count} indexes `
-                + `(${summary.uniqueCount || 0} unique, ${summary.functionBasedCount || 0} function-based)`);
+        if (job.kind === 'extraction') {
+            displayIndexMetadata(result, job.database);
         } else {
             displayIndexCreationResults(result);
         }
@@ -153,6 +147,87 @@ async function getIndexJobResults(jobId, kind) {
         console.error('Error getting index job results:', error);
         updateMessage('Error getting index job results: ' + error.message);
     }
+}
+
+function displayIndexMetadata(result, database) {
+    const summary = result.summary || {};
+    const count = summary.indexCount || 0;
+
+    updateComponentCount(`${database}-indexes`, count);
+
+    if (database === 'oracle') {
+        updateMessage(`Oracle: found ${count} non-constraint indexes `
+            + `(${summary.uniqueCount || 0} unique, ${summary.functionBasedCount || 0} function-based)`);
+    } else {
+        // Constraint-backed indexes are excluded on both sides, so the two counts are comparable
+        updateMessage(`PostgreSQL: found ${count} non-constraint indexes (${summary.uniqueCount || 0} unique)`);
+    }
+
+    populateIndexList(summary, database);
+
+    if (count > 0) {
+        document.getElementById(`${database}-index-list`).style.display = 'block';
+    }
+}
+
+/** Renders the index list grouped by schema, matching the table list. */
+function populateIndexList(summary, database) {
+    const itemsElement = document.getElementById(`${database}-index-items`);
+
+    if (!itemsElement) {
+        console.warn('Index items element not found');
+        return;
+    }
+
+    itemsElement.innerHTML = '';
+
+    const schemaCounts = summary.schemaIndexCounts || {};
+    const indexes = summary.indexes || [];
+
+    if (Object.keys(schemaCounts).length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'table-item';
+        empty.textContent = 'No indexes found';
+        empty.style.fontStyle = 'italic';
+        empty.style.color = '#999';
+        itemsElement.appendChild(empty);
+        return;
+    }
+
+    Object.entries(schemaCounts).forEach(([schemaName, indexCount]) => {
+        const schemaGroup = document.createElement('div');
+        schemaGroup.className = 'table-schema-group';
+
+        const schemaHeader = document.createElement('div');
+        schemaHeader.className = 'table-schema-header';
+        schemaHeader.innerHTML = `<span class="toggle-indicator">▼</span> ${schemaName} (${indexCount} indexes)`;
+        schemaHeader.onclick = () => toggleIndexSchemaGroup(database, schemaName);
+
+        const schemaItems = document.createElement('div');
+        schemaItems.className = 'table-items-list';
+        schemaItems.id = `${database}-${schemaName}-indexes`;
+
+        indexes
+            .filter(index => index.schema === schemaName)
+            .forEach(index => {
+                const item = document.createElement('div');
+                item.className = 'table-item';
+                const flags = [];
+                if (index.unique) {
+                    flags.push('UNIQUE');
+                }
+                if (index.functionBased) {
+                    flags.push('function-based');
+                }
+                const suffix = flags.length > 0 ? ` [${flags.join(', ')}]` : '';
+                item.innerHTML = `${index.indexName} on ${index.tableName} (${index.keys})${suffix}`;
+                schemaItems.appendChild(item);
+            });
+
+        schemaGroup.appendChild(schemaHeader);
+        schemaGroup.appendChild(schemaItems);
+        itemsElement.appendChild(schemaGroup);
+    });
 }
 
 function displayIndexCreationResults(result) {
@@ -226,12 +301,38 @@ function toIndexArray(entries) {
     return Array.isArray(entries) ? entries : Object.values(entries);
 }
 
-function resetIndexButton(componentId, label) {
-    const button = document.querySelector(`#${componentId} .action-btn`);
+function resetIndexButton(job) {
+    const button = document.querySelector(job.buttonSelector);
     if (button) {
         button.disabled = false;
-        button.innerHTML = label;
+        button.innerHTML = job.buttonLabel;
     }
+}
+
+function toggleIndexList(database) {
+    const items = document.getElementById(`${database}-index-items`);
+    const header = document.querySelector(`#${database}-index-list .table-list-header`);
+
+    if (!items || !header) {
+        console.warn(`Index list elements not found for database: ${database}`);
+        return;
+    }
+
+    if (items.style.display === 'none') {
+        items.style.display = 'block';
+        header.classList.remove('collapsed');
+    } else {
+        items.style.display = 'none';
+        header.classList.add('collapsed');
+    }
+}
+
+function toggleIndexSchemaGroup(database, schemaName) {
+    const items = document.getElementById(`${database}-${schemaName}-indexes`);
+    if (!items) {
+        return;
+    }
+    items.style.display = items.style.display === 'none' ? 'block' : 'none';
 }
 
 function toggleIndexCreationResults() {

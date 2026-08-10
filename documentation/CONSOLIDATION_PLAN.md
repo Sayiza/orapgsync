@@ -101,10 +101,12 @@ lost, so the migrated database silently underperforms.
 - [x] Handle: DESC columns, reverse key (→ plain B-tree + note), bitmap (→ plain B-tree),
       domain/text indexes (report as unsupported).
 - [x] Create indexes **after** data transfer in the orchestration order (also benefits item 2).
-- [ ] Verification job comparing index coverage per table, surfaced in the UI.
-      *Not built: the creation result already reports every index with its outcome and reason,
-      which is what the verification job was for. Revisit only if a real run shows the two
-      diverging.*
+- [x] Verification job comparing index coverage per table, surfaced in the UI.
+      `PostgresIndexExtractionJob` reads the indexes currently in PostgreSQL, excluding
+      constraint-backed ones so the count is directly comparable with the Oracle side. Surfaced
+      as the ⟳ button on the target cell, matching every other object type. A separate
+      per-table coverage diff was *not* built — the creation result already reports every index
+      with its outcome and reason.
 
 **Acceptance:** For a real schema, ≥90% of non-constraint indexes exist in PostgreSQL
 after migration; the rest are explicitly listed with reasons.
@@ -275,7 +277,8 @@ recreated. Constraint-backed indexes are excluded — PostgreSQL creates those i
 constraint creation.
 
 **Modules:**
-- `index/service/OracleIndexExtractor`, `index/job/OracleIndexExtractionJob` — extraction
+- `index/service/OracleIndexExtractor`, `index/job/OracleIndexExtractionJob` — Oracle extraction
+- `index/job/PostgresIndexExtractionJob` — reads the current PostgreSQL indexes
 - `index/service/IndexCreationPlanner` — decisions and name allocation (single-threaded)
 - `index/service/ParallelIndexCreationService` — worker pool execution
 - `index/service/IndexExpressionTransformer` — function-based index expressions
@@ -344,9 +347,9 @@ Verified by mutation: forcing the worker count to 1 fails 4 tests, and removing 
 rule from `makesRedundant` fails the test that says a non-unique index cannot stand in for a
 unique one.
 
-**Not done:** the separate verification job. The creation result already reports every index with
-its outcome and reason, which is what verification was for. Acceptance (≥90% of non-constraint
-indexes present) is **not yet measured** — that needs a run against the real schema.
+**Acceptance** (≥90% of non-constraint indexes present) is **not yet measured** — that needs a run
+against the real schema. The two ⟳ counts are now directly comparable, so measuring it is a
+matter of running both sides and reading the badges.
 
 ---
 

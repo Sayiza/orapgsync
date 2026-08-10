@@ -2,6 +2,7 @@ package me.christianrobert.orapgsync.database.service;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import me.christianrobert.orapgsync.core.job.model.index.IndexKeyPart;
+import me.christianrobert.orapgsync.core.job.model.index.IndexMetadata;
 import me.christianrobert.orapgsync.core.job.model.index.IndexSignature;
 import me.christianrobert.orapgsync.core.job.model.index.PostgresIndexCatalog;
 import org.slf4j.Logger;
@@ -47,6 +48,7 @@ public class PostgresIndexCatalogService {
                    t.relname                                          AS table_name,
                    i.relname                                          AS index_name,
                    idx.indisunique                                    AS is_unique,
+                   am.amname                                          AS index_type,
                    k.ord                                              AS key_ordinal,
                    pg_get_indexdef(idx.indexrelid, k.ord::int, true)  AS key_def,
                    (idx.indoption[(k.ord - 1)::int] & 1) = 1          AS is_descending
@@ -54,10 +56,23 @@ public class PostgresIndexCatalogService {
             JOIN pg_class i ON i.oid = idx.indexrelid
             JOIN pg_class t ON t.oid = idx.indrelid
             JOIN pg_namespace n ON n.oid = t.relnamespace
+            JOIN pg_am am ON am.oid = i.relam
             CROSS JOIN LATERAL generate_series(1, idx.indnkeyatts) AS k(ord)
             WHERE n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+              %s
             ORDER BY n.nspname, t.relname, i.relname, k.ord
             """;
+
+    /**
+     * Excludes indexes PostgreSQL created to back a primary key or unique constraint.
+     *
+     * <p>Applied only when listing indexes for the user, so the PostgreSQL side is comparable with
+     * the Oracle side, which excludes the same class of index. It is deliberately <em>not</em>
+     * applied when building the catalog: deciding whether an Oracle index is already present has
+     * to see the constraint indexes, or every primary key would be migrated a second time.</p>
+     */
+    private static final String EXCLUDE_CONSTRAINT_BACKED =
+            "AND NOT EXISTS (SELECT 1 FROM pg_constraint c WHERE c.conindid = idx.indexrelid)";
 
     /** Every relation name, because PostgreSQL shares one namespace across relation kinds. */
     private static final String RELATION_NAME_SQL = """
@@ -69,23 +84,42 @@ public class PostgresIndexCatalogService {
             """;
 
     public PostgresIndexCatalog load(Connection connection) throws SQLException {
-        Map<String, Map<String, IndexBuilder>> byTable = readIndexRows(connection);
-        Map<String, List<IndexSignature>> signaturesByTable = toSignatures(byTable);
-        Map<String, Set<String>> indexNamesByTable = toIndexNames(byTable);
-        Map<String, Set<String>> relationNames = readRelationNames(connection);
+        // Everything, constraint indexes included - see EXCLUDE_CONSTRAINT_BACKED for why.
+        List<IndexMetadata> indexes = readIndexes(connection, false);
 
-        PostgresIndexCatalog catalog =
-                new PostgresIndexCatalog(signaturesByTable, indexNamesByTable, relationNames);
+        Map<String, List<IndexSignature>> signaturesByTable = new HashMap<>();
+        Map<String, Set<String>> indexNamesByTable = new HashMap<>();
+
+        for (IndexMetadata index : indexes) {
+            String qualifiedTable = index.getQualifiedTableName();
+            signaturesByTable.computeIfAbsent(qualifiedTable, k -> new ArrayList<>())
+                    .add(index.getSignature());
+            indexNamesByTable.computeIfAbsent(qualifiedTable, k -> new HashSet<>())
+                    .add(index.getIndexName());
+        }
+
+        PostgresIndexCatalog catalog = new PostgresIndexCatalog(
+                signaturesByTable, indexNamesByTable, readRelationNames(connection));
         log.info("Loaded PostgreSQL index catalog: {} indexes across {} tables",
                 catalog.getIndexCount(), catalog.getTableCount());
         return catalog;
     }
 
-    /** Keyed by table then index, so the ordered key rows can be reassembled per index. */
-    private Map<String, Map<String, IndexBuilder>> readIndexRows(Connection connection) throws SQLException {
+    /**
+     * Reads the existing PostgreSQL indexes.
+     *
+     * @param excludeConstraintBacked when true, omits indexes backing a primary key or unique
+     *                                constraint, giving a list comparable with the Oracle side
+     */
+    public List<IndexMetadata> readIndexes(Connection connection, boolean excludeConstraintBacked)
+            throws SQLException {
+
+        String sql = String.format(INDEX_SQL, excludeConstraintBacked ? EXCLUDE_CONSTRAINT_BACKED : "");
+
+        // Keyed by table then index, so the ordered key rows can be reassembled per index.
         Map<String, Map<String, IndexBuilder>> byTable = new LinkedHashMap<>();
 
-        try (PreparedStatement stmt = connection.prepareStatement(INDEX_SQL);
+        try (PreparedStatement stmt = connection.prepareStatement(sql);
              ResultSet rs = stmt.executeQuery()) {
 
             while (rs.next()) {
@@ -93,38 +127,23 @@ public class PostgresIndexCatalogService {
                 String table = rs.getString("table_name");
                 String indexName = rs.getString("index_name");
                 boolean unique = rs.getBoolean("is_unique");
+                String indexType = rs.getString("index_type");
                 String keyDef = rs.getString("key_def");
                 boolean descending = rs.getBoolean("is_descending");
 
                 String qualifiedTable = IndexSignature.qualifiedName(schema, table);
                 IndexBuilder builder = byTable
                         .computeIfAbsent(qualifiedTable, k -> new LinkedHashMap<>())
-                        .computeIfAbsent(indexName, k -> new IndexBuilder(schema, table, unique));
+                        .computeIfAbsent(indexName,
+                                k -> new IndexBuilder(schema, table, indexName, unique, indexType));
                 builder.addKey(stripOrderingSuffix(keyDef), descending);
             }
         }
 
-        return byTable;
-    }
-
-    private Map<String, List<IndexSignature>> toSignatures(Map<String, Map<String, IndexBuilder>> byTable) {
-        Map<String, List<IndexSignature>> signatures = new HashMap<>();
-        byTable.forEach((qualifiedTable, indexes) -> {
-            List<IndexSignature> tableSignatures = new ArrayList<>(indexes.size());
-            indexes.values().forEach(builder -> tableSignatures.add(builder.build()));
-            signatures.put(qualifiedTable, tableSignatures);
-        });
-        return signatures;
-    }
-
-    private Map<String, Set<String>> toIndexNames(Map<String, Map<String, IndexBuilder>> byTable) {
-        Map<String, Set<String>> names = new HashMap<>();
-        byTable.forEach((qualifiedTable, indexes) -> {
-            Set<String> tableIndexNames = new HashSet<>();
-            indexes.keySet().forEach(name -> tableIndexNames.add(name.toLowerCase()));
-            names.put(qualifiedTable, tableIndexNames);
-        });
-        return names;
+        List<IndexMetadata> indexes = new ArrayList<>();
+        byTable.values().forEach(indexesOfTable ->
+                indexesOfTable.values().forEach(builder -> indexes.add(builder.build())));
+        return indexes;
     }
 
     /**
@@ -156,25 +175,31 @@ public class PostgresIndexCatalogService {
         return names;
     }
 
-    /** Accumulates the key rows of one index until its signature can be built. */
+    /** Accumulates the key rows of one index until it can be built. */
     private static final class IndexBuilder {
         private final String schema;
         private final String table;
+        private final String indexName;
         private final boolean unique;
+        private final String indexType;
         private final List<IndexKeyPart> keyParts = new ArrayList<>();
 
-        IndexBuilder(String schema, String table, boolean unique) {
+        IndexBuilder(String schema, String table, String indexName, boolean unique, String indexType) {
             this.schema = schema;
             this.table = table;
+            this.indexName = indexName;
             this.unique = unique;
+            this.indexType = indexType;
         }
 
         void addKey(String keyText, boolean descending) {
+            // Keys are read back from PostgreSQL as rendered text, so they are treated as
+            // expressions; a plain column simply renders as its own name and compares equal.
             keyParts.add(new IndexKeyPart(keyText, false, descending));
         }
 
-        IndexSignature build() {
-            return IndexSignature.of(schema, table, unique, keyParts);
+        IndexMetadata build() {
+            return new IndexMetadata(schema, table, indexName, unique, indexType, keyParts);
         }
     }
 }

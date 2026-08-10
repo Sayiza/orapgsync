@@ -19,6 +19,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -44,6 +45,12 @@ public class IndexResource {
     @Path("/oracle/extract")
     public Response extractOracleIndexes() {
         return startJob("ORACLE", "INDEX", "Oracle index extraction");
+    }
+
+    @POST
+    @Path("/postgres/extract")
+    public Response extractPostgresIndexes() {
+        return startJob("POSTGRES", "INDEX", "PostgreSQL index extraction");
     }
 
     @POST
@@ -89,8 +96,12 @@ public class IndexResource {
         long bitmap = indexes.stream().filter(IndexMetadata::isBitmap).count();
         long domain = indexes.stream().filter(IndexMetadata::isDomain).count();
 
+        // Index count per schema, so the UI can group the list the same way the table list does
+        Map<String, Integer> schemaIndexCounts = new LinkedHashMap<>();
+
         List<Map<String, Object>> details = new ArrayList<>();
         for (IndexMetadata index : indexes) {
+            schemaIndexCounts.merge(nullSafe(index.getSchema()), 1, Integer::sum);
             details.add(Map.of(
                     "schema", nullSafe(index.getSchema()),
                     "tableName", nullSafe(index.getTableName()),
@@ -107,6 +118,7 @@ public class IndexResource {
         summary.put("functionBasedCount", functionBased);
         summary.put("bitmapCount", bitmap);
         summary.put("domainCount", domain);
+        summary.put("schemaIndexCounts", schemaIndexCounts);
         summary.put("indexes", details);
 
         return summary;

@@ -187,13 +187,20 @@ class ParallelIndexCreationServiceTest {
     }
 
     @Test
-    @DisplayName("one connection per worker, and all are closed")
-    void oneContextPerWorkerAllClosed() {
+    @DisplayName("connections are capped at the worker count, and all are closed")
+    void capsConnectionsAtWorkerCountAndClosesThem() {
         Recorder recorder = new Recorder();
 
         service.createIndexes(plannedIndexes(40), 4, null, contextFactory(recorder));
 
-        assertEquals(4, recorder.openAttempts.get(), "one connection per worker, not per index");
+        int opened = recorder.openAttempts.get();
+
+        // Not "exactly 4": if the queue is drained before the last worker thread starts, the
+        // coordinator finishes and shutdownNow() cancels it before it opens a connection. That is
+        // correct behaviour - an idle worker should not connect. What must hold is the cap, which
+        // is what distinguishes a worker loop from one task (and one connection) per index.
+        assertTrue(opened >= 1 && opened <= 4,
+                "one connection per worker at most, not one per index, but was " + opened);
         assertEquals(recorder.contextsOpened, recorder.contextsClosed, "every context was closed");
     }
 

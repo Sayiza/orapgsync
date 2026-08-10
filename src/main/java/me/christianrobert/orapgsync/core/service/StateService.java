@@ -106,6 +106,7 @@ public class StateService {
     // Indexes are held separately from TableMetadata: that model is consumed by the data
     // transfer path and its normalizer, and index migration has no business mutating it.
     List<IndexMetadata> oracleIndexMetadata = new ArrayList<>();
+    List<IndexMetadata> postgresIndexMetadata = new ArrayList<>();
     IndexCreationResult indexCreationResult;
 
     FKIndexCreationResult fkIndexCreationResult;
@@ -489,6 +490,14 @@ public class StateService {
         this.oracleIndexMetadata = oracleIndexMetadata;
     }
 
+    public List<IndexMetadata> getPostgresIndexMetadata() {
+        return postgresIndexMetadata;
+    }
+
+    public void setPostgresIndexMetadata(List<IndexMetadata> postgresIndexMetadata) {
+        this.postgresIndexMetadata = postgresIndexMetadata;
+    }
+
     public IndexCreationResult getIndexCreationResult() {
         return indexCreationResult;
     }
@@ -680,6 +689,7 @@ public class StateService {
         this.oracleCompatVerificationResult = null;
         this.constraintCreationResult = null;
         this.oracleIndexMetadata = new ArrayList<>();
+        this.postgresIndexMetadata = new ArrayList<>();
         this.indexCreationResult = null;
         this.fkIndexCreationResult = null;
         this.dataTransferResult = null;
