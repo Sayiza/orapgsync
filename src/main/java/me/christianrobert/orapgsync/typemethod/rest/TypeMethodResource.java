@@ -14,7 +14,9 @@ import me.christianrobert.orapgsync.core.job.service.JobService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -115,10 +117,21 @@ public class TypeMethodResource {
         long functionCount = 0;
         long procedureCount = 0;
 
+        // Projection for the UI list; parameter lists stay off the wire.
+        List<Map<String, Object>> methodList = new ArrayList<>();
+
         for (TypeMethodMetadata method : typeMethods) {
             String schema = method.getSchema();
             schemaTypeMethodCounts.put(schema, schemaTypeMethodCounts.getOrDefault(schema, 0) + 1);
             totalParameters += method.getParameters().size();
+
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("schema", schema);
+            entry.put("typeName", method.getTypeName());
+            entry.put("methodName", method.getMethodName());
+            entry.put("methodType", method.getMethodType());
+            entry.put("instantiable", method.getInstantiable());
+            methodList.add(entry);
 
             if (method.isMemberMethod()) {
                 memberMethodCount++;
@@ -141,6 +154,7 @@ public class TypeMethodResource {
                 "functionCount", functionCount,
                 "procedureCount", procedureCount,
                 "schemaTypeMethodCounts", schemaTypeMethodCounts,
+                "typeMethods", methodList,
                 "message", String.format("Extraction completed: %d type methods (%d member, %d static, %d functions, %d procedures) from %d schemas",
                         typeMethods.size(), memberMethodCount, staticMethodCount, functionCount, procedureCount, schemaTypeMethodCounts.size())
         );

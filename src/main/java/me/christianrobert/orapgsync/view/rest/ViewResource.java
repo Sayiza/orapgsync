@@ -16,7 +16,9 @@ import me.christianrobert.orapgsync.core.job.service.JobService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -40,6 +42,9 @@ public class ViewResource {
 
     @Inject
     me.christianrobert.orapgsync.database.service.PostgresConnectionService postgresConnectionService;
+
+    @Inject
+    me.christianrobert.orapgsync.core.service.StateService stateService;
 
     @POST
     @Path("/oracle/extract")
@@ -71,12 +76,12 @@ public class ViewResource {
                     if (rs.next()) {
                         String postgresSql = rs.getString("viewdef");
 
-                        Map<String, Object> result = Map.of(
-                                "status", "success",
-                                "schema", schema,
-                                "viewName", viewName,
-                                "postgresSql", postgresSql != null ? postgresSql : "-- View definition not available"
-                        );
+                        Map<String, Object> result = new LinkedHashMap<>();
+                        result.put("status", "success");
+                        result.put("schema", schema);
+                        result.put("viewName", viewName);
+                        result.put("postgresSql", postgresSql != null ? postgresSql : "-- View definition not available");
+                        result.put("oracleSql", findOracleViewSource(schema, viewName));
 
                         return Response.ok(result).build();
                     } else {
@@ -96,6 +101,23 @@ public class ViewResource {
                     .entity(errorResult)
                     .build();
         }
+    }
+
+    /**
+     * The original Oracle view SQL, from the extracted metadata held in state.
+     *
+     * <p>The extraction list response no longer carries {@code sqlDefinition} — a few thousand
+     * views made it megabytes and the list does not render it — so this is where it is read
+     * from when a single view is opened. Returns null when views have not been extracted in
+     * this session, which the frontend renders as "not available".
+     */
+    private String findOracleViewSource(String schema, String viewName) {
+        return stateService.getOracleViewMetadata().stream()
+                .filter(view -> schema.equalsIgnoreCase(view.getSchema())
+                        && viewName.equalsIgnoreCase(view.getViewName()))
+                .map(ViewMetadata::getSqlDefinition)
+                .findFirst()
+                .orElse(null);
     }
 
     @POST
@@ -171,16 +193,29 @@ public class ViewResource {
         Map<String, Integer> schemaViewCounts = new HashMap<>();
         int totalColumns = 0;
 
+        // Projection for the UI list. Deliberately excludes sqlDefinition (the full Oracle view
+        // source) and the column list — a few thousand views make those megabytes, and the list
+        // renders neither. The source is one click away at /postgres/source/{schema}/{view},
+        // and the complete result is at /api/jobs/{jobId}/report.
+        List<Map<String, Object>> views = new ArrayList<>();
+
         for (ViewMetadata view : viewDefinitions) {
             String schema = view.getSchema();
             schemaViewCounts.put(schema, schemaViewCounts.getOrDefault(schema, 0) + 1);
             totalColumns += view.getColumns().size();
+
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("schema", schema);
+            entry.put("viewName", view.getViewName());
+            entry.put("columnCount", view.getColumns().size());
+            views.add(entry);
         }
 
         return Map.of(
                 "totalViews", viewDefinitions.size(),
                 "totalColumns", totalColumns,
                 "schemaViewCounts", schemaViewCounts,
+                "views", views,
                 "message", String.format("Extraction completed: %d views with %d columns from %d schemas",
                         viewDefinitions.size(), totalColumns, schemaViewCounts.size())
         );

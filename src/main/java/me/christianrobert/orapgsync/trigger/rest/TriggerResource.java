@@ -13,7 +13,9 @@ import me.christianrobert.orapgsync.core.job.service.JobService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -172,9 +174,23 @@ public class TriggerResource {
         long rowLevelTriggers = 0;
         long statementLevelTriggers = 0;
 
+        // Projection for the UI list. Excludes triggerBody and the two generated PostgreSQL
+        // DDL fields — three copies of code per trigger, none of which the list renders.
+        // The DDL is fetched per trigger at /postgres/source/{schema}/{trigger}.
+        List<Map<String, Object>> triggerList = new ArrayList<>();
+
         for (TriggerMetadata trigger : triggers) {
             String schema = trigger.getSchema();
             schemaTriggerCounts.put(schema, schemaTriggerCounts.getOrDefault(schema, 0) + 1);
+
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("schema", schema);
+            entry.put("triggerName", trigger.getTriggerName());
+            entry.put("tableName", trigger.getTableName());
+            entry.put("triggerType", trigger.getTriggerType());
+            entry.put("triggerLevel", trigger.getTriggerLevel());
+            entry.put("status", trigger.getStatus());
+            triggerList.add(entry);
 
             if (trigger.getTriggerType() != null) {
                 if (trigger.getTriggerType().contains("BEFORE")) {
@@ -201,6 +217,7 @@ public class TriggerResource {
                 "rowLevelTriggers", rowLevelTriggers,
                 "statementLevelTriggers", statementLevelTriggers,
                 "schemaTriggerCounts", schemaTriggerCounts,
+                "triggers", triggerList,
                 "message", String.format("Extraction completed: %d triggers (%d BEFORE, %d AFTER, %d INSTEAD OF) from %d schemas",
                         triggers.size(), beforeTriggers, afterTriggers, insteadOfTriggers, schemaTriggerCounts.size())
         );

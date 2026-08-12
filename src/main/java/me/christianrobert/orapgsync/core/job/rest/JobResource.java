@@ -488,14 +488,19 @@ public class JobResource {
                     response.put("result", funcImplVerifyResult); // Unwrap the single element
                 }
             } else if (result instanceof List<?>) {
-                // Handle List results based on jobType
+                // Handle List results based on jobType.
+                //
+                // Extraction results do NOT put the raw metadata list under "result". Each
+                // summary carries a projection with only the fields the UI renders — the raw
+                // models hold view SQL, trigger bodies, column lists and parameter lists that
+                // add up to megabytes over a real schema and that nothing on this endpoint's
+                // side reads. The full result stays available at /api/jobs/{jobId}/report.
                 if (jobType.contains("INDEX")) {
                     @SuppressWarnings("unchecked")
                     List<IndexMetadata> indexMetadata = (List<IndexMetadata>) result;
                     Map<String, Object> summary = IndexResource.generateIndexExtractionSummary(indexMetadata);
                     response.put("summary", summary);
                     response.put("indexCount", indexMetadata.size());
-                    response.put("result", result);
                 } else if (jobType.contains("SCHEMA") && !jobType.contains("SCHEMA_CREATION")) {
                     @SuppressWarnings("unchecked")
                     List<String> schemas = (List<String>) result;
@@ -522,7 +527,6 @@ public class JobResource {
                     Map<String, Object> summary = DataTransferResource.generateRowCountSummary(rowCounts);
                     response.put("summary", summary);
                     response.put("rowCountDataCount", rowCounts.size());
-                    response.put("result", result);
                 } else if (jobType.contains("SYNONYM")) {
                     @SuppressWarnings("unchecked")
                     List<?> synonyms = (List<?>) result;
@@ -536,14 +540,12 @@ public class JobResource {
                     Map<String, Object> summary = SequenceResource.generateSequenceSummary(sequences);
                     response.put("summary", summary);
                     response.put("sequenceCount", sequences.size());
-                    response.put("result", result);
                 } else if (jobType.contains("CONSTRAINT") && !jobType.contains("CONSTRAINT_CREATION")) {
                     @SuppressWarnings("unchecked")
                     List<ConstraintMetadata> constraints = (List<ConstraintMetadata>) result;
                     Map<String, Object> summary = ConstraintResource.generateConstraintSummary(constraints);
                     response.put("summary", summary);
                     response.put("constraintCount", constraints.size());
-                    response.put("result", result);
                 } else if (jobType.contains("VIEW")
                         && !jobType.contains("VIEW_STUB_CREATION")
                         && !jobType.contains("VIEW_IMPLEMENTATION")
@@ -553,21 +555,18 @@ public class JobResource {
                     Map<String, Object> summary = ViewResource.generateViewDefinitionSummary(viewDefinitions);
                     response.put("summary", summary);
                     response.put("viewCount", viewDefinitions.size());
-                    response.put("result", result);
                 } else if (jobType.contains("FUNCTION") && !jobType.contains("FUNCTION_STUB_CREATION")) {
                     @SuppressWarnings("unchecked")
                     List<FunctionMetadata> functions = (List<FunctionMetadata>) result;
                     Map<String, Object> summary = FunctionResource.generateFunctionSummary(functions);
                     response.put("summary", summary);
                     response.put("functionCount", functions.size());
-                    response.put("result", result);
                 } else if (jobType.contains("TYPE_METHOD") && !jobType.contains("TYPE_METHOD_STUB_CREATION")) {
                     @SuppressWarnings("unchecked")
                     List<TypeMethodMetadata> typeMethods = (List<TypeMethodMetadata>) result;
                     Map<String, Object> summary = TypeMethodResource.generateTypeMethodSummary(typeMethods);
                     response.put("summary", summary);
                     response.put("typeMethodCount", typeMethods.size());
-                    response.put("result", result);
                 } else if (jobType.contains("TRIGGER")
                         && !jobType.contains("TRIGGER_IMPLEMENTATION")) {
                     // Handle both TRIGGER extraction and TRIGGER_VERIFICATION
@@ -576,7 +575,6 @@ public class JobResource {
                     Map<String, Object> summary = TriggerResource.generateTriggerSummary(triggers);
                     response.put("summary", summary);
                     response.put("triggerCount", triggers.size());
-                    response.put("result", result);
                 } else {
                     // Generic list result
                     response.put("result", result);

@@ -18,7 +18,7 @@ transformation, data transfer. Full plan and rationale:
 
 | Priority | Item | Status |
 |---|---|---|
-| 1 | Frontend performance — deferred/capped rendering, plain-text job reports | ✅ done |
+| 1 | Frontend performance — deferred/capped rendering, plain-text reports, trimmed payloads | ✅ done |
 | 1 | Error transparency — per-object error detail (failing construct + Oracle source) | 🔄 active |
 | 2 | Parallel data transfer | ✅ done |
 | 3 | Index migration | ✅ done |
@@ -35,7 +35,7 @@ transformation, data transfer. Full plan and rationale:
 
 - **Build**: `mvn clean compile`
 - **Dev mode**: `mvn quarkus:dev`
-- **Test**: `mvn test` (~1,590 tests across 130 test classes)
+- **Test**: `mvn test` (~1,591 tests across 131 test classes)
 - **Generate ANTLR parsers**: `mvn antlr4:antlr4` (from `src/main/antlr4/` → `target/generated-sources/antlr4/`)
 - **Package**: `mvn clean package`
 
@@ -193,6 +193,10 @@ public class OracleRowCountExtractionJob extends AbstractDatabaseExtractionJob<R
 3. **Done** — auto-discovered by `JobRegistry`; `POST /api/jobs/oracle/row-count/extract` works
    immediately, with progress tracking and error handling included.
 
+**If the new element has a UI list**, add a `generate{Feature}Summary` projection carrying only
+the fields that list renders (see "REST API" below) and render it through `results-panel.js` —
+not by building rows in the feature service.
+
 ## Conventions
 
 **Package structure:** `{feature}/` with `job/`, `rest/`, `service/` sub-packages.
@@ -227,6 +231,17 @@ browser tab. The HTML panels render a capped preview; this is the uncapped list,
 browser renders instantly and can search, save and diff between runs. `JobTextReportFormatter`
 walks the result's Jackson tree instead of switching on its type, so it covers every job type,
 including ones added later.
+
+**`GET /api/jobs/{jobId}/result` does not return raw metadata for extraction jobs.** Each
+`generate{Feature}Summary` carries a projection of the fields the UI renders (`summary.views`,
+`summary.functions`, `summary.triggers`, `summary.typeMethods`, `summary.sequences`,
+`summary.constraints`, and the pre-existing `summary.tables` / `summary.indexes`). The raw models
+hold view SQL, trigger bodies, column and parameter lists that the UI never reads — 14 MB vs
+252 KB for a realistic schema. **When adding a field the frontend needs, add it to the projection;
+do not re-add `response.put("result", result)`.** Full data lives at `/report`; a single view's
+Oracle and PostgreSQL source at `GET /api/views/postgres/source/{schema}/{viewName}`.
+`OBJECT_DATATYPE` and `SYNONYM` still send raw models — already minimal, and the object type
+detail view needs the variable list.
 
 **`POST /api/transformation/sql`** — ad-hoc Oracle→PostgreSQL SQL transformation for development
 testing and future dynamic SQL conversion. Body is `text/plain`, optional `?schema=HR` (defaults

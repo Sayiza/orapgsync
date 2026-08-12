@@ -340,7 +340,7 @@ async function getTypeMethodStubCreationResults(jobId, database) {
 }
 
 function populateTypeMethodList(result, database) {
-    const typeMethods = result.result || [];
+    const typeMethods = (result.summary && result.summary.typeMethods) || [];
 
     setDeferredList(`${database}-type-method-list`, `${database}-type-method-items`,
         () => renderSchemaGroups(typeMethods, method => {
@@ -686,7 +686,7 @@ function displayTypeMethodImplementationResults(result) {
 }
 
 function displayTypeMethodVerificationResults(result) {
-    const typeMethods = result.result || [];
+    const typeMethods = (result.summary && result.summary.typeMethods) || [];
 
     setResultsPanel('postgres-unified-type-method-verification', {
         summaryHtml: renderSummaryStats([

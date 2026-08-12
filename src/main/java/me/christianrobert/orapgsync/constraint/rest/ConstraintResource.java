@@ -14,7 +14,9 @@ import me.christianrobert.orapgsync.core.job.service.JobService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -103,18 +105,29 @@ public class ConstraintResource {
         Map<String, Integer> schemaConstraintCounts = new HashMap<>();
         Map<String, Integer> typeConstraintCounts = new HashMap<>();
 
+        // Projection for the UI list; the column lists and CHECK conditions stay off the wire.
+        List<Map<String, Object>> constraintList = new ArrayList<>();
+
         for (ConstraintMetadata constraint : constraints) {
             String schema = constraint.getSchema();
             schemaConstraintCounts.put(schema, schemaConstraintCounts.getOrDefault(schema, 0) + 1);
 
             String typeName = constraint.getConstraintTypeName();
             typeConstraintCounts.put(typeName, typeConstraintCounts.getOrDefault(typeName, 0) + 1);
+
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("schema", schema);
+            entry.put("tableName", constraint.getTableName());
+            entry.put("constraintName", constraint.getConstraintName());
+            entry.put("constraintType", constraint.getConstraintType());
+            constraintList.add(entry);
         }
 
         return Map.of(
                 "totalConstraints", constraints.size(),
                 "schemaConstraintCounts", schemaConstraintCounts,
                 "typeConstraintCounts", typeConstraintCounts,
+                "constraints", constraintList,
                 "message", String.format("Extraction completed: %d constraints from %d schemas",
                         constraints.size(), schemaConstraintCounts.size())
         );

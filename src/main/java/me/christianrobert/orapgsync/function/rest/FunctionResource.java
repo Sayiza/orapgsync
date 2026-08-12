@@ -15,7 +15,9 @@ import me.christianrobert.orapgsync.core.job.service.JobService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -182,10 +184,21 @@ public class FunctionResource {
         long standaloneCount = 0;
         long packageMemberCount = 0;
 
+        // Projection for the UI list: the parameter lists stay off the wire, and so does
+        // everything the list does not render. Full data: /api/jobs/{jobId}/report.
+        List<Map<String, Object>> functionList = new ArrayList<>();
+
         for (FunctionMetadata function : functions) {
             String schema = function.getSchema();
             schemaFunctionCounts.put(schema, schemaFunctionCounts.getOrDefault(schema, 0) + 1);
             totalParameters += function.getParameters().size();
+
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("schema", schema);
+            entry.put("objectName", function.getObjectName());
+            entry.put("packageName", function.getPackageName());
+            entry.put("objectType", function.getObjectType());
+            functionList.add(entry);
 
             if (function.isFunction()) {
                 functionCount++;
@@ -208,6 +221,7 @@ public class FunctionResource {
                 "standaloneCount", standaloneCount,
                 "packageMemberCount", packageMemberCount,
                 "schemaFunctionCounts", schemaFunctionCounts,
+                "functions", functionList,
                 "message", String.format("Extraction completed: %d functions/procedures (%d functions, %d procedures) from %d schemas",
                         functions.size(), functionCount, procedureCount, schemaFunctionCounts.size())
         );

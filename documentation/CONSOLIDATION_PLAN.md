@@ -47,9 +47,12 @@ tables/views are involved.
 - [x] **Aggregate-first UI** (done 2026-08-12): summary counts render immediately, object rows
       are built only on expand and discarded on collapse, every list section is capped, and the
       complete result is one click away as plain text. See "Frontend Rendering" below.
-- [ ] Server-side pagination/filtering of the result endpoints ("show only failures"). The
-      frontend no longer *needs* it to stay responsive, so this is now about payload size:
-      `/api/jobs/{id}/result` still ships every object including `sqlDefinition`.
+- [x] **Trimmed result payloads** (done 2026-08-12): extraction responses carry a projection of
+      the fields the UI renders instead of the raw metadata. 14 MB → 252 KB for a realistic
+      schema. See "Result Payloads" below.
+- [ ] Server-side pagination/filtering of the result endpoints ("show only failures"). No longer
+      about size — the remaining reason would be filtering, and the pre-flight report already
+      answers "which objects failed and why" with `GET /api/preflight/report/findings`.
 - [ ] Audit frontend polling: avoid re-fetching and re-rendering full lists on every poll tick.
 - [x] **Consistency pass over the feature panels** (done 2026-08-12): all 22 result panels and
       12 extraction lists now go through the same two helpers, so badge semantics, toggle
@@ -235,8 +238,50 @@ an opinion about the same property.
 Their output is a fixed catalog and a single generated project — bounded, so there is nothing
 to gain and no reason to churn them.
 
-**Still open:** `/api/jobs/{id}/result` continues to ship every object including
-`ViewMetadata.sqlDefinition`. The DOM is no longer the bottleneck; the payload is the next one.
+---
+
+## Result Payloads (implemented 2026-08-12)
+
+With the DOM fixed, the wire was the next bottleneck: `/api/jobs/{jobId}/result` serialized the
+full metadata list for every extraction. That meant `ViewMetadata.sqlDefinition` (the complete
+Oracle view source) and every `ColumnMetadata`, plus `TriggerMetadata.triggerBody` and *both*
+generated PostgreSQL DDL fields — three copies of code per trigger. **The frontend read none of
+those**; the only column information it rendered was `columns.length`.
+
+**Each extraction summary now carries a projection** of exactly the fields the list renders, and
+`JobResource` no longer puts the raw list under `result`:
+
+| Job type | Summary key | Fields |
+|---|---|---|
+| `VIEW` | `views` | schema, viewName, columnCount |
+| `FUNCTION` | `functions` | schema, objectName, packageName, objectType |
+| `TRIGGER` | `triggers` | schema, triggerName, tableName, triggerType, triggerLevel, status |
+| `TYPE_METHOD` | `typeMethods` | schema, typeName, methodName, methodType, instantiable |
+| `SEQUENCE` | `sequences` | schema, sequenceName |
+| `CONSTRAINT` | `constraints` | schema, tableName, constraintName, constraintType |
+
+`TABLE_METADATA` (`tables`), `ROW_COUNT` (`tables`) and `INDEX` (`indexes`) already worked this
+way — this completes the pattern rather than introducing one. `OBJECT_DATATYPE` and `SYNONYM`
+still send their raw models: both are already minimal, and the object type detail view renders
+the variable list, so trimming them would cost a feature and save nothing.
+
+**Measured**, 3,000 views (1.5 KB of SQL, 12 columns each) + 800 triggers:
+
+| | before | after | |
+|---|---|---|---|
+| 3,000 views | 12,553 KB | 158 KB | 79× |
+| 800 triggers | 1,682 KB | 93 KB | 18× |
+| combined | 14,236 KB | 252 KB | **56×** |
+
+**Nothing became unreachable.** The full result is at `GET /api/jobs/{jobId}/report`, and
+`GET /api/views/postgres/source/{schema}/{viewName}` now returns `oracleSql` alongside
+`postgresSql` — its javadoc had promised that since it was written but it only ever returned the
+PostgreSQL side. The view detail panel shows both, so a transformation can be checked against its
+source in place.
+
+`ExtractionSummaryPayloadTest` asserts the omissions directly (serialize the summary, assert the
+source text is absent) rather than just checking the fields that are present — otherwise the next
+person to add a field to a summary has nothing telling them the omissions are deliberate.
 
 ---
 

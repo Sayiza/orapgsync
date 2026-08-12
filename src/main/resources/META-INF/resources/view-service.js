@@ -208,8 +208,10 @@ function displayViewResults(result, database = 'oracle') {
     const summary = result.summary;
 
     if (summary) {
-        // Extract view count from summary
-        const viewCount = result.result ? result.result.length : 0;
+        // The list projection lives in the summary; the raw ViewMetadata (with sqlDefinition
+        // and the column list) is deliberately not sent - see JobResource.
+        const views = summary.views || [];
+        const viewCount = summary.totalViews || views.length;
 
         // Update view count badge
         updateComponentCount(`${database}-views`, viewCount);
@@ -219,11 +221,8 @@ function displayViewResults(result, database = 'oracle') {
         updateMessage(`Extracted ${viewCount} ${databaseName} views`);
 
         // Populate view list
-        if (result.result && result.result.length > 0) {
-            populateViewList(result.result, database);
-
-            // Show view list
-            document.getElementById(`${database}-view-list`).style.display = 'block';
+        if (views.length > 0) {
+            populateViewList(views, database);
         }
     }
 }
@@ -1106,8 +1105,16 @@ async function toggleViewDdlLazy(viewId, schema, viewName) {
         const result = await response.json();
 
         if (result.status === 'success' && result.postgresSql) {
-            // Replace loading message with actual DDL
-            ddlSection.innerHTML = '<pre class="sql-statement">' + escapeHtml(result.postgresSql) + '</pre>';
+            // Both sides, so a transformation can be checked against its source without
+            // leaving the panel. The Oracle SQL is no longer part of the extraction payload —
+            // it is read from state on this request.
+            let html = '<div class="ddl-label">PostgreSQL</div>';
+            html += '<pre class="sql-statement">' + escapeHtml(result.postgresSql) + '</pre>';
+            html += '<div class="ddl-label">Oracle</div>';
+            html += result.oracleSql
+                ? '<pre class="sql-statement">' + escapeHtml(result.oracleSql) + '</pre>'
+                : '<div class="ddl-note">Not available — extract Oracle views to see the original source.</div>';
+            ddlSection.innerHTML = html;
             ddlSection.setAttribute('data-loaded', 'true');
         } else {
             // Show error

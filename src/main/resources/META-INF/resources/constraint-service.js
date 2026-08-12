@@ -282,8 +282,7 @@ async function getConstraintJobResults(jobId, database) {
             console.log('Constraint job results:', result);
 
             // Update badge count
-            const constraints = result.result || [];
-            const constraintCount = constraints.length || 0;
+            const constraintCount = (result.summary && result.summary.totalConstraints) || 0;
             updateComponentCount(`${database}-constraints`, constraintCount);
 
             // Show success message
@@ -346,7 +345,7 @@ async function getConstraintCreationResults(jobId, database) {
 }
 
 function populateConstraintList(result, database) {
-    const constraints = result.result || [];
+    const constraints = (result.summary && result.summary.constraints) || [];
 
     // Constraints group by kind rather than by schema - which kind a constraint is says more
     // about it than which schema it lives in.

@@ -1668,3 +1668,19 @@ input[type="checkbox"] {
 .report-link:hover {
     text-decoration: underline;
 }
+
+/* Section labels inside a lazily loaded DDL panel (PostgreSQL / Oracle) */
+.ddl-label {
+    color: #495057;
+    font-size: var(--font-xs);
+    font-weight: bold;
+    margin-top: var(--spacing-xs);
+    text-transform: uppercase;
+}
+
+.ddl-note {
+    color: #6c757d;
+    font-size: var(--font-xs);
+    font-style: italic;
+    padding: var(--spacing-xs);
+}

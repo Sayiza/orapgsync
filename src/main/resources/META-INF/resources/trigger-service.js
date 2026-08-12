@@ -406,7 +406,7 @@ async function getTriggerVerificationResults(jobId) {
 }
 
 function populateTriggerList(result, database) {
-    const triggers = result.result || [];
+    const triggers = (result.summary && result.summary.triggers) || [];
 
     setDeferredList(`${database}-trigger-list`, `${database}-trigger-items`,
         () => renderSchemaGroups(triggers, renderTriggerListRow,
@@ -466,7 +466,7 @@ function displayTriggerImplementationResults(result) {
 }
 
 function displayTriggerVerificationResults(result) {
-    const triggers = result.result || [];
+    const triggers = (result.summary && result.summary.triggers) || [];
 
     setResultsPanel('postgres-unified-trigger-verification', {
         summaryHtml: renderSummaryStats([

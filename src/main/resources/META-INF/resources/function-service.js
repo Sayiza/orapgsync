@@ -341,7 +341,7 @@ async function getFunctionStubCreationResults(jobId, database) {
 }
 
 function populateFunctionList(result, database) {
-    const functions = result.result || [];
+    const functions = (result.summary && result.summary.functions) || [];
 
     setDeferredList(`${database}-function-list`, `${database}-function-items`,
         () => renderSchemaGroups(functions, func => {

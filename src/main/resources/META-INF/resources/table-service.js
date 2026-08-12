@@ -392,8 +392,8 @@ function displayRowCountResults(result, database = 'oracle') {
     const summary = result.summary;
 
     if (summary) {
-        // Extract total row count from summary message
-        const rowCounts = result.result || [];
+        // Row counts arrive as the summary's per-table projection, keyed by qualified name.
+        const rowCounts = Object.values(summary.tables || {});
         const totalRows = rowCounts.reduce((sum, rc) => sum + (rc.rowCount >= 0 ? rc.rowCount : 0), 0);
 
         // Format the total row count

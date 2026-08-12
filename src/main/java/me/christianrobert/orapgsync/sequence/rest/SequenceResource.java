@@ -13,7 +13,9 @@ import me.christianrobert.orapgsync.core.job.service.JobService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -95,14 +97,23 @@ public class SequenceResource {
     public static Map<String, Object> generateSequenceSummary(List<SequenceMetadata> sequences) {
         Map<String, Integer> schemaSequenceCounts = new HashMap<>();
 
+        // Projection for the UI list; the full Oracle sequence properties stay off the wire.
+        List<Map<String, Object>> sequenceList = new ArrayList<>();
+
         for (SequenceMetadata sequence : sequences) {
             String schema = sequence.getSchema();
             schemaSequenceCounts.put(schema, schemaSequenceCounts.getOrDefault(schema, 0) + 1);
+
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("schema", schema);
+            entry.put("sequenceName", sequence.getSequenceName());
+            sequenceList.add(entry);
         }
 
         return Map.of(
                 "totalSequences", sequences.size(),
                 "schemaSequenceCounts", schemaSequenceCounts,
+                "sequences", sequenceList,
                 "message", String.format("Extraction completed: %d sequences from %d schemas",
                         sequences.size(), schemaSequenceCounts.size())
         );

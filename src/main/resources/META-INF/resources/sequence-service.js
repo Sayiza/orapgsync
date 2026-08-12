@@ -341,7 +341,7 @@ async function getSequenceCreationResults(jobId, database) {
 }
 
 function populateSequenceList(result, database) {
-    const sequences = result.result || [];
+    const sequences = (result.summary && result.summary.sequences) || [];
 
     setDeferredList(`${database}-sequence-list`, `${database}-sequence-items`,
         () => renderSchemaGroups(sequences,
