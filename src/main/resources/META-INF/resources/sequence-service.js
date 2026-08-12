@@ -18,7 +18,6 @@
  * - getSequenceJobResults(): Retrieves and displays extraction results
  * - getSequenceCreationResults(): Retrieves and displays creation results
  * - populateSequenceList(): Populates UI with extracted sequences grouped by schema
- * - toggleSequenceSchemaGroup(): Toggles visibility of sequence groups in UI
  * - displaySequenceCreationResults(): Displays detailed creation results
  * - toggleSequenceList(): Toggles visibility of sequence list panels
  * - toggleSequenceCreationResults(): Toggles visibility of creation results panels
@@ -342,175 +341,54 @@ async function getSequenceCreationResults(jobId, database) {
 }
 
 function populateSequenceList(result, database) {
-    const sequenceItemsElement = document.getElementById(`${database}-sequence-items`);
-
-    if (!sequenceItemsElement) {
-        console.warn('Sequence items element not found');
-        return;
-    }
-
-    // Clear existing items
-    sequenceItemsElement.innerHTML = '';
-
-    // Get sequences from result
     const sequences = result.result || [];
 
-    if (sequences && sequences.length > 0) {
-        // Group sequences by schema
-        const schemaGroups = {};
-        sequences.forEach(seq => {
-            const schema = seq.schema || 'unknown';
-            if (!schemaGroups[schema]) {
-                schemaGroups[schema] = [];
-            }
-            schemaGroups[schema].push(seq);
-        });
-
-        // Create schema groups
-        Object.entries(schemaGroups).forEach(([schemaName, schemaSequences]) => {
-            const schemaGroup = document.createElement('div');
-            schemaGroup.className = 'table-schema-group';
-
-            const schemaHeader = document.createElement('div');
-            schemaHeader.className = 'table-schema-header';
-            schemaHeader.innerHTML = `<span class="toggle-indicator">▼</span> ${schemaName} (${schemaSequences.length} sequences)`;
-            schemaHeader.onclick = () => toggleSequenceSchemaGroup(database, schemaName);
-
-            const sequenceItems = document.createElement('div');
-            sequenceItems.className = 'table-items-list';
-            sequenceItems.id = `${database}-${schemaName}-sequences`;
-
-            // Add individual sequence entries for this schema
-            schemaSequences.forEach(seq => {
-                const sequenceItem = document.createElement('div');
-                sequenceItem.className = 'table-item';
-                sequenceItem.textContent = seq.sequenceName;
-                sequenceItems.appendChild(sequenceItem);
-            });
-
-            schemaGroup.appendChild(schemaHeader);
-            schemaGroup.appendChild(sequenceItems);
-            sequenceItemsElement.appendChild(schemaGroup);
-        });
-    } else {
-        const noSequencesItem = document.createElement('div');
-        noSequencesItem.className = 'table-item';
-        noSequencesItem.textContent = 'No sequences found';
-        noSequencesItem.style.fontStyle = 'italic';
-        noSequencesItem.style.color = '#999';
-        sequenceItemsElement.appendChild(noSequencesItem);
-    }
-}
-
-function toggleSequenceSchemaGroup(database, schemaName) {
-    const sequenceItems = document.getElementById(`${database}-${schemaName}-sequences`);
-    const header = sequenceItems.previousElementSibling;
-    const indicator = header.querySelector('.toggle-indicator');
-
-    if (sequenceItems.style.display === 'none') {
-        sequenceItems.style.display = 'block';
-        indicator.textContent = '▼';
-    } else {
-        sequenceItems.style.display = 'none';
-        indicator.textContent = '▶';
-    }
-}
-
-function displaySequenceCreationResults(result, database) {
-    const resultsDiv = document.getElementById(`${database}-sequence-creation-results`);
-    const detailsDiv = document.getElementById(`${database}-sequence-creation-details`);
-
-    if (!resultsDiv || !detailsDiv) {
-        console.error('Sequence creation results container not found');
-        return;
-    }
-
-    let html = '';
-
-    if (result.summary) {
-        const summary = result.summary;
-
-        updateComponentCount("postgres-sequences", summary.createdCount + summary.skippedCount + summary.errorCount);
-
-        html += '<div class="table-creation-summary">';
-        html += `<div class="summary-stats">`;
-        html += `<span class="stat-item created">Created: ${summary.createdCount}</span>`;
-        html += `<span class="stat-item skipped">Skipped: ${summary.skippedCount}</span>`;
-        html += `<span class="stat-item errors">Errors: ${summary.errorCount}</span>`;
-        html += `</div>`;
-        html += '</div>';
-
-        // Show created sequences - convert Map to Array using Object.values()
-        if (summary.createdCount > 0 && summary.createdSequences) {
-            html += '<div class="created-tables-section">';
-            html += '<h4>Created Sequences:</h4>';
-            html += '<div class="table-items">';
-            Object.values(summary.createdSequences).forEach(seq => {
-                html += `<div class="table-item created">${seq.sequenceName} ✓</div>`;
-            });
-            html += '</div>';
-            html += '</div>';
-        }
-
-        // Show skipped sequences - convert Map to Array using Object.values()
-        if (summary.skippedCount > 0 && summary.skippedSequences) {
-            html += '<div class="skipped-tables-section">';
-            html += '<h4>Skipped Sequences (already exist):</h4>';
-            html += '<div class="table-items">';
-            Object.values(summary.skippedSequences).forEach(seq => {
-                html += `<div class="table-item skipped">${seq.sequenceName} (${seq.reason})</div>`;
-            });
-            html += '</div>';
-            html += '</div>';
-        }
-
-        // Show errors - convert Map to Array using Object.values()
-        if (summary.errorCount > 0 && summary.errors) {
-            html += '<div class="error-tables-section">';
-            html += '<h4>Failed Sequences:</h4>';
-            html += '<div class="table-items">';
-            Object.values(summary.errors).forEach(error => {
-                html += `<div class="table-item error">`;
-                html += `<strong>${error.sequenceName}</strong>: ${error.error}`;
-                if (error.sql) {
-                    html += `<div class="sql-statement"><pre>${error.sql}</pre></div>`;
-                }
-                html += `</div>`;
-            });
-            html += '</div>';
-            html += '</div>';
-        }
-    }
-
-    detailsDiv.innerHTML = html;
-    resultsDiv.style.display = 'block';
+    setDeferredList(`${database}-sequence-list`, `${database}-sequence-items`,
+        () => renderSchemaGroups(sequences,
+            seq => `<div class="table-item">${escapeHtml(seq.sequenceName)}</div>`,
+            { label: 'sequences', groupIdPrefix: `${database}-sequence-group` }),
+        `Sequences (${formatCount(sequences.length)})`);
 }
 
 function toggleSequenceList(database) {
-    const listDiv = document.getElementById(`${database}-sequence-list`);
-    const toggleIndicator = listDiv.querySelector('.toggle-indicator');
+    toggleDeferredList(`${database}-sequence-list`);
+}
 
-    if (listDiv.style.display === 'none' || !listDiv.style.display) {
-        listDiv.style.display = 'block';
-        toggleIndicator.textContent = '▲';
-    } else {
-        listDiv.style.display = 'none';
-        toggleIndicator.textContent = '▼';
-    }
+function displaySequenceCreationResults(result, database) {
+    const summary = result.summary;
+    if (!summary) return;
+
+    updateComponentCount("postgres-sequences", summary.createdCount + summary.skippedCount + summary.errorCount);
+
+    setResultsPanel(`${database}-sequence-creation`, {
+        summaryHtml: renderSummaryStats([
+            { label: 'Created', value: summary.createdCount, cssClass: 'created' },
+            { label: 'Skipped', value: summary.skippedCount, cssClass: 'skipped' },
+            { label: 'Errors', value: summary.errorCount, cssClass: 'errors' }
+        ]),
+        detailLabel: 'created sequences',
+        renderDetail: () => renderOutcomeSections([
+            {
+                title: 'Created Sequences',
+                items: toSortedArray(summary.createdSequences, 'sequenceName'),
+                cssClass: 'created', nameKey: 'sequenceName', suffix: ' \u2713'
+            },
+            {
+                title: 'Skipped Sequences (already exist)',
+                items: toSortedArray(summary.skippedSequences, 'sequenceName'),
+                cssClass: 'skipped', nameKey: 'sequenceName'
+            },
+            {
+                title: 'Failed Sequences',
+                items: toSortedArray(summary.errors, 'sequenceName'),
+                cssClass: 'error', nameKey: 'sequenceName', showError: true
+            }
+        ], { jobId: result.jobId, label: 'sequences' })
+    });
 }
 
 function toggleSequenceCreationResults() {
-    const resultsDiv = document.getElementById('postgres-sequence-creation-results');
-    const detailsDiv = document.getElementById('postgres-sequence-creation-details');
-    const toggleIndicator = resultsDiv.querySelector('.toggle-indicator');
-
-    if (detailsDiv.style.display === 'none' || !detailsDiv.style.display) {
-        detailsDiv.style.display = 'block';
-        toggleIndicator.textContent = '▲';
-    } else {
-        detailsDiv.style.display = 'none';
-        toggleIndicator.textContent = '▼';
-    }
+    toggleResultsPanel('postgres-sequence-creation');
 }
 
 // ===== END SEQUENCE FUNCTIONS =====

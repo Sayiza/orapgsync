@@ -18,7 +18,6 @@
  * - getFunctionJobResults(): Retrieves and displays extraction results
  * - getFunctionStubCreationResults(): Retrieves and displays creation results
  * - populateFunctionList(): Populates UI with extracted functions grouped by schema
- * - toggleFunctionSchemaGroup(): Toggles visibility of function groups in UI
  * - displayFunctionStubCreationResults(): Displays detailed creation results
  * - toggleFunctionList(): Toggles visibility of function list panels
  * - toggleFunctionCreationResults(): Toggles visibility of creation results panels
@@ -342,190 +341,57 @@ async function getFunctionStubCreationResults(jobId, database) {
 }
 
 function populateFunctionList(result, database) {
-    const functionItemsElement = document.getElementById(`${database}-function-items`);
-
-    if (!functionItemsElement) {
-        console.warn('Function items element not found');
-        return;
-    }
-
-    // Clear existing items
-    functionItemsElement.innerHTML = '';
-
-    // Get functions from result
     const functions = result.result || [];
 
-    if (functions && functions.length > 0) {
-        // Group functions by schema
-        const schemaGroups = {};
-        functions.forEach(func => {
-            const schema = func.schema || 'unknown';
-            if (!schemaGroups[schema]) {
-                schemaGroups[schema] = [];
-            }
-            schemaGroups[schema].push(func);
-        });
-
-        // Create schema groups
-        Object.entries(schemaGroups).forEach(([schemaName, schemaFunctions]) => {
-            const schemaGroup = document.createElement('div');
-            schemaGroup.className = 'table-schema-group';
-
-            const schemaHeader = document.createElement('div');
-            schemaHeader.className = 'table-schema-header';
-            schemaHeader.innerHTML = `<span class="toggle-indicator">▼</span> ${schemaName} (${schemaFunctions.length} functions/procedures)`;
-            schemaHeader.onclick = () => toggleFunctionSchemaGroup(database, schemaName);
-
-            const functionItems = document.createElement('div');
-            functionItems.className = 'table-items-list';
-            functionItems.id = `${database}-${schemaName}-functions`;
-
-            // Add individual function entries for this schema
-            schemaFunctions.forEach(func => {
-                const functionItem = document.createElement('div');
-                functionItem.className = 'table-item';
-
-                // Display function name with package indicator if applicable
-                let displayName = func.objectName;
-                if (func.packageName) {
-                    displayName = `${func.packageName}.${func.objectName}`;
-                }
-
-                // Add function/procedure indicator
-                const typeIndicator = func.objectType === 'FUNCTION' ? '𝑓' : 'ₚ';
-                functionItem.innerHTML = `<span class="function-type-indicator">${typeIndicator}</span> ${displayName}`;
-
-                functionItems.appendChild(functionItem);
-            });
-
-            schemaGroup.appendChild(schemaHeader);
-            schemaGroup.appendChild(functionItems);
-            functionItemsElement.appendChild(schemaGroup);
-        });
-    } else {
-        const noFunctionsItem = document.createElement('div');
-        noFunctionsItem.className = 'table-item';
-        noFunctionsItem.textContent = 'No functions/procedures found';
-        noFunctionsItem.style.fontStyle = 'italic';
-        noFunctionsItem.style.color = '#999';
-        functionItemsElement.appendChild(noFunctionsItem);
-    }
-}
-
-function toggleFunctionSchemaGroup(database, schemaName) {
-    const functionItems = document.getElementById(`${database}-${schemaName}-functions`);
-    const header = functionItems.previousElementSibling;
-    const indicator = header.querySelector('.toggle-indicator');
-
-    if (functionItems.style.display === 'none') {
-        functionItems.style.display = 'block';
-        indicator.textContent = '▼';
-    } else {
-        functionItems.style.display = 'none';
-        indicator.textContent = '▶';
-    }
-}
-
-function displayFunctionStubCreationResults(result, database) {
-    const resultsDiv = document.getElementById(`${database}-function-creation-results`);
-    const detailsDiv = document.getElementById(`${database}-function-creation-details`);
-
-    if (!resultsDiv || !detailsDiv) {
-        console.error('Function stub creation results container not found');
-        return;
-    }
-
-    let html = '';
-
-    if (result.summary) {
-        const summary = result.summary;
-
-        updateComponentCount("postgres-functions", summary.createdCount + summary.skippedCount + summary.errorCount);
-
-        html += '<div class="table-creation-summary">';
-        html += `<div class="summary-stats">`;
-        html += `<span class="stat-item created">Created: ${summary.createdCount}</span>`;
-        html += `<span class="stat-item skipped">Skipped: ${summary.skippedCount}</span>`;
-        html += `<span class="stat-item errors">Errors: ${summary.errorCount}</span>`;
-        html += `</div>`;
-        html += '</div>';
-
-        // Show created functions - convert Map to Array using Object.values()
-        if (summary.createdCount > 0 && summary.createdFunctions) {
-            html += '<div class="created-tables-section">';
-            html += '<h4>Created Function Stubs:</h4>';
-            html += '<div class="table-items">';
-            Object.values(summary.createdFunctions).forEach(func => {
-                html += `<div class="table-item created">${func.functionName} ✓</div>`;
-            });
-            html += '</div>';
-            html += '</div>';
-        }
-
-        // Show skipped functions - convert Map to Array using Object.values()
-        if (summary.skippedCount > 0 && summary.skippedFunctions) {
-            html += '<div class="skipped-tables-section">';
-            html += '<h4>Skipped Functions (already exist):</h4>';
-            html += '<div class="table-items">';
-            Object.values(summary.skippedFunctions).forEach(func => {
-                html += `<div class="table-item skipped">${func.functionName} (already exists)</div>`;
-            });
-            html += '</div>';
-            html += '</div>';
-        }
-
-        // Show errors - convert Map to Array using Object.values()
-        if (summary.errorCount > 0 && summary.errors) {
-            html += '<div class="error-tables-section">';
-            html += '<h4>Failed Functions:</h4>';
-            html += '<div class="table-items">';
-            Object.values(summary.errors).forEach(error => {
-                html += `<div class="table-item error">`;
-                html += `<strong>${error.functionName}</strong>: ${error.error}`;
-                if (error.sql) {
-                    html += `<div class="sql-statement"><pre>${error.sql}</pre></div>`;
-                }
-                html += `</div>`;
-            });
-            html += '</div>';
-            html += '</div>';
-        }
-    }
-
-    detailsDiv.innerHTML = html;
-    resultsDiv.style.display = 'block';
+    setDeferredList(`${database}-function-list`, `${database}-function-items`,
+        () => renderSchemaGroups(functions, func => {
+            const displayName = func.packageName ? `${func.packageName}.${func.objectName}` : func.objectName;
+            const typeIndicator = func.objectType === 'FUNCTION' ? '𝑓' : 'ₚ';
+            return `<div class="table-item"><span class="function-type-indicator">${typeIndicator}</span> ${escapeHtml(displayName)}</div>`;
+        }, { label: 'functions/procedures', groupIdPrefix: `${database}-function-group` }),
+        `Functions/Procedures (${formatCount(functions.length)})`);
 }
 
 function toggleFunctionList(database) {
-    const functionItems = document.getElementById(`${database}-function-items`);
-    const header = document.querySelector(`#${database}-function-list .table-list-header`);
-
-    if (!functionItems || !header) {
-        console.warn(`Function list elements not found for database: ${database}`);
-        return;
-    }
-
-    if (functionItems.style.display === 'none') {
-        functionItems.style.display = 'block';
-        header.classList.remove('collapsed');
-    } else {
-        functionItems.style.display = 'none';
-        header.classList.add('collapsed');
-    }
+    toggleDeferredList(`${database}-function-list`);
 }
 
-function toggleFunctionCreationResults() {
-    const resultsDiv = document.getElementById('postgres-function-creation-results');
-    const detailsDiv = document.getElementById('postgres-function-creation-details');
-    const toggleIndicator = resultsDiv.querySelector('.toggle-indicator');
+function displayFunctionStubCreationResults(result, database) {
+    const summary = result.summary;
+    if (!summary) return;
 
-    if (detailsDiv.style.display === 'none' || !detailsDiv.style.display) {
-        detailsDiv.style.display = 'block';
-        toggleIndicator.textContent = '▲';
-    } else {
-        detailsDiv.style.display = 'none';
-        toggleIndicator.textContent = '▼';
-    }
+    updateComponentCount("postgres-functions", summary.createdCount + summary.skippedCount + summary.errorCount);
+
+    setResultsPanel(`${database}-function-creation`, {
+        summaryHtml: renderSummaryStats([
+            { label: 'Created', value: summary.createdCount, cssClass: 'created' },
+            { label: 'Skipped', value: summary.skippedCount, cssClass: 'skipped' },
+            { label: 'Errors', value: summary.errorCount, cssClass: 'errors' }
+        ]),
+        detailLabel: 'function stubs',
+        renderDetail: () => renderOutcomeSections([
+            {
+                title: 'Created Function Stubs',
+                items: toSortedArray(summary.createdFunctions, 'functionName'),
+                cssClass: 'created', nameKey: 'functionName', suffix: ' \u2713'
+            },
+            {
+                title: 'Skipped Functions (already exist)',
+                items: toSortedArray(summary.skippedFunctions, 'functionName'),
+                cssClass: 'skipped', nameKey: 'functionName', suffix: ' (already exists)'
+            },
+            {
+                title: 'Failed Functions',
+                items: toSortedArray(summary.errors, 'functionName'),
+                cssClass: 'error', nameKey: 'functionName', showError: true
+            }
+        ], { jobId: result.jobId, label: 'functions' })
+    });
+}
+
+
+function toggleFunctionCreationResults() {
+    toggleResultsPanel('postgres-function-creation');
 }
 
 // ===== STANDALONE FUNCTION IMPLEMENTATION FUNCTIONS (Phase 2) =====
@@ -664,109 +530,41 @@ function handleStandaloneFunctionImplementationJobComplete(result, database) {
 }
 
 function displayStandaloneFunctionImplementationResults(result, database) {
-    const resultsDiv = document.getElementById(`${database}-standalone-function-implementation-results`);
-    const detailsDiv = document.getElementById(`${database}-standalone-function-implementation-details`);
+    const summary = result.summary;
+    if (!summary) return;
 
-    if (!resultsDiv || !detailsDiv) {
-        console.error('Standalone function implementation results container not found');
-        return;
-    }
+    updateComponentCount("postgres-standalone-function-implementation",
+        summary.implementedCount + summary.skippedCount + summary.errorCount);
 
-    let html = '';
-
-    // Access result properties from summary object
-    if (result.summary) {
-        const summary = result.summary;
-
-        updateComponentCount("postgres-standalone-function-implementation", summary.implementedCount + summary.skippedCount + summary.errorCount);
-
-        html += '<div class="table-creation-summary">';
-        html += `<div class="summary-stats">`;
-        html += `<span class="stat-item created">Implemented: ${summary.implementedCount}</span>`;
-        html += `<span class="stat-item skipped">Skipped: ${summary.skippedCount}</span>`;
-        html += `<span class="stat-item errors">Errors: ${summary.errorCount}</span>`;
-        html += `</div>`;
-        html += '</div>';
-
-        // Show implemented functions - convert Map to Array using Object.values()
-        if (summary.implementedCount > 0 && summary.implementedFunctions) {
-            html += '<div class="created-tables-section">';
-            html += '<h4>Implemented Functions/Procedures:</h4>';
-            html += '<div class="table-items">';
-            Object.values(summary.implementedFunctions)
-                .sort((a, b) => {
-                    // Sort by schema first, then by function name
-                    const schemaCompare = (a.schema || '').localeCompare(b.schema || '');
-                    if (schemaCompare !== 0) return schemaCompare;
-                    return (a.functionName || '').localeCompare(b.functionName || '');
-                })
-                .forEach(func => {
-                    html += `<div class="table-item created">${func.functionName} ✓</div>`;
-                });
-            html += '</div>';
-            html += '</div>';
-        }
-
-        // Show skipped functions - convert Map to Array using Object.values()
-        if (summary.skippedCount > 0 && summary.skippedFunctions) {
-            html += '<div class="skipped-tables-section">';
-            html += '<h4>Skipped Functions/Procedures:</h4>';
-            html += '<div class="table-items">';
-            Object.values(summary.skippedFunctions)
-                .sort((a, b) => {
-                    // Sort by schema first, then by function name
-                    const schemaCompare = (a.schema || '').localeCompare(b.schema || '');
-                    if (schemaCompare !== 0) return schemaCompare;
-                    return (a.functionName || '').localeCompare(b.functionName || '');
-                })
-                .forEach(func => {
-                    html += `<div class="table-item skipped">${func.functionName}</div>`;
-                });
-            html += '</div>';
-            html += '</div>';
-        }
-
-        // Show errors - convert Map to Array using Object.values()
-        if (summary.errorCount > 0 && summary.errors) {
-            html += '<div class="error-tables-section">';
-            html += '<h4>Failed Functions/Procedures:</h4>';
-            html += '<div class="table-items">';
-            Object.values(summary.errors)
-                .sort((a, b) => {
-                    // Sort by function name (errors don't have schema property, parse from functionName)
-                    return (a.functionName || '').localeCompare(b.functionName || '');
-                })
-                .forEach(error => {
-                    html += `<div class="table-item error">`;
-                    html += `<strong>${error.functionName}</strong>: ${error.error}`;
-                    if (error.sql) {
-                        html += `<div class="sql-statement"><pre>${error.sql}</pre></div>`;
-                    }
-                    html += `</div>`;
-                });
-            html += '</div>';
-            html += '</div>';
-        }
-    }
-
-    detailsDiv.innerHTML = html;
-
-    // Show the results section
-    resultsDiv.style.display = 'block';
+    setResultsPanel(`${database}-standalone-function-implementation`, {
+        summaryHtml: renderSummaryStats([
+            { label: 'Implemented', value: summary.implementedCount, cssClass: 'created' },
+            { label: 'Skipped', value: summary.skippedCount, cssClass: 'skipped' },
+            { label: 'Errors', value: summary.errorCount, cssClass: 'errors' }
+        ]),
+        detailLabel: 'implemented functions',
+        renderDetail: () => renderOutcomeSections([
+            {
+                title: 'Implemented Functions/Procedures',
+                items: toSortedArray(summary.implementedFunctions, 'schema', 'functionName'),
+                cssClass: 'created', nameKey: 'functionName', suffix: ' \u2713'
+            },
+            {
+                title: 'Skipped Functions/Procedures',
+                items: toSortedArray(summary.skippedFunctions, 'schema', 'functionName'),
+                cssClass: 'skipped', nameKey: 'functionName'
+            },
+            {
+                title: 'Failed Functions/Procedures',
+                items: toSortedArray(summary.errors, 'functionName'),
+                cssClass: 'error', nameKey: 'functionName', showError: true
+            }
+        ], { jobId: result.jobId, label: 'functions' })
+    });
 }
 
 function toggleStandaloneFunctionImplementationResults(database) {
-    const resultsDiv = document.getElementById(`${database}-standalone-function-implementation-results`);
-    const detailsDiv = document.getElementById(`${database}-standalone-function-implementation-details`);
-    const toggleIndicator = resultsDiv.querySelector('.toggle-indicator');
-
-    if (detailsDiv.style.display === 'none' || !detailsDiv.style.display) {
-        detailsDiv.style.display = 'block';
-        toggleIndicator.textContent = '▲';
-    } else {
-        detailsDiv.style.display = 'none';
-        toggleIndicator.textContent = '▼';
-    }
+    toggleResultsPanel(`${database}-standalone-function-implementation`);
 }
 
 // Verify PostgreSQL standalone function implementations
@@ -899,144 +697,95 @@ async function pollStandaloneFunctionVerificationJobStatus(jobId, database) {
 
 // Display standalone function implementation verification results
 function displayStandaloneFunctionImplementationVerificationResults(verificationResult) {
-    const resultsDiv = document.getElementById('postgres-standalone-function-implementation-verification-results');
-    const detailsDiv = document.getElementById('postgres-standalone-function-implementation-verification-details');
+    setResultsPanel('postgres-standalone-function-implementation-verification', {
+        summaryHtml: renderSummaryStats([
+            { label: 'Verified', value: verificationResult.verifiedCount || 0, cssClass: 'created' },
+            { label: 'Failed', value: verificationResult.failedCount || 0, cssClass: 'errors' },
+            { label: 'Warnings', value: verificationResult.warningCount || 0, cssClass: 'skipped' }
+        ]),
+        detailLabel: 'functions by schema',
+        renderDetail: () => {
+            let html = '';
 
-    let html = '';
+            if (verificationResult.verifiedFunctions && verificationResult.verifiedFunctions.length > 0) {
+                html += '<div class="outcome-section">';
+                html += '<h4>Verified Functions (Implemented)</h4>';
+                html += generateSchemaGroupedFunctionList(verificationResult.verifiedFunctions, 'verified');
+                html += '</div>';
+            }
 
-    // Summary statistics
-    html += '<div class="table-creation-summary">';
-    html += '<div class="summary-stats">';
-    html += `<span class="stat-item created">Verified: ${verificationResult.verifiedCount || 0}</span>`;
-    html += `<span class="stat-item errors">Failed: ${verificationResult.failedCount || 0}</span>`;
-    html += `<span class="stat-item skipped">Warnings: ${verificationResult.warningCount || 0}</span>`;
-    html += '</div>';
-    html += '</div>';
+            if (verificationResult.failedFunctions && verificationResult.failedFunctions.length > 0) {
+                html += '<div class="outcome-section">';
+                html += '<h4>Failed Functions (Stubs or Errors)</h4>';
+                html += generateSchemaGroupedFunctionList(verificationResult.failedFunctions, 'failed', verificationResult.failureReasons);
+                html += '</div>';
+            }
 
-    // Show verified functions - GROUPED BY SCHEMA
-    if (verificationResult.verifiedFunctions && verificationResult.verifiedFunctions.length > 0) {
-        html += '<div class="created-tables-section">';
-        html += '<h4>Verified Functions (Implemented):</h4>';
-        html += generateSchemaGroupedFunctionList(verificationResult.verifiedFunctions, 'verified');
-        html += '</div>';
-    }
+            if (verificationResult.warnings && verificationResult.warnings.length > 0) {
+                html += '<div class="outcome-section">';
+                html += '<h4>Warnings</h4><div class="table-items">';
+                html += renderCappedList(verificationResult.warnings,
+                    warning => `<div class="table-item warning">${escapeHtml(warning)}</div>`,
+                    { label: 'warnings' });
+                html += '</div></div>';
+            }
 
-    // Show failed functions - GROUPED BY SCHEMA
-    if (verificationResult.failedFunctions && verificationResult.failedFunctions.length > 0) {
-        html += '<div class="error-tables-section">';
-        html += '<h4>Failed Functions (Stubs or Errors):</h4>';
-        html += generateSchemaGroupedFunctionList(verificationResult.failedFunctions, 'failed', verificationResult.failureReasons);
-        html += '</div>';
-    }
-
-    // Show warnings - GROUPED BY SCHEMA
-    if (verificationResult.warnings && verificationResult.warnings.length > 0) {
-        html += '<div class="skipped-tables-section">';
-        html += '<h4>Warnings:</h4>';
-        html += '<div class="table-items">';
-        verificationResult.warnings.forEach(warning => {
-            html += `<div class="table-item warning">${escapeHtml(warning)}</div>`;
-        });
-        html += '</div>';
-        html += '</div>';
-    }
-
-    detailsDiv.innerHTML = html;
-    resultsDiv.style.display = 'block';
+            return html;
+        }
+    });
 }
 
-// Helper function to generate schema-grouped function list with expandable DDL
+// Schema-grouped function list with expandable DDL.
+// The DDL is the expensive part - a few thousand functions is a few thousand <pre> blocks -
+// so it is held in the deferred-code registry and materialized one function at a time.
 function generateSchemaGroupedFunctionList(functions, statusClass, failureReasons) {
-    const functionsBySchema = {};
-    functions.forEach(func => {
+    const normalized = functions.map(func => {
         const qualifiedName = func.qualifiedName || `${func.schema}.${func.functionName}`;
         const parts = qualifiedName.split('.');
-        const schema = parts.length > 1 ? parts[0] : 'unknown';
-        const functionName = parts.length > 1 ? parts[1] : qualifiedName;
-
-        if (!functionsBySchema[schema]) {
-            functionsBySchema[schema] = [];
-        }
-        functionsBySchema[schema].push({
+        return {
             qualifiedName: qualifiedName,
-            functionName: functionName,
+            schema: parts.length > 1 ? parts[0] : 'unknown',
+            functionName: parts.length > 1 ? parts.slice(1).join('.') : qualifiedName,
             signature: func.signature,
-            objectType: func.objectType,
-            returnType: func.returnType,
             ddl: func.ddl,
             lineCount: func.lineCount,
             isStub: func.isStub
-        });
+        };
     });
 
-    let html = '<div class="table-items">';
+    return renderSchemaGroups(normalized,
+        func => renderVerifiedFunctionRow(func, statusClass, failureReasons),
+        { label: 'functions', groupIdPrefix: `function-verification-${statusClass}` });
+}
 
-    Object.entries(functionsBySchema).sort(([a], [b]) => a.localeCompare(b)).forEach(([schemaName, schemaFunctions]) => {
-        const schemaId = `function-verification-${statusClass}-${schemaName.replace(/[^a-z0-9]/gi, '_')}`;
+// One function row: metadata line always, DDL only once asked for.
+function renderVerifiedFunctionRow(func, statusClass, failureReasons) {
+    const funcId = `func-ddl-${++functionRowSeq}`;
+    const statusIcon = statusClass === 'verified' ? '✓' : '✗';
+    const stubLabel = func.isStub ? ' [STUB]' : '';
 
-        html += '<div class="table-schema-group">';
-        html += `<div class="table-schema-header" onclick="toggleSchemaGroup('${schemaId}')">`;
-        html += `<span class="toggle-indicator" id="${schemaId}-indicator">▼</span> ${schemaName} (${schemaFunctions.length} functions)`;
-        html += '</div>';
-        html += `<div class="table-items-list" id="${schemaId}">`;
+    functionDdlSources.set(funcId, func.ddl || 'No DDL available');
 
-        // Sort functions within schema by function name
-        schemaFunctions.sort((a, b) => (a.functionName || '').localeCompare(b.functionName || ''));
+    let html = `<div class="function-item ${statusClass}">`;
+    html += `<div class="function-metadata" onclick="toggleFunctionDDL('${funcId}')">`;
+    html += `<span class="toggle-indicator" id="${funcId}-indicator">▶</span> `;
+    html += `<strong>${escapeHtml(func.functionName)}</strong>${stubLabel} ${statusIcon}`;
+    html += ` <span class="function-signature">${escapeHtml(func.signature || '')}</span>`;
+    html += ` <span class="function-lines">(${func.lineCount || 0} lines)</span>`;
 
-        schemaFunctions.forEach((func, index) => {
-            const funcId = `${schemaId}-func-${index}`;
-            const statusIcon = statusClass === 'verified' ? '✓' : '✗';
-            const stubLabel = func.isStub ? ' [STUB]' : '';
+    if (failureReasons && failureReasons[func.qualifiedName]) {
+        html += `<br/><span class="failure-reason">${escapeHtml(failureReasons[func.qualifiedName])}</span>`;
+    }
 
-            // Compact metadata line (collapsed)
-            html += `<div class="function-item ${statusClass}">`;
-            html += `<div class="function-metadata" onclick="toggleFunctionDDL('${funcId}')">`;
-            html += `<span class="toggle-indicator" id="${funcId}-indicator">▶</span> `;
-            html += `<strong>${func.functionName}</strong>${stubLabel} ${statusIcon}`;
-            html += ` <span class="function-signature">${escapeHtml(func.signature || '')}</span>`;
-            html += ` <span class="function-lines">(${func.lineCount || 0} lines)</span>`;
-
-            // Add failure reason if present
-            if (failureReasons && failureReasons[func.qualifiedName]) {
-                html += `<br/><span class="failure-reason">${escapeHtml(failureReasons[func.qualifiedName])}</span>`;
-            }
-
-            html += `</div>`;
-
-            // Expandable DDL section (hidden by default)
-            html += `<div class="function-ddl" id="${funcId}" style="display: none;">`;
-            html += `<button class="copy-ddl-btn" onclick="copyFunctionDDL('${funcId}-ddl')">Copy DDL</button>`;
-            html += `<pre id="${funcId}-ddl" class="ddl-content">${escapeHtml(func.ddl || 'No DDL available')}</pre>`;
-            html += `</div>`;
-            html += `</div>`;
-        });
-
-        html += '</div>';
-        html += '</div>';
-    });
-
-    html += '</div>';
+    html += `</div>`;
+    html += `<div class="function-ddl" id="${funcId}" style="display: none;"></div>`;
+    html += `</div>`;
     return html;
 }
 
-// Toggle schema group (reuse from view-service.js pattern)
-function toggleSchemaGroup(schemaId) {
-    const itemsList = document.getElementById(schemaId);
-    const indicator = document.getElementById(`${schemaId}-indicator`);
-
-    if (!itemsList) {
-        console.warn(`Schema group not found: ${schemaId}`);
-        return;
-    }
-
-    if (itemsList.style.display === 'none') {
-        itemsList.style.display = 'block';
-        if (indicator) indicator.textContent = '▼';
-    } else {
-        itemsList.style.display = 'none';
-        if (indicator) indicator.textContent = '▶';
-    }
-}
+// funcId -> DDL source, kept out of the DOM until the row is expanded.
+const functionDdlSources = new Map();
+let functionRowSeq = 0;
 
 // Toggle function DDL display
 function toggleFunctionDDL(funcId) {
@@ -1049,9 +798,14 @@ function toggleFunctionDDL(funcId) {
     }
 
     if (ddlDiv.style.display === 'none') {
+        // Build the DDL block on first open; discard it again on close.
+        const ddl = functionDdlSources.get(funcId) || 'No DDL available';
+        ddlDiv.innerHTML = `<button class="copy-ddl-btn" onclick="copyFunctionDDL('${funcId}-ddl')">Copy DDL</button>`
+                         + `<pre id="${funcId}-ddl" class="ddl-content">${escapeHtml(ddl)}</pre>`;
         ddlDiv.style.display = 'block';
         if (indicator) indicator.textContent = '▼';
     } else {
+        ddlDiv.innerHTML = '';
         ddlDiv.style.display = 'none';
         if (indicator) indicator.textContent = '▶';
     }
@@ -1083,26 +837,10 @@ function copyFunctionDDL(ddlId) {
 
 // Toggle function implementation verification results container
 function toggleStandaloneFunctionImplementationVerificationResults(database) {
-    const resultsDiv = document.getElementById(`${database}-standalone-function-implementation-verification-results`);
-    const detailsDiv = document.getElementById(`${database}-standalone-function-implementation-verification-details`);
-    const toggleIndicator = resultsDiv.querySelector('.toggle-indicator');
-
-    if (detailsDiv.style.display === 'none' || !detailsDiv.style.display) {
-        detailsDiv.style.display = 'block';
-        toggleIndicator.textContent = '▲';
-    } else {
-        detailsDiv.style.display = 'none';
-        toggleIndicator.textContent = '▼';
-    }
+    toggleResultsPanel(`${database}-standalone-function-implementation-verification`);
 }
 
 // Utility function to escape HTML (prevent XSS)
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
-
 // ===== END STANDALONE FUNCTION IMPLEMENTATION FUNCTIONS =====
 
 // ==========================================
@@ -1267,95 +1005,81 @@ async function getUnifiedFunctionVerificationJobResults(jobId) {
  * Includes function type (FUNCTION/PROCEDURE) and package member indicator.
  */
 function displayUnifiedFunctionVerificationResults(verificationResult) {
-    const resultsDiv = document.getElementById('postgres-unified-function-verification-results');
-    const detailsDiv = document.getElementById('postgres-unified-function-verification-details');
-
-    if (!resultsDiv || !detailsDiv) {
-        console.error('Unified function verification results container not found');
-        return;
-    }
-
-    let html = '';
-
-    // Summary statistics
-    const totalFunctions = verificationResult.totalFunctions || 0;
-    const implementedCount = verificationResult.implementedCount || 0;
-    const stubCount = verificationResult.stubCount || 0;
-    const errorCount = verificationResult.errorCount || 0;
-
-    html += '<div class="table-creation-summary">';
-    html += '<div class="summary-stats">';
-    html += `<span class="stat-item created">Implemented: ${implementedCount}</span>`;
-    html += `<span class="stat-item skipped">Stubs: ${stubCount}</span>`;
-    html += `<span class="stat-item errors">Errors: ${errorCount}</span>`;
-    html += `<span class="stat-item">Total: ${totalFunctions}</span>`;
-    html += '</div>';
-    html += '</div>';
-
-    // Generate schema-grouped functions with DDL
     const functionsBySchema = verificationResult.functionsBySchema || {};
 
-    Object.keys(functionsBySchema).sort().forEach(schemaName => {
-        const schemaFunctions = functionsBySchema[schemaName] || [];
-        const schemaId = `function-verification-schema-${schemaName.replace(/[^a-z0-9]/gi, '_')}`;
+    setResultsPanel('postgres-unified-function-verification', {
+        summaryHtml: renderSummaryStats([
+            { label: 'Implemented', value: verificationResult.implementedCount || 0, cssClass: 'created' },
+            { label: 'Stubs', value: verificationResult.stubCount || 0, cssClass: 'skipped' },
+            { label: 'Errors', value: verificationResult.errorCount || 0, cssClass: 'errors' },
+            { label: 'Total', value: verificationResult.totalFunctions || 0 }
+        ]),
+        detailLabel: 'functions by schema',
+        renderDetail: () => renderFunctionVerificationSchemaGroups(functionsBySchema)
+    });
+}
 
-        // Count by status for this schema
-        const schemaImplemented = schemaFunctions.filter(f => f.status === 'IMPLEMENTED').length;
-        const schemaStubs = schemaFunctions.filter(f => f.status === 'STUB').length;
-        const schemaErrors = schemaFunctions.filter(f => f.status === 'ERROR').length;
+// Schema groups for the unified function verification panel, each with its own
+// implemented/stub/error breakdown in the header.
+function renderFunctionVerificationSchemaGroups(functionsBySchema) {
+    let html = '';
+
+    Object.keys(functionsBySchema).sort().forEach(schemaName => {
+        const schemaFunctions = (functionsBySchema[schemaName] || [])
+            .slice()
+            .sort((a, b) => a.functionName.localeCompare(b.functionName));
+        const groupId = `function-verification-schema-${schemaName.replace(/[^a-z0-9]/gi, '_')}`;
+
+        const implemented = schemaFunctions.filter(f => f.status === 'IMPLEMENTED').length;
+        const stubs = schemaFunctions.filter(f => f.status === 'STUB').length;
+        const errors = schemaFunctions.filter(f => f.status === 'ERROR').length;
 
         html += '<div class="table-schema-group">';
-        html += `<div class="table-schema-header" onclick="toggleSchemaGroup('${schemaId}')">`;
-        html += `<span class="toggle-indicator" id="${schemaId}-indicator">▶</span> `;
-        html += `${schemaName} (${schemaFunctions.length} functions - `;
-        html += `${schemaImplemented} implemented, ${schemaStubs} stubs, ${schemaErrors} errors)`;
+        html += `<div class="table-schema-header collapsed" onclick="toggleSchemaGroupRows('${groupId}')">`;
+        html += `<span class="toggle-indicator">▶</span> `;
+        html += `${escapeHtml(schemaName)} (${formatCount(schemaFunctions.length)} functions - `;
+        html += `${implemented} implemented, ${stubs} stubs, ${errors} errors)`;
         html += '</div>';
-        html += `<div class="table-items-list" id="${schemaId}" style="display: none;">`;
+        html += `<div class="table-items-list" id="${groupId}" style="display: none;"></div>`;
+        html += '</div>';
 
-        // Sort functions by name within schema
-        schemaFunctions.sort((a, b) => a.functionName.localeCompare(b.functionName));
-
-        schemaFunctions.forEach(func => {
-            const funcId = `function-ddl-${schemaName}-${func.functionName}`.replace(/[^a-z0-9]/gi, '_');
-            const statusClass = func.status === 'IMPLEMENTED' ? 'created' :
-                               func.status === 'STUB' ? 'skipped' : 'error';
-            const statusBadge = func.status === 'IMPLEMENTED' ? '✓ IMPLEMENTED' :
-                               func.status === 'STUB' ? '⚠ STUB' : '✗ ERROR';
-
-            // Add type badge (FUNCTION/PROCEDURE) and package indicator
-            const typeBadge = func.functionType || 'FUNCTION';
-            const packageIndicator = func.isPackageMember ? '📦 Package' : 'Standalone';
-
-            html += `<div class="table-item ${statusClass}">`;
-            html += `<div class="view-header" onclick="toggleFunctionDdlLazy('${funcId}', '${schemaName}', '${func.functionName}')">`;
-            html += `<span class="toggle-indicator" id="${funcId}-indicator">▶</span> `;
-            html += `<strong>${func.functionName}</strong> `;
-            html += `<span class="status-badge">[${typeBadge}]</span> `;
-            html += `<span class="status-badge">[${packageIndicator}]</span> `;
-            html += `<span class="status-badge">[${statusBadge}]</span>`;
-            html += '</div>';
-
-            // DDL section (collapsible, starts collapsed, will be loaded on demand)
-            html += `<div class="view-ddl-section" id="${funcId}" style="display: none;" data-schema="${schemaName}" data-function-name="${func.functionName}" data-loaded="false">`;
-            if (func.errorMessage) {
-                // Show error immediately if function has an error
-                html += `<div class="error-message">Error: ${escapeHtml(func.errorMessage)}</div>`;
-            } else {
-                // Placeholder for lazy-loaded content
-                html += '<div class="loading-message">Loading...</div>';
-            }
-            html += '</div>';
-            html += '</div>';
+        schemaGroupRenderers.set(groupId, {
+            expanded: false,
+            render: () => renderCappedList(schemaFunctions,
+                func => renderUnifiedFunctionRow(schemaName, func),
+                { label: 'functions' })
         });
-
-        html += '</div>';
-        html += '</div>';
     });
 
-    detailsDiv.innerHTML = html;
+    return html;
+}
 
-    // Show the results section
-    resultsDiv.style.display = 'block';
+// One function row; its DDL is fetched from the backend on click.
+function renderUnifiedFunctionRow(schemaName, func) {
+    const funcId = `function-ddl-${schemaName}-${func.functionName}`.replace(/[^a-z0-9]/gi, '_');
+    const statusClass = func.status === 'IMPLEMENTED' ? 'created' :
+                        func.status === 'STUB' ? 'skipped' : 'error';
+    const statusBadge = func.status === 'IMPLEMENTED' ? '✓ IMPLEMENTED' :
+                        func.status === 'STUB' ? '⚠ STUB' : '✗ ERROR';
+    const typeBadge = func.functionType || 'FUNCTION';
+    const packageIndicator = func.isPackageMember ? '📦 Package' : 'Standalone';
+
+    let html = `<div class="table-item ${statusClass}">`;
+    html += `<div class="view-header" onclick="toggleFunctionDdlLazy('${funcId}', '${escapeHtml(schemaName)}', '${escapeHtml(func.functionName)}')">`;
+    html += `<span class="toggle-indicator" id="${funcId}-indicator">▶</span> `;
+    html += `<strong>${escapeHtml(func.functionName)}</strong> `;
+    html += `<span class="status-badge">[${escapeHtml(typeBadge)}]</span> `;
+    html += `<span class="status-badge">[${packageIndicator}]</span> `;
+    html += `<span class="status-badge">[${statusBadge}]</span>`;
+    html += '</div>';
+    html += `<div class="view-ddl-section" id="${funcId}" style="display: none;" data-schema="${escapeHtml(schemaName)}" data-function-name="${escapeHtml(func.functionName)}" data-loaded="false">`;
+    if (func.errorMessage) {
+        html += `<div class="error-message">Error: ${escapeHtml(func.errorMessage)}</div>`;
+    } else {
+        html += '<div class="loading-message">Loading...</div>';
+    }
+    html += '</div></div>';
+    return html;
 }
 
 /**
@@ -1432,17 +1156,7 @@ function toggleFunctionDdl(funcId) {
  * Toggle unified function verification results visibility.
  */
 function toggleUnifiedFunctionVerificationResults() {
-    const resultsDiv = document.getElementById('postgres-unified-function-verification-results');
-    const detailsDiv = document.getElementById('postgres-unified-function-verification-details');
-    const toggleIndicator = resultsDiv.querySelector('.toggle-indicator');
-
-    if (detailsDiv.style.display === 'none' || !detailsDiv.style.display) {
-        detailsDiv.style.display = 'block';
-        if (toggleIndicator) toggleIndicator.textContent = '▲';
-    } else {
-        detailsDiv.style.display = 'none';
-        if (toggleIndicator) toggleIndicator.textContent = '▼';
-    }
+    toggleResultsPanel('postgres-unified-function-verification');
 }
 
 // ===== END UNIFIED FUNCTION VERIFICATION =====

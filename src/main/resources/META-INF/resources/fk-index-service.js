@@ -150,100 +150,46 @@ async function getFKIndexCreationResults(jobId, database) {
 }
 
 function displayFKIndexCreationResults(result, database) {
-    const resultsDiv = document.getElementById(`${database}-fk-index-creation-results`);
-    const detailsDiv = document.getElementById(`${database}-fk-index-creation-details`);
+    const summary = result.summary;
+    if (!summary) return;
 
-    if (!resultsDiv || !detailsDiv) {
-        console.error('FK index creation results container not found');
-        return;
-    }
+    updateComponentCount("postgres-fk-indexes", summary.createdCount + summary.skippedCount + summary.errorCount);
 
-    let html = '';
+    setResultsPanel(`${database}-fk-index-creation`, {
+        summaryHtml: renderSummaryStats([
+            { label: 'Created', value: summary.createdCount, cssClass: 'created' },
+            { label: 'Skipped', value: summary.skippedCount, cssClass: 'skipped' },
+            { label: 'Errors', value: summary.errorCount, cssClass: 'errors' }
+        ]),
+        detailLabel: 'FK index outcomes',
+        renderDetail: () => renderOutcomeSections([
+            {
+                title: 'Created FK Indexes',
+                items: toSortedArray(summary.createdIndexes, 'tableName', 'indexName'),
+                renderItem: i => `<div class="table-item created">${describeFKIndex(i)} \u2713</div>`
+            },
+            {
+                title: 'Skipped FK Indexes (already exist)',
+                items: toSortedArray(summary.skippedIndexes, 'tableName', 'indexName'),
+                renderItem: i => `<div class="table-item skipped">${describeFKIndex(i)} (${escapeHtml(i.reason || 'already exists')})</div>`
+            },
+            {
+                title: 'Failed FK Indexes',
+                items: toSortedArray(summary.errors, 'tableName', 'indexName'),
+                renderItem: i => `<div class="table-item error">${describeFKIndex(i)}: ${escapeHtml(i.error || '')}`
+                                 + renderDeferredCode(i.sql) + `</div>`
+            }
+        ], { jobId: result.jobId, label: 'indexes' })
+    });
+}
 
-    if (result.summary) {
-        const summary = result.summary;
-
-        updateComponentCount("postgres-fk-indexes", summary.createdCount + summary.skippedCount + summary.errorCount);
-
-        html += '<div class="table-creation-summary">';
-        html += `<div class="summary-stats">`;
-        html += `<span class="stat-item created">Created: ${summary.createdCount}</span>`;
-        html += `<span class="stat-item skipped">Skipped: ${summary.skippedCount}</span>`;
-        html += `<span class="stat-item errors">Errors: ${summary.errorCount}</span>`;
-        html += `</div>`;
-        html += '</div>';
-
-        // Show created indexes - convert to Array
-        if (summary.createdCount > 0 && summary.createdIndexes) {
-            const createdIndexes = Array.isArray(summary.createdIndexes)
-                ? summary.createdIndexes
-                : Object.values(summary.createdIndexes);
-
-            html += '<div class="created-tables-section">';
-            html += '<h4>Created FK Indexes:</h4>';
-            html += '<div class="table-items">';
-            createdIndexes.forEach(index => {
-                html += `<div class="table-item created">${index.indexName} on ${index.tableName} (${index.columns}) ✓</div>`;
-            });
-            html += '</div>';
-            html += '</div>';
-        }
-
-        // Show skipped indexes - convert to Array
-        if (summary.skippedCount > 0 && summary.skippedIndexes) {
-            const skippedIndexes = Array.isArray(summary.skippedIndexes)
-                ? summary.skippedIndexes
-                : Object.values(summary.skippedIndexes);
-
-            html += '<div class="skipped-tables-section">';
-            html += '<h4>Skipped FK Indexes (already exist):</h4>';
-            html += '<div class="table-items">';
-            skippedIndexes.forEach(index => {
-                const reason = index.reason || 'already exists';
-                html += `<div class="table-item skipped">${index.indexName} on ${index.tableName} (${index.columns}) (${reason})</div>`;
-            });
-            html += '</div>';
-            html += '</div>';
-        }
-
-        // Show errors - convert to Array
-        if (summary.errorCount > 0 && summary.errors) {
-            const errors = Array.isArray(summary.errors)
-                ? summary.errors
-                : Object.values(summary.errors);
-
-            html += '<div class="error-tables-section">';
-            html += '<h4>Failed FK Indexes:</h4>';
-            html += '<div class="table-items">';
-            errors.forEach(error => {
-                html += `<div class="table-item error">`;
-                html += `<strong>${error.indexName}</strong> on ${error.tableName} (${error.columns}): ${error.error}`;
-                if (error.sql) {
-                    html += `<div class="sql-statement"><pre>${error.sql}</pre></div>`;
-                }
-                html += `</div>`;
-            });
-            html += '</div>';
-            html += '</div>';
-        }
-    }
-
-    detailsDiv.innerHTML = html;
-    resultsDiv.style.display = 'block';
+// "IDX_FK_EMP_DEPT on HR.EMP (DEPT_ID)"
+function describeFKIndex(index) {
+    return `<strong>${escapeHtml(index.indexName)}</strong> on ${escapeHtml(index.tableName)} (${escapeHtml(index.columns)})`;
 }
 
 function toggleFKIndexCreationResults() {
-    const resultsDiv = document.getElementById('postgres-fk-index-creation-results');
-    const detailsDiv = document.getElementById('postgres-fk-index-creation-details');
-    const toggleIndicator = resultsDiv.querySelector('.toggle-indicator');
-
-    if (detailsDiv.style.display === 'none' || !detailsDiv.style.display) {
-        detailsDiv.style.display = 'block';
-        toggleIndicator.textContent = '▲';
-    } else {
-        detailsDiv.style.display = 'none';
-        toggleIndicator.textContent = '▼';
-    }
+    toggleResultsPanel('postgres-fk-index-creation');
 }
 
 // ===== END FK INDEX FUNCTIONS =====

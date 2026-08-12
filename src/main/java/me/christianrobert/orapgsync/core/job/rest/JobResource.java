@@ -36,6 +36,7 @@ import me.christianrobert.orapgsync.core.job.model.trigger.TriggerMetadata;
 import me.christianrobert.orapgsync.core.job.model.trigger.TriggerImplementationResult;
 import me.christianrobert.orapgsync.core.job.model.synonym.SynonymReplacementViewCreationResult;
 import me.christianrobert.orapgsync.core.job.service.JobService;
+import me.christianrobert.orapgsync.core.job.service.JobTextReportFormatter;
 import me.christianrobert.orapgsync.function.rest.FunctionResource;
 import me.christianrobert.orapgsync.objectdatatype.rest.ObjectTypeResource;
 import me.christianrobert.orapgsync.oraclecompat.model.OracleCompatInstallationResult;
@@ -54,6 +55,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -136,6 +138,59 @@ public class JobResource {
 
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
                     .entity(errorResult)
+                    .build();
+        }
+    }
+
+    /**
+     * Full job result as plain text, for opening in a browser tab.
+     *
+     * <p>The HTML panels render only a capped preview of large results — a full migration
+     * produces more rows than the DOM can carry. This endpoint is the complete list, in a
+     * format the browser renders instantly and can search, save and diff.
+     */
+    @GET
+    @Path("/{jobId}/report")
+    @Produces(MediaType.TEXT_PLAIN)
+    public Response getJobReport(@PathParam("jobId") String jobId) {
+        log.debug("Getting job report for: {}", jobId);
+
+        try {
+            JobService.JobExecution<?> execution = jobService.getJobExecution(jobId);
+
+            if (execution == null) {
+                return Response.status(Response.Status.NOT_FOUND)
+                        .entity("Job not found: " + jobId + "\n")
+                        .build();
+            }
+
+            Map<String, String> header = new LinkedHashMap<>();
+            header.put("Job", jobId);
+            header.put("Type", execution.getJob().getJobType());
+            header.put("Status", execution.getStatus().name());
+            if (execution.getStartTime() != null) {
+                header.put("Started", execution.getStartTime().toString());
+            }
+            if (execution.getEndTime() != null) {
+                header.put("Finished", execution.getEndTime().toString());
+            }
+
+            if (execution.getStatus() == JobStatus.FAILED) {
+                Exception error = jobService.getJobError(jobId);
+                header.put("Error", error != null ? error.getMessage() : "unknown error");
+            }
+
+            Object result = jobService.isJobComplete(jobId) ? jobService.getJobResult(jobId) : null;
+            String report = JobTextReportFormatter.format(header, result);
+
+            return Response.ok(report)
+                    .header("Content-Disposition", "inline; filename=\"job-" + jobId + ".txt\"")
+                    .build();
+
+        } catch (Exception e) {
+            log.error("Error getting job report for: " + jobId, e);
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                    .entity("Error generating report: " + e.getMessage() + "\n")
                     .build();
         }
     }

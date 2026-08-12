@@ -147,67 +147,34 @@ async function getObjectDataTypeJobResults(jobId, database) {
 
 // Populate object type list with object types grouped by schema
 function populateObjectTypeList(database, objectTypesBySchema) {
-    const objectItemsElement = document.getElementById(`${database}-object-items`);
+    // Arrives already grouped by schema; flatten so the shared grouping helper can own the
+    // collapse behaviour.
+    const objectTypes = [];
+    Object.entries(objectTypesBySchema || {}).forEach(([schemaName, types]) => {
+        (types || []).forEach(type => objectTypes.push(Object.assign({ schema: schemaName }, type)));
+    });
 
-    if (!objectItemsElement) {
-        console.warn(`Object items element not found for database: ${database}`);
-        return;
-    }
-
-    // Clear existing items
-    objectItemsElement.innerHTML = '';
-
-    if (objectTypesBySchema && Object.keys(objectTypesBySchema).length > 0) {
-        Object.entries(objectTypesBySchema).forEach(([schemaName, objectTypes]) => {
-            const schemaGroup = document.createElement('div');
-            schemaGroup.className = 'object-schema-group';
-
-            const schemaHeader = document.createElement('div');
-            schemaHeader.className = 'object-schema-header';
-            schemaHeader.innerHTML = `<span class="toggle-indicator">▼</span> ${schemaName} (${objectTypes.length})`;
-            schemaHeader.onclick = () => toggleObjectSchemaGroup(database, schemaName);
-
-            const objectTypeItems = document.createElement('div');
-            objectTypeItems.className = 'object-type-items';
-            objectTypeItems.id = `${database}-${schemaName}-object-types`;
-
-            if (objectTypes && objectTypes.length > 0) {
-                objectTypes.forEach(objectType => {
-                    const objectTypeItem = document.createElement('div');
-                    objectTypeItem.className = 'object-type-item';
-                    objectTypeItem.innerHTML = `${objectType.name} (${objectType.variables?.length || 0} vars)`;
-
-                    // Add click handler to show/hide details
-                    objectTypeItem.onclick = () => toggleObjectTypeDetails(objectTypeItem, objectType);
-
-                    objectTypeItems.appendChild(objectTypeItem);
-                });
-            } else {
-                const noObjectTypesItem = document.createElement('div');
-                noObjectTypesItem.className = 'object-type-item';
-                noObjectTypesItem.textContent = 'No object types found';
-                noObjectTypesItem.style.fontStyle = 'italic';
-                noObjectTypesItem.style.color = '#999';
-                objectTypeItems.appendChild(noObjectTypesItem);
-            }
-
-            schemaGroup.appendChild(schemaHeader);
-            schemaGroup.appendChild(objectTypeItems);
-            objectItemsElement.appendChild(schemaGroup);
-        });
-    } else {
-        const noObjectTypesGroup = document.createElement('div');
-        noObjectTypesGroup.className = 'object-schema-group';
-        noObjectTypesGroup.innerHTML = `
-            <div class="object-type-item" style="font-style: italic; color: #999;">
-                No object types found
-            </div>
-        `;
-        objectItemsElement.appendChild(noObjectTypesGroup);
-    }
+    setDeferredList(`${database}-object-list`, `${database}-object-items`,
+        () => renderSchemaGroups(objectTypes, renderObjectTypeRow,
+            { label: 'object types', groupIdPrefix: `${database}-object-type-group` }),
+        `Object Data Types (${formatCount(objectTypes.length)})`);
 }
 
-// Toggle object list visibility
+// One object type row. Its variable list is built on click, from the registry rather than
+// from a captured closure - the rows are HTML strings now, not DOM nodes.
+function renderObjectTypeRow(objectType) {
+    const itemId = `object-type-${++objectTypeRowSeq}`;
+    objectTypeDetails.set(itemId, objectType);
+
+    const varCount = objectType.variables ? objectType.variables.length : 0;
+    return `<div class="object-type-item" id="${itemId}" onclick="toggleObjectTypeDetails('${itemId}')">`
+         + `${escapeHtml(objectType.name)} (${varCount} vars)</div>`;
+}
+
+// itemId -> object type, so the detail view survives the row being re-rendered.
+const objectTypeDetails = new Map();
+let objectTypeRowSeq = 0;
+
 function toggleObjectList(database) {
     const objectItems = document.getElementById(`${database}-object-items`);
     const header = document.querySelector(`#${database}-object-list .object-list-header`);
@@ -226,59 +193,38 @@ function toggleObjectList(database) {
     }
 }
 
-// Toggle object schema group visibility
-function toggleObjectSchemaGroup(database, schemaName) {
-    const objectTypeItems = document.getElementById(`${database}-${schemaName}-object-types`);
-    const header = event.target;
+// Toggle object type details visibility
+function toggleObjectTypeDetails(itemId) {
+    const objectTypeItem = document.getElementById(itemId);
+    const objectType = objectTypeDetails.get(itemId);
 
-    if (!objectTypeItems || !header) {
-        console.warn(`Object schema group elements not found for: ${database}.${schemaName}`);
+    if (!objectTypeItem || !objectType) {
         return;
     }
 
-    if (objectTypeItems.style.display === 'none') {
-        objectTypeItems.style.display = 'block';
-        header.classList.remove('collapsed');
-    } else {
-        objectTypeItems.style.display = 'none';
-        header.classList.add('collapsed');
+    const existing = objectTypeItem.querySelector('.object-type-details');
+    if (existing) {
+        existing.remove();
+        return;
     }
+
+    const details = document.createElement('div');
+    details.className = 'object-type-details';
+
+    if (objectType.variables && objectType.variables.length > 0) {
+        details.innerHTML = '<div><strong>Variables:</strong></div>'
+            + objectType.variables.map(variable =>
+                `<div class="object-type-variable">`
+                + `<span class="object-type-variable-name">${escapeHtml(variable.name)}</span>: `
+                + `<span class="object-type-variable-type">${escapeHtml(variable.dataType)}</span>`
+                + `</div>`).join('');
+    } else {
+        details.innerHTML = '<div style="font-style: italic; color: #999;">No variables defined</div>';
+    }
+
+    objectTypeItem.appendChild(details);
 }
 
-// Toggle object type details visibility
-function toggleObjectTypeDetails(objectTypeItem, objectType) {
-    let detailsElement = objectTypeItem.querySelector('.object-type-details');
-
-    if (detailsElement) {
-        // Toggle existing details
-        detailsElement.style.display = detailsElement.style.display === 'none' ? 'block' : 'none';
-    } else {
-        // Create and show details
-        detailsElement = document.createElement('div');
-        detailsElement.className = 'object-type-details';
-
-        if (objectType.variables && objectType.variables.length > 0) {
-            detailsElement.innerHTML = `
-                <div><strong>Variables:</strong></div>
-                ${objectType.variables.map(variable => `
-                    <div class="object-type-variable">
-                        <span class="object-type-variable-name">${variable.name}</span>:
-                        <span class="object-type-variable-type">${variable.dataType}</span>
-                    </div>
-                `).join('')}
-            `;
-        } else {
-            detailsElement.innerHTML = '<div style="font-style: italic; color: #999;">No variables defined</div>';
-        }
-
-        objectTypeItem.appendChild(detailsElement);
-        detailsElement.style.display = 'block';
-    }
-}
-
-// Object Type Creation Functions
-
-// Create PostgreSQL object types from Oracle object types
 async function createPostgresObjectTypes() {
     console.log('Starting PostgreSQL object type creation job...');
 
@@ -387,6 +333,7 @@ async function pollObjectTypeCreationJobStatus(jobId, database) {
     });
 }
 
+
 // Handle object type creation job completion
 function handleObjectTypeCreationJobComplete(result, database) {
     console.log(`Object type creation job results for ${database}:`, result);
@@ -403,99 +350,42 @@ function handleObjectTypeCreationJobComplete(result, database) {
         updateMessage(`Object type creation completed with errors: ${createdCount} created, ${skippedCount} skipped, ${errorCount} errors`);
     }
 
-    // Display object type creation results
     displayObjectTypeCreationResults(result, database);
-
-    // Refresh PostgreSQL object types to show newly created ones ... no need
-    //setTimeout(() => {
-    //    loadPostgresObjectTypes();
-    //}, 1000);
 }
 
-// Display object type creation results
 function displayObjectTypeCreationResults(result, database) {
-    const resultsDiv = document.getElementById(`${database}-object-type-creation-results`);
-    const detailsDiv = document.getElementById(`${database}-object-type-creation-details`);
+    const summary = result.summary;
+    if (!summary) return;
 
-    if (!resultsDiv || !detailsDiv) {
-        console.error('Object type creation results container not found');
-        return;
-    }
+    updateComponentCount("postgres-objects", summary.createdCount + summary.skippedCount + summary.errorCount);
 
-    let html = '';
-
-    if (result.summary) {
-        const summary = result.summary;
-
-        updateComponentCount("postgres-objects", summary.createdCount + summary.skippedCount + summary.errorCount);
-
-        html += '<div class="object-type-creation-summary">';
-        html += `<div class="summary-stats">`;
-        html += `<span class="stat-item created">Created: ${summary.createdCount}</span>`;
-        html += `<span class="stat-item skipped">Skipped: ${summary.skippedCount}</span>`;
-        html += `<span class="stat-item errors">Errors: ${summary.errorCount}</span>`;
-        html += `</div>`;
-        html += '</div>';
-
-        // Show created object types
-        if (summary.createdCount > 0) {
-            html += '<div class="created-types-section">';
-            html += '<h4>Created Object Types:</h4>';
-            html += '<div class="object-type-items">';
-            Object.values(summary.createdTypes).forEach(type => {
-                html += `<div class="object-type-item created">${type.typeName} ✓</div>`;
-            });
-            html += '</div>';
-            html += '</div>';
-        }
-
-        // Show skipped object types
-        if (summary.skippedCount > 0) {
-            html += '<div class="skipped-types-section">';
-            html += '<h4>Skipped Object Types (already exist):</h4>';
-            html += '<div class="object-type-items">';
-            Object.values(summary.skippedTypes).forEach(type => {
-                html += `<div class="object-type-item skipped">${type.typeName} (${type.reason})</div>`;
-            });
-            html += '</div>';
-            html += '</div>';
-        }
-
-        // Show errors
-        if (summary.errorCount > 0) {
-            html += '<div class="error-types-section">';
-            html += '<h4>Failed Object Types:</h4>';
-            html += '<div class="object-type-items">';
-            Object.values(summary.errors).forEach(error => {
-                html += `<div class="object-type-item error">`;
-                html += `<strong>${error.typeName}</strong>: ${error.error}`;
-                if (error.sql) {
-                    html += `<div class="sql-statement"><pre>${error.sql}</pre></div>`;
-                }
-                html += `</div>`;
-            });
-            html += '</div>';
-            html += '</div>';
-        }
-    }
-
-    detailsDiv.innerHTML = html;
-
-    // Show the results section
-    resultsDiv.style.display = 'block';
+    setResultsPanel(`${database}-object-type-creation`, {
+        summaryHtml: renderSummaryStats([
+            { label: 'Created', value: summary.createdCount, cssClass: 'created' },
+            { label: 'Skipped', value: summary.skippedCount, cssClass: 'skipped' },
+            { label: 'Errors', value: summary.errorCount, cssClass: 'errors' }
+        ]),
+        detailLabel: 'created object types',
+        renderDetail: () => renderOutcomeSections([
+            {
+                title: 'Created Object Types',
+                items: toSortedArray(summary.createdTypes, 'typeName'),
+                cssClass: 'created', nameKey: 'typeName', suffix: ' \u2713'
+            },
+            {
+                title: 'Skipped Object Types (already exist)',
+                items: toSortedArray(summary.skippedTypes, 'typeName'),
+                cssClass: 'skipped', nameKey: 'typeName'
+            },
+            {
+                title: 'Failed Object Types',
+                items: toSortedArray(summary.errors, 'typeName'),
+                cssClass: 'error', nameKey: 'typeName', showError: true
+            }
+        ], { jobId: result.jobId, label: 'object types' })
+    });
 }
 
-// Toggle object type creation results visibility
 function toggleObjectTypeCreationResults(database) {
-    const resultsDiv = document.getElementById(`${database}-object-type-creation-results`);
-    const detailsDiv = document.getElementById(`${database}-object-type-creation-details`);
-    const toggleIndicator = resultsDiv.querySelector('.toggle-indicator');
-
-    if (detailsDiv.style.display === 'none' || !detailsDiv.style.display) {
-        detailsDiv.style.display = 'block';
-        toggleIndicator.textContent = '▲';
-    } else {
-        detailsDiv.style.display = 'none';
-        toggleIndicator.textContent = '▼';
-    }
+    toggleResultsPanel(`${database}-object-type-creation`);
 }

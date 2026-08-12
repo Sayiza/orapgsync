@@ -18,7 +18,8 @@ transformation, data transfer. Full plan and rationale:
 
 | Priority | Item | Status |
 |---|---|---|
-| 1 | Error transparency & frontend performance (per-object error detail, aggregate-first UI) | 🔄 active |
+| 1 | Frontend performance — deferred/capped rendering, plain-text job reports | ✅ done |
+| 1 | Error transparency — per-object error detail (failing construct + Oracle source) | 🔄 active |
 | 2 | Parallel data transfer | ✅ done |
 | 3 | Index migration | ✅ done |
 | 4 | Transformer hardening — eliminate silent statement drops, no new features | 🔄 next |
@@ -34,7 +35,7 @@ transformation, data transfer. Full plan and rationale:
 
 - **Build**: `mvn clean compile`
 - **Dev mode**: `mvn quarkus:dev`
-- **Test**: `mvn test` (~1,590 tests across 126 test classes)
+- **Test**: `mvn test` (~1,590 tests across 130 test classes)
 - **Generate ANTLR parsers**: `mvn antlr4:antlr4` (from `src/main/antlr4/` → `target/generated-sources/antlr4/`)
 - **Package**: `mvn clean package`
 
@@ -123,6 +124,27 @@ drives the full run. Each feature row follows the same shape: ⟳ `refresh-btn` 
 database's current state into a count badge + schema-grouped list, `action-btn` performs creation,
 plus an expandable results panel.
 
+**`results-panel.js` owns all list and panel rendering** — never build result rows directly in a
+feature service. It exists because a full migration run put ~100k nodes into this single page and
+made it unusable. Three rules, and they are the reason it stays responsive:
+
+- **Deferred** — `setResultsPanel(panelId, {summaryHtml, renderDetail})` renders only the counts;
+  rows are built on expand and `innerHTML = ''`d on collapse. Hiding is not enough: a hidden
+  subtree still costs memory and style recalculation. Lists use `setDeferredList` +
+  `renderSchemaGroups`, which defers a second time at the schema-group level.
+- **Capped** — `renderCappedList` renders at most `RESULTS_ROW_CAP` (200) rows per section, then
+  links to the full plain-text report.
+- **Code on demand** — `renderDeferredCode` keeps SQL/DDL in a JS `Map` and builds the `<pre>`
+  only on click.
+
+Panel and list ids are conventional: `{panel}-results`/`{panel}-details`, `{x}-list`/`{x}-items`.
+Toggle state lives in the helper registries, not in `element.style.display`. `escapeHtml` is
+defined once, here — every interpolated value goes through it, because Oracle SQL contains `<`
+and `&`. Details: [CONSOLIDATION_PLAN.md](documentation/CONSOLIDATION_PLAN.md#frontend-rendering-implemented-2026-08-12).
+
+`oracle-compat-service.js` and `web-gateway-service.js` deliberately still render directly —
+their output is bounded.
+
 ## Migration Workflow (32 steps)
 
 Driven by `orchestration-service.js`. **Order matters** — the notes are the non-obvious constraints.
@@ -199,6 +221,12 @@ Two tiers:
    `/api/transformation/sql`, `/api/web-gateway/*`.
 
 Swagger UI at `/q/swagger-ui`.
+
+**`GET /api/jobs/{jobId}/report`** — the complete job result as `text/plain`, for opening in a
+browser tab. The HTML panels render a capped preview; this is the uncapped list, in a format the
+browser renders instantly and can search, save and diff between runs. `JobTextReportFormatter`
+walks the result's Jackson tree instead of switching on its type, so it covers every job type,
+including ones added later.
 
 **`POST /api/transformation/sql`** — ad-hoc Oracle→PostgreSQL SQL transformation for development
 testing and future dynamic SQL conversion. Body is `text/plain`, optional `?schema=HR` (defaults

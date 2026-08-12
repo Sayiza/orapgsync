@@ -152,91 +152,58 @@ function handleDataTransferJobComplete(result) {
 }
 
 function displayDataTransferResults(result) {
-    const resultsDiv = document.getElementById('postgres-data-transfer-results');
-    const detailsDiv = document.getElementById('postgres-data-transfer-details');
+    const summary = result.summary;
 
-    if (!resultsDiv || !detailsDiv) {
-        console.error('Data transfer results container not found');
+    if (!summary) {
+        setResultsPanel('postgres-data-transfer', {
+            summaryHtml: '<div class="no-results">No detailed results available</div>'
+        });
         return;
     }
 
-    let html = '';
+    updateComponentCount("postgres-data", (summary.totalRowsTransferred || 0).toLocaleString());
 
-    if (result.summary) {
-        const summary = result.summary;
+    const stats = [
+        { label: 'Transferred', value: summary.transferredCount, cssClass: 'transferred' },
+        { label: 'Skipped', value: summary.skippedCount, cssClass: 'skipped' }
+    ];
+    if (summary.errorCount > 0) {
+        stats.push({ label: 'Errors', value: summary.errorCount, cssClass: 'errors' });
+    }
+    stats.push({ label: 'Total Rows', value: summary.totalRowsTransferred || 0, cssClass: 'total-rows' });
 
-        updateComponentCount("postgres-data", (summary.totalRowsTransferred || 0).toLocaleString());
-
-        html += '<div class="table-creation-summary">';
-        html += `<div class="summary-stats">`;
-        html += `<span class="stat-item transferred">Transferred: ${summary.transferredCount}</span>`;
-        html += `<span class="stat-item skipped">Skipped: ${summary.skippedCount}</span>`;
-        if (summary.errorCount > 0) {
-            html += `<span class="stat-item errors">Errors: ${summary.errorCount}</span>`;
-        }
-        html += `<span class="stat-item total-rows">Total Rows: ${(summary.totalRowsTransferred || 0).toLocaleString()}</span>`;
-        html += '</div>';
-
-        if (summary.executionTimestamp) {
-            const date = new Date(summary.executionTimestamp);
-            html += `<div class="execution-time">Executed: ${date.toLocaleString()}</div>`;
-        }
-
-        html += '</div>';
-
-        // Show transferred tables
-        if (summary.transferredTables && Object.keys(summary.transferredTables).length > 0) {
-            html += '<div class="created-items-section">';
-            html += '<h4>Transferred Tables:</h4>';
-            html += '<div class="table-items">';
-            Object.values(summary.transferredTables).forEach(table => {
-                const rowInfo = table.rowsTransferred ? ` (${table.rowsTransferred.toLocaleString()} rows)` : '';
-                html += `<div class="table-item created">${table.tableName}${rowInfo} ✓</div>`;
-            });
-            html += '</div>';
-            html += '</div>';
-        }
-
-        // Show skipped tables
-        if (summary.skippedTables && Object.keys(summary.skippedTables).length > 0) {
-            html += '<div class="skipped-items-section">';
-            html += '<h4>Skipped Tables:</h4>';
-            html += '<div class="table-items">';
-            Object.values(summary.skippedTables).forEach(table => {
-                html += `<div class="table-item skipped">${table.tableName} (already synced or empty)</div>`;
-            });
-            html += '</div>';
-            html += '</div>';
-        }
-
-        // Show errors
-        if (summary.errors && Object.keys(summary.errors).length > 0) {
-            html += '<div class="error-items-section">';
-            html += '<h4>Transfer Errors:</h4>';
-            html += '<div class="table-items">';
-            Object.values(summary.errors).forEach(error => {
-                html += `<div class="table-item error"><strong>${error.tableName}</strong>: ${error.error}</div>`;
-            });
-            html += '</div>';
-            html += '</div>';
-        }
-    } else {
-        html += '<div class="no-results">No detailed results available</div>';
+    let summaryHtml = renderSummaryStats(stats);
+    if (summary.executionTimestamp) {
+        const date = new Date(summary.executionTimestamp);
+        summaryHtml += `<div class="execution-time">Executed: ${escapeHtml(date.toLocaleString())}</div>`;
     }
 
-    detailsDiv.innerHTML = html;
-    resultsDiv.style.display = 'block';
+    setResultsPanel('postgres-data-transfer', {
+        summaryHtml: summaryHtml,
+        detailLabel: 'transferred tables',
+        renderDetail: () => renderOutcomeSections([
+            {
+                title: 'Transferred Tables',
+                items: toSortedArray(summary.transferredTables, 'tableName'),
+                renderItem: table => {
+                    const rowInfo = table.rowsTransferred ? ` (${formatCount(table.rowsTransferred)} rows)` : '';
+                    return `<div class="table-item created">${escapeHtml(table.tableName)}${rowInfo} ✓</div>`;
+                }
+            },
+            {
+                title: 'Skipped Tables',
+                items: toSortedArray(summary.skippedTables, 'tableName'),
+                cssClass: 'skipped', nameKey: 'tableName', suffix: ' (already synced or empty)'
+            },
+            {
+                title: 'Transfer Errors',
+                items: toSortedArray(summary.errors, 'tableName'),
+                cssClass: 'error', nameKey: 'tableName', showError: true
+            }
+        ], { jobId: result.jobId, label: 'tables' })
+    });
 }
 
 function toggleDataTransferResults() {
-    const detailsDiv = document.getElementById('postgres-data-transfer-details');
-    const header = document.querySelector('#postgres-data-transfer-results .table-creation-header .toggle-indicator');
-
-    if (detailsDiv.style.display === 'none' || !detailsDiv.style.display) {
-        detailsDiv.style.display = 'block';
-        if (header) header.textContent = '▼';
-    } else {
-        detailsDiv.style.display = 'none';
-        if (header) header.textContent = '▶';
-    }
+    toggleResultsPanel('postgres-data-transfer');
 }

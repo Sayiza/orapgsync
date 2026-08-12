@@ -1620,3 +1620,51 @@ input[type="checkbox"] {
 .function-item.failed {
     background: var(--error-bg);
 }
+/* ========================================
+   Results Panel Infrastructure
+   (see results-panel.js)
+   ======================================== */
+
+/* Let the browser skip layout and paint for result panels that are scrolled out of
+   view. The reserved height is an estimate only — it is corrected once a panel is
+   actually rendered. */
+.panel-detail,
+.table-items-list {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 400px;
+}
+
+/* Clickable hint that expands a panel's deferred detail section */
+.panel-detail-hint,
+.code-toggle {
+    color: #0066cc;
+    cursor: pointer;
+    font-size: var(--font-xs);
+    margin-top: var(--spacing-xs);
+    user-select: none;
+}
+
+.panel-detail-hint:hover,
+.code-toggle:hover {
+    text-decoration: underline;
+}
+
+/* "Showing 200 of 4,312 views." footer under a capped list */
+.list-cap-note {
+    color: #6c757d;
+    font-size: var(--font-xs);
+    font-style: italic;
+    margin-top: var(--spacing-xs);
+    padding: var(--spacing-xs);
+}
+
+.report-link {
+    color: #0066cc;
+    font-style: normal;
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.report-link:hover {
+    text-decoration: underline;
+}

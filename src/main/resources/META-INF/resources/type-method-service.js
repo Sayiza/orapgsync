@@ -17,7 +17,6 @@
  * - getTypeMethodJobResults(): Retrieves and displays extraction results
  * - getTypeMethodStubCreationResults(): Retrieves and displays creation results
  * - populateTypeMethodList(): Populates UI with extracted type methods grouped by schema
- * - toggleTypeMethodSchemaGroup(): Toggles visibility of type method groups in UI
  * - displayTypeMethodStubCreationResults(): Displays detailed creation results
  * - toggleTypeMethodList(): Toggles visibility of type method list panels
  * - toggleTypeMethodCreationResults(): Toggles visibility of creation results panels
@@ -341,207 +340,58 @@ async function getTypeMethodStubCreationResults(jobId, database) {
 }
 
 function populateTypeMethodList(result, database) {
-    const typeMethodItemsElement = document.getElementById(`${database}-type-method-items`);
-
-    if (!typeMethodItemsElement) {
-        console.warn('Type method items element not found');
-        return;
-    }
-
-    // Clear existing items
-    typeMethodItemsElement.innerHTML = '';
-
-    // Get type methods from result
     const typeMethods = result.result || [];
 
-    if (typeMethods && typeMethods.length > 0) {
-        // Group type methods by schema
-        const schemaGroups = {};
-        typeMethods.forEach(method => {
-            const schema = method.schema || 'unknown';
-            if (!schemaGroups[schema]) {
-                schemaGroups[schema] = [];
-            }
-            schemaGroups[schema].push(method);
-        });
-
-        // Create schema groups
-        Object.entries(schemaGroups).forEach(([schemaName, schemaMethods]) => {
-            const schemaGroup = document.createElement('div');
-            schemaGroup.className = 'table-schema-group';
-
-            const schemaHeader = document.createElement('div');
-            schemaHeader.className = 'table-schema-header';
-            schemaHeader.innerHTML = `<span class="toggle-indicator">▼</span> ${schemaName} (${schemaMethods.length} type methods)`;
-            schemaHeader.onclick = () => toggleTypeMethodSchemaGroup(database, schemaName);
-
-            const typeMethodItems = document.createElement('div');
-            typeMethodItems.className = 'table-items-list';
-            typeMethodItems.id = `${database}-${schemaName}-type-methods`;
-
-            // Add individual type method entries for this schema
-            schemaMethods.forEach(method => {
-                const methodItem = document.createElement('div');
-                methodItem.className = 'table-item';
-
-                // Display method name with type name
-                const displayName = `${method.typeName}.${method.methodName}`;
-
-                // Add method type indicators
-                const memberIndicator = method.instantiable === 'YES' ? 'M' : 'S'; // Member or Static
-                const typeIndicator = method.methodType === 'FUNCTION' ? '𝑓' : 'ₚ';
-                methodItem.innerHTML = `<span class="type-method-indicator">${memberIndicator}${typeIndicator}</span> ${displayName}`;
-
-                typeMethodItems.appendChild(methodItem);
-            });
-
-            schemaGroup.appendChild(schemaHeader);
-            schemaGroup.appendChild(typeMethodItems);
-            typeMethodItemsElement.appendChild(schemaGroup);
-        });
-    } else {
-        const noMethodsItem = document.createElement('div');
-        noMethodsItem.className = 'table-item';
-        noMethodsItem.textContent = 'No type methods found';
-        noMethodsItem.style.fontStyle = 'italic';
-        noMethodsItem.style.color = '#999';
-        typeMethodItemsElement.appendChild(noMethodsItem);
-    }
-}
-
-function toggleTypeMethodSchemaGroup(database, schemaName) {
-    const typeMethodItems = document.getElementById(`${database}-${schemaName}-type-methods`);
-    const header = typeMethodItems.previousElementSibling;
-    const indicator = header.querySelector('.toggle-indicator');
-
-    if (typeMethodItems.style.display === 'none') {
-        typeMethodItems.style.display = 'block';
-        indicator.textContent = '▼';
-    } else {
-        typeMethodItems.style.display = 'none';
-        indicator.textContent = '▶';
-    }
-}
-
-function displayTypeMethodStubCreationResults(result, database) {
-    const resultsDiv = document.getElementById(`${database}-type-method-creation-results`);
-    const detailsDiv = document.getElementById(`${database}-type-method-creation-details`);
-
-    if (!resultsDiv || !detailsDiv) {
-        console.error('Type method stub creation results container not found');
-        return;
-    }
-
-    let html = '';
-
-    if (result.summary) {
-        const summary = result.summary;
-
-        updateComponentCount("postgres-type-methods", summary.createdCount + summary.skippedCount + summary.errorCount);
-
-        html += '<div class="table-creation-summary">';
-        html += `<div class="summary-stats">`;
-        html += `<span class="stat-item created">Created: ${summary.createdCount}</span>`;
-        html += `<span class="stat-item skipped">Skipped: ${summary.skippedCount}</span>`;
-        html += `<span class="stat-item errors">Errors: ${summary.errorCount}</span>`;
-        html += `</div>`;
-        html += '</div>';
-
-        // Show created type methods
-        if (summary.createdCount > 0 && summary.createdMethods) {
-            html += '<div class="created-tables-section">';
-            html += '<h4>Created Type Method Stubs:</h4>';
-            html += '<div class="table-items">';
-            Object.values(summary.createdMethods)
-                .sort((a, b) => {
-                    // Sort by schema first, then by method name
-                    const schemaCompare = (a.schema || '').localeCompare(b.schema || '');
-                    if (schemaCompare !== 0) return schemaCompare;
-                    return (a.methodName || '').localeCompare(b.methodName || '');
-                })
-                .forEach(method => {
-                    html += `<div class="table-item created">${method.methodName} ✓</div>`;
-                });
-            html += '</div>';
-            html += '</div>';
-        }
-
-        // Show skipped type methods
-        if (summary.skippedCount > 0 && summary.skippedMethods) {
-            html += '<div class="skipped-tables-section">';
-            html += '<h4>Skipped Type Methods (already exist):</h4>';
-            html += '<div class="table-items">';
-            Object.values(summary.skippedMethods)
-                .sort((a, b) => {
-                    // Sort by schema first, then by method name
-                    const schemaCompare = (a.schema || '').localeCompare(b.schema || '');
-                    if (schemaCompare !== 0) return schemaCompare;
-                    return (a.methodName || '').localeCompare(b.methodName || '');
-                })
-                .forEach(method => {
-                    html += `<div class="table-item skipped">${method.methodName} (already exists)</div>`;
-                });
-            html += '</div>';
-            html += '</div>';
-        }
-
-        // Show errors
-        if (summary.errorCount > 0 && summary.errors) {
-            html += '<div class="error-tables-section">';
-            html += '<h4>Failed Type Methods:</h4>';
-            html += '<div class="table-items">';
-            Object.values(summary.errors)
-                .sort((a, b) => {
-                    // Sort by method name (errors may not have schema property, parse from methodName)
-                    return (a.methodName || '').localeCompare(b.methodName || '');
-                })
-                .forEach(error => {
-                    html += `<div class="table-item error">`;
-                    html += `<strong>${error.methodName}</strong>: ${error.error}`;
-                    if (error.sql) {
-                        html += `<div class="sql-statement"><pre>${error.sql}</pre></div>`;
-                    }
-                    html += `</div>`;
-                });
-            html += '</div>';
-            html += '</div>';
-        }
-    }
-
-    detailsDiv.innerHTML = html;
-    resultsDiv.style.display = 'block';
+    setDeferredList(`${database}-type-method-list`, `${database}-type-method-items`,
+        () => renderSchemaGroups(typeMethods, method => {
+            const displayName = `${method.typeName}.${method.methodName}`;
+            const memberIndicator = method.instantiable === 'YES' ? 'M' : 'S';
+            const typeIndicator = method.methodType === 'FUNCTION' ? '𝑓' : 'ₚ';
+            return `<div class="table-item"><span class="type-method-indicator">${memberIndicator}${typeIndicator}</span> ${escapeHtml(displayName)}</div>`;
+        }, { label: 'type methods', groupIdPrefix: `${database}-type-method-group` }),
+        `Type Methods (${formatCount(typeMethods.length)})`);
 }
 
 function toggleTypeMethodList(database) {
-    const typeMethodItems = document.getElementById(`${database}-type-method-items`);
-    const header = document.querySelector(`#${database}-type-method-list .table-list-header`);
-
-    if (!typeMethodItems || !header) {
-        console.warn(`Type method list elements not found for database: ${database}`);
-        return;
-    }
-
-    if (typeMethodItems.style.display === 'none') {
-        typeMethodItems.style.display = 'block';
-        header.classList.remove('collapsed');
-    } else {
-        typeMethodItems.style.display = 'none';
-        header.classList.add('collapsed');
-    }
+    toggleDeferredList(`${database}-type-method-list`);
 }
 
-function toggleTypeMethodCreationResults() {
-    const resultsDiv = document.getElementById('postgres-type-method-creation-results');
-    const detailsDiv = document.getElementById('postgres-type-method-creation-details');
-    const toggleIndicator = resultsDiv.querySelector('.toggle-indicator');
+function displayTypeMethodStubCreationResults(result, database) {
+    const summary = result.summary;
+    if (!summary) return;
 
-    if (detailsDiv.style.display === 'none' || !detailsDiv.style.display) {
-        detailsDiv.style.display = 'block';
-        toggleIndicator.textContent = '▲';
-    } else {
-        detailsDiv.style.display = 'none';
-        toggleIndicator.textContent = '▼';
-    }
+    updateComponentCount("postgres-type-methods", summary.createdCount + summary.skippedCount + summary.errorCount);
+
+    setResultsPanel(`${database}-type-method-creation`, {
+        summaryHtml: renderSummaryStats([
+            { label: 'Created', value: summary.createdCount, cssClass: 'created' },
+            { label: 'Skipped', value: summary.skippedCount, cssClass: 'skipped' },
+            { label: 'Errors', value: summary.errorCount, cssClass: 'errors' }
+        ]),
+        detailLabel: 'type method stubs',
+        renderDetail: () => renderOutcomeSections([
+            {
+                title: 'Created Type Method Stubs',
+                items: toSortedArray(summary.createdMethods, 'schema', 'methodName'),
+                cssClass: 'created', nameKey: 'methodName', suffix: ' \u2713'
+            },
+            {
+                title: 'Skipped Type Methods (already exist)',
+                items: toSortedArray(summary.skippedMethods, 'schema', 'methodName'),
+                cssClass: 'skipped', nameKey: 'methodName', suffix: ' (already exists)'
+            },
+            {
+                title: 'Failed Type Methods',
+                items: toSortedArray(summary.errors, 'typeMethodName'),
+                cssClass: 'error', nameKey: 'typeMethodName', showError: true
+            }
+        ], { jobId: result.jobId, label: 'type methods' })
+    });
+}
+
+
+function toggleTypeMethodCreationResults() {
+    toggleResultsPanel('postgres-type-method-creation');
 }
 
 // ===== TYPE METHOD IMPLEMENTATION FUNCTIONS =====
@@ -805,196 +655,74 @@ async function getTypeMethodVerificationResults(jobId) {
 }
 
 function displayTypeMethodImplementationResults(result) {
-    const resultsDiv = document.getElementById('postgres-type-method-implementation-results');
-    const detailsDiv = document.getElementById('postgres-type-method-implementation-details');
+    const summary = result.summary;
+    if (!summary) return;
 
-    if (!resultsDiv || !detailsDiv) {
-        console.error('Type method implementation results container not found');
-        return;
-    }
-
-    let html = '';
-
-    if (result.summary) {
-        const summary = result.summary;
-
-        html += '<div class="table-creation-summary">';
-        html += `<div class="summary-stats">`;
-        html += `<span class="stat-item created">Implemented: ${summary.implementedCount}</span>`;
-        html += `<span class="stat-item skipped">Skipped: ${summary.skippedCount}</span>`;
-        html += `<span class="stat-item errors">Errors: ${summary.errorCount}</span>`;
-        html += `</div>`;
-        html += '</div>';
-
-        // Show implemented type methods
-        if (summary.implementedCount > 0 && summary.implementedMethods) {
-            html += '<div class="created-tables-section">';
-            html += '<h4>Implemented Type Methods:</h4>';
-            html += '<div class="table-items">';
-            Object.values(summary.implementedMethods)
-                .sort((a, b) => {
-                    // Sort by schema first, then by method name
-                    const schemaCompare = (a.schema || '').localeCompare(b.schema || '');
-                    if (schemaCompare !== 0) return schemaCompare;
-                    return (a.methodName || '').localeCompare(b.methodName || '');
-                })
-                .forEach(method => {
-                    html += `<div class="table-item created">${method.methodName} ✓</div>`;
-                });
-            html += '</div>';
-            html += '</div>';
-        }
-
-        // Show skipped type methods
-        if (summary.skippedCount > 0 && summary.skippedMethods) {
-            html += '<div class="skipped-tables-section">';
-            html += '<h4>Skipped Type Methods:</h4>';
-            html += '<div class="table-items">';
-            Object.values(summary.skippedMethods)
-                .sort((a, b) => {
-                    // Sort by schema first, then by method name
-                    const schemaCompare = (a.schema || '').localeCompare(b.schema || '');
-                    if (schemaCompare !== 0) return schemaCompare;
-                    return (a.methodName || '').localeCompare(b.methodName || '');
-                })
-                .forEach(method => {
-                    html += `<div class="table-item skipped">${method.methodName} (skipped)</div>`;
-                });
-            html += '</div>';
-            html += '</div>';
-        }
-
-        // Show errors
-        if (summary.errorCount > 0 && summary.errors) {
-            html += '<div class="error-tables-section">';
-            html += '<h4>Failed Type Methods:</h4>';
-            html += '<div class="table-items">';
-            Object.values(summary.errors)
-                .sort((a, b) => {
-                    // Sort by type method name (errors may not have schema property, parse from typeMethodName)
-                    return (a.typeMethodName || '').localeCompare(b.typeMethodName || '');
-                })
-                .forEach(error => {
-                    html += `<div class="table-item error">`;
-                    html += `<strong>${error.typeMethodName}</strong>: ${error.error}`;
-                    if (error.sql) {
-                        html += `<div class="sql-statement"><pre>${error.sql}</pre></div>`;
-                    }
-                    html += `</div>`;
-                });
-            html += '</div>';
-            html += '</div>';
-        }
-    }
-
-    detailsDiv.innerHTML = html;
-    resultsDiv.style.display = 'block';
+    setResultsPanel('postgres-type-method-implementation', {
+        summaryHtml: renderSummaryStats([
+            { label: 'Implemented', value: summary.implementedCount, cssClass: 'created' },
+            { label: 'Skipped', value: summary.skippedCount, cssClass: 'skipped' },
+            { label: 'Errors', value: summary.errorCount, cssClass: 'errors' }
+        ]),
+        detailLabel: 'implemented type methods',
+        renderDetail: () => renderOutcomeSections([
+            {
+                title: 'Implemented Type Methods',
+                items: toSortedArray(summary.implementedMethods, 'schema', 'methodName'),
+                cssClass: 'created', nameKey: 'methodName', suffix: ' \u2713'
+            },
+            {
+                title: 'Skipped Type Methods',
+                items: toSortedArray(summary.skippedMethods, 'schema', 'methodName'),
+                cssClass: 'skipped', nameKey: 'methodName', suffix: ' (skipped)'
+            },
+            {
+                title: 'Failed Type Methods',
+                items: toSortedArray(summary.errors, 'typeMethodName'),
+                cssClass: 'error', nameKey: 'typeMethodName', showError: true
+            }
+        ], { jobId: result.jobId, label: 'type methods' })
+    });
 }
 
 function displayTypeMethodVerificationResults(result) {
-    const resultsDiv = document.getElementById('postgres-unified-type-method-verification-results');
-    const detailsDiv = document.getElementById('postgres-unified-type-method-verification-details');
-
-    if (!resultsDiv || !detailsDiv) {
-        console.error('Type method verification results container not found');
-        return;
-    }
-
-    let html = '';
-
-    // Get type methods from result
     const typeMethods = result.result || [];
-    const typeMethodCount = typeMethods.length;
 
-    html += '<div class="table-creation-summary">';
-    html += `<div class="summary-stats">`;
-    html += `<span class="stat-item">Total Type Methods: ${typeMethodCount}</span>`;
-    html += `</div>`;
-    html += '</div>';
-
-    if (typeMethodCount > 0) {
-        // Group by schema
-        const schemaGroups = {};
-        typeMethods.forEach(method => {
-            const schema = method.schema || 'unknown';
-            if (!schemaGroups[schema]) {
-                schemaGroups[schema] = [];
+    setResultsPanel('postgres-unified-type-method-verification', {
+        summaryHtml: renderSummaryStats([
+            { label: 'Total Type Methods', value: typeMethods.length }
+        ]),
+        detailLabel: 'type methods by schema',
+        renderDetail: () => {
+            if (typeMethods.length === 0) {
+                return '<div class="table-items"><div class="table-item">No type methods found in PostgreSQL</div></div>';
             }
-            schemaGroups[schema].push(method);
-        });
-
-        html += '<div class="created-tables-section">';
-        html += '<h4>Verified Type Methods:</h4>';
-
-        Object.entries(schemaGroups).forEach(([schemaName, schemaMethods]) => {
-            html += `<div class="table-schema-group">`;
-            html += `<div class="table-schema-header"><strong>${schemaName}</strong> (${schemaMethods.length} type methods)</div>`;
-            html += '<div class="table-items">';
-
-            // Sort methods within schema by type name first, then method name
-            schemaMethods.sort((a, b) => {
+            const sorted = typeMethods.slice().sort((a, b) => {
                 const typeCompare = (a.typeName || '').localeCompare(b.typeName || '');
                 if (typeCompare !== 0) return typeCompare;
                 return (a.methodName || '').localeCompare(b.methodName || '');
             });
+            return renderSchemaGroups(sorted, renderVerifiedTypeMethodRow,
+                { label: 'type methods', groupIdPrefix: 'type-method-verification-schema' });
+        }
+    });
+}
 
-            schemaMethods.forEach(method => {
-                const displayName = `${method.typeName}.${method.methodName}`;
-                const memberIndicator = method.instantiable === 'YES' ? 'M' : 'S';
-                const typeIndicator = method.methodType === 'FUNCTION' ? '𝑓' : 'ₚ';
-                html += `<div class="table-item created"><span class="type-method-indicator">${memberIndicator}${typeIndicator}</span> ${displayName} ✓</div>`;
-            });
-            html += '</div>';
-            html += '</div>';
-        });
-
-        html += '</div>';
-    } else {
-        html += '<div class="table-items"><div class="table-item">No type methods found in PostgreSQL</div></div>';
-    }
-
-    detailsDiv.innerHTML = html;
-    resultsDiv.style.display = 'block';
+// One type method row. The indicator is MEMBER/STATIC followed by FUNCTION/PROCEDURE.
+function renderVerifiedTypeMethodRow(method) {
+    const displayName = `${method.typeName}.${method.methodName}`;
+    const memberIndicator = method.instantiable === 'YES' ? 'M' : 'S';
+    const typeIndicator = method.methodType === 'FUNCTION' ? '𝑓' : 'ₚ';
+    return `<div class="table-item created"><span class="type-method-indicator">${memberIndicator}${typeIndicator}</span> `
+         + `${escapeHtml(displayName)} \u2713</div>`;
 }
 
 function toggleTypeMethodImplementationResults(database) {
-    const resultsDiv = document.getElementById(`${database}-type-method-implementation-results`);
-    const detailsDiv = document.getElementById(`${database}-type-method-implementation-details`);
-
-    if (!resultsDiv || !detailsDiv) {
-        console.warn('Type method implementation results elements not found for database:', database);
-        return;
-    }
-
-    const toggleIndicator = resultsDiv.querySelector('.toggle-indicator');
-
-    if (detailsDiv.style.display === 'none' || !detailsDiv.style.display) {
-        detailsDiv.style.display = 'block';
-        if (toggleIndicator) toggleIndicator.textContent = '▲';
-    } else {
-        detailsDiv.style.display = 'none';
-        if (toggleIndicator) toggleIndicator.textContent = '▼';
-    }
+    toggleResultsPanel(`${database}-type-method-implementation`);
 }
 
 function toggleUnifiedTypeMethodVerificationResults() {
-    const resultsDiv = document.getElementById('postgres-unified-type-method-verification-results');
-    const detailsDiv = document.getElementById('postgres-unified-type-method-verification-details');
-
-    if (!resultsDiv || !detailsDiv) {
-        console.warn('Unified type method verification results elements not found');
-        return;
-    }
-
-    const toggleIndicator = resultsDiv.querySelector('.toggle-indicator');
-
-    if (detailsDiv.style.display === 'none' || !detailsDiv.style.display) {
-        detailsDiv.style.display = 'block';
-        if (toggleIndicator) toggleIndicator.textContent = '▲';
-    } else {
-        detailsDiv.style.display = 'none';
-        if (toggleIndicator) toggleIndicator.textContent = '▼';
-    }
+    toggleResultsPanel('postgres-unified-type-method-verification');
 }
 
 // ===== END TYPE METHOD FUNCTIONS =====

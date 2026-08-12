@@ -19,7 +19,6 @@
  * - getConstraintJobResults(): Retrieves and displays extraction/verification results
  * - getConstraintCreationResults(): Retrieves and displays creation results
  * - populateConstraintList(): Populates UI with extracted constraints grouped by type and table
- * - toggleConstraintTypeGroup(): Toggles visibility of constraint type groups in UI
  * - displayConstraintCreationResults(): Displays detailed creation results
  * - toggleConstraintList(): Toggles visibility of constraint list panels
  * - toggleConstraintCreationResults(): Toggles visibility of creation results panels
@@ -347,196 +346,77 @@ async function getConstraintCreationResults(jobId, database) {
 }
 
 function populateConstraintList(result, database) {
-    const constraintItemsElement = document.getElementById(`${database}-constraint-items`);
-
-    if (!constraintItemsElement) {
-        console.warn('Constraint items element not found');
-        return;
-    }
-
-    // Clear existing items
-    constraintItemsElement.innerHTML = '';
-
-    // Get constraints from result
     const constraints = result.result || [];
 
-    if (constraints && constraints.length > 0) {
-        // Group constraints by type
-        const typeGroups = {
-            'P': { name: 'Primary Keys', constraints: [] },
-            'U': { name: 'Unique Constraints', constraints: [] },
-            'R': { name: 'Foreign Keys', constraints: [] },
-            'C': { name: 'Check Constraints', constraints: [] }
-        };
+    // Constraints group by kind rather than by schema - which kind a constraint is says more
+    // about it than which schema it lives in.
+    const typeNames = {
+        'P': 'Primary Keys',
+        'U': 'Unique Constraints',
+        'R': 'Foreign Keys',
+        'C': 'Check Constraints'
+    };
+    const grouped = constraints.map(c => Object.assign({}, c, {
+        constraintGroup: typeNames[c.constraintType || 'C'] || 'Other Constraints'
+    }));
 
-        constraints.forEach(constraint => {
-            const type = constraint.constraintType || 'C';
-            if (typeGroups[type]) {
-                typeGroups[type].constraints.push(constraint);
-            }
-        });
-
-        // Create type groups
-        Object.entries(typeGroups).forEach(([typeCode, typeData]) => {
-            if (typeData.constraints.length > 0) {
-                const typeGroup = document.createElement('div');
-                typeGroup.className = 'table-schema-group';
-
-                const typeHeader = document.createElement('div');
-                typeHeader.className = 'table-schema-header';
-                typeHeader.innerHTML = `<span class="toggle-indicator">▼</span> ${typeData.name} (${typeData.constraints.length})`;
-                typeHeader.onclick = () => toggleConstraintTypeGroup(database, typeCode);
-
-                const constraintItems = document.createElement('div');
-                constraintItems.className = 'table-items-list';
-                constraintItems.id = `${database}-${typeCode}-constraints`;
-
-                // Add individual constraint entries for this type
-                typeData.constraints.forEach(constraint => {
-                    const constraintItem = document.createElement('div');
-                    constraintItem.className = 'table-item';
-                    const tableName = constraint.schema + '.' + constraint.tableName;
-                    constraintItem.textContent = `${constraint.constraintName} (${tableName})`;
-                    constraintItems.appendChild(constraintItem);
-                });
-
-                typeGroup.appendChild(typeHeader);
-                typeGroup.appendChild(constraintItems);
-                constraintItemsElement.appendChild(typeGroup);
-            }
-        });
-    } else {
-        const noConstraintsItem = document.createElement('div');
-        noConstraintsItem.className = 'table-item';
-        noConstraintsItem.textContent = 'No constraints found';
-        noConstraintsItem.style.fontStyle = 'italic';
-        noConstraintsItem.style.color = '#999';
-        constraintItemsElement.appendChild(noConstraintsItem);
-    }
-}
-
-function toggleConstraintTypeGroup(database, typeCode) {
-    const constraintItems = document.getElementById(`${database}-${typeCode}-constraints`);
-    const header = constraintItems.previousElementSibling;
-    const indicator = header.querySelector('.toggle-indicator');
-
-    if (constraintItems.style.display === 'none') {
-        constraintItems.style.display = 'block';
-        indicator.textContent = '▼';
-    } else {
-        constraintItems.style.display = 'none';
-        indicator.textContent = '▶';
-    }
-}
-
-function displayConstraintCreationResults(result, database) {
-    const resultsDiv = document.getElementById(`${database}-constraint-creation-results`);
-    const detailsDiv = document.getElementById(`${database}-constraint-creation-details`);
-
-    if (!resultsDiv || !detailsDiv) {
-        console.error('Constraint creation results container not found');
-        return;
-    }
-
-    let html = '';
-
-    if (result.summary) {
-        const summary = result.summary;
-
-        updateComponentCount("postgres-constraints", summary.createdCount + summary.skippedCount + summary.errorCount);
-
-        html += '<div class="table-creation-summary">';
-        html += `<div class="summary-stats">`;
-        html += `<span class="stat-item created">Created: ${summary.createdCount}</span>`;
-        html += `<span class="stat-item skipped">Skipped: ${summary.skippedCount}</span>`;
-        html += `<span class="stat-item errors">Errors: ${summary.errorCount}</span>`;
-        html += `</div>`;
-        html += '</div>';
-
-        // Show created constraints - convert to Array
-        if (summary.createdCount > 0 && summary.createdConstraints) {
-            const createdConstraints = Array.isArray(summary.createdConstraints)
-                ? summary.createdConstraints
-                : Object.values(summary.createdConstraints);
-
-            html += '<div class="created-tables-section">';
-            html += '<h4>Created Constraints:</h4>';
-            html += '<div class="table-items">';
-            createdConstraints.forEach(constraint => {
-                html += `<div class="table-item created">${constraint.constraintName} (${constraint.constraintType}) on ${constraint.tableName} ✓</div>`;
-            });
-            html += '</div>';
-            html += '</div>';
-        }
-
-        // Show skipped constraints - convert to Array
-        if (summary.skippedCount > 0 && summary.skippedConstraints) {
-            const skippedConstraints = Array.isArray(summary.skippedConstraints)
-                ? summary.skippedConstraints
-                : Object.values(summary.skippedConstraints);
-
-            html += '<div class="skipped-tables-section">';
-            html += '<h4>Skipped Constraints (already exist):</h4>';
-            html += '<div class="table-items">';
-            skippedConstraints.forEach(constraint => {
-                const reason = constraint.reason || 'already exists';
-                html += `<div class="table-item skipped">${constraint.constraintName} (${constraint.constraintType}) on ${constraint.tableName} (${reason})</div>`;
-            });
-            html += '</div>';
-            html += '</div>';
-        }
-
-        // Show errors - convert to Array
-        if (summary.errorCount > 0 && summary.errors) {
-            const errors = Array.isArray(summary.errors)
-                ? summary.errors
-                : Object.values(summary.errors);
-
-            html += '<div class="error-tables-section">';
-            html += '<h4>Failed Constraints:</h4>';
-            html += '<div class="table-items">';
-            errors.forEach(error => {
-                html += `<div class="table-item error">`;
-                html += `<strong>${error.constraintName}</strong> (${error.constraintType}) on ${error.tableName}: ${error.errorMessage}`;
-                if (error.sqlStatement) {
-                    html += `<div class="sql-statement"><pre>${error.sqlStatement}</pre></div>`;
-                }
-                html += `</div>`;
-            });
-            html += '</div>';
-            html += '</div>';
-        }
-    }
-
-    detailsDiv.innerHTML = html;
-    resultsDiv.style.display = 'block';
+    setDeferredList(`${database}-constraint-list`, `${database}-constraint-items`,
+        () => renderSchemaGroups(grouped,
+            c => `<div class="table-item">${escapeHtml(c.constraintName)} (${escapeHtml(c.schema + '.' + c.tableName)})</div>`,
+            {
+                schemaKey: 'constraintGroup',
+                label: 'constraints',
+                groupIdPrefix: `${database}-constraint-group`
+            }),
+        `Constraints (${formatCount(constraints.length)})`);
 }
 
 function toggleConstraintList(database) {
-    const listDiv = document.getElementById(`${database}-constraint-list`);
-    const toggleIndicator = listDiv.querySelector('.toggle-indicator');
+    toggleDeferredList(`${database}-constraint-list`);
+}
 
-    if (listDiv.style.display === 'none' || !listDiv.style.display) {
-        listDiv.style.display = 'block';
-        toggleIndicator.textContent = '▲';
-    } else {
-        listDiv.style.display = 'none';
-        toggleIndicator.textContent = '▼';
-    }
+function displayConstraintCreationResults(result, database) {
+    const summary = result.summary;
+    if (!summary) return;
+
+    updateComponentCount("postgres-constraints", summary.createdCount + summary.skippedCount + summary.errorCount);
+
+    setResultsPanel(`${database}-constraint-creation`, {
+        summaryHtml: renderSummaryStats([
+            { label: 'Created', value: summary.createdCount, cssClass: 'created' },
+            { label: 'Skipped', value: summary.skippedCount, cssClass: 'skipped' },
+            { label: 'Errors', value: summary.errorCount, cssClass: 'errors' }
+        ]),
+        detailLabel: 'created constraints',
+        renderDetail: () => renderOutcomeSections([
+            {
+                title: 'Created Constraints',
+                items: toSortedArray(summary.createdConstraints, 'tableName', 'constraintName'),
+                renderItem: c => `<div class="table-item created">${describeConstraint(c)} \u2713</div>`
+            },
+            {
+                title: 'Skipped Constraints (already exist)',
+                items: toSortedArray(summary.skippedConstraints, 'tableName', 'constraintName'),
+                renderItem: c => `<div class="table-item skipped">${describeConstraint(c)} (${escapeHtml(c.reason || 'already exists')})</div>`
+            },
+            {
+                title: 'Failed Constraints',
+                items: toSortedArray(summary.errors, 'tableName', 'constraintName'),
+                renderItem: c => `<div class="table-item error">${describeConstraint(c)}: ${escapeHtml(c.errorMessage || '')}`
+                                 + renderDeferredCode(c.sqlStatement) + `</div>`
+            }
+        ], { jobId: result.jobId, label: 'constraints' })
+    });
+}
+
+// "PK_EMP (P) on HR.EMP" - the type code matters because constraint names repeat across tables.
+function describeConstraint(constraint) {
+    return `<strong>${escapeHtml(constraint.constraintName)}</strong> `
+         + `(${escapeHtml(constraint.constraintType)}) on ${escapeHtml(constraint.tableName)}`;
 }
 
 function toggleConstraintCreationResults() {
-    const resultsDiv = document.getElementById('postgres-constraint-creation-results');
-    const detailsDiv = document.getElementById('postgres-constraint-creation-details');
-    const toggleIndicator = resultsDiv.querySelector('.toggle-indicator');
-
-    if (detailsDiv.style.display === 'none' || !detailsDiv.style.display) {
-        detailsDiv.style.display = 'block';
-        toggleIndicator.textContent = '▲';
-    } else {
-        detailsDiv.style.display = 'none';
-        toggleIndicator.textContent = '▼';
-    }
+    toggleResultsPanel('postgres-constraint-creation');
 }
 
 // ===== END CONSTRAINT FUNCTIONS =====

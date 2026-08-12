@@ -44,11 +44,16 @@ tables/views are involved.
       transformation error message, the failing construct, and the original Oracle source.
       Backend already has the data (TransformationException messages); expose it via the
       job status/result endpoints instead of logs only.
-- [ ] Aggregate-first UI: summary counts per job (ok / failed / skipped) from a lightweight
-      endpoint; load object lists lazily, paginated, filterable by status ("show only failures").
+- [x] **Aggregate-first UI** (done 2026-08-12): summary counts render immediately, object rows
+      are built only on expand and discarded on collapse, every list section is capped, and the
+      complete result is one click away as plain text. See "Frontend Rendering" below.
+- [ ] Server-side pagination/filtering of the result endpoints ("show only failures"). The
+      frontend no longer *needs* it to stay responsive, so this is now about payload size:
+      `/api/jobs/{id}/result` still ships every object including `sqlDefinition`.
 - [ ] Audit frontend polling: avoid re-fetching and re-rendering full lists on every poll tick.
-- [ ] Consistency pass over the feature panels (same badge semantics, same detail view,
-      same toggle behavior across tables/views/functions/triggers).
+- [x] **Consistency pass over the feature panels** (done 2026-08-12): all 22 result panels and
+      12 extraction lists now go through the same two helpers, so badge semantics, toggle
+      behaviour and detail rendering are identical by construction rather than by convention.
 - [x] **Pre-flight compatibility report** (done 2026-08-08, views only): one job that parses
       all extracted views and produces a categorized report of unsupported constructs *before*
       anything is created. This is also the data source for item 5.
@@ -57,7 +62,9 @@ tables/views are involved.
       separate step from the view analysis).
 
 **Acceptance:** A failed object's root cause is reachable in ≤2 clicks; the UI stays
-responsive with 5,000+ tables/views.
+responsive with 5,000+ tables/views. **The responsiveness half is met** — a panel reporting
+3,000 views now puts 8 elements in the document instead of 3,819. The error-detail half
+(failing construct + Oracle source) is still open.
 
 **Effort:** M–L (largest item, but can be delivered incrementally per sub-task).
 
@@ -174,6 +181,62 @@ position/occurrence > 1, `ORDER SIBLINGS BY`, RETURNING clause, cursor expressio
 categorized reason visible in the UI.
 
 **Effort:** ongoing, sized per construct after the report exists.
+
+---
+
+## Frontend Rendering (implemented 2026-08-12)
+
+After a full run the single-page UI became unusable: every one of ~22 result panels and ~12
+extraction lists rendered every row of its result into the same document, hidden panels kept
+their nodes, and each failed object carried a `<pre>` block of its SQL. One panel reporting
+3,000 views alone contributed 3,819 elements.
+
+**Modules:**
+- `resources/results-panel.js` — the shared rendering infrastructure (new)
+- `core/job/service/JobTextReportFormatter` — plain-text rendering of any job result (new)
+- `JobResource.getJobReport` — `GET /api/jobs/{jobId}/report`, `text/plain`
+
+**Three rules, implemented once instead of in 34 places:**
+
+1. **Deferred detail.** `setResultsPanel(panelId, {summaryHtml, renderDetail})` renders the
+   counts immediately and stores the detail closure. `toggleResultsPanel` invokes it on expand
+   and sets `innerHTML = ''` on collapse. Hiding a subtree was not enough — a hidden subtree
+   still occupies memory and is still walked by style recalculation. Extraction lists get the
+   same treatment through `setDeferredList` / `toggleDeferredList`, with a second level:
+   expanding a list builds one row per *schema*, and expanding a schema builds that schema's
+   rows.
+2. **Capped rows.** `renderCappedList` renders at most `RESULTS_ROW_CAP` (200) rows per section
+   and appends "Showing 200 of 4,312 views" plus a link to the full report.
+3. **Deferred code.** `renderDeferredCode` holds SQL and function DDL in a JS `Map` and builds
+   the `<pre>` only on click. These were the most expensive nodes in the page.
+
+**The plain-text report is the escape hatch that makes capping acceptable.** The browser
+renders a megabyte of text instantly at sizes where the DOM cannot, and unlike the panel view
+it supports the browser's own search, saves to a file, and can be diffed between two runs.
+`JobTextReportFormatter` walks the Jackson tree of the result rather than switching on the
+result type — `JobResource` already carries a 300-line type switch, and a second one would
+silently produce empty reports for whichever job type someone forgot to add.
+
+**Measured** (view implementation panel, 3,000 views + 200 failures): 3,819 → 8 elements on
+arrival; 1,016 when expanded (capped, no `<pre>`); 0 again when collapsed.
+
+**Two pre-existing bugs fixed in passing**, both found by the consolidation:
+- `escapeHtml` was defined three times and applied inconsistently, so a view whose SQL
+  contained `<` corrupted the panel it was rendered into. There is now one definition, it also
+  escapes quotes (the old DOM-based one did not), and it is applied on every interpolated value.
+- `toggleSchemaGroup` was defined in three service files with the same name; the last one
+  loaded won for all three. All three are now gone, replaced by `toggleSchemaGroupRows`.
+
+Toggle state lives in the helper registries, not in `element.style.display`. Inline style is
+not the place to keep application state and reading it back breaks as soon as a stylesheet has
+an opinion about the same property.
+
+**Not changed:** `oracle-compat-service.js` and `web-gateway-service.js` still render directly.
+Their output is a fixed catalog and a single generated project — bounded, so there is nothing
+to gain and no reason to churn them.
+
+**Still open:** `/api/jobs/{id}/result` continues to ship every object including
+`ViewMetadata.sqlDefinition`. The DOM is no longer the bottleneck; the payload is the next one.
 
 ---
 

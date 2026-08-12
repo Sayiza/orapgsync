@@ -406,307 +406,119 @@ async function getTriggerVerificationResults(jobId) {
 }
 
 function populateTriggerList(result, database) {
-    const triggerItemsElement = document.getElementById(`${database}-trigger-items`);
-
-    if (!triggerItemsElement) {
-        console.warn('Trigger items element not found');
-        return;
-    }
-
-    // Clear existing items
-    triggerItemsElement.innerHTML = '';
-
-    // Get triggers from result
     const triggers = result.result || [];
 
-    if (triggers && triggers.length > 0) {
-        // Group triggers by schema
-        const schemaGroups = {};
-        triggers.forEach(trigger => {
-            const schema = trigger.schema || 'unknown';
-            if (!schemaGroups[schema]) {
-                schemaGroups[schema] = [];
-            }
-            schemaGroups[schema].push(trigger);
-        });
-
-        // Create schema groups
-        Object.entries(schemaGroups).forEach(([schemaName, schemaTriggers]) => {
-            const schemaGroup = document.createElement('div');
-            schemaGroup.className = 'table-schema-group';
-
-            const schemaHeader = document.createElement('div');
-            schemaHeader.className = 'table-schema-header';
-            schemaHeader.innerHTML = `<span class="toggle-indicator">▼</span> ${schemaName} (${schemaTriggers.length} triggers)`;
-            schemaHeader.onclick = () => toggleTriggerSchemaGroup(database, schemaName);
-
-            const triggerItems = document.createElement('div');
-            triggerItems.className = 'table-items-list';
-            triggerItems.id = `${database}-${schemaName}-triggers`;
-
-            // Add individual trigger entries for this schema
-            schemaTriggers.forEach(trigger => {
-                const triggerItem = document.createElement('div');
-                triggerItem.className = 'table-item';
-
-                // Display trigger with table
-                const displayName = `${trigger.triggerName} ON ${trigger.tableName}`;
-
-                // Add trigger type indicators
-                let typeIndicator = '';
-                if (trigger.triggerType) {
-                    if (trigger.triggerType.includes('BEFORE')) typeIndicator += 'B';
-                    else if (trigger.triggerType.includes('AFTER')) typeIndicator += 'A';
-                    else if (trigger.triggerType.includes('INSTEAD')) typeIndicator += 'I';
-                }
-                if (trigger.triggerLevel === 'ROW') typeIndicator += 'R';
-                else if (trigger.triggerLevel === 'STATEMENT') typeIndicator += 'S';
-
-                triggerItem.innerHTML = `<span class="trigger-indicator">${typeIndicator}</span> ${displayName}`;
-
-                triggerItems.appendChild(triggerItem);
-            });
-
-            schemaGroup.appendChild(schemaHeader);
-            schemaGroup.appendChild(triggerItems);
-            triggerItemsElement.appendChild(schemaGroup);
-        });
-    } else {
-        const noTriggersItem = document.createElement('div');
-        noTriggersItem.className = 'table-item';
-        noTriggersItem.textContent = 'No triggers found';
-        noTriggersItem.style.fontStyle = 'italic';
-        noTriggersItem.style.color = '#999';
-        triggerItemsElement.appendChild(noTriggersItem);
-    }
+    setDeferredList(`${database}-trigger-list`, `${database}-trigger-items`,
+        () => renderSchemaGroups(triggers, renderTriggerListRow,
+            { label: 'triggers', groupIdPrefix: `${database}-trigger-group` }),
+        `Triggers (${formatCount(triggers.length)})`);
 }
 
-function toggleTriggerSchemaGroup(database, schemaName) {
-    const triggerItems = document.getElementById(`${database}-${schemaName}-triggers`);
-    const header = triggerItems.previousElementSibling;
-    const indicator = header.querySelector('.toggle-indicator');
-
-    if (triggerItems.style.display === 'none') {
-        triggerItems.style.display = 'block';
-        indicator.textContent = '▼';
-    } else {
-        triggerItems.style.display = 'none';
-        indicator.textContent = '▶';
+// "BR MY_TRG ON EMP" - the leading letters are timing (Before/After/Instead of) and
+// level (Row/Statement).
+function renderTriggerListRow(trigger) {
+    let typeIndicator = '';
+    if (trigger.triggerType) {
+        if (trigger.triggerType.includes('BEFORE')) typeIndicator += 'B';
+        else if (trigger.triggerType.includes('AFTER')) typeIndicator += 'A';
+        else if (trigger.triggerType.includes('INSTEAD')) typeIndicator += 'I';
     }
-}
+    if (trigger.triggerLevel === 'ROW') typeIndicator += 'R';
+    else if (trigger.triggerLevel === 'STATEMENT') typeIndicator += 'S';
 
-function displayTriggerImplementationResults(result) {
-    const resultsDiv = document.getElementById('postgres-trigger-implementation-results');
-    const detailsDiv = document.getElementById('postgres-trigger-implementation-details');
-
-    if (!resultsDiv || !detailsDiv) {
-        console.error('Trigger implementation results container not found');
-        return;
-    }
-
-    let html = '';
-
-    if (result.summary) {
-        const summary = result.summary;
-
-        html += '<div class="table-creation-summary">';
-        html += `<div class="summary-stats">`;
-        html += `<span class="stat-item created">Implemented: ${summary.implementedCount}</span>`;
-        html += `<span class="stat-item skipped">Skipped: ${summary.skippedCount}</span>`;
-        html += `<span class="stat-item errors">Errors: ${summary.errorCount}</span>`;
-        html += `</div>`;
-        html += '</div>';
-
-        // Show implemented triggers
-        if (summary.implementedCount > 0 && summary.implementedTriggers) {
-            html += '<div class="created-tables-section">';
-            html += '<h4>Implemented Triggers:</h4>';
-            html += '<div class="table-items">';
-            Object.values(summary.implementedTriggers).forEach(trigger => {
-                html += `<div class="table-item created">${trigger.triggerName} ✓</div>`;
-            });
-            html += '</div>';
-            html += '</div>';
-        }
-
-        // Show skipped triggers
-        if (summary.skippedCount > 0 && summary.skippedTriggers) {
-            html += '<div class="skipped-tables-section">';
-            html += '<h4>Skipped Triggers:</h4>';
-            html += '<div class="table-items">';
-            Object.values(summary.skippedTriggers).forEach(trigger => {
-                html += `<div class="table-item skipped">${trigger.triggerName} (skipped)</div>`;
-            });
-            html += '</div>';
-            html += '</div>';
-        }
-
-        // Show errors
-        if (summary.errorCount > 0 && summary.errors) {
-            html += '<div class="error-tables-section">';
-            html += '<h4>Failed Triggers:</h4>';
-            html += '<div class="table-items">';
-            Object.values(summary.errors).forEach(error => {
-                html += `<div class="table-item error">`;
-                html += `<strong>${error.triggerName}</strong>: ${error.error}`;
-                if (error.sql) {
-                    html += `<div class="sql-statement"><pre>${error.sql}</pre></div>`;
-                }
-                html += `</div>`;
-            });
-            html += '</div>';
-            html += '</div>';
-        }
-    }
-
-    detailsDiv.innerHTML = html;
-    resultsDiv.style.display = 'block';
-}
-
-function displayTriggerVerificationResults(result) {
-    const resultsDiv = document.getElementById('postgres-unified-trigger-verification-results');
-    const detailsDiv = document.getElementById('postgres-unified-trigger-verification-details');
-
-    if (!resultsDiv || !detailsDiv) {
-        console.error('Trigger verification results container not found');
-        return;
-    }
-
-    let html = '';
-
-    // Get triggers from result
-    const triggers = result.result || [];
-    const triggerCount = triggers.length;
-
-    html += '<div class="table-creation-summary">';
-    html += `<div class="summary-stats">`;
-    html += `<span class="stat-item">Total Triggers: ${triggerCount}</span>`;
-    html += `</div>`;
-    html += '</div>';
-
-    if (triggerCount > 0) {
-        // Group by schema
-        const schemaGroups = {};
-        triggers.forEach(trigger => {
-            const schema = trigger.schema || 'unknown';
-            if (!schemaGroups[schema]) {
-                schemaGroups[schema] = [];
-            }
-            schemaGroups[schema].push(trigger);
-        });
-
-        html += '<div class="created-tables-section">';
-        html += '<h4>Verified Triggers (Click to view DDL):</h4>';
-
-        Object.keys(schemaGroups).sort().forEach(schemaName => {
-            const schemaTriggers = schemaGroups[schemaName];
-            const schemaId = `trigger-verification-schema-${schemaName.replace(/[^a-z0-9]/gi, '_')}`;
-
-            html += '<div class="table-schema-group">';
-            html += `<div class="table-schema-header" onclick="toggleSchemaGroup('${schemaId}')">`;
-            html += `<span class="toggle-indicator" id="${schemaId}-indicator">▶</span> `;
-            html += `${schemaName} (${schemaTriggers.length} triggers)`;
-            html += '</div>';
-            html += `<div class="table-items-list" id="${schemaId}" style="display: none;">`;
-
-            // Sort triggers by name within schema
-            schemaTriggers.sort((a, b) => a.triggerName.localeCompare(b.triggerName));
-
-            schemaTriggers.forEach(trigger => {
-                const triggerId = `trigger-ddl-${schemaName}-${trigger.triggerName}`.replace(/[^a-z0-9]/gi, '_');
-                const displayName = `${trigger.triggerName} ON ${trigger.tableName}`;
-
-                let typeIndicator = '';
-                if (trigger.triggerType) {
-                    if (trigger.triggerType.includes('BEFORE')) typeIndicator += 'B';
-                    else if (trigger.triggerType.includes('AFTER')) typeIndicator += 'A';
-                    else if (trigger.triggerType.includes('INSTEAD')) typeIndicator += 'I';
-                }
-                if (trigger.triggerLevel === 'ROW') typeIndicator += 'R';
-                else if (trigger.triggerLevel === 'STATEMENT') typeIndicator += 'S';
-
-                html += `<div class="table-item created">`;
-                html += `<div class="view-header" onclick="toggleTriggerDdlLazy('${triggerId}', '${schemaName}', '${trigger.triggerName}')">`;
-                html += `<span class="toggle-indicator" id="${triggerId}-indicator">▶</span> `;
-                html += `<strong><span class="trigger-indicator">${typeIndicator}</span> ${displayName}</strong>`;
-                html += '</div>';
-
-                // DDL section (collapsible, starts collapsed, will be loaded on demand)
-                html += `<div class="view-ddl-section" id="${triggerId}" style="display: none;" data-schema="${schemaName}" data-trigger-name="${trigger.triggerName}" data-loaded="false">`;
-                html += '<div class="loading-message">Loading...</div>';
-                html += '</div>';
-                html += '</div>';
-            });
-
-            html += '</div>';
-            html += '</div>';
-        });
-
-        html += '</div>';
-    } else {
-        html += '<div class="table-items"><div class="table-item">No triggers found in PostgreSQL</div></div>';
-    }
-
-    detailsDiv.innerHTML = html;
-    resultsDiv.style.display = 'block';
+    const displayName = `${trigger.triggerName} ON ${trigger.tableName}`;
+    return `<div class="table-item"><span class="trigger-indicator">${typeIndicator}</span> ${escapeHtml(displayName)}</div>`;
 }
 
 function toggleTriggerList(database) {
-    const triggerItems = document.getElementById(`${database}-trigger-items`);
-    const header = document.querySelector(`#${database}-trigger-list .table-list-header`);
-
-    if (!triggerItems || !header) {
-        console.warn(`Trigger list elements not found for database: ${database}`);
-        return;
-    }
-
-    if (triggerItems.style.display === 'none') {
-        triggerItems.style.display = 'block';
-        header.classList.remove('collapsed');
-    } else {
-        triggerItems.style.display = 'none';
-        header.classList.add('collapsed');
-    }
+    toggleDeferredList(`${database}-trigger-list`);
 }
 
+function displayTriggerImplementationResults(result) {
+    const summary = result.summary;
+    if (!summary) return;
+
+    setResultsPanel('postgres-trigger-implementation', {
+        summaryHtml: renderSummaryStats([
+            { label: 'Implemented', value: summary.implementedCount, cssClass: 'created' },
+            { label: 'Skipped', value: summary.skippedCount, cssClass: 'skipped' },
+            { label: 'Errors', value: summary.errorCount, cssClass: 'errors' }
+        ]),
+        detailLabel: 'implemented triggers',
+        renderDetail: () => renderOutcomeSections([
+            {
+                title: 'Implemented Triggers',
+                items: toSortedArray(summary.implementedTriggers, 'triggerName'),
+                cssClass: 'created', nameKey: 'triggerName', suffix: ' \u2713'
+            },
+            {
+                title: 'Skipped Triggers',
+                items: toSortedArray(summary.skippedTriggers, 'triggerName'),
+                cssClass: 'skipped', nameKey: 'triggerName', suffix: ' (skipped)'
+            },
+            {
+                title: 'Failed Triggers',
+                items: toSortedArray(summary.errors, 'triggerName'),
+                cssClass: 'error', nameKey: 'triggerName', showError: true
+            }
+        ], { jobId: result.jobId, label: 'triggers' })
+    });
+}
+
+function displayTriggerVerificationResults(result) {
+    const triggers = result.result || [];
+
+    setResultsPanel('postgres-unified-trigger-verification', {
+        summaryHtml: renderSummaryStats([
+            { label: 'Total Triggers', value: triggers.length }
+        ]),
+        detailLabel: 'triggers by schema (click a trigger for its DDL)',
+        renderDetail: () => {
+            if (triggers.length === 0) {
+                return '<div class="table-items"><div class="table-item">No triggers found in PostgreSQL</div></div>';
+            }
+            return renderSchemaGroups(
+                triggers.slice().sort((a, b) => a.triggerName.localeCompare(b.triggerName)),
+                trigger => renderVerifiedTriggerRow(trigger),
+                { label: 'triggers', groupIdPrefix: 'trigger-verification-schema' });
+        }
+    });
+}
+
+// One trigger row; the DDL is fetched on click. The indicator letters are timing and level:
+// B/A/I for BEFORE/AFTER/INSTEAD OF, R/S for ROW/STATEMENT.
+function renderVerifiedTriggerRow(trigger) {
+    const schemaName = trigger.schema || 'unknown';
+    const triggerId = `trigger-ddl-${schemaName}-${trigger.triggerName}`.replace(/[^a-z0-9]/gi, '_');
+    const displayName = `${trigger.triggerName} ON ${trigger.tableName}`;
+
+    let typeIndicator = '';
+    if (trigger.triggerType) {
+        if (trigger.triggerType.includes('BEFORE')) typeIndicator += 'B';
+        else if (trigger.triggerType.includes('AFTER')) typeIndicator += 'A';
+        else if (trigger.triggerType.includes('INSTEAD')) typeIndicator += 'I';
+    }
+    if (trigger.triggerLevel === 'ROW') typeIndicator += 'R';
+    else if (trigger.triggerLevel === 'STATEMENT') typeIndicator += 'S';
+
+    let html = '<div class="table-item created">';
+    html += `<div class="view-header" onclick="toggleTriggerDdlLazy('${triggerId}', '${escapeHtml(schemaName)}', '${escapeHtml(trigger.triggerName)}')">`;
+    html += `<span class="toggle-indicator" id="${triggerId}-indicator">▶</span> `;
+    html += `<strong><span class="trigger-indicator">${typeIndicator}</span> ${escapeHtml(displayName)}</strong>`;
+    html += '</div>';
+    html += `<div class="view-ddl-section" id="${triggerId}" style="display: none;" data-schema="${escapeHtml(schemaName)}" data-trigger-name="${escapeHtml(trigger.triggerName)}" data-loaded="false">`;
+    html += '<div class="loading-message">Loading...</div>';
+    html += '</div></div>';
+    return html;
+}
+
+
 function toggleTriggerImplementationResults(database) {
-    const resultsDiv = document.getElementById(`${database}-trigger-implementation-results`);
-    const detailsDiv = document.getElementById(`${database}-trigger-implementation-details`);
-
-    if (!resultsDiv || !detailsDiv) {
-        console.warn('Trigger implementation results elements not found for database:', database);
-        return;
-    }
-
-    const toggleIndicator = resultsDiv.querySelector('.toggle-indicator');
-
-    if (detailsDiv.style.display === 'none' || !detailsDiv.style.display) {
-        detailsDiv.style.display = 'block';
-        if (toggleIndicator) toggleIndicator.textContent = '▲';
-    } else {
-        detailsDiv.style.display = 'none';
-        if (toggleIndicator) toggleIndicator.textContent = '▼';
-    }
+    toggleResultsPanel(`${database}-trigger-implementation`);
 }
 
 function toggleUnifiedTriggerVerificationResults() {
-    const resultsDiv = document.getElementById('postgres-unified-trigger-verification-results');
-    const detailsDiv = document.getElementById('postgres-unified-trigger-verification-details');
-
-    if (!resultsDiv || !detailsDiv) {
-        console.warn('Unified trigger verification results elements not found');
-        return;
-    }
-
-    const toggleIndicator = resultsDiv.querySelector('.toggle-indicator');
-
-    if (detailsDiv.style.display === 'none' || !detailsDiv.style.display) {
-        detailsDiv.style.display = 'block';
-        if (toggleIndicator) toggleIndicator.textContent = '▲';
-    } else {
-        detailsDiv.style.display = 'none';
-        if (toggleIndicator) toggleIndicator.textContent = '▼';
-    }
+    toggleResultsPanel('postgres-unified-trigger-verification');
 }
 
 /**
@@ -761,31 +573,4 @@ async function toggleTriggerDdlLazy(triggerId, schema, triggerName) {
 /**
  * Toggle schema group visibility (shared helper function).
  */
-function toggleSchemaGroup(schemaId) {
-    const schemaItems = document.getElementById(schemaId);
-    const indicator = document.getElementById(`${schemaId}-indicator`);
-
-    if (!schemaItems) {
-        console.warn(`Schema group not found: ${schemaId}`);
-        return;
-    }
-
-    if (schemaItems.style.display === 'none') {
-        schemaItems.style.display = 'block';
-        if (indicator) indicator.textContent = '▼';
-    } else {
-        schemaItems.style.display = 'none';
-        if (indicator) indicator.textContent = '▶';
-    }
-}
-
-/**
- * Escape HTML to prevent XSS attacks in DDL display.
- */
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
-
 // ===== END TRIGGER FUNCTIONS =====

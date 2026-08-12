@@ -100,106 +100,25 @@ async function getSynonymJobResults(jobId, database) {
 
 // Populate synonym list with synonyms grouped by schema
 function populateSynonymList(database, synonymsBySchema) {
-    const synonymItemsElement = document.getElementById(`${database}-synonym-items`);
+    const synonyms = [];
+    Object.entries(synonymsBySchema || {}).forEach(([schemaName, list]) => {
+        (list || []).forEach(synonym => synonyms.push(Object.assign({ schema: schemaName }, synonym)));
+    });
 
-    if (!synonymItemsElement) {
-        console.warn(`Synonym items element not found for database: ${database}`);
-        return;
-    }
-
-    // Clear existing items
-    synonymItemsElement.innerHTML = '';
-
-    if (synonymsBySchema && Object.keys(synonymsBySchema).length > 0) {
-        Object.entries(synonymsBySchema).forEach(([schemaName, synonyms]) => {
-            const schemaGroup = document.createElement('div');
-            schemaGroup.className = 'synonym-schema-group';
-
-            const schemaHeader = document.createElement('div');
-            schemaHeader.className = 'synonym-schema-header';
-            schemaHeader.innerHTML = `<span class="toggle-indicator">▼</span> ${schemaName} (${synonyms.length})`;
-            schemaHeader.onclick = () => toggleSynonymSchemaGroup(database, schemaName);
-
-            const synonymItems = document.createElement('div');
-            synonymItems.className = 'synonym-items-inner';
-            synonymItems.id = `${database}-${schemaName}-synonyms`;
-
-            if (synonyms && synonyms.length > 0) {
-                synonyms.forEach(synonym => {
-                    const synonymItem = document.createElement('div');
-                    synonymItem.className = 'synonym-item';
-                    const target = `${synonym.tableOwner}.${synonym.tableName}`;
-                    synonymItem.innerHTML = `${synonym.synonymName} → ${target}`;
-
-                    // Add remote indicator if applicable
-                    if (synonym.dbLink) {
-                        const remoteIndicator = document.createElement('span');
-                        remoteIndicator.className = 'remote-indicator';
-                        remoteIndicator.textContent = ` @${synonym.dbLink}`;
-                        remoteIndicator.style.color = '#ff9800';
-                        remoteIndicator.style.fontStyle = 'italic';
-                        synonymItem.appendChild(remoteIndicator);
-                    }
-
-                    synonymItems.appendChild(synonymItem);
-                });
-            } else {
-                const noSynonymsItem = document.createElement('div');
-                noSynonymsItem.className = 'synonym-item';
-                noSynonymsItem.textContent = 'No synonyms found';
-                noSynonymsItem.style.fontStyle = 'italic';
-                noSynonymsItem.style.color = '#999';
-                synonymItems.appendChild(noSynonymsItem);
+    setDeferredList(`${database}-synonym-list`, `${database}-synonym-items`,
+        () => renderSchemaGroups(synonyms, synonym => {
+            const target = `${synonym.tableOwner}.${synonym.tableName}`;
+            let html = `<div class="synonym-item">${escapeHtml(synonym.synonymName)} → ${escapeHtml(target)}`;
+            if (synonym.dbLink) {
+                html += `<span class="remote-indicator" style="color: #ff9800; font-style: italic;"> @${escapeHtml(synonym.dbLink)}</span>`;
             }
-
-            schemaGroup.appendChild(schemaHeader);
-            schemaGroup.appendChild(synonymItems);
-            synonymItemsElement.appendChild(schemaGroup);
-        });
-    } else {
-        const noSynonymsGroup = document.createElement('div');
-        noSynonymsGroup.className = 'synonym-schema-group';
-        noSynonymsGroup.innerHTML = `
-            <div class="synonym-item" style="font-style: italic; color: #999;">
-                No synonyms found
-            </div>
-        `;
-        synonymItemsElement.appendChild(noSynonymsGroup);
-    }
+            return html + '</div>';
+        }, { label: 'synonyms', groupIdPrefix: `${database}-synonym-group` }),
+        `Synonyms (${formatCount(synonyms.length)})`);
 }
 
-// Toggle synonym list visibility
 function toggleSynonymList(database) {
-    const synonymListElement = document.getElementById(`${database}-synonym-list`);
-    if (synonymListElement) {
-        const isVisible = synonymListElement.style.display !== 'none';
-        synonymListElement.style.display = isVisible ? 'none' : 'block';
-
-        // Update toggle indicator
-        const header = synonymListElement.querySelector('.synonym-list-header');
-        if (header) {
-            const indicator = header.querySelector('.toggle-indicator');
-            if (indicator) {
-                indicator.textContent = isVisible ? '▶' : '▼';
-            }
-        }
-    }
+    toggleDeferredList(`${database}-synonym-list`);
 }
 
-// Toggle synonym schema group visibility
-function toggleSynonymSchemaGroup(database, schemaName) {
-    const synonymItemsElement = document.getElementById(`${database}-${schemaName}-synonyms`);
-    if (synonymItemsElement) {
-        const isVisible = synonymItemsElement.style.display !== 'none';
-        synonymItemsElement.style.display = isVisible ? 'none' : 'block';
 
-        // Update toggle indicator
-        const header = synonymItemsElement.previousElementSibling;
-        if (header && header.classList.contains('synonym-schema-header')) {
-            const indicator = header.querySelector('.toggle-indicator');
-            if (indicator) {
-                indicator.textContent = isVisible ? '▶' : '▼';
-            }
-        }
-    }
-}

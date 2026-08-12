@@ -18,7 +18,6 @@
  * - displayViewResults(): Display view extraction results
  * - populateViewList(): Populate UI with extracted view metadata
  * - toggleViewList(): Toggle view list visibility
- * - toggleViewSchemaGroup(): Toggle schema group visibility in view lists
  * - displayViewStubCreationResults(): Display view stub creation results
  * - toggleViewStubCreationResults(): Toggle view stub creation results visibility
  */
@@ -229,100 +228,21 @@ function displayViewResults(result, database = 'oracle') {
     }
 }
 
-// Populate view list with extracted view metadata
+// Populate view list with extracted view metadata.
+// The rows are not built here - only the header summary is. Expanding the list builds the
+// schema groups, and expanding a group builds that group's rows.
 function populateViewList(views, database = 'oracle') {
-    const viewItemsElement = document.getElementById(`${database}-view-items`);
-
-    if (!viewItemsElement) {
-        console.warn('View items element not found');
-        return;
-    }
-
-    // Clear existing items
-    viewItemsElement.innerHTML = '';
-
-    if (views && views.length > 0) {
-        // Group views by schema
-        const viewsBySchema = {};
-        views.forEach(view => {
-            if (!viewsBySchema[view.schema]) {
-                viewsBySchema[view.schema] = [];
-            }
-            viewsBySchema[view.schema].push(view);
-        });
-
-        Object.entries(viewsBySchema).forEach(([schemaName, schemaViews]) => {
-            const schemaGroup = document.createElement('div');
-            schemaGroup.className = 'table-schema-group';
-
-            const schemaHeader = document.createElement('div');
-            schemaHeader.className = 'table-schema-header';
-            schemaHeader.innerHTML = `<span class="toggle-indicator">▼</span> ${schemaName} (${schemaViews.length} views)`;
-            schemaHeader.onclick = () => toggleViewSchemaGroup(database, schemaName);
-
-            const viewItems = document.createElement('div');
-            viewItems.className = 'table-items-list';
-            viewItems.id = `${database}-${schemaName}-views`;
-
-            // Add individual view entries for this schema
-            schemaViews.forEach(view => {
-                const viewItem = document.createElement('div');
-                viewItem.className = 'table-item';
-                const columnCount = view.columns ? view.columns.length : 0;
-                viewItem.innerHTML = `${view.viewName} (${columnCount} cols)`;
-                viewItems.appendChild(viewItem);
-            });
-
-            schemaGroup.appendChild(schemaHeader);
-            schemaGroup.appendChild(viewItems);
-            viewItemsElement.appendChild(schemaGroup);
-        });
-    } else {
-        const noViewsItem = document.createElement('div');
-        noViewsItem.className = 'table-item';
-        noViewsItem.textContent = 'No views found';
-        noViewsItem.style.fontStyle = 'italic';
-        noViewsItem.style.color = '#999';
-        viewItemsElement.appendChild(noViewsItem);
-    }
+    setDeferredList(`${database}-view-list`, `${database}-view-items`,
+        () => renderSchemaGroups(views, view => {
+            const columnCount = view.columns ? view.columns.length : 0;
+            return `<div class="table-item">${escapeHtml(view.viewName)} (${columnCount} cols)</div>`;
+        }, { label: 'views', groupIdPrefix: `${database}-view-group` }),
+        `View Names (${formatCount(views ? views.length : 0)})`);
 }
 
 // Toggle view list visibility
 function toggleViewList(database) {
-    const viewItems = document.getElementById(`${database}-view-items`);
-    const header = document.querySelector(`#${database}-view-list .table-list-header`);
-
-    if (!viewItems || !header) {
-        console.warn(`View list elements not found for database: ${database}`);
-        return;
-    }
-
-    if (viewItems.style.display === 'none') {
-        viewItems.style.display = 'block';
-        header.classList.remove('collapsed');
-    } else {
-        viewItems.style.display = 'none';
-        header.classList.add('collapsed');
-    }
-}
-
-// Toggle view schema group visibility
-function toggleViewSchemaGroup(database, schemaName) {
-    const viewItems = document.getElementById(`${database}-${schemaName}-views`);
-    const header = event.target;
-
-    if (!viewItems || !header) {
-        console.warn(`View schema group elements not found for: ${database}.${schemaName}`);
-        return;
-    }
-
-    if (viewItems.style.display === 'none') {
-        viewItems.style.display = 'block';
-        header.classList.remove('collapsed');
-    } else {
-        viewItems.style.display = 'none';
-        header.classList.add('collapsed');
-    }
+    toggleDeferredList(`${database}-view-list`);
 }
 
 // View Stub Creation Functions
@@ -461,109 +381,40 @@ function handleViewStubCreationJobComplete(result, database) {
 }
 
 function displayViewStubCreationResults(result, database) {
-    const resultsDiv = document.getElementById(`${database}-view-stub-creation-results`);
-    const detailsDiv = document.getElementById(`${database}-view-stub-creation-details`);
+    const summary = result.summary;
+    if (!summary) return;
 
-    if (!resultsDiv || !detailsDiv) {
-        console.error('View stub creation results container not found');
-        return;
-    }
+    updateComponentCount("postgres-views", summary.createdCount + summary.skippedCount + summary.errorCount);
 
-    let html = '';
-
-    // Access result properties from summary object (matches function-service.js pattern)
-    if (result.summary) {
-        const summary = result.summary;
-
-        updateComponentCount("postgres-views", summary.createdCount + summary.skippedCount + summary.errorCount);
-
-        html += '<div class="table-creation-summary">';
-        html += `<div class="summary-stats">`;
-        html += `<span class="stat-item created">Created: ${summary.createdCount}</span>`;
-        html += `<span class="stat-item skipped">Skipped: ${summary.skippedCount}</span>`;
-        html += `<span class="stat-item errors">Errors: ${summary.errorCount}</span>`;
-        html += `</div>`;
-        html += '</div>';
-
-        // Show created views - convert Map to Array using Object.values()
-        if (summary.createdCount > 0 && summary.createdViews) {
-            html += '<div class="created-tables-section">';
-            html += '<h4>Created View Stubs:</h4>';
-            html += '<div class="table-items">';
-            Object.values(summary.createdViews)
-                .sort((a, b) => {
-                    // Sort by schema first, then by view name
-                    const schemaCompare = (a.schema || '').localeCompare(b.schema || '');
-                    if (schemaCompare !== 0) return schemaCompare;
-                    return (a.viewName || '').localeCompare(b.viewName || '');
-                })
-                .forEach(view => {
-                    html += `<div class="table-item created">${view.viewName} ✓</div>`;
-                });
-            html += '</div>';
-            html += '</div>';
-        }
-
-        // Show skipped views - convert Map to Array using Object.values()
-        if (summary.skippedCount > 0 && summary.skippedViews) {
-            html += '<div class="skipped-tables-section">';
-            html += '<h4>Skipped Views (already exist):</h4>';
-            html += '<div class="table-items">';
-            Object.values(summary.skippedViews)
-                .sort((a, b) => {
-                    // Sort by schema first, then by view name
-                    const schemaCompare = (a.schema || '').localeCompare(b.schema || '');
-                    if (schemaCompare !== 0) return schemaCompare;
-                    return (a.viewName || '').localeCompare(b.viewName || '');
-                })
-                .forEach(view => {
-                    html += `<div class="table-item skipped">${view.viewName}</div>`;
-                });
-            html += '</div>';
-            html += '</div>';
-        }
-
-        // Show errors - convert Map to Array using Object.values()
-        if (summary.errorCount > 0 && summary.errors) {
-            html += '<div class="error-tables-section">';
-            html += '<h4>Failed Views:</h4>';
-            html += '<div class="table-items">';
-            Object.values(summary.errors)
-                .sort((a, b) => {
-                    // Sort by view name (errors may not have schema property, parse from viewName)
-                    return (a.viewName || '').localeCompare(b.viewName || '');
-                })
-                .forEach(error => {
-                    html += `<div class="table-item error">`;
-                    html += `<strong>${error.viewName}</strong>: ${error.error}`;
-                    if (error.sql) {
-                        html += `<div class="sql-statement"><pre>${error.sql}</pre></div>`;
-                    }
-                    html += `</div>`;
-                });
-            html += '</div>';
-            html += '</div>';
-        }
-    }
-
-    detailsDiv.innerHTML = html;
-
-    // Show the results section
-    resultsDiv.style.display = 'block';
+    setResultsPanel(`${database}-view-stub-creation`, {
+        summaryHtml: renderSummaryStats([
+            { label: 'Created', value: summary.createdCount, cssClass: 'created' },
+            { label: 'Skipped', value: summary.skippedCount, cssClass: 'skipped' },
+            { label: 'Errors', value: summary.errorCount, cssClass: 'errors' }
+        ]),
+        detailLabel: 'view stubs',
+        renderDetail: () => renderOutcomeSections([
+            {
+                title: 'Created View Stubs',
+                items: toSortedArray(summary.createdViews, 'schema', 'viewName'),
+                cssClass: 'created', nameKey: 'viewName', suffix: ' ✓'
+            },
+            {
+                title: 'Skipped Views (already exist)',
+                items: toSortedArray(summary.skippedViews, 'schema', 'viewName'),
+                cssClass: 'skipped', nameKey: 'viewName'
+            },
+            {
+                title: 'Failed Views',
+                items: toSortedArray(summary.errors, 'viewName'),
+                cssClass: 'error', nameKey: 'viewName', showError: true
+            }
+        ], { jobId: result.jobId, label: 'views' })
+    });
 }
 
 function toggleViewStubCreationResults(database) {
-    const resultsDiv = document.getElementById(`${database}-view-stub-creation-results`);
-    const detailsDiv = document.getElementById(`${database}-view-stub-creation-details`);
-    const toggleIndicator = resultsDiv.querySelector('.toggle-indicator');
-
-    if (detailsDiv.style.display === 'none' || !detailsDiv.style.display) {
-        detailsDiv.style.display = 'block';
-        toggleIndicator.textContent = '▲';
-    } else {
-        detailsDiv.style.display = 'none';
-        toggleIndicator.textContent = '▼';
-    }
+    toggleResultsPanel(`${database}-view-stub-creation`);
 }
 
 // View Implementation Functions (Phase 2)
@@ -702,123 +553,44 @@ function handleViewImplementationJobComplete(result, database) {
 }
 
 function displayViewImplementationResults(result, database) {
-    const resultsDiv = document.getElementById(`${database}-view-implementation-results`);
-    const detailsDiv = document.getElementById(`${database}-view-implementation-details`);
+    const summary = result.summary;
+    if (!summary) return;
 
-    if (!resultsDiv || !detailsDiv) {
-        console.error('View implementation results container not found');
-        return;
-    }
+    updateComponentCount("postgres-view-implementation", summary.implementedCount + summary.skippedCount + summary.errorCount);
 
-    let html = '';
-
-    // Access result properties from summary object (matches function-service.js pattern)
-    if (result.summary) {
-        const summary = result.summary;
-
-        updateComponentCount("postgres-view-implementation", summary.implementedCount + summary.skippedCount + summary.errorCount);
-
-        html += '<div class="table-creation-summary">';
-        html += `<div class="summary-stats">`;
-        html += `<span class="stat-item created">Implemented: ${summary.implementedCount}</span>`;
-        html += `<span class="stat-item skipped">Skipped: ${summary.skippedCount}</span>`;
-        html += `<span class="stat-item errors">Errors: ${summary.errorCount}</span>`;
-        html += `</div>`;
-        html += '</div>';
-
-        // Show implemented views - convert Map to Array using Object.values()
-        if (summary.implementedCount > 0 && summary.implementedViews) {
-            html += '<div class="created-tables-section">';
-            html += '<h4>Implemented Views:</h4>';
-            html += '<div class="table-items">';
-            Object.values(summary.implementedViews)
-                .sort((a, b) => {
-                    // Sort by schema first, then by view name
-                    const schemaCompare = (a.schema || '').localeCompare(b.schema || '');
-                    if (schemaCompare !== 0) return schemaCompare;
-                    return (a.viewName || '').localeCompare(b.viewName || '');
-                })
-                .forEach(view => {
-                    html += `<div class="table-item created">${view.viewName} ✓</div>`;
-                });
-            html += '</div>';
-            html += '</div>';
-        }
-
-        // Show skipped views - convert Map to Array using Object.values()
-        if (summary.skippedCount > 0 && summary.skippedViews) {
-            html += '<div class="skipped-tables-section">';
-            html += '<h4>Skipped Views:</h4>';
-            html += '<div class="table-items">';
-            Object.values(summary.skippedViews)
-                .sort((a, b) => {
-                    // Sort by schema first, then by view name
-                    const schemaCompare = (a.schema || '').localeCompare(b.schema || '');
-                    if (schemaCompare !== 0) return schemaCompare;
-                    return (a.viewName || '').localeCompare(b.viewName || '');
-                })
-                .forEach(view => {
-                    html += `<div class="table-item skipped">${view.viewName}</div>`;
-                });
-            html += '</div>';
-            html += '</div>';
-        }
-
-        // Show errors - convert Map to Array using Object.values()
-        if (summary.errorCount > 0 && summary.errors) {
-            html += '<div class="error-tables-section">';
-            html += '<h4>Failed Views:</h4>';
-            html += '<div class="table-items">';
-            Object.values(summary.errors)
-                .sort((a, b) => {
-                    // Sort by view name (errors may not have schema property, parse from viewName)
-                    return (a.viewName || '').localeCompare(b.viewName || '');
-                })
-                .forEach(error => {
-                    html += `<div class="table-item error">`;
-                    html += `<strong>${error.viewName}</strong>: ${error.error}`;
-                    if (error.sql) {
-                        html += `<div class="sql-statement"><pre>${error.sql}</pre></div>`;
-                    }
-                    html += `</div>`;
-                });
-            html += '</div>';
-            html += '</div>';
-        }
-    }
-
-    detailsDiv.innerHTML = html;
-
-    // Show the results section
-    resultsDiv.style.display = 'block';
+    setResultsPanel(`${database}-view-implementation`, {
+        summaryHtml: renderSummaryStats([
+            { label: 'Implemented', value: summary.implementedCount, cssClass: 'created' },
+            { label: 'Skipped', value: summary.skippedCount, cssClass: 'skipped' },
+            { label: 'Errors', value: summary.errorCount, cssClass: 'errors' }
+        ]),
+        detailLabel: 'implemented views',
+        renderDetail: () => renderOutcomeSections([
+            {
+                title: 'Implemented Views',
+                items: toSortedArray(summary.implementedViews, 'schema', 'viewName'),
+                cssClass: 'created', nameKey: 'viewName', suffix: ' \u2713'
+            },
+            {
+                title: 'Skipped Views',
+                items: toSortedArray(summary.skippedViews, 'schema', 'viewName'),
+                cssClass: 'skipped', nameKey: 'viewName'
+            },
+            {
+                title: 'Failed Views',
+                items: toSortedArray(summary.errors, 'viewName'),
+                cssClass: 'error', nameKey: 'viewName', showError: true
+            }
+        ], { jobId: result.jobId, label: 'views' })
+    });
 }
 
 function toggleViewImplementationResults(database) {
-    const resultsDiv = document.getElementById(`${database}-view-implementation-results`);
-    const detailsDiv = document.getElementById(`${database}-view-implementation-details`);
-    const toggleIndicator = resultsDiv.querySelector('.toggle-indicator');
-
-    if (detailsDiv.style.display === 'none' || !detailsDiv.style.display) {
-        detailsDiv.style.display = 'block';
-        toggleIndicator.textContent = '▲';
-    } else {
-        detailsDiv.style.display = 'none';
-        toggleIndicator.textContent = '▼';
-    }
+    toggleResultsPanel(`${database}-view-implementation`);
 }
 
 function toggleViewImplementationVerificationResults(database) {
-    const resultsDiv = document.getElementById(`${database}-view-implementation-verification-results`);
-    const detailsDiv = document.getElementById(`${database}-view-implementation-verification-details`);
-    const toggleIndicator = resultsDiv.querySelector('.toggle-indicator');
-
-    if (detailsDiv.style.display === 'none' || !detailsDiv.style.display) {
-        detailsDiv.style.display = 'block';
-        toggleIndicator.textContent = '▲';
-    } else {
-        detailsDiv.style.display = 'none';
-        toggleIndicator.textContent = '▼';
-    }
+    toggleResultsPanel(`${database}-view-implementation-verification`);
 }
 
 // Verify PostgreSQL view implementations
@@ -976,208 +748,92 @@ async function getViewImplementationVerificationJobResults(jobId) {
 
 // Display view implementation verification results
 function displayViewImplementationVerificationResults(verificationResult) {
-    const resultsDiv = document.getElementById('postgres-view-implementation-verification-results');
-    const detailsDiv = document.getElementById('postgres-view-implementation-verification-details');
+    setResultsPanel('postgres-view-implementation-verification', {
+        summaryHtml: renderSummaryStats([
+            { label: 'Verified', value: verificationResult.verifiedCount || 0, cssClass: 'created' },
+            { label: 'Failed', value: verificationResult.failedCount || 0, cssClass: 'errors' },
+            { label: 'Warnings', value: verificationResult.warningCount || 0, cssClass: 'skipped' }
+        ]),
+        detailLabel: 'verified views by schema',
+        renderDetail: () => {
+            let html = '';
 
-    if (!resultsDiv || !detailsDiv) {
-        console.error('View implementation verification results container not found');
-        return;
-    }
+            if (verificationResult.verifiedViews && verificationResult.verifiedViews.length > 0) {
+                html += '<div class="outcome-section">';
+                html += '<h4>Verified Views (Implemented)</h4>';
+                html += generateSchemaGroupedViewList(verificationResult.verifiedViews, 'verified', verificationResult.rowCounts);
+                html += '</div>';
+            }
 
-    let html = '';
+            if (verificationResult.failedViews && verificationResult.failedViews.length > 0) {
+                html += '<div class="outcome-section">';
+                html += '<h4>Failed Views (Not Implemented or Errors)</h4>';
+                html += generateSchemaGroupedFailedViewList(verificationResult.failedViews, verificationResult.failureReasons);
+                html += '</div>';
+            }
 
-    // Summary statistics
-    html += '<div class="table-creation-summary">';
-    html += '<div class="summary-stats">';
-    html += `<span class="stat-item created">Verified: ${verificationResult.verifiedCount || 0}</span>`;
-    html += `<span class="stat-item errors">Failed: ${verificationResult.failedCount || 0}</span>`;
-    html += `<span class="stat-item skipped">Warnings: ${verificationResult.warningCount || 0}</span>`;
-    html += '</div>';
-    html += '</div>';
+            if (verificationResult.warnings && verificationResult.warnings.length > 0) {
+                html += '<div class="outcome-section">';
+                html += '<h4>Warnings</h4>';
+                html += generateSchemaGroupedWarningList(verificationResult.warnings);
+                html += '</div>';
+            }
 
-    // Show verified views with row counts - GROUPED BY SCHEMA
-    if (verificationResult.verifiedViews && verificationResult.verifiedViews.length > 0) {
-        html += '<div class="created-tables-section">';
-        html += '<h4>Verified Views (Implemented):</h4>';
-        html += generateSchemaGroupedViewList(verificationResult.verifiedViews, 'verified', verificationResult.rowCounts);
-        html += '</div>';
-    }
-
-    // Show failed views with failure reasons - GROUPED BY SCHEMA
-    if (verificationResult.failedViews && verificationResult.failedViews.length > 0) {
-        html += '<div class="error-tables-section">';
-        html += '<h4>Failed Views (Not Implemented or Errors):</h4>';
-        html += generateSchemaGroupedFailedViewList(verificationResult.failedViews, verificationResult.failureReasons);
-        html += '</div>';
-    }
-
-    // Show warnings - GROUPED BY SCHEMA
-    if (verificationResult.warnings && verificationResult.warnings.length > 0) {
-        html += '<div class="skipped-tables-section">';
-        html += '<h4>Warnings:</h4>';
-        html += generateSchemaGroupedWarningList(verificationResult.warnings);
-        html += '</div>';
-    }
-
-    detailsDiv.innerHTML = html;
-
-    // Show the results section
-    resultsDiv.style.display = 'block';
+            return html;
+        }
+    });
 }
 
-// Helper function to generate schema-grouped view list for verified views
+// Split "SCHEMA.OBJECT" into its parts; unqualified names fall back to schema 'unknown'.
+function splitQualifiedName(qualifiedName) {
+    const parts = String(qualifiedName || '').split('.');
+    return parts.length > 1
+        ? { schema: parts[0], name: parts.slice(1).join('.') }
+        : { schema: 'unknown', name: qualifiedName };
+}
+
+// Schema-grouped list of verified views, with row counts where known
 function generateSchemaGroupedViewList(verifiedViews, statusClass, rowCounts) {
-    // Group by schema
-    const viewsBySchema = {};
-    verifiedViews.forEach(view => {
-        const qualifiedName = view.viewName;
-        const parts = qualifiedName.split('.');
-        const schema = parts.length > 1 ? parts[0] : 'unknown';
-        const viewName = parts.length > 1 ? parts[1] : qualifiedName;
-
-        if (!viewsBySchema[schema]) {
-            viewsBySchema[schema] = [];
-        }
-        viewsBySchema[schema].push({
-            qualifiedName: qualifiedName,
-            viewName: viewName,
-            rowCount: view.rowCount
-        });
+    const views = verifiedViews.map(view => {
+        const split = splitQualifiedName(view.viewName);
+        return { schema: split.schema, viewName: split.name, rowCount: view.rowCount };
     });
 
-    let html = '<div class="table-items">';
-
-    Object.entries(viewsBySchema).sort(([a], [b]) => a.localeCompare(b)).forEach(([schemaName, schemaViews]) => {
-        const schemaId = `view-verification-${statusClass}-${schemaName.replace(/[^a-z0-9]/gi, '_')}`;
-
-        html += '<div class="table-schema-group">';
-        html += `<div class="table-schema-header" onclick="toggleSchemaGroup('${schemaId}')">`;
-        html += `<span class="toggle-indicator" id="${schemaId}-indicator">▼</span> ${schemaName} (${schemaViews.length} views)`;
-        html += '</div>';
-        html += `<div class="table-items-list" id="${schemaId}">`;
-
-        // Sort views within schema by view name
-        schemaViews.sort((a, b) => (a.viewName || '').localeCompare(b.viewName || ''));
-
-        schemaViews.forEach(view => {
-            const rowCountText = view.rowCount !== undefined ? ` (${view.rowCount} rows)` : '';
-            html += `<div class="table-item ${statusClass}">${view.viewName}${rowCountText} ✓</div>`;
-        });
-
-        html += '</div>';
-        html += '</div>';
-    });
-
-    html += '</div>';
-    return html;
+    return renderSchemaGroups(views, view => {
+        const rowCountText = view.rowCount !== undefined ? ` (${formatCount(view.rowCount)} rows)` : '';
+        return `<div class="table-item ${statusClass}">${escapeHtml(view.viewName)}${rowCountText} \u2713</div>`;
+    }, { label: 'views', groupIdPrefix: `view-verification-${statusClass}` });
 }
 
-// Helper function to generate schema-grouped view list for failed views
+// Schema-grouped list of failed views with their failure reasons
 function generateSchemaGroupedFailedViewList(failedViews, failureReasons) {
-    // Group by schema
-    const viewsBySchema = {};
-    failedViews.forEach(qualifiedName => {
-        const parts = qualifiedName.split('.');
-        const schema = parts.length > 1 ? parts[0] : 'unknown';
-        const viewName = parts.length > 1 ? parts[1] : qualifiedName;
-
-        if (!viewsBySchema[schema]) {
-            viewsBySchema[schema] = [];
-        }
-        viewsBySchema[schema].push({
-            qualifiedName: qualifiedName,
-            viewName: viewName,
+    const views = failedViews.map(qualifiedName => {
+        const split = splitQualifiedName(qualifiedName);
+        return {
+            schema: split.schema,
+            viewName: split.name,
             reason: failureReasons && failureReasons[qualifiedName] ? failureReasons[qualifiedName] : 'Unknown reason'
-        });
+        };
     });
 
-    let html = '<div class="table-items">';
-
-    Object.entries(viewsBySchema).sort(([a], [b]) => a.localeCompare(b)).forEach(([schemaName, schemaViews]) => {
-        const schemaId = `view-verification-failed-${schemaName.replace(/[^a-z0-9]/gi, '_')}`;
-
-        html += '<div class="table-schema-group">';
-        html += `<div class="table-schema-header" onclick="toggleSchemaGroup('${schemaId}')">`;
-        html += `<span class="toggle-indicator" id="${schemaId}-indicator">▼</span> ${schemaName} (${schemaViews.length} views)`;
-        html += '</div>';
-        html += `<div class="table-items-list" id="${schemaId}">`;
-
-        schemaViews.forEach(view => {
-            html += `<div class="table-item error">`;
-            html += `<strong>${view.viewName}</strong>: ${view.reason}`;
-            html += `</div>`;
-        });
-
-        html += '</div>';
-        html += '</div>';
-    });
-
-    html += '</div>';
-    return html;
+    return renderSchemaGroups(views, view =>
+        `<div class="table-item error"><strong>${escapeHtml(view.viewName)}</strong>: ${escapeHtml(view.reason)}</div>`,
+        { label: 'views', groupIdPrefix: 'view-verification-failed' });
 }
 
-// Helper function to generate schema-grouped warning list
+// Schema-grouped warning list; warnings arrive as "schema.viewname: message"
 function generateSchemaGroupedWarningList(warnings) {
-    // Group by schema - warnings are in format "schema.viewname: warning message"
-    const warningsBySchema = {};
-    warnings.forEach(warning => {
+    const entries = warnings.map(warning => {
         const colonIndex = warning.indexOf(':');
         const qualifiedName = colonIndex > 0 ? warning.substring(0, colonIndex).trim() : warning;
         const message = colonIndex > 0 ? warning.substring(colonIndex + 1).trim() : 'Warning';
-
-        const parts = qualifiedName.split('.');
-        const schema = parts.length > 1 ? parts[0] : 'unknown';
-        const viewName = parts.length > 1 ? parts[1] : qualifiedName;
-
-        if (!warningsBySchema[schema]) {
-            warningsBySchema[schema] = [];
-        }
-        warningsBySchema[schema].push({
-            viewName: viewName,
-            message: message
-        });
+        const split = splitQualifiedName(qualifiedName);
+        return { schema: split.schema, viewName: split.name, message: message };
     });
 
-    let html = '<div class="table-items">';
-
-    Object.entries(warningsBySchema).sort(([a], [b]) => a.localeCompare(b)).forEach(([schemaName, schemaWarnings]) => {
-        const schemaId = `view-verification-warnings-${schemaName.replace(/[^a-z0-9]/gi, '_')}`;
-
-        html += '<div class="table-schema-group">';
-        html += `<div class="table-schema-header" onclick="toggleSchemaGroup('${schemaId}')">`;
-        html += `<span class="toggle-indicator" id="${schemaId}-indicator">▼</span> ${schemaName} (${schemaWarnings.length} warnings)`;
-        html += '</div>';
-        html += `<div class="table-items-list" id="${schemaId}">`;
-
-        schemaWarnings.forEach(warning => {
-            html += `<div class="table-item skipped">${warning.viewName}: ${warning.message}</div>`;
-        });
-
-        html += '</div>';
-        html += '</div>';
-    });
-
-    html += '</div>';
-    return html;
-}
-
-// Generic toggle function for schema groups
-function toggleSchemaGroup(schemaId) {
-    const viewItems = document.getElementById(schemaId);
-    const indicator = document.getElementById(`${schemaId}-indicator`);
-
-    if (!viewItems) {
-        console.warn(`Schema group not found: ${schemaId}`);
-        return;
-    }
-
-    if (viewItems.style.display === 'none') {
-        viewItems.style.display = 'block';
-        if (indicator) indicator.textContent = '▼';
-    } else {
-        viewItems.style.display = 'none';
-        if (indicator) indicator.textContent = '▶';
-    }
+    return renderSchemaGroups(entries, entry =>
+        `<div class="table-item skipped">${escapeHtml(entry.viewName)}: ${escapeHtml(entry.message)}</div>`,
+        { label: 'warnings', groupIdPrefix: 'view-verification-warnings' });
 }
 
 // ==========================================
@@ -1341,88 +997,77 @@ async function getUnifiedViewVerificationJobResults(jobId) {
  * Groups views by schema with collapsible DDL sections.
  */
 function displayUnifiedViewVerificationResults(verificationResult) {
-    const resultsDiv = document.getElementById('postgres-unified-view-verification-results');
-    const detailsDiv = document.getElementById('postgres-unified-view-verification-details');
-
-    if (!resultsDiv || !detailsDiv) {
-        console.error('Unified view verification results container not found');
-        return;
-    }
-
-    let html = '';
-
-    // Summary statistics
-    const totalViews = verificationResult.totalViews || 0;
-    const implementedCount = verificationResult.implementedCount || 0;
-    const stubCount = verificationResult.stubCount || 0;
-    const errorCount = verificationResult.errorCount || 0;
-
-    html += '<div class="table-creation-summary">';
-    html += '<div class="summary-stats">';
-    html += `<span class="stat-item created">Implemented: ${implementedCount}</span>`;
-    html += `<span class="stat-item skipped">Stubs: ${stubCount}</span>`;
-    html += `<span class="stat-item errors">Errors: ${errorCount}</span>`;
-    html += `<span class="stat-item">Total: ${totalViews}</span>`;
-    html += '</div>';
-    html += '</div>';
-
-    // Generate schema-grouped views with DDL
     const viewsBySchema = verificationResult.viewsBySchema || {};
 
-    Object.keys(viewsBySchema).sort().forEach(schemaName => {
-        const schemaViews = viewsBySchema[schemaName] || [];
-        const schemaId = `view-verification-schema-${schemaName.replace(/[^a-z0-9]/gi, '_')}`;
+    setResultsPanel('postgres-unified-view-verification', {
+        summaryHtml: renderSummaryStats([
+            { label: 'Implemented', value: verificationResult.implementedCount || 0, cssClass: 'created' },
+            { label: 'Stubs', value: verificationResult.stubCount || 0, cssClass: 'skipped' },
+            { label: 'Errors', value: verificationResult.errorCount || 0, cssClass: 'errors' },
+            { label: 'Total', value: verificationResult.totalViews || 0 }
+        ]),
+        detailLabel: 'views by schema',
+        renderDetail: () => renderVerificationSchemaGroups(viewsBySchema)
+    });
+}
 
-        // Count by status for this schema
-        const schemaImplemented = schemaViews.filter(v => v.status === 'IMPLEMENTED').length;
-        const schemaStubs = schemaViews.filter(v => v.status === 'STUB').length;
-        const schemaErrors = schemaViews.filter(v => v.status === 'ERROR').length;
+// Schema groups for the unified verification panel. Each group reports its own
+// implemented/stub/error breakdown in the header, so the counts are readable without
+// expanding anything.
+function renderVerificationSchemaGroups(viewsBySchema) {
+    let html = '';
+
+    Object.keys(viewsBySchema).sort().forEach(schemaName => {
+        const schemaViews = (viewsBySchema[schemaName] || [])
+            .slice()
+            .sort((a, b) => a.viewName.localeCompare(b.viewName));
+        const groupId = `view-verification-schema-${schemaName.replace(/[^a-z0-9]/gi, '_')}`;
+
+        const implemented = schemaViews.filter(v => v.status === 'IMPLEMENTED').length;
+        const stubs = schemaViews.filter(v => v.status === 'STUB').length;
+        const errors = schemaViews.filter(v => v.status === 'ERROR').length;
 
         html += '<div class="table-schema-group">';
-        html += `<div class="table-schema-header" onclick="toggleSchemaGroup('${schemaId}')">`;
-        html += `<span class="toggle-indicator" id="${schemaId}-indicator">▶</span> `;
-        html += `${schemaName} (${schemaViews.length} views - `;
-        html += `${schemaImplemented} implemented, ${schemaStubs} stubs, ${schemaErrors} errors)`;
+        html += `<div class="table-schema-header collapsed" onclick="toggleSchemaGroupRows('${groupId}')">`;
+        html += `<span class="toggle-indicator">\u25b6</span> `;
+        html += `${escapeHtml(schemaName)} (${formatCount(schemaViews.length)} views - `;
+        html += `${implemented} implemented, ${stubs} stubs, ${errors} errors)`;
         html += '</div>';
-        html += `<div class="table-items-list" id="${schemaId}" style="display: none;">`;
+        html += `<div class="table-items-list" id="${groupId}" style="display: none;"></div>`;
+        html += '</div>';
 
-        // Sort views by name within schema
-        schemaViews.sort((a, b) => a.viewName.localeCompare(b.viewName));
-
-        schemaViews.forEach(view => {
-            const viewId = `view-ddl-${schemaName}-${view.viewName}`.replace(/[^a-z0-9]/gi, '_');
-            const statusClass = view.status === 'IMPLEMENTED' ? 'created' :
-                               view.status === 'STUB' ? 'skipped' : 'error';
-            const statusBadge = view.status === 'IMPLEMENTED' ? '✓ IMPLEMENTED' :
-                               view.status === 'STUB' ? '⚠ STUB' : '✗ ERROR';
-
-            html += `<div class="table-item ${statusClass}">`;
-            html += `<div class="view-header" onclick="toggleViewDdlLazy('${viewId}', '${schemaName}', '${view.viewName}')">`;
-            html += `<span class="toggle-indicator" id="${viewId}-indicator">▶</span> `;
-            html += `<strong>${view.viewName}</strong> <span class="status-badge">[${statusBadge}]</span>`;
-            html += '</div>';
-
-            // DDL section (collapsible, starts collapsed, will be loaded on demand)
-            html += `<div class="view-ddl-section" id="${viewId}" style="display: none;" data-schema="${schemaName}" data-view-name="${view.viewName}" data-loaded="false">`;
-            if (view.errorMessage) {
-                // Show error immediately if view has an error
-                html += `<div class="error-message">Error: ${escapeHtml(view.errorMessage)}</div>`;
-            } else {
-                // Placeholder for lazy-loaded content
-                html += '<div class="loading-message">Loading...</div>';
-            }
-            html += '</div>';
-            html += '</div>';
+        schemaGroupRenderers.set(groupId, {
+            expanded: false,
+            render: () => renderCappedList(schemaViews,
+                view => renderVerificationViewRow(schemaName, view),
+                { label: 'views' })
         });
-
-        html += '</div>';
-        html += '</div>';
     });
 
-    detailsDiv.innerHTML = html;
+    return html;
+}
 
-    // Show the results section
-    resultsDiv.style.display = 'block';
+// One view row, with its DDL still unloaded - the DDL is fetched per view on click.
+function renderVerificationViewRow(schemaName, view) {
+    const viewId = `view-ddl-${schemaName}-${view.viewName}`.replace(/[^a-z0-9]/gi, '_');
+    const statusClass = view.status === 'IMPLEMENTED' ? 'created' :
+                        view.status === 'STUB' ? 'skipped' : 'error';
+    const statusBadge = view.status === 'IMPLEMENTED' ? '\u2713 IMPLEMENTED' :
+                        view.status === 'STUB' ? '\u26a0 STUB' : '\u2717 ERROR';
+
+    let html = `<div class="table-item ${statusClass}">`;
+    html += `<div class="view-header" onclick="toggleViewDdlLazy('${viewId}', '${escapeHtml(schemaName)}', '${escapeHtml(view.viewName)}')">`;
+    html += `<span class="toggle-indicator" id="${viewId}-indicator">\u25b6</span> `;
+    html += `<strong>${escapeHtml(view.viewName)}</strong> <span class="status-badge">[${statusBadge}]</span>`;
+    html += '</div>';
+    html += `<div class="view-ddl-section" id="${viewId}" style="display: none;" data-schema="${escapeHtml(schemaName)}" data-view-name="${escapeHtml(view.viewName)}" data-loaded="false">`;
+    if (view.errorMessage) {
+        html += `<div class="error-message">Error: ${escapeHtml(view.errorMessage)}</div>`;
+    } else {
+        html += '<div class="loading-message">Loading...</div>';
+    }
+    html += '</div></div>';
+    return html;
 }
 
 /**
@@ -1499,24 +1144,5 @@ function toggleViewDdl(viewId) {
  * Toggle unified view verification results visibility.
  */
 function toggleUnifiedViewVerificationResults() {
-    const resultsDiv = document.getElementById('postgres-unified-view-verification-results');
-    const detailsDiv = document.getElementById('postgres-unified-view-verification-details');
-    const toggleIndicator = resultsDiv.querySelector('.toggle-indicator');
-
-    if (detailsDiv.style.display === 'none' || !detailsDiv.style.display) {
-        detailsDiv.style.display = 'block';
-        if (toggleIndicator) toggleIndicator.textContent = '▲';
-    } else {
-        detailsDiv.style.display = 'none';
-        if (toggleIndicator) toggleIndicator.textContent = '▼';
-    }
-}
-
-/**
- * Escape HTML to prevent XSS attacks in DDL display.
- */
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+    toggleResultsPanel('postgres-unified-view-verification');
 }

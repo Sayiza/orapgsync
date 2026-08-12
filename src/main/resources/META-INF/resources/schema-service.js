@@ -165,55 +165,18 @@ async function getSchemaJobResults(jobId, database) {
  * @param {Array<string>} schemas - Array of schema names to display
  */
 function populateSchemaList(database, schemas) {
-    const schemaItemsElement = document.getElementById(`${database}-schema-items`);
+    const list = schemas || [];
 
-    if (!schemaItemsElement) {
-        console.warn(`Schema items element not found for database: ${database}`);
-        return;
-    }
-
-    // Clear existing items
-    schemaItemsElement.innerHTML = '';
-
-    if (schemas && schemas.length > 0) {
-        schemas.forEach(schema => {
-            const schemaItem = document.createElement('div');
-            schemaItem.className = 'schema-item';
-            schemaItem.textContent = schema;
-            schemaItemsElement.appendChild(schemaItem);
-        });
-    } else {
-        const noSchemasItem = document.createElement('div');
-        noSchemasItem.className = 'schema-item';
-        noSchemasItem.textContent = 'No schemas found';
-        noSchemasItem.style.fontStyle = 'italic';
-        noSchemasItem.style.color = '#999';
-        schemaItemsElement.appendChild(noSchemasItem);
-    }
+    setDeferredList(`${database}-schema-list`, `${database}-schema-items`,
+        () => list.length === 0
+            ? '<div class="schema-item" style="font-style: italic; color: #999;">No schemas found</div>'
+            : renderCappedList(list, schema => `<div class="schema-item">${escapeHtml(schema)}</div>`,
+                { label: 'schemas' }),
+        `Schema Names (${formatCount(list.length)})`);
 }
 
-/**
- * Toggle schema list visibility
- * Expands or collapses the schema list UI element
- *
- * @param {string} database - The database type ('oracle' or 'postgres')
- */
 function toggleSchemaList(database) {
-    const schemaItems = document.getElementById(`${database}-schema-items`);
-    const header = document.querySelector(`#${database}-schema-list .schema-list-header`);
-
-    if (!schemaItems || !header) {
-        console.warn(`Schema list elements not found for database: ${database}`);
-        return;
-    }
-
-    if (schemaItems.style.display === 'none') {
-        schemaItems.style.display = 'block';
-        header.classList.remove('collapsed');
-    } else {
-        schemaItems.style.display = 'none';
-        header.classList.add('collapsed');
-    }
+    toggleDeferredList(`${database}-schema-list`);
 }
 
 // ============================================================================
@@ -390,88 +353,38 @@ function handleSchemaCreationJobComplete(result, database) {
  * @param {string} database - The database type (typically 'postgres')
  */
 function displaySchemaCreationResults(result, database) {
-    const resultsDiv = document.getElementById(`${database}-schema-creation-results`);
-    const detailsDiv = document.getElementById(`${database}-schema-creation-details`);
+    const summary = result.summary;
+    if (!summary) return;
 
-    if (!resultsDiv || !detailsDiv) {
-        console.error('Schema creation results container not found');
-        return;
-    }
+    updateComponentCount("postgres-schemas", summary.createdCount + summary.skippedCount + summary.errorCount);
 
-    let html = '';
-
-    if (result.summary) {
-        const summary = result.summary;
-
-        updateComponentCount("postgres-schemas", summary.createdCount + summary.skippedCount + summary.errorCount);
-
-        html += '<div class="schema-creation-summary">';
-        html += `<div class="summary-stats">`;
-        html += `<span class="stat-item created">Created: ${summary.createdCount}</span>`;
-        html += `<span class="stat-item skipped">Skipped: ${summary.skippedCount}</span>`;
-        html += `<span class="stat-item errors">Errors: ${summary.errorCount}</span>`;
-        html += `</div>`;
-        html += '</div>';
-
-        // Show created schemas
-        if (summary.createdCount > 0) {
-            html += '<div class="created-schemas-section">';
-            html += '<h4>Created Schemas:</h4>';
-            html += '<div class="schema-items">';
-            Object.values(summary.createdSchemas).forEach(schema => {
-                html += `<div class="schema-item created">${schema.schema} ✓</div>`;
-            });
-            html += '</div>';
-            html += '</div>';
-        }
-
-        // Show skipped schemas
-        if (summary.skippedCount > 0) {
-            html += '<div class="skipped-schemas-section">';
-            html += '<h4>Skipped Schemas (already exist):</h4>';
-            html += '<div class="schema-items">';
-            Object.values(summary.skippedSchemas).forEach(schema => {
-                html += `<div class="schema-item skipped">${schema.schema} (${schema.reason})</div>`;
-            });
-            html += '</div>';
-            html += '</div>';
-        }
-
-        // Show errors
-        if (summary.errorCount > 0) {
-            html += '<div class="error-schemas-section">';
-            html += '<h4>Failed Schemas:</h4>';
-            html += '<div class="schema-items">';
-            Object.values(summary.errors).forEach(error => {
-                html += `<div class="schema-item error">${error.schema}: ${error.error}</div>`;
-            });
-            html += '</div>';
-            html += '</div>';
-        }
-    }
-
-    detailsDiv.innerHTML = html;
-
-    // Show the results section
-    resultsDiv.style.display = 'block';
+    setResultsPanel(`${database}-schema-creation`, {
+        summaryHtml: renderSummaryStats([
+            { label: 'Created', value: summary.createdCount, cssClass: 'created' },
+            { label: 'Skipped', value: summary.skippedCount, cssClass: 'skipped' },
+            { label: 'Errors', value: summary.errorCount, cssClass: 'errors' }
+        ]),
+        detailLabel: 'created schemas',
+        renderDetail: () => renderOutcomeSections([
+            {
+                title: 'Created Schemas',
+                items: toSortedArray(summary.createdSchemas, 'schema'),
+                cssClass: 'created', nameKey: 'schema', suffix: ' \u2713'
+            },
+            {
+                title: 'Skipped Schemas (already exist)',
+                items: toSortedArray(summary.skippedSchemas, 'schema'),
+                cssClass: 'skipped', nameKey: 'schema'
+            },
+            {
+                title: 'Failed Schemas',
+                items: toSortedArray(summary.errors, 'schema'),
+                cssClass: 'error', nameKey: 'schema', showError: true
+            }
+        ], { jobId: result.jobId, label: 'schemas' })
+    });
 }
 
-/**
- * Toggle schema creation results visibility
- * Expands or collapses the detailed schema creation results
- *
- * @param {string} database - The database type (typically 'postgres')
- */
 function toggleSchemaCreationResults(database) {
-    const resultsDiv = document.getElementById(`${database}-schema-creation-results`);
-    const detailsDiv = document.getElementById(`${database}-schema-creation-details`);
-    const toggleIndicator = resultsDiv.querySelector('.toggle-indicator');
-
-    if (detailsDiv.style.display === 'none' || !detailsDiv.style.display) {
-        detailsDiv.style.display = 'block';
-        toggleIndicator.textContent = '▲';
-    } else {
-        detailsDiv.style.display = 'none';
-        toggleIndicator.textContent = '▼';
-    }
+    toggleResultsPanel(`${database}-schema-creation`);
 }

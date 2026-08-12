@@ -14,7 +14,7 @@
  * - pollIndexJobStatus(): Monitors any of the three jobs
  * - populateIndexList(): Renders the index list grouped by schema
  * - displayIndexCreationResults(): Renders per-index outcomes
- * - toggleIndexList() / toggleIndexSchemaGroup() / toggleIndexCreationResults(): UI toggles
+ * - toggleIndexList() / toggleIndexCreationResults(): UI toggles
  */
 
 // ===== INDEX MIGRATION FUNCTIONS =====
@@ -172,126 +172,60 @@ function displayIndexMetadata(result, database) {
 
 /** Renders the index list grouped by schema, matching the table list. */
 function populateIndexList(summary, database) {
-    const itemsElement = document.getElementById(`${database}-index-items`);
-
-    if (!itemsElement) {
-        console.warn('Index items element not found');
-        return;
-    }
-
-    itemsElement.innerHTML = '';
-
-    const schemaCounts = summary.schemaIndexCounts || {};
     const indexes = summary.indexes || [];
 
-    if (Object.keys(schemaCounts).length === 0) {
-        const empty = document.createElement('div');
-        empty.className = 'table-item';
-        empty.textContent = 'No indexes found';
-        empty.style.fontStyle = 'italic';
-        empty.style.color = '#999';
-        itemsElement.appendChild(empty);
-        return;
-    }
-
-    Object.entries(schemaCounts).forEach(([schemaName, indexCount]) => {
-        const schemaGroup = document.createElement('div');
-        schemaGroup.className = 'table-schema-group';
-
-        const schemaHeader = document.createElement('div');
-        schemaHeader.className = 'table-schema-header';
-        schemaHeader.innerHTML = `<span class="toggle-indicator">▼</span> ${schemaName} (${indexCount} indexes)`;
-        schemaHeader.onclick = () => toggleIndexSchemaGroup(database, schemaName);
-
-        const schemaItems = document.createElement('div');
-        schemaItems.className = 'table-items-list';
-        schemaItems.id = `${database}-${schemaName}-indexes`;
-
-        indexes
-            .filter(index => index.schema === schemaName)
-            .forEach(index => {
-                const item = document.createElement('div');
-                item.className = 'table-item';
-                const flags = [];
-                if (index.unique) {
-                    flags.push('UNIQUE');
-                }
-                if (index.functionBased) {
-                    flags.push('function-based');
-                }
-                const suffix = flags.length > 0 ? ` [${flags.join(', ')}]` : '';
-                item.innerHTML = `${index.indexName} on ${index.tableName} (${index.keys})${suffix}`;
-                schemaItems.appendChild(item);
-            });
-
-        schemaGroup.appendChild(schemaHeader);
-        schemaGroup.appendChild(schemaItems);
-        itemsElement.appendChild(schemaGroup);
-    });
+    setDeferredList(`${database}-index-list`, `${database}-index-items`,
+        () => renderSchemaGroups(indexes, index => {
+            const flags = [];
+            if (index.unique) flags.push('UNIQUE');
+            if (index.functionBased) flags.push('function-based');
+            const suffix = flags.length > 0 ? ` [${flags.join(', ')}]` : '';
+            return `<div class="table-item">${escapeHtml(index.indexName)} on ${escapeHtml(index.tableName)} `
+                 + `(${escapeHtml(index.keys)})${escapeHtml(suffix)}</div>`;
+        }, { label: 'indexes', groupIdPrefix: `${database}-index-group` }),
+        `Indexes (${formatCount(indexes.length)})`);
 }
 
 function displayIndexCreationResults(result) {
-    const resultsDiv = document.getElementById('postgres-index-creation-results');
-    const detailsDiv = document.getElementById('postgres-index-creation-details');
-
-    if (!resultsDiv || !detailsDiv) {
-        console.error('Index creation results container not found');
-        return;
-    }
-
     const summary = result.summary;
-    if (!summary) {
-        return;
-    }
+    if (!summary) return;
 
     updateComponentCount('postgres-indexes', summary.createdCount || 0);
     updateMessage(`PostgreSQL: created ${summary.createdCount} indexes, skipped ${summary.skippedCount}, `
         + `${summary.unsupportedCount} unsupported, ${summary.errorCount} errors`);
 
-    let html = '<div class="table-creation-summary"><div class="summary-stats">';
-    html += `<span class="stat-item created">Created: ${summary.createdCount}</span>`;
-    html += `<span class="stat-item skipped">Skipped: ${summary.skippedCount}</span>`;
-    html += `<span class="stat-item skipped">Unsupported: ${summary.unsupportedCount}</span>`;
-    html += `<span class="stat-item errors">Errors: ${summary.errorCount}</span>`;
-    html += '</div></div>';
-
-    html += renderIndexSection(summary.createdIndexes, 'Created Indexes', 'created');
-    html += renderIndexSection(summary.skippedIndexes, 'Skipped Indexes', 'skipped');
-    html += renderIndexSection(summary.unsupportedIndexes, 'Unsupported Indexes', 'skipped');
-    html += renderIndexSection(summary.errors, 'Failed Indexes', 'error');
-
-    detailsDiv.innerHTML = html;
-    resultsDiv.style.display = 'block';
+    setResultsPanel('postgres-index-creation', {
+        summaryHtml: renderSummaryStats([
+            { label: 'Created', value: summary.createdCount, cssClass: 'created' },
+            { label: 'Skipped', value: summary.skippedCount, cssClass: 'skipped' },
+            { label: 'Unsupported', value: summary.unsupportedCount, cssClass: 'skipped' },
+            { label: 'Errors', value: summary.errorCount, cssClass: 'errors' }
+        ]),
+        detailLabel: 'index outcomes',
+        renderDetail: () => renderOutcomeSections([
+            { title: 'Created Indexes', items: toIndexArray(summary.createdIndexes), renderItem: indexRow('created') },
+            { title: 'Skipped Indexes', items: toIndexArray(summary.skippedIndexes), renderItem: indexRow('skipped') },
+            { title: 'Unsupported Indexes', items: toIndexArray(summary.unsupportedIndexes), renderItem: indexRow('skipped') },
+            { title: 'Failed Indexes', items: toIndexArray(summary.errors), renderItem: indexRow('error') }
+        ], { jobId: result.jobId, label: 'indexes' })
+    });
 }
 
-/**
- * Renders one outcome group. Every entry carries its reason, so a skipped or refused index can be
- * told apart from one that was never considered.
- */
-function renderIndexSection(entries, title, cssClass) {
-    const items = toIndexArray(entries);
-    if (items.length === 0) {
-        return '';
-    }
-
-    let html = `<div class="${cssClass}-tables-section">`;
-    html += `<h4>${title}:</h4>`;
-    html += '<div class="table-items">';
-
-    items.forEach(item => {
-        html += `<div class="table-item ${cssClass}">`;
-        html += `<strong>${item.indexName}</strong> on ${item.tableName} (${item.keys})`;
+// One index outcome row. Every index carries a reason, so the row states why it ended up in
+// the section it is in.
+function indexRow(cssClass) {
+    return item => {
+        let html = `<div class="table-item ${cssClass}">`;
+        html += `<strong>${escapeHtml(item.indexName)}</strong> on ${escapeHtml(item.tableName)} (${escapeHtml(item.keys)})`;
         if (item.reason) {
-            html += ` — ${item.reason}`;
+            html += ` \u2014 ${escapeHtml(item.reason)}`;
         }
-        if (cssClass === 'error' && item.sql) {
-            html += `<div class="sql-statement"><pre>${item.sql}</pre></div>`;
+        if (cssClass === 'error') {
+            html += renderDeferredCode(item.sql);
         }
         html += '</div>';
-    });
-
-    html += '</div></div>';
-    return html;
+        return html;
+    };
 }
 
 function toIndexArray(entries) {
@@ -310,43 +244,11 @@ function resetIndexButton(job) {
 }
 
 function toggleIndexList(database) {
-    const items = document.getElementById(`${database}-index-items`);
-    const header = document.querySelector(`#${database}-index-list .table-list-header`);
-
-    if (!items || !header) {
-        console.warn(`Index list elements not found for database: ${database}`);
-        return;
-    }
-
-    if (items.style.display === 'none') {
-        items.style.display = 'block';
-        header.classList.remove('collapsed');
-    } else {
-        items.style.display = 'none';
-        header.classList.add('collapsed');
-    }
-}
-
-function toggleIndexSchemaGroup(database, schemaName) {
-    const items = document.getElementById(`${database}-${schemaName}-indexes`);
-    if (!items) {
-        return;
-    }
-    items.style.display = items.style.display === 'none' ? 'block' : 'none';
+    toggleDeferredList(`${database}-index-list`);
 }
 
 function toggleIndexCreationResults() {
-    const resultsDiv = document.getElementById('postgres-index-creation-results');
-    const detailsDiv = document.getElementById('postgres-index-creation-details');
-    const toggleIndicator = resultsDiv.querySelector('.toggle-indicator');
-
-    if (detailsDiv.style.display === 'none' || !detailsDiv.style.display) {
-        detailsDiv.style.display = 'block';
-        toggleIndicator.textContent = '▲';
-    } else {
-        detailsDiv.style.display = 'none';
-        toggleIndicator.textContent = '▼';
-    }
+    toggleResultsPanel('postgres-index-creation');
 }
 
 // ===== END INDEX MIGRATION FUNCTIONS =====

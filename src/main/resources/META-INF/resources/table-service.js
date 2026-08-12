@@ -17,14 +17,12 @@
  * - displayTableResults(): Display table extraction results
  * - populateTableList(): Populate UI with extracted table metadata
  * - toggleTableList(): Toggle table list visibility
- * - toggleTableSchemaGroup(): Toggle schema group visibility in table lists
  * - extractOracleRowCounts(): Extract row counts from Oracle tables
  * - pollRowCountJobStatus(): Poll row count job status
  * - getRowCountJobResults(): Retrieve row count job results
  * - displayRowCountResults(): Display row count results
  * - populateRowCountList(): Populate UI with row count data
  * - toggleRowCountList(): Toggle row count list visibility
- * - toggleRowCountSchemaGroup(): Toggle schema group visibility in row count lists
  * - extractPostgresRowCounts(): Extract row counts from PostgreSQL tables
  * - createPostgresTables(): Create tables in PostgreSQL
  * - pollTableCreationJobStatus(): Poll table creation job status
@@ -238,94 +236,18 @@ function displayTableResults(result, database = 'oracle') {
 
 // Populate table list with extracted table metadata
 function populateTableList(summary, database = 'oracle') {
-    const tableItemsElement = document.getElementById(`${database}-table-items`);
+    // summary.tables is keyed by qualified name; the rows carry their own schema.
+    const tables = Object.values(summary.tables || {});
 
-    if (!tableItemsElement) {
-        console.warn('Table items element not found');
-        return;
-    }
-
-    // Clear existing items
-    tableItemsElement.innerHTML = '';
-
-    if (summary.schemaTableCounts && Object.keys(summary.schemaTableCounts).length > 0) {
-        Object.entries(summary.schemaTableCounts).forEach(([schemaName, tableCount]) => {
-            const schemaGroup = document.createElement('div');
-            schemaGroup.className = 'table-schema-group';
-
-            const schemaHeader = document.createElement('div');
-            schemaHeader.className = 'table-schema-header';
-            schemaHeader.innerHTML = `<span class="toggle-indicator">▼</span> ${schemaName} (${tableCount} tables)`;
-            schemaHeader.onclick = () => toggleTableSchemaGroup(database, schemaName);
-
-            const tableItems = document.createElement('div');
-            tableItems.className = 'table-items-list';
-            tableItems.id = `${database}-${schemaName}-tables`;
-
-            // Add individual table entries for this schema
-            if (summary.tables) {
-                const schemaTables = Object.entries(summary.tables).filter(([key, table]) =>
-                    table.schema === schemaName);
-
-                schemaTables.forEach(([tableKey, table]) => {
-                    const tableItem = document.createElement('div');
-                    tableItem.className = 'table-item';
-                    // Note: Constraints are extracted but NOT created yet (will be created after data transfer - Step C)
-                    tableItem.innerHTML = `${table.name} (${table.columnCount} cols)`;
-                    tableItems.appendChild(tableItem);
-                });
-            }
-
-            schemaGroup.appendChild(schemaHeader);
-            schemaGroup.appendChild(tableItems);
-            tableItemsElement.appendChild(schemaGroup);
-        });
-    } else {
-        const noTablesItem = document.createElement('div');
-        noTablesItem.className = 'table-item';
-        noTablesItem.textContent = 'No tables found';
-        noTablesItem.style.fontStyle = 'italic';
-        noTablesItem.style.color = '#999';
-        tableItemsElement.appendChild(noTablesItem);
-    }
+    setDeferredList(`${database}-table-list`, `${database}-table-items`,
+        () => renderSchemaGroups(tables,
+            table => `<div class="table-item">${escapeHtml(table.name)} (${table.columnCount} cols)</div>`,
+            { label: 'tables', groupIdPrefix: `${database}-table-group` }),
+        `Table Names (${formatCount(tables.length)})`);
 }
 
-// Toggle table list visibility
 function toggleTableList(database) {
-    const tableItems = document.getElementById(`${database}-table-items`);
-    const header = document.querySelector(`#${database}-table-list .table-list-header`);
-
-    if (!tableItems || !header) {
-        console.warn(`Table list elements not found for database: ${database}`);
-        return;
-    }
-
-    if (tableItems.style.display === 'none') {
-        tableItems.style.display = 'block';
-        header.classList.remove('collapsed');
-    } else {
-        tableItems.style.display = 'none';
-        header.classList.add('collapsed');
-    }
-}
-
-// Toggle table schema group visibility
-function toggleTableSchemaGroup(database, schemaName) {
-    const tableItems = document.getElementById(`${database}-${schemaName}-tables`);
-    const header = event.target;
-
-    if (!tableItems || !header) {
-        console.warn(`Table schema group elements not found for: ${database}.${schemaName}`);
-        return;
-    }
-
-    if (tableItems.style.display === 'none') {
-        tableItems.style.display = 'block';
-        header.classList.remove('collapsed');
-    } else {
-        tableItems.style.display = 'none';
-        header.classList.add('collapsed');
-    }
+    toggleDeferredList(`${database}-table-list`);
 }
 
 // Row Count Extraction Functions
@@ -496,107 +418,29 @@ function displayRowCountResults(result, database = 'oracle') {
 
 // Populate row count list with extracted row count data
 function populateRowCountList(rowCounts, database = 'oracle') {
-    const rowCountItemsElement = document.getElementById(`${database}-rowcount-items`);
+    const counts = rowCounts || [];
 
-    if (!rowCountItemsElement) {
-        console.warn('Row count items element not found');
-        return;
-    }
-
-    // Clear existing items
-    rowCountItemsElement.innerHTML = '';
-
-    if (rowCounts && rowCounts.length > 0) {
-        // Group row counts by schema
-        const rowCountsBySchema = {};
-        rowCounts.forEach(rowCount => {
-            if (!rowCountsBySchema[rowCount.schema]) {
-                rowCountsBySchema[rowCount.schema] = [];
+    setDeferredList(`${database}-rowcount-list`, `${database}-rowcount-items`,
+        () => renderSchemaGroups(counts, rowCount => {
+            if (rowCount.rowCount >= 0) {
+                return `<div class="table-item">${escapeHtml(rowCount.tableName)}: ${formatCount(rowCount.rowCount)} rows</div>`;
             }
-            rowCountsBySchema[rowCount.schema].push(rowCount);
-        });
-
-        Object.entries(rowCountsBySchema).forEach(([schemaName, schemaRowCounts]) => {
-            const schemaGroup = document.createElement('div');
-            schemaGroup.className = 'table-schema-group';
-
-            // Calculate total rows for this schema
-            const schemaTotalRows = schemaRowCounts.reduce((sum, rc) => sum + (rc.rowCount >= 0 ? rc.rowCount : 0), 0);
-
-            const schemaHeader = document.createElement('div');
-            schemaHeader.className = 'table-schema-header';
-            schemaHeader.innerHTML = `<span class="toggle-indicator">▼</span> ${schemaName} (${schemaRowCounts.length} tables, ${schemaTotalRows.toLocaleString()} rows)`;
-            schemaHeader.onclick = () => toggleRowCountSchemaGroup(database, schemaName);
-
-            const rowCountItems = document.createElement('div');
-            rowCountItems.className = 'table-items-list';
-            rowCountItems.id = `${database}-${schemaName}-rowcounts`;
-
-            // Add individual table row counts for this schema
-            schemaRowCounts.forEach(rowCount => {
-                const rowCountItem = document.createElement('div');
-                rowCountItem.className = 'table-item';
-
-                if (rowCount.rowCount >= 0) {
-                    rowCountItem.innerHTML = `${rowCount.tableName}: ${rowCount.rowCount.toLocaleString()} rows`;
-                } else {
-                    rowCountItem.innerHTML = `${rowCount.tableName}: <span style="color: #d73502;">Error counting rows</span>`;
-                    rowCountItem.style.color = '#666';
-                }
-
-                rowCountItems.appendChild(rowCountItem);
-            });
-
-            schemaGroup.appendChild(schemaHeader);
-            schemaGroup.appendChild(rowCountItems);
-            rowCountItemsElement.appendChild(schemaGroup);
-        });
-    } else {
-        const noRowCountsItem = document.createElement('div');
-        noRowCountsItem.className = 'table-item';
-        noRowCountsItem.textContent = 'No row count data found';
-        noRowCountsItem.style.fontStyle = 'italic';
-        noRowCountsItem.style.color = '#999';
-        rowCountItemsElement.appendChild(noRowCountsItem);
-    }
+            return `<div class="table-item" style="color: #666;">${escapeHtml(rowCount.tableName)}: `
+                 + `<span style="color: #d73502;">Error counting rows</span></div>`;
+        }, {
+            label: 'tables',
+            groupIdPrefix: `${database}-rowcount-group`,
+            // Row totals per schema are the point of this list, so they belong in the header.
+            groupSummary: group => {
+                const total = group.reduce((sum, rc) => sum + (rc.rowCount >= 0 ? rc.rowCount : 0), 0);
+                return `, ${formatCount(total)} rows`;
+            }
+        }),
+        `Row Counts (${formatCount(counts.length)} tables)`);
 }
 
-// Toggle row count list visibility
 function toggleRowCountList(database) {
-    const rowCountItems = document.getElementById(`${database}-rowcount-items`);
-    const header = document.querySelector(`#${database}-rowcount-list .table-list-header`);
-
-    if (!rowCountItems || !header) {
-        console.warn(`Row count list elements not found for database: ${database}`);
-        return;
-    }
-
-    if (rowCountItems.style.display === 'none') {
-        rowCountItems.style.display = 'block';
-        header.classList.remove('collapsed');
-    } else {
-        rowCountItems.style.display = 'none';
-        header.classList.add('collapsed');
-    }
-}
-
-// Toggle row count schema group visibility
-function toggleRowCountSchemaGroup(database, schemaName) {
-    const rowCountItems = document.getElementById(`${database}-${schemaName}-rowcounts`);
-    const header = event.target;
-
-    if (!rowCountItems || !header) {
-        console.warn(`Row count schema group elements not found for: ${database}.${schemaName}`);
-        return;
-    }
-
-    if (rowCountItems.style.display === 'none') {
-        rowCountItems.style.display = 'block';
-        header.classList.remove('collapsed');
-    } else {
-        rowCountItems.style.display = 'none';
-        header.classList.add('collapsed');
-    }
+    toggleDeferredList(`${database}-rowcount-list`);
 }
 
 // Extract PostgreSQL row counts (starts the job)
@@ -778,109 +622,60 @@ function handleTableCreationJobComplete(result, database) {
 }
 
 function displayTableCreationResults(result, database) {
-    const resultsDiv = document.getElementById(`${database}-table-creation-results`);
-    const detailsDiv = document.getElementById(`${database}-table-creation-details`);
+    const summary = result.summary;
+    if (!summary) return;
 
-    if (!resultsDiv || !detailsDiv) {
-        console.error('Table creation results container not found');
-        return;
+    updateComponentCount("postgres-tables", summary.createdCount + summary.skippedCount + summary.errorCount);
+
+    const stats = [
+        { label: 'Created', value: summary.createdCount, cssClass: 'created' },
+        { label: 'Skipped', value: summary.skippedCount, cssClass: 'skipped' },
+        { label: 'Errors', value: summary.errorCount, cssClass: 'errors' }
+    ];
+    if (summary.unmappedDefaultCount > 0) {
+        stats.push({ label: 'Unmapped Defaults', value: summary.unmappedDefaultCount, cssClass: 'warnings' });
     }
 
-    let html = '';
+    setResultsPanel(`${database}-table-creation`, {
+        summaryHtml: renderSummaryStats(stats),
+        detailLabel: 'created tables',
+        renderDetail: () => renderOutcomeSections([
+            {
+                title: 'Created Tables',
+                items: toSortedArray(summary.createdTables, 'tableName'),
+                cssClass: 'created', nameKey: 'tableName', suffix: ' \u2713'
+            },
+            {
+                title: 'Skipped Tables (already exist)',
+                items: toSortedArray(summary.skippedTables, 'tableName'),
+                cssClass: 'skipped', nameKey: 'tableName'
+            },
+            {
+                title: 'Failed Tables',
+                items: toSortedArray(summary.errors, 'tableName'),
+                cssClass: 'error', nameKey: 'tableName', showError: true
+            },
+            {
+                title: 'Columns with Unmapped Default Values (Require Manual Review)',
+                items: toSortedArray(summary.unmappedDefaults, 'tableName', 'columnName'),
+                renderItem: renderUnmappedDefault
+            }
+        ], { jobId: result.jobId, label: 'tables' })
+    });
+}
 
-    if (result.summary) {
-        const summary = result.summary;
-
-        updateComponentCount("postgres-tables", summary.createdCount + summary.skippedCount + summary.errorCount);
-
-        html += '<div class="table-creation-summary">';
-        html += `<div class="summary-stats">`;
-        html += `<span class="stat-item created">Created: ${summary.createdCount}</span>`;
-        html += `<span class="stat-item skipped">Skipped: ${summary.skippedCount}</span>`;
-        html += `<span class="stat-item errors">Errors: ${summary.errorCount}</span>`;
-        if (summary.unmappedDefaultCount > 0) {
-            html += `<span class="stat-item warnings">Unmapped Defaults: ${summary.unmappedDefaultCount}</span>`;
-        }
-        html += `</div>`;
-        html += '</div>';
-
-        // Show created tables
-        if (summary.createdCount > 0) {
-            html += '<div class="created-tables-section">';
-            html += '<h4>Created Tables:</h4>';
-            html += '<div class="table-items">';
-            Object.values(summary.createdTables).forEach(table => {
-                html += `<div class="table-item created">${table.tableName} ✓</div>`;
-            });
-            html += '</div>';
-            html += '</div>';
-        }
-
-        // Show skipped tables
-        if (summary.skippedCount > 0) {
-            html += '<div class="skipped-tables-section">';
-            html += '<h4>Skipped Tables (already exist):</h4>';
-            html += '<div class="table-items">';
-            Object.values(summary.skippedTables).forEach(table => {
-                html += `<div class="table-item skipped">${table.tableName} (${table.reason})</div>`;
-            });
-            html += '</div>';
-            html += '</div>';
-        }
-
-        // Show errors
-        if (summary.errorCount > 0) {
-            html += '<div class="error-tables-section">';
-            html += '<h4>Failed Tables:</h4>';
-            html += '<div class="table-items">';
-            Object.values(summary.errors).forEach(error => {
-                html += `<div class="table-item error">`;
-                html += `<strong>${error.tableName}</strong>: ${error.error}`;
-                if (error.sql) {
-                    html += `<div class="sql-statement"><pre>${error.sql}</pre></div>`;
-                }
-                html += `</div>`;
-            });
-            html += '</div>';
-            html += '</div>';
-        }
-
-        // Show unmapped defaults (columns with complex Oracle default values that need manual review)
-        if (summary.unmappedDefaultCount > 0) {
-            html += '<div class="warning-tables-section">';
-            html += '<p style="font-size:0.9rem; font-weight: bold;">Columns with Unmapped Default Values (Require Manual Review):</p>';
-            html += '<div class="table-items">';
-            html += '<p style="font-size: 0.7rem; font-style: italic; color: #666; margin: 5px 0;">The following columns have complex Oracle default values that could not be automatically transformed. Tables were created without these defaults. You can add them manually later.</p>';
-            Object.values(summary.unmappedDefaults).forEach(warning => {
-                html += `<div class="table-item warning">`;
-                html += `<strong>${warning.tableName}.${warning.columnName}</strong>`;
-                html += `<div style="margin-left: 15px; margin-top: 5px;">`;
-                html += `<div><strong>Oracle Default:</strong> <code>${warning.oracleDefault}</code></div>`;
-                html += `<div><strong>Note:</strong> ${warning.note}</div>`;
-                html += `</div>`;
-                html += `</div>`;
-            });
-            html += '</div>';
-            html += '</div>';
-        }
-    }
-
-    detailsDiv.innerHTML = html;
-
-    // Show the results section
-    resultsDiv.style.display = 'block';
+// A column whose Oracle default could not be transformed. The table was created without the
+// default, so this is a to-do list rather than a failure.
+function renderUnmappedDefault(warning) {
+    let html = '<div class="table-item warning">';
+    html += `<strong>${escapeHtml(warning.tableName)}.${escapeHtml(warning.columnName)}</strong>`;
+    html += '<div style="margin-left: 15px; margin-top: 5px;">';
+    html += `<div><strong>Oracle Default:</strong> <code>${escapeHtml(warning.oracleDefault)}</code></div>`;
+    html += `<div><strong>Note:</strong> ${escapeHtml(warning.note)}</div>`;
+    html += '</div></div>';
+    return html;
 }
 
 function toggleTableCreationResults(database) {
-    const resultsDiv = document.getElementById(`${database}-table-creation-results`);
-    const detailsDiv = document.getElementById(`${database}-table-creation-details`);
-    const toggleIndicator = resultsDiv.querySelector('.toggle-indicator');
-
-    if (detailsDiv.style.display === 'none' || !detailsDiv.style.display) {
-        detailsDiv.style.display = 'block';
-        toggleIndicator.textContent = '▲';
-    } else {
-        detailsDiv.style.display = 'none';
-        toggleIndicator.textContent = '▼';
-    }
+    toggleResultsPanel(`${database}-table-creation`);
 }
