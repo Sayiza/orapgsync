@@ -821,22 +821,6 @@
 
 <div class="configuration-container">
   <div class="config-section">
-    <h2 class="config-title">Pre-Flight Compatibility Report</h2>
-    <p class="config-help" style="margin-bottom: 0.75rem;">
-      Transforms every extracted Oracle view in memory - no PostgreSQL objects are created - and
-      reports which Oracle constructs block or silently truncate the transformation, ranked by how
-      often they occur in this codebase. Requires extracted Oracle views.
-    </p>
-    <button class="action-btn" onclick="runPreFlightAnalysis()" id="preflight-run-btn">Run Analysis</button>
-    <button class="refresh-btn" onclick="loadPreFlightReport()" title="Reload the last report">⟳</button>
-    <div id="preflight-report" class="table-creation-details" style="margin-top: 0.75rem;">
-      <!-- Pre-flight report is rendered here -->
-    </div>
-  </div>
-</div>
-
-<div class="configuration-container">
-  <div class="config-section">
     <h2 class="config-title">Configuration Settings</h2>
     <form id="config-form" class="config-form">
       <div class="config-grid">
@@ -1030,7 +1014,6 @@
 <script src="oracle-compat-service.js"></script>
 <script src="synonym-replacement-service.js"></script>
 <script src="web-gateway-service.js"></script>
-<script src="preflight-service.js"></script>
 
 <!-- Orchestration Script -->
 <script src="orchestration-service.js"></script>

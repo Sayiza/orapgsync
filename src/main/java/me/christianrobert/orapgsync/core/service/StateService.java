@@ -25,7 +25,6 @@ import me.christianrobert.orapgsync.core.job.model.function.FunctionStubCreation
 import me.christianrobert.orapgsync.core.job.model.typemethod.TypeMethodMetadata;
 import me.christianrobert.orapgsync.core.job.model.typemethod.TypeMethodStubCreationResult;
 import me.christianrobert.orapgsync.core.job.model.typemethod.TypeMethodImplementationResult;
-import me.christianrobert.orapgsync.core.job.model.preflight.CompatibilityFinding;
 import me.christianrobert.orapgsync.core.job.model.trigger.TriggerMetadata;
 import me.christianrobert.orapgsync.core.job.model.trigger.TriggerImplementationResult;
 import me.christianrobert.orapgsync.oraclecompat.model.OracleCompatInstallationResult;
@@ -93,9 +92,6 @@ public class StateService {
     List<TriggerMetadata> oracleTriggerMetadata = new ArrayList<>();
     List<TriggerMetadata> postgresTriggerMetadata = new ArrayList<>();
     TriggerImplementationResult triggerImplementationResult;
-
-    // Pre-flight compatibility report (analysis only, no database objects involved)
-    List<CompatibilityFinding> compatibilityFindings = new ArrayList<>();
 
     // Oracle Compatibility Layer
     OracleCompatInstallationResult oracleCompatInstallationResult;
@@ -450,14 +446,6 @@ public class StateService {
         this.triggerImplementationResult = triggerImplementationResult;
     }
 
-    public List<CompatibilityFinding> getCompatibilityFindings() {
-        return compatibilityFindings;
-    }
-
-    public void setCompatibilityFindings(List<CompatibilityFinding> compatibilityFindings) {
-        this.compatibilityFindings = compatibilityFindings;
-    }
-
     public OracleCompatInstallationResult getOracleCompatInstallationResult() {
         return oracleCompatInstallationResult;
     }
@@ -684,7 +672,6 @@ public class StateService {
         this.oracleTriggerMetadata = new ArrayList<>();
         this.postgresTriggerMetadata = new ArrayList<>();
         this.triggerImplementationResult = null;
-        this.compatibilityFindings = new ArrayList<>();
         this.oracleCompatInstallationResult = null;
         this.oracleCompatVerificationResult = null;
         this.constraintCreationResult = null;

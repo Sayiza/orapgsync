@@ -23,19 +23,24 @@ transformation, data transfer. Full plan and rationale:
 | 2 | Parallel data transfer | ✅ done |
 | 3 | Index migration | ✅ done |
 | 4 | Transformer hardening — eliminate silent statement drops, no new features | 🔄 next |
-| 5 | View transformation gaps, ranked by the pre-flight report | 🔄 demand-driven |
+| 5 | View transformation gaps, ranked by what blocks a real run | 🔄 demand-driven |
 
 **Deferred — do not invest here without an explicit decision:**
 - 🔒 PL/SQL long tail (BULK COLLECT, collections, `%ROWTYPE`, dynamic SQL, autonomous
-  transactions). Decide with pre-flight report data after Phase 1, not by intuition.
+  transactions). Decide with real failure data after Phase 1, not by intuition.
 - 🔒 Mod-PL/SQL web gateway (`web/`, orchestration step 32). Partially built, paused.
 - 🔒 State persistence / resume. Transfers run all-or-nothing in practice; not needed.
+- 🅿️ Pre-flight compatibility report — **removed from `main` 2026-08-12**, preserved on branch
+  `parked/preflight-compatibility-report`. The views reached a good state and the normal run
+  already reports the few failures with error and SQL, so a second analysis pipeline and its
+  always-visible UI panel were not earning their keep. Rationale and recovery instructions:
+  [CONSOLIDATION_PLAN.md](documentation/CONSOLIDATION_PLAN.md#pre-flight-compatibility-report-implemented-2026-08-08-parked-2026-08-12).
 
 ## Build and Development Commands
 
 - **Build**: `mvn clean compile`
 - **Dev mode**: `mvn quarkus:dev`
-- **Test**: `mvn test` (~1,591 tests across 131 test classes)
+- **Test**: `mvn test` (~1,557 tests across 124 test classes)
 - **Generate ANTLR parsers**: `mvn antlr4:antlr4` (from `src/main/antlr4/` → `target/generated-sources/antlr4/`)
 - **Package**: `mvn clean package`
 
@@ -79,7 +84,6 @@ Each database element type is an independent module depending only on `core/`, `
 | `typemethod/` | stubs + PL/SQL transformation | ✅ |
 | `trigger/` | extraction + transformation, idempotent drop-and-recreate | ✅ |
 | `oraclecompat/` | PostgreSQL equivalents for Oracle built-ins | ✅ |
-| `preflight/` | pre-migration compatibility analysis (views) | ✅ |
 | `web/` | mod_plsql gateway project generator | 🔒 deferred |
 
 ### Transformer (`transformer/`)
@@ -97,7 +101,7 @@ Oracle SQL/PL-SQL → AntlrParser → PostgresCodeBuilder → PostgreSQL SQL/PL-
 - `context/TransformationContext` + `TransformationIndices` — metadata indices for O(1) lookups,
   passed as a **parameter**, never CDI-injected into the visitor layer
 - `service/TransformationService` — high-level CDI API
-- `type/` — two-pass type inference · `analysis/` — pre-flight construct detection
+- `type/` — two-pass type inference
 - `inline/`, `packagevariable/` — inline type definitions, package variable getter/setters
 
 **Design principles:** direct transformation (visitors return PostgreSQL strings, no intermediate
@@ -221,7 +225,7 @@ Two tiers:
    For standard extraction/creation/verification. Examples: `POST /api/jobs/oracle/view/extract`,
    `POST /api/jobs/postgres/view-stub/create`, `POST /api/jobs/postgres/constraint/create`.
 2. **Specialized resources** — `/api/{resource}/{database}/{operation}`, for operations that
-   don't fit the job pattern: `/api/oracle-compat/*`, `/api/preflight/*`, `/api/indexes/*`,
+   don't fit the job pattern: `/api/oracle-compat/*`, `/api/indexes/*`,
    `/api/transformation/sql`, `/api/web-gateway/*`.
 
 Swagger UI at `/q/swagger-ui`.
@@ -373,26 +377,19 @@ Implemented: DBMS_OUTPUT, DBMS_UTILITY, UTL_FILE, DBMS_LOB, plus HTP/OWA/OWA_UTI
 gateway. The catalog is extensible — register in `oraclecompat/catalog/OracleBuiltinCatalog`, add
 the SQL in `oraclecompat/implementations/`.
 
-### Pre-Flight Compatibility Report
+### Unanchored Grammar Entry Rules — a live silent-failure trap
 
-Transforms every extracted Oracle view **in memory** — no connection, nothing created — and answers
-"what will fail, why, and how often" before a run. Per view:
-`OK` / `OK_WITH_WARNINGS` / `TRUNCATED_PARSE` / `PARSE_ERROR` / `TRANSFORM_ERROR` / `NO_SOURCE`.
+`select_statement` / `function_body` are **not anchored to EOF**. When the parser meets a construct
+it cannot place, it ends the rule early, leaves the rest of the source unread and reports **no
+error** — the transformation then "succeeds" on a fragment. Measured:
+`SELECT ... FROM sales_view MODEL PARTITION BY ...` consumes 49 of 149 characters, reads `MODEL` as
+a table alias, and produces a silently truncated view.
 
-- Constructs are ranked by the number of **failing** views they appear in — that is the number that
-  decides what is worth implementing. This is the data source for the demand-driven view work.
-- **Silent loss detection:** flags constructs dropped in views that transformed *without* an error.
-- **`TRUNCATED_PARSE`:** grammar entry rules are not anchored to EOF, so the parser can end a
-  statement early, leave the rest unread, and report no error — the transformation then "succeeds"
-  on a fragment. `ParseCompleteness` makes this visible. The transformer still *accepts* truncated
-  parses; making it reject them is an open decision (item 4) because it will convert an unknown
-  number of currently "successful" views into loud failures.
-- Support status is **derived by reflection** from `PostgresCodeBuilder`'s visit methods, so the
-  catalog cannot go stale when a visitor is added.
-- Not covered yet: functions/procedures (need package context).
-
-REST: `POST /api/preflight/oracle/analyze`, `GET /api/preflight/report`,
-`GET /api/preflight/report/findings` (filtered + paginated).
+This is unfixed and unguarded on `main`. A detector (`ParseCompleteness`) exists on branch
+`parked/preflight-compatibility-report` — recover it from there rather than rewriting it if
+transformer hardening (item 4) is picked up. Making the transformer *reject* truncated parses is
+still an open decision: it converts an unknown number of currently "successful" views into loud
+failures.
 
 ## Development Guidelines
 
@@ -450,8 +447,8 @@ Every plan document, listed once. Prefer linking here over copying content into 
 
 **Current plan**
 - [CONSOLIDATION_PLAN.md](documentation/CONSOLIDATION_PLAN.md) — the active plan; per-item status,
-  acceptance criteria, and full implementation write-ups for parallel transfer, index migration and
-  the pre-flight report
+  acceptance criteria, full implementation write-ups for parallel transfer and index migration, and
+  the parking record for the pre-flight report
 
 **Living references**
 - [TRANSFORMATION.md](documentation/TRANSFORMATION.md) — SQL/view transformation feature list and history

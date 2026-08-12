@@ -50,19 +50,15 @@ tables/views are involved.
 - [x] **Trimmed result payloads** (done 2026-08-12): extraction responses carry a projection of
       the fields the UI renders instead of the raw metadata. 14 MB → 252 KB for a realistic
       schema. See "Result Payloads" below.
-- [ ] Server-side pagination/filtering of the result endpoints ("show only failures"). No longer
-      about size — the remaining reason would be filtering, and the pre-flight report already
-      answers "which objects failed and why" with `GET /api/preflight/report/findings`.
+- [ ] Server-side pagination/filtering of the result endpoints ("show only failures").
+      No longer about size — the remaining reason would be filtering.
 - [ ] Audit frontend polling: avoid re-fetching and re-rendering full lists on every poll tick.
 - [x] **Consistency pass over the feature panels** (done 2026-08-12): all 22 result panels and
       12 extraction lists now go through the same two helpers, so badge semantics, toggle
       behaviour and detail rendering are identical by construction rather than by convention.
-- [x] **Pre-flight compatibility report** (done 2026-08-08, views only): one job that parses
-      all extracted views and produces a categorized report of unsupported constructs *before*
-      anything is created. This is also the data source for item 5.
-      See "Pre-Flight Compatibility Report" below.
-- [ ] Extend the pre-flight report to functions/procedures (needs package context, so it is a
-      separate step from the view analysis).
+- ~~Pre-flight compatibility report~~ — **removed from main 2026-08-12**, parked on branch
+  `parked/preflight-compatibility-report`. See "Pre-Flight Compatibility Report (parked)" below.
+- ~~Extend the pre-flight report to functions/procedures~~ — dropped with the feature.
 
 **Acceptance:** A failed object's root cause is reachable in ≤2 clicks; the UI stays
 responsive with 5,000+ tables/views. **The responsiveness half is met** — a panel reporting
@@ -140,12 +136,12 @@ otherwise real coverage.
   reports **no error**. Measured: `SELECT ... FROM sales_view MODEL PARTITION BY ...` consumes
   49 of 149 characters, reads `MODEL` as a table alias, and transforms "successfully" into a
   truncated view. Every construct outside the grammar's reach fails this way, silently.
-  → Detection exists now (`ParseCompleteness`, reported as `TRUNCATED_PARSE`); making the
-  *transformer* reject truncated parses is the open decision — it will convert an unknown
-  number of currently "successful" views into loud failures, so run the report first.
+  → This is the one finding of the pre-flight work worth keeping. The *detection*
+  (`ParseCompleteness`) went with the parked feature, so if this is picked up, recover that
+  class from `parked/preflight-compatibility-report` rather than rewriting it.
 - `VisitSeq_of_statements:31` — silently `continue`s on statements that transform to null
 - `VisitPragma_declaration:69` — silently ignores `AUTONOMOUS_TRANSACTION` (changes commit
-  semantics!); now at least *reported* by the pre-flight construct catalog
+  semantics!)
 - `VisitGeneralElement` — returns null for unsupported cross-schema references
 - 166 `return null` sites in `transformer/` still to audit
 
@@ -171,10 +167,11 @@ PIVOT/UNPIVOT, MODEL clause, compound `(+)` outer-join expressions, `REGEXP_*` w
 position/occurrence > 1, `ORDER SIBLINGS BY`, RETURNING clause, cursor expressions.
 
 **Approach — explicitly demand-driven, not coverage-driven:**
-- [ ] Run the pre-flight compatibility report (item 1) against the real project's views.
-      **This is the immediate next action** — the report exists now, so the ranking that
-      decides this item's order can be produced instead of guessed.
-- [ ] Rank failing constructs by *frequency in the actual codebase*; fix top-down.
+- [ ] Take failures from the normal migration run. **The views are in a good state** (assessed
+      2026-08-12); the few that still fail surface in the view implementation panel with their
+      error and failing SQL, which is enough to act on at this volume. This replaced the
+      pre-flight report as the demand signal — see the parking note below.
+- [ ] Fix top-down by how often a construct actually blocks a run.
 - [ ] For each fixed construct: add both a string-comparison test and (where feasible) an
       execution test against PostgreSQL (Testcontainers pattern from
       `PostgresPlSqlCursorAttributesValidationTest`).
@@ -183,7 +180,7 @@ position/occurrence > 1, `ORDER SIBLINGS BY`, RETURNING clause, cursor expressio
 **Acceptance:** Every view in the reference project either transforms or has a documented,
 categorized reason visible in the UI.
 
-**Effort:** ongoing, sized per construct after the report exists.
+**Effort:** ongoing, sized per construct.
 
 ---
 
@@ -285,10 +282,31 @@ person to add a field to a summary has nothing telling them the omissions are de
 
 ---
 
-## Pre-Flight Compatibility Report (implemented 2026-08-08)
+## Pre-Flight Compatibility Report (implemented 2026-08-08, parked 2026-08-12)
 
-Analyses every extracted Oracle view in memory — **no database connection, nothing created** —
-and answers "what will fail, why, and how often" before a migration run.
+> **Removed from `main` on 2026-08-12. The full implementation is preserved on branch
+> `parked/preflight-compatibility-report`** (branched from `5505cd9`, the last commit that
+> contains it). Nothing was deleted outright — recover with
+> `git checkout parked/preflight-compatibility-report -- <path>`.
+>
+> **Why it was parked.** The report was built to answer "which view constructs should we fix
+> first?" That question stopped being open: the views reached a good state, and the small number
+> that still fail are identified perfectly well by the normal migration run, which reports each
+> failure with its error and failing SQL in the view panel. A whole second analysis pipeline —
+> its own job, REST resource, aggregator and UI panel — was left standing to answer a question
+> the ordinary workflow already answers. On the frontend it was an extra always-visible panel;
+> in the codebase, ~2,100 lines and a `StateService` field carried for no live consumer.
+>
+> **What this cost.** Item 5 lost its ranking data source, which is a real loss in principle and
+> not in practice at the current failure volume — the ranking is now "what blocked the last run".
+> Item 4 lost `ParseCompleteness`, the truncated-parse detector; that one is worth recovering
+> from the branch if transformer hardening is picked up, because the underlying grammar problem
+> it detects is still present and still silent.
+>
+> **Revisit if** the failure volume grows enough that per-run triage stops scaling, or the
+> analysis is extended to functions/procedures, where there is no cheap equivalent signal.
+
+The description below documents the parked implementation as it stood.
 
 **Modules:**
 - `transformer/analysis/` — pure, transformer-side detection:

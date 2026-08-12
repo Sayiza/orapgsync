@@ -132,9 +132,8 @@ public class TransformationService {
     /**
      * Transforms an already parsed Oracle SELECT statement to PostgreSQL.
      *
-     * <p>Callers that need the parse tree themselves (for example the pre-flight compatibility
-     * report, which detects Oracle constructs in the AST) use this entry point to avoid parsing
-     * the same source twice. {@link #transformSql(String, String, TransformationIndices, boolean)}
+     * <p>Callers that need the parse tree themselves use this entry point to avoid parsing the
+     * same source twice. {@link #transformSql(String, String, TransformationIndices, boolean)}
      * delegates here after parsing.</p>
      *
      * @param parseResult result of parsing the Oracle SQL with {@link AntlrParser#parseSelectStatement}
