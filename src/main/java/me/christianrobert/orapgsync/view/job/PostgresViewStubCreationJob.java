@@ -200,6 +200,17 @@ public class PostgresViewStubCreationJob extends AbstractDatabaseWriteJob<ViewSt
                     String.format("Creating view stub: %s", qualifiedViewName),
                     String.format("View %d of %d", processedViews + 1, totalViews));
 
+            // Same case-collision guard as table creation: two Oracle view columns differing only
+            // by case would collapse to one PostgreSQL column. Caught here rather than left to
+            // PostgreSQL, so the message names both Oracle columns.
+            String collision = describeColumnNameCollisions(view);
+            if (collision != null) {
+                result.addError(qualifiedViewName, collision, generateCreateViewStubSQL(view));
+                log.error("Refusing to create view stub '{}': {}", qualifiedViewName, collision);
+                processedViews++;
+                continue;
+            }
+
             try {
                 createViewStub(connection, view);
                 result.addCreatedView(qualifiedViewName);
@@ -215,6 +226,30 @@ public class PostgresViewStubCreationJob extends AbstractDatabaseWriteJob<ViewSt
 
             processedViews++;
         }
+    }
+
+    /**
+     * Detects Oracle view columns that would collapse onto one PostgreSQL column name.
+     *
+     * @param view the view about to be stubbed
+     * @return an error message naming the colliding columns, or {@code null} if there is none
+     * @see me.christianrobert.orapgsync.table.job.PostgresTableCreationJob
+     */
+    private String describeColumnNameCollisions(ViewMetadata view) {
+        List<String> columnNames = view.getColumns().stream()
+                .map(ColumnMetadata::getColumnName)
+                .toList();
+
+        Map<String, List<String>> collisions = PostgresIdentifierNormalizer.findCollisions(columnNames);
+        if (collisions.isEmpty()) {
+            return null;
+        }
+
+        return String.format(
+                "Column names differ only by case and would collapse to one PostgreSQL column: %s. "
+                        + "PostgreSQL identifiers are folded to lower case, so these Oracle columns "
+                        + "cannot be migrated without renaming one of them in the source.",
+                PostgresIdentifierNormalizer.describeCollisions(collisions));
     }
 
     private void createViewStub(Connection connection, ViewMetadata view) throws SQLException {

@@ -3,6 +3,7 @@ package me.christianrobert.orapgsync.transformer.type.helpers;
 import me.christianrobert.orapgsync.antlr.PlSqlParser.*;
 import me.christianrobert.orapgsync.transformer.type.TypeAnalysisVisitor;
 import me.christianrobert.orapgsync.transformer.type.TypeInfo;
+import me.christianrobert.orapgsync.transformer.util.IdentifierHelper;
 import org.antlr.v4.runtime.ParserRuleContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -85,7 +86,7 @@ public final class ResolveFunction {
         if (partCtx == null || partCtx.id_expression() == null) {
             return null;
         }
-        String text = partCtx.id_expression().getText();
+        String text = IdentifierHelper.unquote(partCtx.id_expression().getText());
         return text != null ? text.toLowerCase() : null;
     }
 

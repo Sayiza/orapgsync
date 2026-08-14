@@ -103,16 +103,32 @@ Oracle SQL/PL-SQL → AntlrParser → PostgresCodeBuilder → PostgreSQL SQL/PL-
 - `service/TransformationService` — high-level CDI API
 - `type/` — two-pass type inference
 - `inline/`, `packagevariable/` — inline type definitions, package variable getter/setters
+- `util/IdentifierHelper` — the only sanctioned way to read an identifier out of the parse tree
 
 **Design principles:** direct transformation (visitors return PostgreSQL strings, no intermediate
 semantic tree); metadata-driven disambiguation (e.g. `emp.address.get_street()` type method vs.
 `emp_pkg.get_salary()` package function); visitor layer stays pure so it is unit-testable with
 mocked metadata.
 
+**Never call `getText()` on an identifier context.** Oracle has two identifier forms and the
+parser returns both verbatim: `RUN_ID` and `"RUN_ID"` name the same column but are not the same
+string. Route every identifier through `util/IdentifierHelper`, picking by purpose —
+`canonical()` for metadata lookup keys and comparisons, `emit()` for anything landing in output
+SQL, `unquote()` for name fragments and jsonb keys. Skipping this produced two silent failures at
+once: `"RUN_ID"` reached PostgreSQL case-sensitive and missed the migrated `run_id`, *and* it hit
+the lower-case-keyed indices as the literal string `"run_id"` with quotes attached, so synonym
+resolution, CTE detection and type inference quietly took the wrong branch and still reported
+success. `emit()` deliberately leaves unquoted identifiers byte-identical — that is what keeps
+bare `USER` and `LEVEL` working as PostgreSQL keywords. **Column aliases are excluded on
+purpose** (an alias defines a name rather than referencing one; it is the view's contract).
+Details and the known gaps: [TRANSFORMATION.md](documentation/TRANSFORMATION.md#quoted-identifiers-oracle-delimited_id--2026-08-14).
+
 ### Cross-Cutting (`core/`)
 
 `core/tools/` — `TypeConverter` (Oracle→PostgreSQL types), `OracleTypeClassifier` (complex system
-types), `PostgreSqlIdentifierUtils`, `UserExcluder`, `NameNormalizer`, `CodeCleaner`.
+types), `PostgresIdentifierNormalizer` (Oracle name → PostgreSQL name; **the** authority, used by
+every DDL job and by the transformer's `IdentifierHelper`), `PostgreSqlIdentifierUtils`,
+`UserExcluder`, `CodeCleaner`.
 `core/service/` — `StateService` (incl. `resolveSynonym()`).
 
 ### Database & Config
@@ -290,6 +306,18 @@ transaction: adds `{column}_staging bytea` columns → COPYs into staging →
 Self-contained, repeatable, and transactional — on failure the staging columns survive for
 debugging. Methods: `detectOidColumns`, `addStagingColumns`, `convertStagingToLargeObjects`,
 `dropStagingColumns`. Plan: [LOB_TO_OID_MIGRATION_PLAN.md](documentation/completed/LOB_TO_OID_MIGRATION_PLAN.md).
+
+### Identifier Normalization — one authority, one collision guard
+
+Every Oracle name becomes a PostgreSQL name through `PostgresIdentifierNormalizer` and nothing
+else: lower-cased, quoted only when PostgreSQL requires it. The DDL jobs and the transformer must
+agree, so both call this class rather than re-deriving the rule — if its curated reserved-word
+list is wrong, both sides are wrong identically and still match, which is the property that
+matters. In the transformer, reach it via `transformer/util/IdentifierHelper`.
+
+Lower-casing means Oracle's case-sensitive `"Foo"` and `"FOO"` collapse to one name.
+`findCollisions()` detects that, and table and view-stub creation **refuse the object** with an
+error naming both Oracle columns rather than let a column be silently merged or dropped.
 
 ### Synonym Resolution
 

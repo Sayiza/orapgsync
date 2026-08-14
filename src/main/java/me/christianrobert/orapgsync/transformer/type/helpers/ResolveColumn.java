@@ -4,6 +4,7 @@ import me.christianrobert.orapgsync.antlr.PlSqlParser.General_elementContext;
 import me.christianrobert.orapgsync.antlr.PlSqlParser.General_element_partContext;
 import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
 import me.christianrobert.orapgsync.transformer.type.TypeInfo;
+import me.christianrobert.orapgsync.transformer.util.IdentifierHelper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -95,7 +96,7 @@ public final class ResolveColumn {
         if (partCtx == null || partCtx.id_expression() == null) {
             return null;
         }
-        String text = partCtx.id_expression().getText();
+        String text = IdentifierHelper.unquote(partCtx.id_expression().getText());
         return text != null ? text.toLowerCase() : null;
     }
 

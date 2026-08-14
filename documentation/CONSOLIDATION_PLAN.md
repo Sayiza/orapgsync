@@ -160,6 +160,17 @@ is either correct, explicitly annotated, or explicitly failed.
 
 **Effort:** S–M
 
+**Done so far — quoted identifiers (✅ 2026-08-14).** Found from a real failing view, and it was
+this item's pattern exactly: the transformer never called `PostgresIdentifierNormalizer`, so
+Oracle `DELIMITED_ID`s (`"RUN_ID"`) reached PostgreSQL case-sensitive *and* poisoned every
+lower-case-keyed metadata lookup with quote characters. The emission half failed loudly; the
+lookup half was silent — synonym resolution, CTE detection, alias resolution and type inference
+took the wrong branch and still reported success. Fixed by routing all identifier reads through
+`transformer/util/IdentifierHelper`; unquoted identifiers are emitted byte-identical, so the
+change cannot regress a working view. Case-colliding column names (`"Foo"` / `"FOO"`) are now
+refused at table and view-stub creation instead of silently merging.
+Full write-up: [TRANSFORMATION.md](TRANSFORMATION.md#quoted-identifiers-oracle-delimited_id--2026-08-14).
+
 ### 5. View Transformation Gaps — driven by real-world cases
 
 **Problem:** Some complicated views still fail. Known candidate gaps from the review:

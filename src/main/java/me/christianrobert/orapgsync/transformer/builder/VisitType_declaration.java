@@ -6,6 +6,7 @@ import me.christianrobert.orapgsync.transformer.inline.ConversionStrategy;
 import me.christianrobert.orapgsync.transformer.inline.FieldDefinition;
 import me.christianrobert.orapgsync.transformer.inline.InlineTypeDefinition;
 import me.christianrobert.orapgsync.transformer.inline.TypeCategory;
+import me.christianrobert.orapgsync.transformer.util.IdentifierHelper;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -132,7 +133,7 @@ public class VisitType_declaration {
 
         // Extract field specifications
         for (PlSqlParser.Field_specContext fieldSpec : recordCtx.field_spec()) {
-            String fieldName = fieldSpec.column_name().getText();
+            String fieldName = IdentifierHelper.unquote(fieldSpec.column_name().getText());
             String oracleType = extractDataType(fieldSpec.type_spec());
             String postgresType = TypeConverter.toPostgre(oracleType);
 

@@ -17,6 +17,7 @@ import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
 import me.christianrobert.orapgsync.transformer.inline.FieldDefinition;
 import me.christianrobert.orapgsync.transformer.inline.InlineTypeDefinition;
 import me.christianrobert.orapgsync.transformer.packagevariable.PackageContext;
+import me.christianrobert.orapgsync.transformer.util.IdentifierHelper;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -168,8 +169,8 @@ public class VisitGeneralElement {
       TransformationContext context = b.getContext();
       if (context != null && parts.size() >= 3) {
         // Could be type member method: alias.col.method()
-        String firstPart = parts.get(0).id_expression().getText();
-        String secondPart = parts.get(1).id_expression().getText();
+        String firstPart = IdentifierHelper.unquote(parts.get(0).id_expression().getText());
+        String secondPart = IdentifierHelper.unquote(parts.get(1).id_expression().getText());
 
         // 1. Is firstPart a table alias?
         String tableName = context.resolveAlias(firstPart);
@@ -181,7 +182,7 @@ public class VisitGeneralElement {
 
           if (typeInfo != null && typeInfo.isCustomType()) {
             // 3. Does the type have the method we're calling?
-            String methodName = parts.get(2).id_expression().getText();
+            String methodName = IdentifierHelper.unquote(parts.get(2).id_expression().getText());
             if (context.hasTypeMethod(typeInfo.getQualifiedType(), methodName)) {
               // IT'S A TYPE MEMBER METHOD!
               return handleTypeMemberMethod(parts, b, context);
@@ -229,7 +230,7 @@ public class VisitGeneralElement {
       return false; // Has arguments, not a pseudo-column
     }
 
-    String lastIdentifier = lastPart.id_expression().getText().toUpperCase();
+    String lastIdentifier = IdentifierHelper.unquote(lastPart.id_expression().getText()).toUpperCase();
     return "NEXTVAL".equals(lastIdentifier) || "CURRVAL".equals(lastIdentifier);
   }
 
@@ -259,7 +260,7 @@ public class VisitGeneralElement {
 
     // Extract sequence name path (all parts except last)
     List<String> sequencePath = parts.subList(0, parts.size() - 1).stream()
-        .map(part -> part.id_expression().getText())
+        .map(part -> IdentifierHelper.unquote(part.id_expression().getText()))
         .collect(Collectors.toList());
 
     // Apply transformation with metadata context
@@ -361,7 +362,7 @@ public class VisitGeneralElement {
 
     // Previous parts form the package path (could be "package" or "schema.package")
     List<String> packagePath = parts.subList(0, parts.size() - 1).stream()
-        .map(part -> part.id_expression().getText())
+        .map(part -> IdentifierHelper.unquote(part.id_expression().getText()))
         .collect(Collectors.toList());
 
     // Apply transformation logic with metadata context
@@ -466,7 +467,10 @@ public class VisitGeneralElement {
 
   /**
    * Handles qualified column references: table.column, table.column.subfield, etc.
-   * For now, pass through as-is (future: could validate against metadata).
+   *
+   * <p>Each part is normalized independently, so it matches the name the DDL migration gave the
+   * column. Oracle's {@code "RUN_ID"} would otherwise reach PostgreSQL as a case-sensitive
+   * quoted name and miss the {@code run_id} that was actually created.
    */
   private static String handleQualifiedColumn(
       List<PlSqlParser.General_element_partContext> parts,
@@ -474,7 +478,7 @@ public class VisitGeneralElement {
 
     // Build dotted path: part1.part2.part3...
     return parts.stream()
-        .map(part -> part.id_expression().getText())
+        .map(part -> IdentifierHelper.emit(part.id_expression().getText()))
         .collect(Collectors.joining(" . "));
   }
 
@@ -585,7 +589,9 @@ public class VisitGeneralElement {
     }
 
     // Check for Oracle pseudo-columns and special constants that need transformation
-    String identifier = partCtx.getText();
+    // Delimiters are stripped first: "SYSDATE" is the same pseudo-column as SYSDATE, and a
+    // quoted name must not reach a lookup key with its quote characters still attached.
+    String identifier = IdentifierHelper.unquote(partCtx.getText());
     String upperIdentifier = identifier.toUpperCase();
 
     // SYSDATE → CURRENT_TIMESTAMP
@@ -617,8 +623,9 @@ public class VisitGeneralElement {
       }
     }
 
-    // Simple identifier - use getText()
-    return partCtx.getText();
+    // Simple identifier - column, local variable or parameter. Normalized so a quoted Oracle
+    // name matches what the DDL migration created; unquoted names pass through unchanged.
+    return IdentifierHelper.emit(partCtx.getText());
   }
 
   /**
@@ -628,7 +635,7 @@ public class VisitGeneralElement {
     if (partCtx.id_expression() == null) {
       throw new TransformationException("Function part missing id_expression");
     }
-    return partCtx.id_expression().getText();
+    return IdentifierHelper.unquote(partCtx.id_expression().getText());
   }
 
   /**
@@ -790,7 +797,7 @@ public class VisitGeneralElement {
         if (i > startIdx) {
           objectPath.append(" . ");
         }
-        objectPath.append(parts.get(i).id_expression().getText());
+        objectPath.append(IdentifierHelper.emit(parts.get(i).id_expression().getText()));
       }
 
       // Get type name for the method
@@ -826,8 +833,8 @@ public class VisitGeneralElement {
     // parts[startIdx] = alias (e.g., emp)
     // parts[startIdx + 1] = column (e.g., address)
 
-    String firstPart = parts.get(startIdx).id_expression().getText();
-    String secondPart = parts.get(startIdx + 1).id_expression().getText();
+    String firstPart = IdentifierHelper.unquote(parts.get(startIdx).id_expression().getText());
+    String secondPart = IdentifierHelper.unquote(parts.get(startIdx + 1).id_expression().getText());
 
     // Resolve alias to table name
     String tableName = context.resolveAlias(firstPart);
@@ -902,7 +909,7 @@ public class VisitGeneralElement {
     // parts[0] = variable name
     // parts[1..n] = field path
 
-    String variableName = parts.get(0).id_expression().getText();
+    String variableName = IdentifierHelper.unquote(parts.get(0).id_expression().getText());
     me.christianrobert.orapgsync.transformer.inline.InlineTypeDefinition inlineType = varDef.getInlineType();
 
     StringBuilder result = new StringBuilder();
@@ -918,7 +925,7 @@ public class VisitGeneralElement {
     me.christianrobert.orapgsync.transformer.inline.FieldDefinition finalField = null;
 
     for (int i = 1; i < parts.size(); i++) {
-      String fieldName = parts.get(i).id_expression().getText();
+      String fieldName = IdentifierHelper.unquote(parts.get(i).id_expression().getText());
       boolean isLastField = (i == parts.size() - 1);
 
       if (isLastField) {
@@ -1030,7 +1037,7 @@ public class VisitGeneralElement {
       // Try Pattern 1: Unqualified inside package function (g_rec.field)
       // Only applies when we're inside a package member
       if (context.isInPackageMember()) {
-        String firstPart = parts.get(0).id_expression().getText();
+        String firstPart = IdentifierHelper.unquote(parts.get(0).id_expression().getText());
         String currentPackage = context.getCurrentPackageName();
 
         if (currentPackage != null && b.isPackageVariable(currentPackage, firstPart)) {
@@ -1057,8 +1064,8 @@ public class VisitGeneralElement {
 
     if (parts.size() >= 3) {
       // Try Pattern 2: Package-qualified (pkg.g_rec.field)
-      String firstPart = parts.get(0).id_expression().getText();
-      String secondPart = parts.get(1).id_expression().getText();
+      String firstPart = IdentifierHelper.unquote(parts.get(0).id_expression().getText());
+      String secondPart = IdentifierHelper.unquote(parts.get(1).id_expression().getText());
 
       if (b.isPackageVariable(firstPart, secondPart)) {
         PackageContext pkgContext = context.getPackageContext(firstPart);
@@ -1082,9 +1089,9 @@ public class VisitGeneralElement {
 
     if (parts.size() >= 4) {
       // Try Pattern 3: Schema-qualified (schema.pkg.g_rec.field)
-      String firstPart = parts.get(0).id_expression().getText();
-      String secondPart = parts.get(1).id_expression().getText();
-      String thirdPart = parts.get(2).id_expression().getText();
+      String firstPart = IdentifierHelper.unquote(parts.get(0).id_expression().getText());
+      String secondPart = IdentifierHelper.unquote(parts.get(1).id_expression().getText());
+      String thirdPart = IdentifierHelper.unquote(parts.get(2).id_expression().getText());
       String currentSchema = context.getCurrentSchema();
 
       // Check if first part is the current schema
@@ -1151,7 +1158,7 @@ public class VisitGeneralElement {
     FieldDefinition finalField = null;
 
     for (int i = fieldStartIndex; i < parts.size(); i++) {
-      String fieldName = parts.get(i).id_expression().getText();
+      String fieldName = IdentifierHelper.unquote(parts.get(i).id_expression().getText());
       boolean isLastField = (i == parts.size() - 1);
 
       if (isLastField) {
@@ -1228,7 +1235,7 @@ public class VisitGeneralElement {
 
     // Last part is the one with function arguments (which might be collection element access)
     PlSqlParser.General_element_partContext lastPart = parts.get(parts.size() - 1);
-    String memberName = lastPart.id_expression().getText();
+    String memberName = IdentifierHelper.unquote(lastPart.id_expression().getText());
 
     // Get the index/key argument
     List<PlSqlParser.Function_argumentContext> funcArgList = lastPart.function_argument();
@@ -1258,18 +1265,18 @@ public class VisitGeneralElement {
       schemaPrefix = context.getCurrentSchema().toLowerCase() + ".";
     } else if (parts.size() == 2) {
       // Two parts: pkg.g_array(1) - package-qualified
-      packageName = parts.get(0).id_expression().getText();
+      packageName = IdentifierHelper.unquote(parts.get(0).id_expression().getText());
       schemaPrefix = context.getCurrentSchema().toLowerCase() + ".";
     } else if (parts.size() == 3) {
       // Three parts: schema.pkg.g_array(1) - schema-qualified
-      String firstPart = parts.get(0).id_expression().getText();
+      String firstPart = IdentifierHelper.unquote(parts.get(0).id_expression().getText());
       String currentSchema = context.getCurrentSchema();
 
       if (!firstPart.equalsIgnoreCase(currentSchema)) {
         return null;  // Cross-schema not supported
       }
       schemaPrefix = currentSchema.toLowerCase() + ".";
-      packageName = parts.get(1).id_expression().getText();
+      packageName = IdentifierHelper.unquote(parts.get(1).id_expression().getText());
     } else {
       return null;  // Too many parts for collection access
     }
@@ -1449,7 +1456,7 @@ public class VisitGeneralElement {
       TransformationContext context) {
 
     // Get variable name
-    String variableName = partCtx.id_expression().getText();
+    String variableName = IdentifierHelper.unquote(partCtx.id_expression().getText());
 
     // Get the index/key argument
     List<PlSqlParser.Function_argumentContext> funcArgList = partCtx.function_argument();
@@ -1917,7 +1924,7 @@ public class VisitGeneralElement {
     }
 
     // Get variable name
-    String variableName = partCtx.id_expression().getText();
+    String variableName = IdentifierHelper.unquote(partCtx.id_expression().getText());
     String upperName = variableName.toUpperCase();
 
     // Exclude known Oracle/PostgreSQL built-in functions

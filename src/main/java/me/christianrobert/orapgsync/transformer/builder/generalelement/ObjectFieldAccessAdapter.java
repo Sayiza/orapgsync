@@ -4,6 +4,7 @@ import me.christianrobert.orapgsync.antlr.PlSqlParser;
 import me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder;
 import me.christianrobert.orapgsync.transformer.builder.objectfield.ObjectFieldAccessTransformer;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
+import me.christianrobert.orapgsync.transformer.util.IdentifierHelper;
 
 import java.util.List;
 import java.util.stream.Collectors;
@@ -51,7 +52,7 @@ public class ObjectFieldAccessAdapter implements GeneralElementTransformer {
 
         // Build full identifier chain from parts
         String identifierChain = parts.stream()
-                .map(p -> p.id_expression().getText())
+                .map(p -> IdentifierHelper.unquote(p.id_expression().getText()))
                 .collect(Collectors.joining("."));
 
         // Delegate to existing ObjectFieldAccessTransformer

@@ -3,6 +3,7 @@ package me.christianrobert.orapgsync.transformer.builder.generalelement;
 import me.christianrobert.orapgsync.antlr.PlSqlParser;
 import me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
+import me.christianrobert.orapgsync.transformer.util.IdentifierHelper;
 
 import java.util.List;
 
@@ -55,7 +56,7 @@ public class PackageVariableTransformer implements GeneralElementTransformer {
 
         // Try Pattern 1: Unqualified variable in current package (1 part)
         if (parts.size() == 1) {
-            String variableName = parts.get(0).id_expression().getText();
+            String variableName = IdentifierHelper.unquote(parts.get(0).id_expression().getText());
             String currentPackage = context.getCurrentPackageName();
 
             if (currentPackage != null && builder.isPackageVariable(currentPackage, variableName)) {
@@ -66,8 +67,8 @@ public class PackageVariableTransformer implements GeneralElementTransformer {
 
         // Try Pattern 2: Package-qualified variable (2 parts)
         if (parts.size() == 2) {
-            String packageName = parts.get(0).id_expression().getText();
-            String variableName = parts.get(1).id_expression().getText();
+            String packageName = IdentifierHelper.unquote(parts.get(0).id_expression().getText());
+            String variableName = IdentifierHelper.unquote(parts.get(1).id_expression().getText());
 
             if (builder.isPackageVariable(packageName, variableName)) {
                 String result = builder.transformToPackageVariableGetter(packageName, variableName);
@@ -77,9 +78,9 @@ public class PackageVariableTransformer implements GeneralElementTransformer {
 
         // Try Pattern 3: Schema-qualified variable (3 parts)
         if (parts.size() == 3) {
-            String schemaName = parts.get(0).id_expression().getText();
-            String packageName = parts.get(1).id_expression().getText();
-            String variableName = parts.get(2).id_expression().getText();
+            String schemaName = IdentifierHelper.unquote(parts.get(0).id_expression().getText());
+            String packageName = IdentifierHelper.unquote(parts.get(1).id_expression().getText());
+            String variableName = IdentifierHelper.unquote(parts.get(2).id_expression().getText());
 
             // Verify schema matches current schema (Oracle doesn't allow cross-schema package refs)
             String currentSchema = context.getCurrentSchema();

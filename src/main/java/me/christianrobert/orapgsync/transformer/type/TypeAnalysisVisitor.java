@@ -4,6 +4,7 @@ import me.christianrobert.orapgsync.antlr.PlSqlParser.*;
 import me.christianrobert.orapgsync.antlr.PlSqlParserBaseVisitor;
 import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
 import me.christianrobert.orapgsync.transformer.type.helpers.*;
+import me.christianrobert.orapgsync.transformer.util.IdentifierHelper;
 import org.antlr.v4.runtime.ParserRuleContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -474,7 +475,7 @@ public class TypeAnalysisVisitor extends PlSqlParserBaseVisitor<TypeInfo> {
         if (partCtx == null || partCtx.id_expression() == null) {
             return null;
         }
-        String text = partCtx.id_expression().getText();
+        String text = IdentifierHelper.unquote(partCtx.id_expression().getText());
         return text != null ? text.toLowerCase() : null;
     }
 

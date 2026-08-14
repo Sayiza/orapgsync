@@ -4,6 +4,7 @@ import me.christianrobert.orapgsync.antlr.PlSqlParser;
 import me.christianrobert.orapgsync.transformer.builder.tablereference.TableReferenceHelper;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
 import me.christianrobert.orapgsync.transformer.context.TransformationException;
+import me.christianrobert.orapgsync.transformer.util.IdentifierHelper;
 
 public class VisitTableReference {
   public static String v(PlSqlParser.Table_refContext ctx, PostgresCodeBuilder b) {
@@ -64,7 +65,10 @@ public class VisitTableReference {
     // Check for alias (applies to both tables and subqueries)
     PlSqlParser.Table_aliasContext aliasCtx = tableRefAux.table_alias();
     if (aliasCtx != null) {
-      String alias = aliasCtx.getText();
+      // Normalized before it is both emitted and registered: the alias registry is lower-case
+      // keyed, so a quoted "E" would be stored under the literal key "e" (quotes included) and
+      // never match the column references that look it up.
+      String alias = IdentifierHelper.emit(aliasCtx.getText());
 
       // Register the alias in the transformation context (if available)
       TransformationContext context = b.getContext();

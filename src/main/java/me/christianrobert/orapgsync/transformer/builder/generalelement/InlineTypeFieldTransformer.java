@@ -6,6 +6,7 @@ import me.christianrobert.orapgsync.transformer.context.TransformationContext;
 import me.christianrobert.orapgsync.transformer.context.TransformationException;
 import me.christianrobert.orapgsync.transformer.inline.FieldDefinition;
 import me.christianrobert.orapgsync.transformer.inline.InlineTypeDefinition;
+import me.christianrobert.orapgsync.transformer.util.IdentifierHelper;
 
 import java.util.List;
 
@@ -50,7 +51,7 @@ public class InlineTypeFieldTransformer implements GeneralElementTransformer {
         }
 
         // Check if first part is a local RECORD variable
-        String variableName = parts.get(0).id_expression().getText();
+        String variableName = IdentifierHelper.unquote(parts.get(0).id_expression().getText());
         TransformationContext.VariableDefinition varDef = context.lookupVariable(variableName);
 
         if (varDef == null || !varDef.isRecord()) {
@@ -80,7 +81,7 @@ public class InlineTypeFieldTransformer implements GeneralElementTransformer {
                     "Inline type field access requires at least 2 parts: variable.field");
         }
 
-        String variableName = parts.get(0).id_expression().getText();
+        String variableName = IdentifierHelper.unquote(parts.get(0).id_expression().getText());
         InlineTypeDefinition inlineType = varDef.getInlineType();
 
         StringBuilder result = new StringBuilder();
@@ -95,7 +96,7 @@ public class InlineTypeFieldTransformer implements GeneralElementTransformer {
         FieldDefinition finalField = null;
 
         for (int i = 1; i < parts.size(); i++) {
-            String fieldName = parts.get(i).id_expression().getText();
+            String fieldName = IdentifierHelper.unquote(parts.get(i).id_expression().getText());
             boolean isLastField = (i == parts.size() - 1);
 
             if (isLastField) {

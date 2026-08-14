@@ -199,6 +199,14 @@ public class PostgresTableCreationJob extends AbstractDatabaseWriteJob<TableCrea
                           String.format("Creating table: %s", qualifiedTableName),
                           String.format("Table %d of %d", processedTables + 1, totalTables));
 
+            String collision = describeColumnNameCollisions(table);
+            if (collision != null) {
+                result.addError(qualifiedTableName, collision, generateCreateTableSQL(table, result));
+                log.error("Refusing to create table '{}': {}", qualifiedTableName, collision);
+                processedTables++;
+                continue;
+            }
+
             try {
                 createTable(connection, table, result);
                 result.addCreatedTable(qualifiedTableName);
@@ -213,6 +221,36 @@ public class PostgresTableCreationJob extends AbstractDatabaseWriteJob<TableCrea
 
             processedTables++;
         }
+    }
+
+    /**
+     * Detects Oracle columns that would collapse onto one PostgreSQL column name.
+     *
+     * <p>Column names are normalized to lower case, so Oracle's case-sensitive {@code "Foo"} and
+     * {@code "FOO"} - two distinct columns - both become {@code foo}. PostgreSQL would reject the
+     * duplicate, but with a message about a duplicate column that says nothing about the cause,
+     * and the failure would be attributed to whatever else the DDL contains. Worse, the same
+     * conflation reaches the transformer and the data transfer, where it silently picks one of
+     * the two. Detecting it here names both Oracle columns and stops before any of that.
+     *
+     * @param table the table about to be created
+     * @return an error message naming the colliding columns, or {@code null} if there is none
+     */
+    private String describeColumnNameCollisions(TableMetadata table) {
+        List<String> columnNames = table.getColumns().stream()
+                .map(ColumnMetadata::getColumnName)
+                .toList();
+
+        Map<String, List<String>> collisions = PostgresIdentifierNormalizer.findCollisions(columnNames);
+        if (collisions.isEmpty()) {
+            return null;
+        }
+
+        return String.format(
+                "Column names differ only by case and would collapse to one PostgreSQL column: %s. "
+                        + "PostgreSQL identifiers are folded to lower case, so these Oracle columns "
+                        + "cannot be migrated without renaming one of them in the source.",
+                PostgresIdentifierNormalizer.describeCollisions(collisions));
     }
 
     private void createTable(Connection connection, TableMetadata table, TableCreationResult result) throws SQLException {

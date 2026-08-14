@@ -817,6 +817,79 @@ TransformationService:
 
 **Test Coverage:** 18 tests in DateArithmeticTransformationTest (15 heuristic, 3 type inference)
 
+### Quoted Identifiers (Oracle `DELIMITED_ID`) — ✅ 2026-08-14
+
+**Problem:** Oracle's grammar has two identifier forms and the parser handed both through
+verbatim: `regular_id` (`RUN_ID`, case-insensitive) and `DELIMITED_ID` (`"RUN_ID"`,
+case-sensitive). View text exported by a GUI tool quotes every identifier, so a view as ordinary
+as this failed:
+
+```sql
+-- Oracle
+select "RUN_ID","STATUS","TIMESTAMP","MSG" from bagl_status
+ where run_id = ( select max(run_id) from bagl_status )
+
+-- Was produced (fails: column "RUN_ID" does not exist)
+SELECT "RUN_ID" , "STATUS" , "TIMESTAMP" , "MSG" FROM bibl2.bagl_status ...
+
+-- Now produced
+SELECT run_id , status , "timestamp" , msg FROM bibl2.bagl_status ...
+```
+
+**Two distinct bugs, both live.** The transformer package did not reference
+`PostgresIdentifierNormalizer` at all, while every DDL-producing job did:
+
+1. **Emission.** `"RUN_ID"` is case-sensitive in PostgreSQL; the DDL migration created `run_id`.
+2. **Lookup — the quieter and more dangerous one.** Metadata indices are lower-case keyed and
+   callers key them with `text.toLowerCase()`. For `"RUN_ID"` that yields `"run_id"` *with the
+   quote characters attached*, missing every entry. Synonym resolution, CTE detection, column
+   type inference, alias resolution and package-variable rewriting all silently took the wrong
+   branch and still reported success.
+
+**Solution:** `transformer/util/IdentifierHelper`, with three operations and a strict rule about
+which to use where:
+
+| Operation | Used for | Example |
+|---|---|---|
+| `canonical` | metadata lookup keys, comparisons | `"MyCol"` → `MYCOL` |
+| `emit` | anything landing in output SQL | `"RUN_ID"` → `run_id` |
+| `unquote` | name fragments, jsonb keys, flattened names | `"a""b"` → `a"b` |
+
+`emit` delegates to `PostgresIdentifierNormalizer` rather than re-deriving the rule — the same
+class that named the objects being referenced, so it is correct by construction whatever its
+curated reserved-word list contains.
+
+**`emit` leaves unquoted identifiers byte-identical.** This is what makes the change incapable of
+regressing a working transformation: an unquoted Oracle identifier is case-insensitive, and
+PostgreSQL folds it to the migrated lower-case name on its own. Normalizing it instead would
+quote it on every reserved-word hit and turn bare `USER` into `"user"` and `LEVEL` into
+`"level"`, destroying their PostgreSQL keyword meaning. Only two shapes are rewritten: quoted
+identifiers, and unquoted ones PostgreSQL cannot read bare (`ORDER#`).
+
+**Column aliases are deliberately excluded.** An alias *defines* a name rather than referencing a
+migrated object, so there is nothing to stay consistent with, and it is the statement's public
+column name — rewriting `AS "Employee Number"` to `employee_number` would silently change a
+view's contract. For views it would also be pointless: `PostgresViewImplementationJob` wraps the
+result in `FROM ( ... ) AS subq(c0, c1, ...)` and re-aliases every column positionally from
+`ALL_TAB_COLUMNS`. Three tests in `ColumnAliasTransformationTest` assert this preservation.
+
+**Case-collision guard.** Normalization lower-cases, so Oracle `"Foo"` and `"FOO"` collapse to
+one name. That conflation is inherited, not introduced — `PostgresTableCreationJob` already
+lower-cased every column — but it is now detected rather than left to corrupt silently.
+`PostgresIdentifierNormalizer.findCollisions` reports the groups, and table and view-stub
+creation refuse the object with an error naming both Oracle columns.
+
+**Known gaps (documented, not fixed):**
+- An unquoted Oracle column genuinely named `USER` still emits as bare `USER`, which PostgreSQL
+  reads as the current-user keyword. Distinguishing the two needs column metadata at the
+  reference site. Pre-existing; neither fixed nor worsened.
+- Oracle resolves an unquoted outer reference to an inner `AS "A"` (both fold to `A`);
+  PostgreSQL does not (`a` folds to `a`).
+
+**Test Coverage:** 13 tests in `IdentifierHelperTest`, 6 in `QuotedIdentifierTransformationTest`
+(including the production view above and byte-identical non-regression assertions), 9 in
+`PostgresIdentifierNormalizerTest`.
+
 ---
 
 ## Testing

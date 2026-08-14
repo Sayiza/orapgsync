@@ -4,6 +4,7 @@ import me.christianrobert.orapgsync.antlr.PlSqlParser;
 import me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
 import me.christianrobert.orapgsync.transformer.context.TransformationException;
+import me.christianrobert.orapgsync.transformer.util.IdentifierHelper;
 
 import java.util.List;
 
@@ -53,7 +54,7 @@ public class CollectionMethodTransformer implements GeneralElementTransformer {
         }
 
         // Check if first part is a collection variable
-        String variableName = parts.get(0).id_expression().getText();
+        String variableName = IdentifierHelper.unquote(parts.get(0).id_expression().getText());
         TransformationContext.VariableDefinition varDef = context.lookupVariable(variableName);
 
         if (varDef == null || !varDef.isCollection()) {
@@ -62,7 +63,7 @@ public class CollectionMethodTransformer implements GeneralElementTransformer {
 
         // Check if second part is a valid collection method
         PlSqlParser.General_element_partContext methodPart = parts.get(1);
-        String methodName = methodPart.id_expression().getText().toUpperCase();
+        String methodName = IdentifierHelper.unquote(methodPart.id_expression().getText()).toUpperCase();
         boolean hasArguments = methodPart.function_argument() != null && !methodPart.function_argument().isEmpty();
 
         if (!isCollectionMethod(methodName, hasArguments)) {

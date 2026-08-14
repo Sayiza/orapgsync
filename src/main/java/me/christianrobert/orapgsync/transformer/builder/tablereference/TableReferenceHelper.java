@@ -4,6 +4,7 @@ import me.christianrobert.orapgsync.antlr.PlSqlParser;
 import me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
 import me.christianrobert.orapgsync.transformer.context.TransformationException;
+import me.christianrobert.orapgsync.transformer.util.IdentifierHelper;
 
 /**
  * Static helper utilities for table reference resolution.
@@ -182,7 +183,15 @@ public class TableReferenceHelper {
             throw new TransformationException("tableview_name context is null");
         }
 
-        String tableName = ctx.getText();
+        // Build the name from the grammar's components rather than ctx.getText().
+        //
+        // Two reasons. First, delimiters must come off before the name is used as a lookup key:
+        // the CTE and synonym indices are lower-case keyed, so a quoted "EMP" would be looked up
+        // as the literal string "emp" - quote characters included - and miss every entry,
+        // silently skipping synonym resolution. Second, splitting getText() on '.' would be
+        // wrong for a delimited identifier that itself contains a dot ("A.B" is one legal Oracle
+        // name); the parse tree already has the components separated correctly.
+        String tableName = unquotedName(ctx);
         TransformationContext context = b.getContext();
 
         // Apply name resolution logic (only if context is available)
@@ -215,6 +224,27 @@ public class TableReferenceHelper {
         // If context not available, keep original name (e.g., in simple tests without metadata)
 
         return tableName;
+    }
+
+    /**
+     * Renders a {@code tableview_name} with any {@code DELIMITED_ID} delimiters removed.
+     *
+     * <p>Grammar: {@code tableview_name : identifier ('.' id_expression)? ... | xmltable ...}.
+     * The {@code xmltable} alternative has no {@code identifier} child and is returned verbatim.
+     *
+     * @param ctx tableview_name context
+     * @return the bare (possibly schema-qualified) Oracle name
+     */
+    private static String unquotedName(PlSqlParser.Tableview_nameContext ctx) {
+        if (ctx.identifier() == null) {
+            return ctx.getText();
+        }
+
+        String name = IdentifierHelper.unquote(ctx.identifier().getText());
+        if (ctx.id_expression() != null) {
+            name = name + "." + IdentifierHelper.unquote(ctx.id_expression().getText());
+        }
+        return name;
     }
 
     /**

@@ -4,6 +4,7 @@ import me.christianrobert.orapgsync.antlr.PlSqlParser;
 import me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
 import me.christianrobert.orapgsync.transformer.context.TransformationException;
+import me.christianrobert.orapgsync.transformer.util.IdentifierHelper;
 
 import java.util.List;
 import java.util.stream.Collectors;
@@ -67,7 +68,7 @@ public class SequenceCallTransformer implements GeneralElementTransformer {
             return false; // Has arguments, not a pseudo-column
         }
 
-        String lastIdentifier = lastPart.id_expression().getText().toUpperCase();
+        String lastIdentifier = IdentifierHelper.unquote(lastPart.id_expression().getText()).toUpperCase();
         return "NEXTVAL".equals(lastIdentifier) || "CURRVAL".equals(lastIdentifier);
     }
 
@@ -87,7 +88,7 @@ public class SequenceCallTransformer implements GeneralElementTransformer {
 
         // Extract sequence name path (all parts except last)
         List<String> sequencePath = parts.subList(0, parts.size() - 1).stream()
-                .map(part -> part.id_expression().getText())
+                .map(part -> IdentifierHelper.unquote(part.id_expression().getText()))
                 .collect(Collectors.toList());
 
         // Apply transformation with metadata context

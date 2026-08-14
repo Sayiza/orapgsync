@@ -2,6 +2,7 @@ package me.christianrobert.orapgsync.transformer.builder;
 
 import me.christianrobert.orapgsync.antlr.PlSqlParser;
 import me.christianrobert.orapgsync.transformer.builder.tablereference.TableReferenceHelper;
+import me.christianrobert.orapgsync.transformer.util.IdentifierHelper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -124,7 +125,7 @@ public class VisitMerge_statement {
      */
     private static String getRawTableName(PlSqlParser.Selected_tableviewContext ctx) {
         if (ctx.tableview_name() != null) {
-            return ctx.tableview_name().getText();
+            return IdentifierHelper.unquote(ctx.tableview_name().getText());
         }
         // Subquery case
         return ctx.getText();
@@ -228,7 +229,7 @@ public class VisitMerge_statement {
             // Get merge elements (column = expression pairs)
             List<String> updates = new ArrayList<>();
             for (PlSqlParser.Merge_elementContext element : updateClause.merge_element()) {
-                String colName = element.column_name().getText().toLowerCase();
+                String colName = IdentifierHelper.emit(element.column_name().getText()).toLowerCase();
                 String expr = b.visit(element.expression());
 
                 // Replace target alias references with table name for PostgreSQL

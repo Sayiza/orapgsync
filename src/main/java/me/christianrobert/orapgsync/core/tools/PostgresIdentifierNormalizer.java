@@ -1,6 +1,12 @@
 package me.christianrobert.orapgsync.core.tools;
 
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Utility class for normalizing identifiers (table names, column names, etc.) for PostgreSQL.
@@ -114,11 +120,70 @@ public class PostgresIdentifierNormalizer {
 
         // Check if quoting is required
         if (needsQuoting(lowercase)) {
-            return "\"" + lowercase + "\"";
+            // A literal double quote inside the name must be doubled, or the quoted identifier
+            // terminates early and produces syntactically invalid SQL.
+            return "\"" + lowercase.replace("\"", "\"\"") + "\"";
         }
 
         // Return unquoted lowercase identifier
         return lowercase;
+    }
+
+    /**
+     * Finds groups of distinct Oracle identifiers that normalize to the same PostgreSQL identifier.
+     *
+     * <p>Normalization lower-cases, so Oracle's case-sensitive quoted identifiers {@code "Foo"}
+     * and {@code "FOO"} — two genuinely different columns — both become {@code foo}. Creating
+     * such a table would silently drop or merge a column, which is exactly the kind of quiet
+     * semantic corruption this project refuses to ship. Callers use this to reject the object
+     * with an explicit error instead.
+     *
+     * <p>Names are compared after normalization, so this also catches the mixed case where one
+     * name is quoted and the other is not.
+     *
+     * <p>Insertion order is preserved so error messages are deterministic across runs.
+     *
+     * @param identifiers the Oracle identifiers to check (e.g. all column names of one table)
+     * @return normalized name → the distinct Oracle names that collapse onto it, containing only
+     *         entries with more than one such name; empty when there is no collision
+     */
+    public static Map<String, List<String>> findCollisions(Collection<String> identifiers) {
+        if (identifiers == null || identifiers.isEmpty()) {
+            return Map.of();
+        }
+
+        Map<String, List<String>> byNormalized = new LinkedHashMap<>();
+        for (String identifier : identifiers) {
+            if (identifier == null || identifier.isEmpty()) {
+                continue;
+            }
+            List<String> group =
+                    byNormalized.computeIfAbsent(normalizeIdentifier(identifier), k -> new ArrayList<>());
+            // Same name listed twice is a duplicate, not a case collision - only distinct names count.
+            if (!group.contains(identifier)) {
+                group.add(identifier);
+            }
+        }
+
+        Map<String, List<String>> collisions = new LinkedHashMap<>();
+        byNormalized.forEach((normalized, group) -> {
+            if (group.size() > 1) {
+                collisions.put(normalized, group);
+            }
+        });
+        return collisions;
+    }
+
+    /**
+     * Renders {@link #findCollisions} output as a single-line, human-readable message fragment.
+     *
+     * @param collisions the collision groups
+     * @return e.g. {@code foo (from "Foo", "FOO"); bar (from "Bar", BAR)}
+     */
+    public static String describeCollisions(Map<String, List<String>> collisions) {
+        return collisions.entrySet().stream()
+                .map(e -> e.getKey() + " (from " + String.join(", ", e.getValue()) + ")")
+                .collect(Collectors.joining("; "));
     }
 
     /**

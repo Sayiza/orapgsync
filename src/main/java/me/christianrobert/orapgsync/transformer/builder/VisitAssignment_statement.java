@@ -5,6 +5,7 @@ import me.christianrobert.orapgsync.transformer.context.TransformationContext;
 import me.christianrobert.orapgsync.transformer.inline.FieldDefinition;
 import me.christianrobert.orapgsync.transformer.inline.InlineTypeDefinition;
 import me.christianrobert.orapgsync.transformer.packagevariable.PackageContext;
+import me.christianrobert.orapgsync.transformer.util.IdentifierHelper;
 
 /**
  * Static helper for visiting PL/SQL assignment statements.
@@ -164,7 +165,7 @@ public class VisitAssignment_statement {
         }
 
         // Extract variable name and field path
-        String variableName = parts.get(0).id_expression().getText();
+        String variableName = IdentifierHelper.unquote(parts.get(0).id_expression().getText());
 
         // For Phase 1B, we use a simple heuristic:
         // If the variable name looks like a local variable (starts with v_, etc.)
@@ -185,7 +186,7 @@ public class VisitAssignment_statement {
             if (i > 1) {
                 fieldPath.append(" , ");
             }
-            fieldPath.append(parts.get(i).id_expression().getText());
+            fieldPath.append(IdentifierHelper.unquote(parts.get(i).id_expression().getText()));
         }
         fieldPath.append(" }'");
 
@@ -336,7 +337,7 @@ public class VisitAssignment_statement {
         }
 
         // Get variable name
-        String variableName = part.id_expression().getText();
+        String variableName = IdentifierHelper.unquote(part.id_expression().getText());
 
         // Transform argument expression
         PlSqlParser.ArgumentContext arg = arguments.get(0);
@@ -463,7 +464,7 @@ public class VisitAssignment_statement {
 
         // Try Pattern 1: Unqualified inside package function (g_rec.field)
         if (parts.size() >= 2 && context.isInPackageMember()) {
-            String firstPart = parts.get(0).id_expression().getText();
+            String firstPart = IdentifierHelper.unquote(parts.get(0).id_expression().getText());
             String currentPackage = context.getCurrentPackageName();
 
             if (currentPackage != null && b.isPackageVariable(currentPackage, firstPart)) {
@@ -488,8 +489,8 @@ public class VisitAssignment_statement {
 
         // Try Pattern 2: Package-qualified (pkg.g_rec.field)
         if (parts.size() >= 3) {
-            String firstPart = parts.get(0).id_expression().getText();
-            String secondPart = parts.get(1).id_expression().getText();
+            String firstPart = IdentifierHelper.unquote(parts.get(0).id_expression().getText());
+            String secondPart = IdentifierHelper.unquote(parts.get(1).id_expression().getText());
 
             if (b.isPackageVariable(firstPart, secondPart)) {
                 pkgContext = context.getPackageContext(firstPart);
@@ -513,9 +514,9 @@ public class VisitAssignment_statement {
 
         // Try Pattern 3: Schema-qualified (schema.pkg.g_rec.field)
         if (parts.size() >= 4) {
-            String firstPart = parts.get(0).id_expression().getText();
-            String secondPart = parts.get(1).id_expression().getText();
-            String thirdPart = parts.get(2).id_expression().getText();
+            String firstPart = IdentifierHelper.unquote(parts.get(0).id_expression().getText());
+            String secondPart = IdentifierHelper.unquote(parts.get(1).id_expression().getText());
+            String thirdPart = IdentifierHelper.unquote(parts.get(2).id_expression().getText());
             String currentSchema = context.getCurrentSchema();
 
             if (firstPart.equalsIgnoreCase(currentSchema) && b.isPackageVariable(secondPart, thirdPart)) {
@@ -582,7 +583,7 @@ public class VisitAssignment_statement {
             if (i > fieldStartIndex) {
                 fieldPath.append(" , ");
             }
-            fieldPath.append(parts.get(i).id_expression().getText());
+            fieldPath.append(IdentifierHelper.unquote(parts.get(i).id_expression().getText()));
         }
         fieldPath.append(" }'");
 
@@ -666,7 +667,7 @@ public class VisitAssignment_statement {
         // Determine the pattern based on number of parts and context
         String schemaPrefix;
         String packageName;
-        String variableName = lastPart.id_expression().getText();
+        String variableName = IdentifierHelper.unquote(lastPart.id_expression().getText());
         PackageContext pkgContext = null;
 
         if (parts.size() == 1) {
@@ -682,7 +683,7 @@ public class VisitAssignment_statement {
             pkgContext = context.getPackageContext(packageName);
         } else if (parts.size() == 2) {
             // Pattern 2: Package-qualified (pkg.g_array(1))
-            packageName = parts.get(0).id_expression().getText();
+            packageName = IdentifierHelper.unquote(parts.get(0).id_expression().getText());
             if (!b.isPackageVariable(packageName, variableName)) {
                 return null;
             }
@@ -690,12 +691,12 @@ public class VisitAssignment_statement {
             pkgContext = context.getPackageContext(packageName);
         } else if (parts.size() == 3) {
             // Pattern 3: Schema-qualified (schema.pkg.g_array(1))
-            String firstPart = parts.get(0).id_expression().getText();
+            String firstPart = IdentifierHelper.unquote(parts.get(0).id_expression().getText());
             String currentSchema = context.getCurrentSchema();
             if (!firstPart.equalsIgnoreCase(currentSchema)) {
                 return null;  // Cross-schema not supported
             }
-            packageName = parts.get(1).id_expression().getText();
+            packageName = IdentifierHelper.unquote(parts.get(1).id_expression().getText());
             if (!b.isPackageVariable(packageName, variableName)) {
                 return null;
             }

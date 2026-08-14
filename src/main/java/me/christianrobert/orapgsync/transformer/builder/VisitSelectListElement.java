@@ -2,6 +2,7 @@ package me.christianrobert.orapgsync.transformer.builder;
 
 import me.christianrobert.orapgsync.antlr.PlSqlParser;
 import me.christianrobert.orapgsync.transformer.context.TransformationException;
+import me.christianrobert.orapgsync.transformer.util.IdentifierHelper;
 
 public class VisitSelectListElement {
   public static String v(PlSqlParser.Select_list_elementsContext ctx, PostgresCodeBuilder b) {
@@ -16,7 +17,7 @@ public class VisitSelectListElement {
       }
 
       // Get the table/alias name
-      String tableName = tableCtx.getText();
+      String tableName = IdentifierHelper.emit(tableCtx.getText());
       return tableName + " . *";
     }
 
@@ -81,7 +82,18 @@ public class VisitSelectListElement {
     PlSqlParser.Quoted_stringContext quotedStringCtx = ctx.quoted_string();
 
     if (identifierCtx != null) {
-      // AS identifier or just identifier
+      // AS identifier or just identifier.
+      //
+      // Deliberately NOT normalized, unlike column and table references. An alias defines a new
+      // name rather than referring to a migrated object, so there is nothing to stay consistent
+      // with, and the alias is the statement's public column name - rewriting AS "Employee
+      // Number" to employee_number would silently change a view's contract. For views it would
+      // also be pointless: PostgresViewImplementationJob wraps the result in
+      // "FROM ( ... ) AS subq(c0, c1, ...)" and re-aliases every column positionally from
+      // ALL_TAB_COLUMNS, discarding whatever appears here.
+      //
+      // Known gap: Oracle resolves an unquoted outer reference to an inner AS "A" (both fold to
+      // A), PostgreSQL does not (a folds to a). Rare, and worth less than the contract.
       String alias = identifierCtx.getText();
       return hasAs ? "AS " + alias : "AS " + alias;
     } else if (quotedStringCtx != null) {

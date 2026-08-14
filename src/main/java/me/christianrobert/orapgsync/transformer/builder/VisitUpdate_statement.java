@@ -2,6 +2,7 @@ package me.christianrobert.orapgsync.transformer.builder;
 
 import me.christianrobert.orapgsync.antlr.PlSqlParser;
 import me.christianrobert.orapgsync.transformer.builder.tablereference.TableReferenceHelper;
+import me.christianrobert.orapgsync.transformer.util.IdentifierHelper;
 
 import java.util.List;
 import java.util.stream.Collectors;
@@ -195,8 +196,8 @@ public class VisitUpdate_statement {
 
         // Case 1: column_name = expression
         if (ctx.column_name() != null && ctx.expression() != null) {
-            // Column names are simple identifiers - use getText() directly (no transformation needed)
-            String columnName = ctx.column_name().getText();
+            // Normalized so a quoted Oracle column matches the name the DDL migration created
+            String columnName = IdentifierHelper.emit(ctx.column_name().getText());
             String expression = b.visit(ctx.expression());
             return columnName + " = " + expression;
         }
