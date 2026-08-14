@@ -6,6 +6,7 @@ import me.christianrobert.orapgsync.transformer.context.TransformationException;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Pattern;
 
 /**
  * Transforms Oracle string functions to PostgreSQL equivalents.
@@ -18,7 +19,7 @@ import java.util.List;
  *   <li>TRANSLATE(str, from, to) → TRANSLATE(str, from, to) (pass-through)</li>
  *   <li>REGEXP_REPLACE(str, pattern, replacement[, position[, occurrence[, flags]]]) → REGEXP_REPLACE(str, pattern, replacement, 'g')</li>
  *   <li>REGEXP_SUBSTR(str, pattern[, position[, occurrence[, flags[, subexpr]]]]) → (REGEXP_MATCH(str, pattern))[1]</li>
- *   <li>REGEXP_INSTR(str, pattern[, position[, occurrence[, return_opt[, flags[, subexpr]]]]]) → Custom function or documented as unsupported</li>
+ *   <li>REGEXP_INSTR(str, pattern[, position[, occurrence[, return_opt[, flags[, subexpr]]]]]) → REGEXP_INSTR(...) (native since PostgreSQL 15)</li>
  *   <li>SUBSTR(str, pos[, len]) → SUBSTRING(str FROM pos [FOR len]) (future)</li>
  *   <li>TRIM(...) → TRIM(...) with syntax adjustments (future)</li>
  * </ul>
@@ -415,7 +416,7 @@ public class StringFunctionTransformer {
   }
 
   /**
-   * Handles Oracle REGEXP_INSTR (currently not supported - documented).
+   * Transforms Oracle REGEXP_INSTR to PostgreSQL REGEXP_INSTR.
    *
    * <p>Oracle REGEXP_INSTR syntax:
    * <pre>
@@ -423,35 +424,115 @@ public class StringFunctionTransformer {
    *              [, position [, occurrence [, return_option [, match_parameter [, subexpr]]]]])
    * </pre>
    *
-   * <p><b>PostgreSQL Challenge:</b> No direct equivalent. Would require complex logic:
+   * <p>PostgreSQL REGEXP_INSTR syntax (PostgreSQL 15 and later):
+   * <pre>
+   * REGEXP_INSTR(string, pattern
+   *              [, start [, N [, endoption [, flags [, subexpr]]]]])
+   * </pre>
+   *
+   * <p>The two signatures are argument-for-argument identical, so every parameter maps
+   * positionally and none of Oracle's optional parameters need to be rejected. Only two
+   * adjustments are required:
+   *
    * <ul>
-   *   <li>Use REGEXP_MATCH to find the match</li>
-   *   <li>Use string functions to calculate position</li>
-   *   <li>Handle occurrence parameter (find Nth match)</li>
-   *   <li>Handle return_option (0=start, 1=end of match)</li>
+   *   <li><b>Flags,</b> because the engines disagree on the default newline handling — see
+   *       {@link OracleRegexFlags}. The flags argument is therefore always emitted, which forces
+   *       the preceding optional arguments to be emitted at their Oracle defaults.</li>
+   *   <li><b>Integer casts,</b> because PostgreSQL resolves overloads by exact type and has no
+   *       implicit numeric-to-integer cast. A transformed Oracle expression is typically
+   *       {@code numeric}, which would fail with "function regexp_instr(text, text, numeric) does
+   *       not exist".</li>
    * </ul>
    *
-   * <p><b>Current Strategy:</b> Document as unsupported and suggest alternatives:
-   * <ul>
-   *   <li>Option 1: Create a custom PostgreSQL function regexp_instr()</li>
-   *   <li>Option 2: Rewrite query logic to use REGEXP_MATCH + string position calculations</li>
-   *   <li>Option 3: Use a combination of POSITION() and REGEXP_REPLACE for simple cases</li>
-   * </ul>
+   * <h3>Examples:</h3>
+   * <pre>
+   * REGEXP_INSTR(email, '@')
+   *   → REGEXP_INSTR( email , '@' , 1 , 1 , 0 , 'p' )
+   *
+   * REGEXP_INSTR(text, '[0-9]+', 5, 2, 1, 'i')
+   *   → REGEXP_INSTR( text , '[0-9]+' , 5 , 2 , 1 , 'ip' )
+   * </pre>
    */
   private static String transformRegexpInstr(
       PlSqlParser.General_element_partContext partCtx,
       PostgresCodeBuilder b) {
 
-    throw new TransformationException(
-        "REGEXP_INSTR is not directly supported in PostgreSQL. " +
-        "\n\nAlternatives:" +
-        "\n  1. Create a custom PostgreSQL function: regexp_instr(text, text, ...)" +
-        "\n  2. Rewrite query to use REGEXP_MATCH() and calculate position" +
-        "\n  3. For simple patterns, use POSITION() or STRPOS()" +
-        "\n\nIf you need REGEXP_INSTR, consider implementing a custom function in PostgreSQL.");
+    List<PlSqlParser.ArgumentContext> args = extractFunctionArguments(partCtx);
+
+    if (args.size() < 2 || args.size() > 7) {
+      throw new TransformationException(
+          "REGEXP_INSTR requires 2-7 arguments (source, pattern[, position[, occurrence"
+          + "[, return_option[, match_parameter[, subexpr]]]]]), found: " + args.size());
+    }
+
+    String sourceExpr = transformArgument(args.get(0), b);
+    String patternExpr = transformArgument(args.get(1), b);
+
+    // Oracle defaults: position 1, occurrence 1, return_option 0 (start of match).
+    String positionExpr = args.size() >= 3 ? asIntegerArgument(transformArgument(args.get(2), b)) : "1";
+    String occurrenceExpr = args.size() >= 4 ? asIntegerArgument(transformArgument(args.get(3), b)) : "1";
+    String returnOptionExpr = args.size() >= 5 ? asIntegerArgument(transformArgument(args.get(4), b)) : "0";
+
+    String flags = OracleRegexFlags.toPostgres(
+        args.size() >= 6 ? extractMatchParameter(args.get(5), "REGEXP_INSTR") : null);
+
+    StringBuilder sql = new StringBuilder("REGEXP_INSTR( ")
+        .append(sourceExpr).append(" , ")
+        .append(patternExpr).append(" , ")
+        .append(positionExpr).append(" , ")
+        .append(occurrenceExpr).append(" , ")
+        .append(returnOptionExpr).append(" , ")
+        .append("'").append(flags).append("'");
+
+    if (args.size() >= 7) {
+      sql.append(" , ").append(asIntegerArgument(transformArgument(args.get(6), b)));
+    }
+
+    return sql.append(" )").toString();
   }
 
   // ==================== Helper Methods ====================
+
+  /** Matches an argument that is already an integer literal and so needs no cast. */
+  private static final Pattern INTEGER_LITERAL = Pattern.compile("\\d+");
+
+  /**
+   * Renders an already-transformed expression as an {@code integer} argument.
+   *
+   * <p>PostgreSQL picks a function overload by exact argument type and offers no implicit
+   * {@code numeric} to {@code integer} cast, while Oracle's positional regexp parameters are
+   * plain numbers. An unadorned column or variable reference would therefore fail overload
+   * resolution, so everything that is not already an integer literal gets an explicit cast.
+   */
+  private static String asIntegerArgument(String expr) {
+    String trimmed = expr.trim();
+    if (INTEGER_LITERAL.matcher(trimmed).matches()) {
+      return trimmed;
+    }
+    return "( " + trimmed + " )::integer";
+  }
+
+  /**
+   * Reads an Oracle {@code match_parameter} argument as raw flag characters.
+   *
+   * <p>The flags have to be mapped rather than passed through ({@link OracleRegexFlags}), and a
+   * mapping can only be done at transformation time, so a non-literal argument cannot be
+   * supported. Passing such an expression through unmapped would silently change the matching
+   * semantics, so it is rejected instead.
+   */
+  private static String extractMatchParameter(
+      PlSqlParser.ArgumentContext argCtx, String functionName) {
+
+    String text = argCtx.getText().trim();
+    if (text.length() >= 2 && text.startsWith("'") && text.endsWith("'")) {
+      return text.substring(1, text.length() - 1);
+    }
+
+    throw new TransformationException(
+        functionName + " match_parameter must be a string literal so it can be mapped to "
+        + "PostgreSQL regex flags (the two engines disagree on default newline handling), found: "
+        + text);
+  }
 
   /**
    * Extracts arguments from a function_argument list.

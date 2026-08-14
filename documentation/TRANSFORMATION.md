@@ -687,6 +687,9 @@ REGEXP_REPLACE(text, '[0-9]', 'X') → REGEXP_REPLACE(text, '[0-9]', 'X', 'g')
 
 -- REGEXP_SUBSTR (array extraction)
 REGEXP_SUBSTR(email, '[^@]+') → (REGEXP_MATCH(email, '[^@]+'))[1]
+
+-- REGEXP_INSTR (native since PostgreSQL 15; 'p' is Oracle's default newline handling)
+REGEXP_INSTR(email, '@') → REGEXP_INSTR( email , '@' , 1 , 1 , 0 , 'p' )
 ```
 
 **Pass-through Functions:**
@@ -962,6 +965,74 @@ Full write-up: [completed/VISIT_GENERAL_ELEMENT_REFACTORING_PLAN.md](completed/V
 
 ---
 
+### REGEXP_INSTR and Oracle Regex Flags — ✅ 2026-08-14
+
+**The problem.** `REGEXP_INSTR` threw `TransformationException` on sight, on the premise that
+PostgreSQL has no equivalent. That premise expired in 2022: **PostgreSQL 15 added
+`regexp_count()`, `regexp_instr()`, `regexp_like()` and `regexp_substr()` with deliberately
+Oracle-compatible signatures.** Verified against PostgreSQL 17:
+
+```
+regexp_instr(text, text [, integer [, integer [, integer [, text [, integer ]]]]])
+```
+
+That is Oracle's `REGEXP_INSTR(source, pattern, position, occurrence, return_option,
+match_param, subexpr)` argument-for-argument, in order. Every parameter maps positionally and
+none has to be rejected.
+
+**Two adjustments are still required.**
+
+1. **Flags must be mapped, not passed through.** The engines disagree on what an *empty* flag
+   string means — the default case, and therefore the common one. Oracle's default is that `.`
+   does not match a newline; PostgreSQL's default is that it does. PostgreSQL spells Oracle's
+   default as the `p` flag, so `OracleRegexFlags.toPostgres()` always emits exactly one newline
+   flag rather than relying on either default:
+
+   | Oracle `n` (dot matches newline) | Oracle `m` (per-line anchors) | PostgreSQL |
+   |---|---|---|
+   | no | no | `p` |
+   | yes | no | *(none — PostgreSQL's default)* |
+   | no | yes | `n` |
+   | yes | yes | `w` |
+
+   `i` / `c` / `x` mean the same in both engines and pass through **in source order**, because
+   both resolve contradictory values by letting the last one win — so `'ci'` and `'ic'` differ.
+
+   A non-literal `match_parameter` cannot be mapped at transformation time and is **rejected**
+   rather than passed through unmapped, which would silently change matching semantics.
+
+2. **Integer arguments need explicit casts.** PostgreSQL resolves overloads by exact type and
+   has no implicit `numeric` → `integer` cast, while a transformed Oracle expression is
+   typically `numeric`. Without the cast, `REGEXP_INSTR(txt, p, start_pos)` fails with
+   `function regexp_instr(text, text, numeric) does not exist`. Integer literals are left bare;
+   everything else is wrapped in `( … )::integer`.
+
+**Because the flags argument is always emitted, the preceding optional arguments are emitted too,
+at their Oracle defaults:**
+
+```sql
+REGEXP_INSTR(email, '@')                        → REGEXP_INSTR( email , '@' , 1 , 1 , 0 , 'p' )
+REGEXP_INSTR(txt, '[0-9]+', 5, 2)               → REGEXP_INSTR( txt , '[0-9]+' , 5 , 2 , 0 , 'p' )
+REGEXP_INSTR(txt, '[a-z]+', 1, 1, 1, 'i')       → REGEXP_INSTR( txt , '[a-z]+' , 1 , 1 , 1 , 'ip' )
+REGEXP_INSTR(dt, '(\d+)-(\d+)', 1, 1, 0, 'c', 2)
+                                                → REGEXP_INSTR( dt , '(\d+)-(\d+)' , 1 , 1 , 0 , 'cp' , 2 )
+```
+
+**Requires PostgreSQL 15 or later.** The migration target is PostgreSQL 17; the Testcontainers
+base is `postgres:16-alpine`. There is no version detection anywhere in the codebase, and none was
+added — on an older server these calls fail loudly at `CREATE VIEW` with PostgreSQL's own
+"function does not exist" message, which is the correct outcome.
+
+**Key classes:** `transformer/builder/functions/OracleRegexFlags` (the mapping, no notion of
+quoting — the caller renders the literal), `StringFunctionTransformer.transformRegexpInstr()`.
+
+**Test Coverage:** 8 tests in `OracleRegexFlagsTest` (every newline combination, pass-through
+order, unknown-flag rejection), 6 in `RegexpFunctionTransformationTest` (all argument counts,
+the integer cast, the non-literal-flag rejection). Expected values were verified by executing the
+emitted SQL against PostgreSQL 17 and comparing with Oracle's documented results.
+
+---
+
 ## Testing
 
 ### Test Organization (43+ test classes, 677+ tests)
@@ -1151,7 +1222,6 @@ Detailed implementation documentation:
 - CONNECT_BY_ROOT pseudo-column (currently not implemented)
 - CONNECT_BY_ISLEAF pseudo-column (currently not implemented)
 - NEXT_DAY date function (low usage)
-- REGEXP_INSTR (complex, low usage - documented as unsupported)
 - Advanced analytic functions (LISTAGG, KEEP clause)
 - PIVOT/UNPIVOT operations
 - MODEL clause

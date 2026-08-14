@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * <ul>
  *   <li>REGEXP_REPLACE(str, pattern, replacement) → REGEXP_REPLACE(str, pattern, replacement, 'g')</li>
  *   <li>REGEXP_SUBSTR(str, pattern) → (REGEXP_MATCH(str, pattern))[1]</li>
- *   <li>REGEXP_INSTR(str, pattern) → Error (documented as unsupported)</li>
+ *   <li>REGEXP_INSTR(str, pattern) → REGEXP_INSTR(str, pattern, 1, 1, 0, 'p')</li>
  * </ul>
  */
 public class RegexpFunctionTransformationTest {
@@ -341,8 +341,8 @@ public class RegexpFunctionTransformationTest {
     // ==================== REGEXP_INSTR Tests ====================
 
     @Test
-    void regexpInstrThrowsException() {
-        // Given: REGEXP_INSTR (not supported)
+    void regexpInstrSimpleTwoArgs() {
+        // Given: REGEXP_INSTR with 2 arguments (simple case)
         TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
 
         String oracleSql = "SELECT REGEXP_INSTR(email, '@') FROM employees";
@@ -352,18 +352,124 @@ public class RegexpFunctionTransformationTest {
         assertFalse(parseResult.hasErrors(), "Parse should succeed");
 
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
+        String postgresSql = builder.visit(parseResult.getTree());
 
-        // Then: Should throw TransformationException with helpful message
+        // Then: Should map to native REGEXP_INSTR with Oracle's defaults made explicit.
+        // The 'p' flag is Oracle's default newline handling, which PostgreSQL does not default to.
+        String normalized = postgresSql.trim().replaceAll("\\s+", " ");
+
+        assertTrue(normalized.contains("REGEXP_INSTR( email , '@' , 1 , 1 , 0 , 'p' )"),
+            "REGEXP_INSTR should map to native REGEXP_INSTR, got: " + normalized);
+    }
+
+    @Test
+    void regexpInstrWithPositionAndOccurrence() {
+        // Given: REGEXP_INSTR with position and occurrence - rejected before, now passes through
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
+
+        String oracleSql = "SELECT REGEXP_INSTR(text, '[0-9]+', 5, 2) FROM messages";
+
+        // When: Parse and transform
+        ParseResult parseResult = parser.parseSelectStatement(oracleSql);
+        assertFalse(parseResult.hasErrors(), "Parse should succeed");
+
+        PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
+        String postgresSql = builder.visit(parseResult.getTree());
+
+        // Then: position and occurrence map positionally
+        String normalized = postgresSql.trim().replaceAll("\\s+", " ");
+
+        assertTrue(normalized.contains("REGEXP_INSTR( text , '[0-9]+' , 5 , 2 , 0 , 'p' )"),
+            "REGEXP_INSTR should pass position/occurrence through, got: " + normalized);
+    }
+
+    @Test
+    void regexpInstrWithReturnOptionAndFlags() {
+        // Given: REGEXP_INSTR with return_option and a match parameter
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
+
+        String oracleSql = "SELECT REGEXP_INSTR(text, '[a-z]+', 1, 1, 1, 'i') FROM messages";
+
+        // When: Parse and transform
+        ParseResult parseResult = parser.parseSelectStatement(oracleSql);
+        assertFalse(parseResult.hasErrors(), "Parse should succeed");
+
+        PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
+        String postgresSql = builder.visit(parseResult.getTree());
+
+        // Then: 'i' is passed through and the newline flag is appended
+        String normalized = postgresSql.trim().replaceAll("\\s+", " ");
+
+        assertTrue(normalized.contains("REGEXP_INSTR( text , '[a-z]+' , 1 , 1 , 1 , 'ip' )"),
+            "REGEXP_INSTR should map flags to 'ip', got: " + normalized);
+    }
+
+    @Test
+    void regexpInstrWithSubexpr() {
+        // Given: REGEXP_INSTR with all 7 arguments including subexpr
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
+
+        String oracleSql = "SELECT REGEXP_INSTR(dt, '(\\d+)-(\\d+)', 1, 1, 0, 'c', 2) FROM events";
+
+        // When: Parse and transform
+        ParseResult parseResult = parser.parseSelectStatement(oracleSql);
+        assertFalse(parseResult.hasErrors(), "Parse should succeed");
+
+        PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
+        String postgresSql = builder.visit(parseResult.getTree());
+
+        // Then: subexpr is emitted as the 7th argument
+        String normalized = postgresSql.trim().replaceAll("\\s+", " ");
+
+        assertTrue(normalized.contains(", 'cp' , 2 )"),
+            "REGEXP_INSTR should emit subexpr after the flags, got: " + normalized);
+    }
+
+    @Test
+    void regexpInstrCastsNonLiteralPositionToInteger() {
+        // Given: REGEXP_INSTR whose position is a column, not a literal.
+        // PostgreSQL resolves overloads by exact type and has no implicit numeric->integer cast,
+        // so an uncast column reference would fail with "function ... does not exist".
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
+
+        String oracleSql = "SELECT REGEXP_INSTR(text, '[0-9]+', start_pos) FROM messages";
+
+        // When: Parse and transform
+        ParseResult parseResult = parser.parseSelectStatement(oracleSql);
+        assertFalse(parseResult.hasErrors(), "Parse should succeed");
+
+        PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
+        String postgresSql = builder.visit(parseResult.getTree());
+
+        // Then: the non-literal argument is cast
+        String normalized = postgresSql.trim().replaceAll("\\s+", " ");
+
+        assertTrue(normalized.contains("( start_pos )::integer"),
+            "Non-literal position should be cast to integer, got: " + normalized);
+    }
+
+    @Test
+    void regexpInstrRejectsNonLiteralMatchParameter() {
+        // Given: REGEXP_INSTR whose match_parameter is not a literal.
+        // Flags must be mapped at transformation time; passing them through unmapped would
+        // silently change matching semantics, so this must fail loudly instead.
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
+
+        String oracleSql = "SELECT REGEXP_INSTR(text, '[0-9]+', 1, 1, 0, flag_col) FROM messages";
+
+        // When: Parse and transform
+        ParseResult parseResult = parser.parseSelectStatement(oracleSql);
+        assertFalse(parseResult.hasErrors(), "Parse should succeed");
+
+        PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
+
+        // Then: Should throw rather than emit unmapped flags
         TransformationException exception = assertThrows(TransformationException.class, () -> {
             builder.visit(parseResult.getTree());
         });
 
-        assertTrue(exception.getMessage().contains("REGEXP_INSTR"),
-            "Exception should mention 'REGEXP_INSTR': " + exception.getMessage());
-        assertTrue(exception.getMessage().contains("not directly supported"),
-            "Exception should mention it's not supported: " + exception.getMessage());
-        assertTrue(exception.getMessage().contains("custom function"),
-            "Exception should suggest custom function: " + exception.getMessage());
+        assertTrue(exception.getMessage().contains("match_parameter"),
+            "Exception should mention 'match_parameter': " + exception.getMessage());
     }
 
     // ==================== Mixed/Integration Tests ====================
