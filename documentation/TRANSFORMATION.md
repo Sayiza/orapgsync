@@ -148,6 +148,7 @@ This document describes the ANTLR-based transformation module that converts Orac
 - CASE expressions (END CASE → END)
 - TO_CHAR (format code transformations: RR→YY, RRRR→YYYY, D→., G→,)
 - TO_DATE → TO_TIMESTAMP
+- TO_NUMBER / TO_TIMESTAMP / TO_TIMESTAMP_TZ (see "Conversion Functions" below)
 - SUBSTR → SUBSTRING (FROM/FOR syntax)
 - TRIM (pass-through)
 
@@ -546,6 +547,7 @@ transformer/
 **Key Visitor Classes by Feature:**
 - **VisitGeneralElement**: SYSDATE, sequences (NEXTVAL/CURRVAL), type methods, package functions, date functions
 - **VisitStringFunction**: NVL, DECODE, SUBSTR, TO_CHAR, TO_DATE, TRIM
+- **VisitOtherFunction**: COALESCE, EXTRACT, TRANSLATE, TO_NUMBER/TO_TIMESTAMP/TO_TIMESTAMP_TZ, cursor attributes
 - **VisitConcatenation**: Arithmetic operators, || → CONCAT()
 - **VisitQueryBlock**: FROM DUAL handling, ROWNUM LIMIT generation, CONNECT BY detection
 - **VisitWithClause**: CTE handling, recursive detection
@@ -689,6 +691,60 @@ REGEXP_SUBSTR(email, '[^@]+') → (REGEXP_MATCH(email, '[^@]+'))[1]
 
 **Pass-through Functions:**
 - LPAD, RPAD, TRANSLATE: Identical syntax in Oracle and PostgreSQL
+
+### Conversion Functions (TO_NUMBER, TO_TIMESTAMP, TO_TIMESTAMP_TZ)
+
+Implemented in `VisitOtherFunction.conversionFunction()` — these sit in the `other_function`
+grammar rule, unlike TO_CHAR and TO_DATE, which live in `string_function`.
+
+**The asymmetry that matters:** Oracle accepts these with a single argument; PostgreSQL has no
+such overload — `to_number` and `to_timestamp` exist only as `(text, text)`. The single-argument
+form therefore becomes a cast, and the two-argument form must cast the value to `text`:
+
+```sql
+TO_NUMBER(x)               → ( x )::numeric
+TO_NUMBER(x, '9999D99')    → TO_NUMBER( ( x )::text , '9999D99' )
+TO_TIMESTAMP(x)            → ( x )::timestamp
+TO_TIMESTAMP(x, 'RRRR-MM') → TO_TIMESTAMP( ( x )::text , 'YYYY-MM' )
+TO_TIMESTAMP_TZ(x)         → ( x )::timestamptz
+```
+
+**TO_DATE follows the same rule** (in `VisitStringFunction`):
+
+```sql
+TO_DATE(x)                 → ( x )::timestamp
+TO_DATE(x, 'RRRR-MM-DD')   → TO_TIMESTAMP( ( x )::text , 'YYYY-MM-DD' )
+```
+
+Both forms changed on 2026-08-14. The single-argument form was a **silent-corruption bug**: it
+emitted `TO_TIMESTAMP( x )`, and PostgreSQL resolves a one-argument `to_timestamp` to the
+`double precision` overload, which reads its argument as **Unix epoch seconds**. Measured against
+PostgreSQL 16, `TO_DATE(20260301)` returned `1970-08-23 12:51:41` with no error. The two-argument
+form gained the `::text` cast for consistency with the functions above, which also makes the
+common Oracle idiom of storing dates as numbers work — `TO_DATE(20260301, 'YYYYMMDD')` previously
+failed with "function to_timestamp(numeric, unknown) does not exist".
+
+**Decisions:**
+- **Number format models are passed through unchanged.** Oracle's `9 0 . , G D S PR MI FM` are
+  PostgreSQL-compatible; `L`, `C`, `V`, `EEEE` and `NLS_NUMERIC_CHARACTERS` are not. An
+  incompatible model is left to fail loudly at `CREATE VIEW` with PostgreSQL's own message rather
+  than be silently mistranslated. Date format models go through the same `transformToCharFormat`
+  translation as TO_DATE.
+- **`DEFAULT ... ON CONVERSION ERROR` throws `TransformationException`.** Dropping it would turn
+  "substitute a value" into "raise an error" — a silent semantic change. **TO_DATE** carries the
+  same clause in its grammar and used to drop it silently; it now rejects it too, so all four
+  conversion functions behave alike.
+- **The third argument (NLS parameters) is dropped**, matching TO_CHAR and TO_DATE.
+- **TO_TIMESTAMP_TZ maps onto `TO_TIMESTAMP`** in the two-argument form; PostgreSQL has no
+  `to_timestamp_tz` and its two-argument `to_timestamp` already returns `timestamptz`.
+
+**Not implemented:** `TO_BINARY_DOUBLE` / `TO_BINARY_FLOAT` share the same grammar alternative and
+still fall through to the "Other function not yet supported" error, pending a real schema needing
+them.
+
+**Test Coverage:** `ConversionFunctionTransformationTest` (12 string-comparison tests),
+`ToDateTransformationTest` (18), `PostgresConversionFunctionValidationTest` (7 Testcontainers
+execution tests, incl. `CREATE VIEW` and a guard against the epoch trap above).
 
 ### Date Arithmetic
 

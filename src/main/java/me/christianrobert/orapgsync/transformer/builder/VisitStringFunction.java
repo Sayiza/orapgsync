@@ -210,6 +210,14 @@ public class VisitStringFunction {
                 throw new TransformationException("TO_DATE function missing value expression");
             }
 
+            // DEFAULT <expr> ON CONVERSION ERROR - Oracle-specific, no PostgreSQL equivalent.
+            // Dropping it would silently change semantics from "substitute" to "raise", so reject.
+            if (ctx.DEFAULT() != null) {
+                throw new TransformationException(
+                    "TO_DATE with DEFAULT ... ON CONVERSION ERROR is not supported - "
+                    + "PostgreSQL has no equivalent for conversion error substitution");
+            }
+
             // Get the format string (if present)
             List<PlSqlParser.Quoted_stringContext> quotedStrings = ctx.quoted_string();
             String format = null;
@@ -221,22 +229,21 @@ public class VisitStringFunction {
                 format = transformToCharFormat(format);
             }
 
-            // Note: DEFAULT ... ON CONVERSION ERROR clause is Oracle-specific and not supported in PostgreSQL
-            // We silently drop it (error handling would need to be done differently in PostgreSQL)
-
             // Note: Third parameter (NLS params) is ignored - PostgreSQL doesn't support it
             // If there's a third parameter, we silently drop it
 
-            // Build the TO_TIMESTAMP call
-            StringBuilder result = new StringBuilder("TO_TIMESTAMP( ");
-            result.append(value);
-            if (format != null) {
-                result.append(" , ");
-                result.append(format);
+            // Single-argument form: PostgreSQL has no to_timestamp(text). Its one-argument
+            // to_timestamp(double precision) reads the value as Unix epoch seconds, so emitting
+            // TO_TIMESTAMP(x) here fails at CREATE VIEW for a text argument and - worse - silently
+            // yields 1970-era timestamps for a numeric one. A cast is the correct mapping.
+            if (format == null) {
+                return "( " + value + " )::timestamp";
             }
-            result.append(" )");
 
-            return result.toString();
+            // Two-argument form: PostgreSQL's to_timestamp(text, text) has no numeric overload,
+            // so the value must be cast. This also makes the common Oracle idiom of storing dates
+            // as numbers work - TO_DATE(20260301, 'YYYYMMDD') would otherwise fail outright.
+            return "TO_TIMESTAMP( ( " + value + " )::text , " + format + " )";
         }
 
         // TRIM function: TRIM '(' ((LEADING | TRAILING | BOTH)? expression? FROM)? concatenation ')'
@@ -330,7 +337,7 @@ public class VisitStringFunction {
      * @param format Original Oracle format string (with quotes)
      * @return Transformed PostgreSQL format string (with quotes)
      */
-    private static String transformToCharFormat(String format) {
+    static String transformToCharFormat(String format) {
         if (format == null) {
             return null;
         }

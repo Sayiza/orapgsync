@@ -16,6 +16,7 @@ import me.christianrobert.orapgsync.transformer.context.TransformationException;
  *   <li>COALESCE (identical in Oracle and PostgreSQL)</li>
  *   <li>EXTRACT (identical in Oracle and PostgreSQL)</li>
  *   <li>TRANSLATE (identical in Oracle and PostgreSQL)</li>
+ *   <li>TO_NUMBER, TO_TIMESTAMP, TO_TIMESTAMP_TZ (cast or two-argument form)</li>
  * </ul>
  *
  * <p><b>Grammar rule excerpt:</b>
@@ -207,6 +208,15 @@ public class VisitOtherFunction {
             return result.toString();
         }
 
+        // (TO_BINARY_DOUBLE | TO_BINARY_FLOAT | TO_NUMBER | TO_TIMESTAMP | TO_TIMESTAMP_TZ) '(' concatenation
+        //     (DEFAULT concatenation ON CONVERSION ERROR)? (',' quoted_string (',' quoted_string)?)? ')'
+        //
+        // Only TO_NUMBER, TO_TIMESTAMP and TO_TIMESTAMP_TZ are implemented; the TO_BINARY_* variants
+        // fall through to the catch-all below until a real schema needs them.
+        if (ctx.TO_NUMBER() != null || ctx.TO_TIMESTAMP() != null || ctx.TO_TIMESTAMP_TZ() != null) {
+            return conversionFunction(ctx, b);
+        }
+
         // TRANSLATE '(' expression (USING (CHAR_CS | NCHAR_CS))? (',' expression)* ')'
         // TRANSLATE(str, from, to) - character-by-character replacement
         // Identical syntax in Oracle and PostgreSQL (for basic form)
@@ -285,5 +295,74 @@ public class VisitOtherFunction {
         throw new TransformationException(
             "Other function not yet supported in current implementation. " +
             "Function context: " + ctx.getText().substring(0, Math.min(50, ctx.getText().length())));
+    }
+
+    /**
+     * Transforms the TO_NUMBER / TO_TIMESTAMP / TO_TIMESTAMP_TZ alternative of other_function.
+     *
+     * <p>Oracle allows these conversion functions with a single argument, PostgreSQL does not —
+     * {@code to_number} and {@code to_timestamp} only exist in their two-argument (value, format)
+     * form. The single-argument case therefore becomes a cast:</p>
+     *
+     * <table>
+     *   <tr><th>Oracle</th><th>PostgreSQL</th></tr>
+     *   <tr><td>{@code TO_NUMBER(x)}</td><td>{@code ( x )::numeric}</td></tr>
+     *   <tr><td>{@code TO_NUMBER(x, 'fmt')}</td><td>{@code TO_NUMBER( ( x )::text , 'fmt' )}</td></tr>
+     *   <tr><td>{@code TO_TIMESTAMP(x)}</td><td>{@code ( x )::timestamp}</td></tr>
+     *   <tr><td>{@code TO_TIMESTAMP(x, 'fmt')}</td><td>{@code TO_TIMESTAMP( ( x )::text , 'fmt' )}</td></tr>
+     * </table>
+     *
+     * <p>The {@code ::text} cast on the value is not optional — PostgreSQL's two-argument forms
+     * take {@code text}, while the Oracle argument is frequently a {@code VARCHAR2} column that
+     * maps to {@code text} but may also be numeric or a date.</p>
+     *
+     * <p><b>Number format models are passed through unchanged.</b> Oracle's {@code 9 0 . , G D S
+     * PR MI FM} are compatible with PostgreSQL; {@code L}, {@code C}, {@code V}, {@code EEEE} and
+     * {@code NLS_NUMERIC_CHARACTERS} are not, and are left to fail loudly at {@code CREATE VIEW}
+     * with PostgreSQL's own message rather than being silently mistranslated. Date format models
+     * go through the same translation as TO_DATE.</p>
+     *
+     * <p>The third argument (NLS parameters) is dropped, as it is for TO_CHAR and TO_DATE.
+     * {@code DEFAULT ... ON CONVERSION ERROR} has no PostgreSQL equivalent and is rejected.</p>
+     */
+    private static String conversionFunction(PlSqlParser.Other_functionContext ctx, PostgresCodeBuilder b) {
+        boolean isNumber = ctx.TO_NUMBER() != null;
+        String functionName = isNumber ? "TO_NUMBER" : (ctx.TO_TIMESTAMP() != null ? "TO_TIMESTAMP" : "TO_TIMESTAMP_TZ");
+
+        java.util.List<PlSqlParser.ConcatenationContext> concatenations = ctx.concatenation();
+        if (concatenations == null || concatenations.isEmpty()) {
+            throw new TransformationException(functionName + " function missing value expression");
+        }
+
+        // DEFAULT <expr> ON CONVERSION ERROR - Oracle-specific, no PostgreSQL equivalent.
+        // Dropping it would silently change semantics from "substitute" to "raise", so reject.
+        if (ctx.DEFAULT() != null) {
+            throw new TransformationException(
+                functionName + " with DEFAULT ... ON CONVERSION ERROR is not supported - "
+                + "PostgreSQL has no equivalent for conversion error substitution");
+        }
+
+        String value = "( " + b.visit(concatenations.get(0)) + " )";
+
+        java.util.List<PlSqlParser.Quoted_stringContext> quotedStrings = ctx.quoted_string();
+        if (quotedStrings == null || quotedStrings.isEmpty()) {
+            // Single-argument form: PostgreSQL has no such function, use a cast
+            String targetType = isNumber ? "numeric"
+                : (ctx.TO_TIMESTAMP() != null ? "timestamp" : "timestamptz");
+            return value + "::" + targetType;
+        }
+
+        // Number format models are passed through; date format models get the TO_DATE treatment
+        String format = quotedStrings.get(0).getText();
+        if (!isNumber) {
+            format = VisitStringFunction.transformToCharFormat(format);
+        }
+
+        // PostgreSQL has no TO_TIMESTAMP_TZ; its two-argument to_timestamp already returns
+        // timestamptz, so both Oracle timestamp variants map onto it - as TO_DATE does.
+        String pgFunction = isNumber ? "TO_NUMBER" : "TO_TIMESTAMP";
+
+        // Note: a third argument (NLS params) is ignored - PostgreSQL doesn't support it
+        return pgFunction + "( " + value + "::text , " + format + " )";
     }
 }

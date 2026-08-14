@@ -3,6 +3,7 @@ package me.christianrobert.orapgsync.transformer;
 import me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder;
 import me.christianrobert.orapgsync.transformer.context.MetadataIndexBuilder;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
+import me.christianrobert.orapgsync.transformer.context.TransformationException;
 import me.christianrobert.orapgsync.transformer.type.SimpleTypeEvaluator;
 import me.christianrobert.orapgsync.transformer.type.TypeEvaluator;
 import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
@@ -21,11 +22,14 @@ import static org.junit.jupiter.api.Assertions.*;
  *
  * <h3>Oracle vs PostgreSQL:</h3>
  * <pre>
- * Oracle:     TO_DATE(string, 'format')
- * PostgreSQL: TO_TIMESTAMP(string, 'format')
+ * Oracle:     TO_DATE(x, 'format')
+ * PostgreSQL: TO_TIMESTAMP( ( x )::text , 'format')  -- to_timestamp(text, text) has no numeric overload
  *
- * Oracle:     TO_DATE(string, 'format', 'nls_params')
- * PostgreSQL: TO_TIMESTAMP(string, 'format')  -- NLS params dropped
+ * Oracle:     TO_DATE(x, 'format', 'nls_params')
+ * PostgreSQL: TO_TIMESTAMP( ( x )::text , 'format')  -- NLS params dropped
+ *
+ * Oracle:     TO_DATE(x)
+ * PostgreSQL: ( x )::timestamp                       -- NOT to_timestamp(x), which reads Unix epoch seconds
  * </pre>
  */
 class ToDateTransformationTest {
@@ -56,7 +60,7 @@ class ToDateTransformationTest {
 
         // Then: TO_DATE → TO_TIMESTAMP
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
-        assertTrue(normalized.contains("TO_TIMESTAMP( '2025-01-15' , 'YYYY-MM-DD' )"),
+        assertTrue(normalized.contains("TO_TIMESTAMP( ( '2025-01-15' )::text , 'YYYY-MM-DD' )"),
                 "Should transform TO_DATE to TO_TIMESTAMP");
     }
 
@@ -73,10 +77,13 @@ class ToDateTransformationTest {
         PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
         String postgresSql = builder.visit(parseResult.getTree());
 
-        // Then: TO_DATE → TO_TIMESTAMP (no format)
+        // Then: cast, NOT TO_TIMESTAMP - PostgreSQL has no to_timestamp(text), and its
+        // to_timestamp(double precision) would read a numeric argument as Unix epoch seconds
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
-        assertTrue(normalized.contains("TO_TIMESTAMP( '15-JAN-25' )"),
-                "Should transform TO_DATE to TO_TIMESTAMP without format");
+        assertTrue(normalized.contains("( '15-JAN-25' )::timestamp"),
+                "Single-argument TO_DATE should become a cast, got: " + normalized);
+        assertFalse(normalized.contains("TO_TIMESTAMP("),
+                "Single-argument TO_DATE must not emit to_timestamp(), got: " + normalized);
     }
 
     // ==================== COLUMN REFERENCES ====================
@@ -96,7 +103,7 @@ class ToDateTransformationTest {
 
         // Then: Column reference preserved
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
-        assertTrue(normalized.contains("TO_TIMESTAMP( hire_date_str , 'YYYY-MM-DD' )"),
+        assertTrue(normalized.contains("TO_TIMESTAMP( ( hire_date_str )::text , 'YYYY-MM-DD' )"),
                 "Should preserve column reference in TO_TIMESTAMP");
     }
 
@@ -115,7 +122,7 @@ class ToDateTransformationTest {
 
         // Then: Qualified column reference preserved (no spaces around dot in expression context)
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
-        assertTrue(normalized.contains("TO_TIMESTAMP( e.hire_date_str , 'YYYY-MM-DD' )"),
+        assertTrue(normalized.contains("TO_TIMESTAMP( ( e.hire_date_str )::text , 'YYYY-MM-DD' )"),
                 "Should preserve qualified column reference in TO_TIMESTAMP");
     }
 
@@ -136,7 +143,7 @@ class ToDateTransformationTest {
 
         // Then: RR → YY transformation
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
-        assertTrue(normalized.contains("TO_TIMESTAMP( '25-01-15' , 'YY-MM-DD' )"),
+        assertTrue(normalized.contains("TO_TIMESTAMP( ( '25-01-15' )::text , 'YY-MM-DD' )"),
                 "Should transform RR to YY");
     }
 
@@ -155,7 +162,7 @@ class ToDateTransformationTest {
 
         // Then: RRRR → YYYY transformation
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
-        assertTrue(normalized.contains("TO_TIMESTAMP( '2025-01-15' , 'YYYY-MM-DD' )"),
+        assertTrue(normalized.contains("TO_TIMESTAMP( ( '2025-01-15' )::text , 'YYYY-MM-DD' )"),
                 "Should transform RRRR to YYYY");
     }
 
@@ -174,7 +181,7 @@ class ToDateTransformationTest {
 
         // Then: Format unchanged (standard codes work in both)
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
-        assertTrue(normalized.contains("TO_TIMESTAMP( '2025-01-15 14:30:45' , 'YYYY-MM-DD HH24:MI:SS' )"),
+        assertTrue(normalized.contains("TO_TIMESTAMP( ( '2025-01-15 14:30:45' )::text , 'YYYY-MM-DD HH24:MI:SS' )"),
                 "Should preserve standard format codes");
     }
 
@@ -195,10 +202,32 @@ class ToDateTransformationTest {
 
         // Then: NLS parameter dropped (PostgreSQL doesn't support it)
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
-        assertTrue(normalized.contains("TO_TIMESTAMP( '15-JAN-2025' , 'DD-MON-YYYY' )"),
+        assertTrue(normalized.contains("TO_TIMESTAMP( ( '15-JAN-2025' )::text , 'DD-MON-YYYY' )"),
                 "Should drop NLS parameters");
         assertFalse(normalized.contains("NLS_DATE_LANGUAGE"),
                 "Should not include NLS parameters in output");
+    }
+
+    // ==================== ON CONVERSION ERROR ====================
+
+    @Test
+    void toDateWithOnConversionErrorIsRejected() {
+        // Given: TO_DATE with Oracle's DEFAULT ... ON CONVERSION ERROR clause
+        TransformationContext context = new TransformationContext("HR", emptyIndices, new SimpleTypeEvaluator("HR", emptyIndices));
+        String oracleSql = "SELECT TO_DATE(hire_date DEFAULT NULL ON CONVERSION ERROR, 'DD-MON-YYYY') FROM employees";
+
+        // When: Parse and transform
+        ParseResult parseResult = parser.parseSelectStatement(oracleSql);
+        assertFalse(parseResult.hasErrors(), "Parse should succeed");
+
+        PostgresCodeBuilder builder = new PostgresCodeBuilder(context);
+
+        // Then: rejected rather than dropped - dropping it would silently turn "substitute a
+        // value on bad input" into "raise an error", which is a semantic change, not a formatting one
+        TransformationException ex = assertThrows(TransformationException.class,
+                () -> builder.visit(parseResult.getTree()));
+        assertTrue(ex.getMessage().contains("ON CONVERSION ERROR"),
+                "Error should name the unsupported clause, was: " + ex.getMessage());
     }
 
     // ==================== NESTED FUNCTIONS ====================
@@ -218,7 +247,7 @@ class ToDateTransformationTest {
 
         // Then: Both functions transformed
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
-        assertTrue(normalized.contains("TO_TIMESTAMP( SUBSTRING( date_str FROM 1 FOR 10 ) , 'YYYY-MM-DD' )"),
+        assertTrue(normalized.contains("TO_TIMESTAMP( ( SUBSTRING( date_str FROM 1 FOR 10 ) )::text , 'YYYY-MM-DD' )"),
                 "Should transform both TO_DATE and SUBSTR");
     }
 
@@ -239,7 +268,7 @@ class ToDateTransformationTest {
 
         // Then: TO_DATE in WHERE transformed
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
-        assertTrue(normalized.contains("WHERE hire_date > TO_TIMESTAMP( '2020-01-01' , 'YYYY-MM-DD' )"),
+        assertTrue(normalized.contains("WHERE hire_date > TO_TIMESTAMP( ( '2020-01-01' )::text , 'YYYY-MM-DD' )"),
                 "Should transform TO_DATE in WHERE clause");
     }
 
@@ -260,7 +289,7 @@ class ToDateTransformationTest {
 
         // Then: Column alias preserved
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
-        assertTrue(normalized.contains("TO_TIMESTAMP( '2025-01-15' , 'YYYY-MM-DD' ) AS parsed_date"),
+        assertTrue(normalized.contains("TO_TIMESTAMP( ( '2025-01-15' )::text , 'YYYY-MM-DD' ) AS parsed_date"),
                 "Should preserve column alias");
     }
 
@@ -281,9 +310,9 @@ class ToDateTransformationTest {
 
         // Then: Both TO_DATE calls transformed
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
-        assertTrue(normalized.contains("TO_TIMESTAMP( start_date , 'YYYY-MM-DD' )"),
+        assertTrue(normalized.contains("TO_TIMESTAMP( ( start_date )::text , 'YYYY-MM-DD' )"),
                 "Should transform first TO_DATE");
-        assertTrue(normalized.contains("TO_TIMESTAMP( end_date , 'YYYY-MM-DD' )"),
+        assertTrue(normalized.contains("TO_TIMESTAMP( ( end_date )::text , 'YYYY-MM-DD' )"),
                 "Should transform second TO_DATE");
     }
 
@@ -304,7 +333,7 @@ class ToDateTransformationTest {
 
         // Then: Transformed to TO_TIMESTAMP (uppercase)
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
-        assertTrue(normalized.contains("TO_TIMESTAMP( '2025-01-15' , 'YYYY-MM-DD' )"),
+        assertTrue(normalized.contains("TO_TIMESTAMP( ( '2025-01-15' )::text , 'YYYY-MM-DD' )"),
                 "Should transform lowercase to_date");
     }
 
@@ -323,7 +352,7 @@ class ToDateTransformationTest {
 
         // Then: Transformed to TO_TIMESTAMP (uppercase)
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
-        assertTrue(normalized.contains("TO_TIMESTAMP( '2025-01-15' , 'YYYY-MM-DD' )"),
+        assertTrue(normalized.contains("TO_TIMESTAMP( ( '2025-01-15' )::text , 'YYYY-MM-DD' )"),
                 "Should transform mixed case To_Date");
     }
 
@@ -344,7 +373,7 @@ class ToDateTransformationTest {
 
         // Then: TO_DATE transformed and FROM DUAL removed
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
-        assertTrue(normalized.contains("TO_TIMESTAMP( '2025-01-15' , 'YYYY-MM-DD' )"),
+        assertTrue(normalized.contains("TO_TIMESTAMP( ( '2025-01-15' )::text , 'YYYY-MM-DD' )"),
                 "Should transform TO_DATE");
         assertFalse(normalized.contains("DUAL"),
                 "Should remove FROM DUAL");
@@ -367,7 +396,7 @@ class ToDateTransformationTest {
 
         // Then: Complex format preserved (FF3 works in both Oracle and PostgreSQL)
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
-        assertTrue(normalized.contains("TO_TIMESTAMP( '2025-01-15 14:30:45.123' , 'YYYY-MM-DD HH24:MI:SS.FF3' )"),
+        assertTrue(normalized.contains("TO_TIMESTAMP( ( '2025-01-15 14:30:45.123' )::text , 'YYYY-MM-DD HH24:MI:SS.FF3' )"),
                 "Should preserve complex format");
     }
 
@@ -388,7 +417,7 @@ class ToDateTransformationTest {
 
         // Then: TO_DATE in ORDER BY transformed
         String normalized = postgresSql.trim().replaceAll("\\s+", " ");
-        assertTrue(normalized.contains("ORDER BY TO_TIMESTAMP( hire_date_str , 'YYYY-MM-DD' ) DESC"),
+        assertTrue(normalized.contains("ORDER BY TO_TIMESTAMP( ( hire_date_str )::text , 'YYYY-MM-DD' ) DESC"),
                 "Should transform TO_DATE in ORDER BY");
     }
 }
