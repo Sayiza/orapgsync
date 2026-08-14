@@ -555,6 +555,8 @@ public class VisitGeneralElement {
         case "REGEXP_REPLACE":
         case "REGEXP_SUBSTR":
         case "REGEXP_INSTR":
+        case "REGEXP_COUNT":
+        case "REGEXP_LIKE":
           return StringFunctionTransformer.transform(upperFunctionName, partCtx, b);
         default:
           // Not a special function - proceed with normal handling

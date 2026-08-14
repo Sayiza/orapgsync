@@ -17,9 +17,9 @@ import java.util.regex.Pattern;
  *   <li>LPAD(str, len[, pad]) → LPAD(str, len[, pad]) (pass-through)</li>
  *   <li>RPAD(str, len[, pad]) → RPAD(str, len[, pad]) (pass-through)</li>
  *   <li>TRANSLATE(str, from, to) → TRANSLATE(str, from, to) (pass-through)</li>
- *   <li>REGEXP_REPLACE(str, pattern, replacement[, position[, occurrence[, flags]]]) → REGEXP_REPLACE(str, pattern, replacement, 'g')</li>
- *   <li>REGEXP_SUBSTR(str, pattern[, position[, occurrence[, flags[, subexpr]]]]) → (REGEXP_MATCH(str, pattern))[1]</li>
- *   <li>REGEXP_INSTR(str, pattern[, position[, occurrence[, return_opt[, flags[, subexpr]]]]]) → REGEXP_INSTR(...) (native since PostgreSQL 15)</li>
+ *   <li>REGEXP_REPLACE / REGEXP_SUBSTR / REGEXP_INSTR / REGEXP_COUNT / REGEXP_LIKE →
+ *       the same-named PostgreSQL function, mapped positionally — see
+ *       {@link #transformRegexpFunction}</li>
  *   <li>SUBSTR(str, pos[, len]) → SUBSTRING(str FROM pos [FOR len]) (future)</li>
  *   <li>TRIM(...) → TRIM(...) with syntax adjustments (future)</li>
  * </ul>
@@ -48,12 +48,18 @@ public class StringFunctionTransformer {
         // These functions have identical syntax in Oracle and PostgreSQL
         // Pass through unchanged with transformed arguments
         return transformPassThrough(functionName, partCtx, b);
+      // The Oracle REGEXP family maps positionally onto PostgreSQL 15+ equivalents.
+      // The array is the Oracle default for each positional integer parameter.
       case "REGEXP_REPLACE":
-        return transformRegexpReplace(partCtx, b);
+        return transformRegexpFunction("REGEXP_REPLACE", 3, new String[]{"1", "0"}, false, partCtx, b);
       case "REGEXP_SUBSTR":
-        return transformRegexpSubstr(partCtx, b);
+        return transformRegexpFunction("REGEXP_SUBSTR", 2, new String[]{"1", "1"}, true, partCtx, b);
       case "REGEXP_INSTR":
-        return transformRegexpInstr(partCtx, b);
+        return transformRegexpFunction("REGEXP_INSTR", 2, new String[]{"1", "1", "0"}, true, partCtx, b);
+      case "REGEXP_COUNT":
+        return transformRegexpFunction("REGEXP_COUNT", 2, new String[]{"1"}, false, partCtx, b);
+      case "REGEXP_LIKE":
+        return transformRegexpFunction("REGEXP_LIKE", 2, new String[]{}, false, partCtx, b);
       default:
         throw new TransformationException("Unsupported string function: " + functionName);
     }
@@ -216,276 +222,84 @@ public class StringFunctionTransformer {
   }
 
   /**
-   * Transforms Oracle REGEXP_REPLACE to PostgreSQL REGEXP_REPLACE with 'g' flag.
+   * Transforms an Oracle REGEXP function to its PostgreSQL equivalent.
    *
-   * <p>Oracle REGEXP_REPLACE syntax:
+   * <p><b>PostgreSQL 15 added {@code regexp_count()}, {@code regexp_instr()},
+   * {@code regexp_like()} and {@code regexp_substr()} with deliberately Oracle-compatible
+   * signatures,</b> and extended {@code regexp_replace()} with the Oracle-shaped
+   * {@code (string, pattern, replacement, start, N, flags)} overload. Every member of the family
+   * therefore maps argument-for-argument, and none of Oracle's optional parameters needs to be
+   * rejected:
+   *
    * <pre>
-   * REGEXP_REPLACE(source_string, pattern, replace_string
-   *                [, position [, occurrence [, match_parameter]]])
+   * REGEXP_REPLACE(source, pattern, replace [, position [, occurrence [, match_param]]])
+   * REGEXP_SUBSTR (source, pattern [, position [, occurrence [, match_param [, subexpr]]]])
+   * REGEXP_INSTR  (source, pattern [, position [, occurrence [, return_opt [, match_param [, subexpr]]]]])
+   * REGEXP_COUNT  (source, pattern [, position [, match_param]])
+   * REGEXP_LIKE   (source, pattern [, match_param])
    * </pre>
    *
-   * <p>PostgreSQL REGEXP_REPLACE syntax:
-   * <pre>
-   * REGEXP_REPLACE(source, pattern, replacement [, flags])
-   * </pre>
+   * <p>They share one shape, which is what this method encodes: some leading string arguments,
+   * then a run of positional integer parameters each with an Oracle default, then the flags, then
+   * an optional trailing {@code subexpr}.
    *
-   * <p><b>Key Difference:</b> Oracle replaces all occurrences by default (when occurrence=0, which is default).
-   * PostgreSQL only replaces the first occurrence unless 'g' (global) flag is specified.
+   * <p>Two adjustments are applied to every member:
    *
-   * <p><b>Transformation Strategy:</b>
    * <ul>
-   *   <li>2-3 args: Simple transformation, add 'g' flag for global replacement</li>
-   *   <li>4+ args: Extract position/occurrence parameters and determine if 'g' flag is needed</li>
-   *   <li>If occurrence > 1: Cannot be directly translated (would need custom function)</li>
+   *   <li><b>Flags are mapped, never passed through</b> — see {@link OracleRegexFlags}. Oracle and
+   *       PostgreSQL disagree on the default newline handling, so the flags argument is
+   *       <em>always</em> emitted. That in turn forces the preceding optional arguments to be
+   *       emitted at their Oracle defaults, which is what {@code integerDefaults} supplies.</li>
+   *   <li><b>Integer arguments are cast</b> — see {@link #asIntegerArgument(String)}.</li>
    * </ul>
    *
-   * <h3>Examples:</h3>
-   * <pre>
-   * -- Simple (3 args) - Global replace
-   * REGEXP_REPLACE(text, '[0-9]', 'X') → REGEXP_REPLACE(text, '[0-9]', 'X', 'g')
-   *
-   * -- With match parameter (6 args)
-   * REGEXP_REPLACE(text, 'a', 'A', 1, 0, 'i') → REGEXP_REPLACE(text, 'a', 'A', 'gi')
-   * </pre>
+   * @param functionName    the PostgreSQL function to emit; the names happen to match Oracle's
+   * @param textArgCount    number of leading string arguments (2, or 3 for REGEXP_REPLACE)
+   * @param integerDefaults Oracle's default for each positional integer parameter, in order
+   * @param allowsSubexpr   whether a trailing {@code subexpr} argument is accepted
    */
-  private static String transformRegexpReplace(
+  private static String transformRegexpFunction(
+      String functionName,
+      int textArgCount,
+      String[] integerDefaults,
+      boolean allowsSubexpr,
       PlSqlParser.General_element_partContext partCtx,
       PostgresCodeBuilder b) {
 
     List<PlSqlParser.ArgumentContext> args = extractFunctionArguments(partCtx);
 
-    if (args.size() < 3 || args.size() > 6) {
+    int flagsIndex = textArgCount + integerDefaults.length;
+    int maxArgs = flagsIndex + 1 + (allowsSubexpr ? 1 : 0);
+
+    if (args.size() < textArgCount || args.size() > maxArgs) {
       throw new TransformationException(
-          "REGEXP_REPLACE requires 3-6 arguments (source, pattern, replacement[, position[, occurrence[, flags]]]), found: " + args.size());
+          functionName + " requires " + textArgCount + "-" + maxArgs + " arguments, found: "
+          + args.size());
     }
 
-    String sourceExpr = transformArgument(args.get(0), b);
-    String patternExpr = transformArgument(args.get(1), b);
-    String replacementExpr = transformArgument(args.get(2), b);
+    StringBuilder sql = new StringBuilder(functionName).append("( ");
 
-    // Determine flags
-    String flags = "g"; // Default: global replacement
-
-    if (args.size() >= 6) {
-      // Oracle match_parameter (flags) - 6th argument
-      // Extract flags from Oracle format (e.g., 'i' for case-insensitive)
-      String oracleFlags = args.get(5).getText().trim();
-      // Remove quotes if present
-      if (oracleFlags.startsWith("'") && oracleFlags.endsWith("'")) {
-        oracleFlags = oracleFlags.substring(1, oracleFlags.length() - 1);
+    for (int i = 0; i < textArgCount; i++) {
+      if (i > 0) {
+        sql.append(" , ");
       }
-      // Add 'g' if not already present (Oracle default is global)
-      if (!oracleFlags.contains("g")) {
-        flags = "g" + oracleFlags;
-      } else {
-        flags = oracleFlags;
-      }
+      sql.append(transformArgument(args.get(i), b));
     }
 
-    if (args.size() >= 5) {
-      // Oracle occurrence parameter - 5th argument
-      String occurrenceText = args.get(4).getText().trim();
-      // If occurrence is 1, only replace first match (don't use 'g')
-      if ("1".equals(occurrenceText)) {
-        flags = flags.replace("g", "");
-        if (flags.isEmpty()) {
-          // No flags, but PostgreSQL REGEXP_REPLACE requires at least empty string if we want to be explicit
-          // However, we can just omit the flags parameter
-          return "REGEXP_REPLACE( " + sourceExpr + " , " + patternExpr + " , " + replacementExpr + " )";
-        }
-      } else if (!"0".equals(occurrenceText)) {
-        // occurrence > 1: This is complex and not directly supported
-        // Would need a custom function or loop logic
-        throw new TransformationException(
-            "REGEXP_REPLACE with occurrence > 1 is not supported. " +
-            "Occurrence parameter: " + occurrenceText + ". " +
-            "Consider creating a custom PostgreSQL function for this use case.");
-      }
+    for (int i = 0; i < integerDefaults.length; i++) {
+      int argIndex = textArgCount + i;
+      sql.append(" , ").append(argIndex < args.size()
+          ? asIntegerArgument(transformArgument(args.get(argIndex), b))
+          : integerDefaults[i]);
     }
 
-    if (args.size() >= 4) {
-      // Oracle position parameter - 4th argument
-      // PostgreSQL doesn't support starting position directly
-      // Would need SUBSTRING workaround, but this is rare
-      String positionText = args.get(3).getText().trim();
-      if (!"1".equals(positionText)) {
-        throw new TransformationException(
-            "REGEXP_REPLACE with position != 1 is not supported. " +
-            "Position parameter: " + positionText + ". " +
-            "Consider using SUBSTRING to extract the relevant portion first.");
-      }
-    }
+    String oracleFlags = flagsIndex < args.size()
+        ? extractMatchParameter(args.get(flagsIndex), functionName)
+        : null;
+    sql.append(" , '").append(OracleRegexFlags.toPostgres(oracleFlags)).append("'");
 
-    // Build PostgreSQL REGEXP_REPLACE with flags
-    if (!flags.isEmpty()) {
-      return "REGEXP_REPLACE( " + sourceExpr + " , " + patternExpr + " , " + replacementExpr + " , '" + flags + "' )";
-    } else {
-      return "REGEXP_REPLACE( " + sourceExpr + " , " + patternExpr + " , " + replacementExpr + " )";
-    }
-  }
-
-  /**
-   * Transforms Oracle REGEXP_SUBSTR to PostgreSQL (REGEXP_MATCH())[1].
-   *
-   * <p>Oracle REGEXP_SUBSTR syntax:
-   * <pre>
-   * REGEXP_SUBSTR(source_string, pattern
-   *               [, position [, occurrence [, match_parameter [, subexpr]]]])
-   * </pre>
-   *
-   * <p>PostgreSQL REGEXP_MATCH syntax:
-   * <pre>
-   * REGEXP_MATCH(string, pattern [, flags])
-   * </pre>
-   *
-   * <p><b>Key Difference:</b> Oracle returns a string, PostgreSQL returns an array.
-   * We extract the first element with [1].
-   *
-   * <p><b>Transformation Strategy:</b>
-   * <ul>
-   *   <li>2 args: Simple transformation to (REGEXP_MATCH(str, pattern))[1]</li>
-   *   <li>3+ args: Extract position/occurrence parameters</li>
-   *   <li>If position > 1 or occurrence > 1: Complex, may require SUBSTRING or custom function</li>
-   * </ul>
-   *
-   * <h3>Examples:</h3>
-   * <pre>
-   * -- Simple (2 args)
-   * REGEXP_SUBSTR(email, '[^@]+') → (REGEXP_MATCH(email, '[^@]+'))[1]
-   *
-   * -- With flags (5 args)
-   * REGEXP_SUBSTR(text, '[a-z]+', 1, 1, 'i') → (REGEXP_MATCH(text, '[a-z]+', 'i'))[1]
-   * </pre>
-   */
-  private static String transformRegexpSubstr(
-      PlSqlParser.General_element_partContext partCtx,
-      PostgresCodeBuilder b) {
-
-    List<PlSqlParser.ArgumentContext> args = extractFunctionArguments(partCtx);
-
-    if (args.size() < 2 || args.size() > 6) {
-      throw new TransformationException(
-          "REGEXP_SUBSTR requires 2-6 arguments (source, pattern[, position[, occurrence[, flags[, subexpr]]]]), found: " + args.size());
-    }
-
-    String sourceExpr = transformArgument(args.get(0), b);
-    String patternExpr = transformArgument(args.get(1), b);
-
-    // Determine flags
-    String flags = "";
-
-    if (args.size() >= 5) {
-      // Oracle match_parameter (flags) - 5th argument
-      String oracleFlags = args.get(4).getText().trim();
-      // Remove quotes if present
-      if (oracleFlags.startsWith("'") && oracleFlags.endsWith("'")) {
-        flags = oracleFlags;  // Keep quotes for PostgreSQL
-      } else {
-        flags = "'" + oracleFlags + "'";
-      }
-    }
-
-    if (args.size() >= 4) {
-      // Oracle occurrence parameter - 4th argument
-      String occurrenceText = args.get(3).getText().trim();
-      if (!"1".equals(occurrenceText)) {
-        throw new TransformationException(
-            "REGEXP_SUBSTR with occurrence != 1 is not supported. " +
-            "Occurrence parameter: " + occurrenceText + ". " +
-            "Consider extracting multiple matches with REGEXP_MATCHES (note: returns a set).");
-      }
-    }
-
-    if (args.size() >= 3) {
-      // Oracle position parameter - 3rd argument
-      String positionText = args.get(2).getText().trim();
-      if (!"1".equals(positionText)) {
-        throw new TransformationException(
-            "REGEXP_SUBSTR with position != 1 is not supported. " +
-            "Position parameter: " + positionText + ". " +
-            "Consider using SUBSTRING to extract the relevant portion first.");
-      }
-    }
-
-    // Build PostgreSQL (REGEXP_MATCH())[1]
-    if (!flags.isEmpty()) {
-      return "( REGEXP_MATCH( " + sourceExpr + " , " + patternExpr + " , " + flags + " ) )[1]";
-    } else {
-      return "( REGEXP_MATCH( " + sourceExpr + " , " + patternExpr + " ) )[1]";
-    }
-  }
-
-  /**
-   * Transforms Oracle REGEXP_INSTR to PostgreSQL REGEXP_INSTR.
-   *
-   * <p>Oracle REGEXP_INSTR syntax:
-   * <pre>
-   * REGEXP_INSTR(source_string, pattern
-   *              [, position [, occurrence [, return_option [, match_parameter [, subexpr]]]]])
-   * </pre>
-   *
-   * <p>PostgreSQL REGEXP_INSTR syntax (PostgreSQL 15 and later):
-   * <pre>
-   * REGEXP_INSTR(string, pattern
-   *              [, start [, N [, endoption [, flags [, subexpr]]]]])
-   * </pre>
-   *
-   * <p>The two signatures are argument-for-argument identical, so every parameter maps
-   * positionally and none of Oracle's optional parameters need to be rejected. Only two
-   * adjustments are required:
-   *
-   * <ul>
-   *   <li><b>Flags,</b> because the engines disagree on the default newline handling — see
-   *       {@link OracleRegexFlags}. The flags argument is therefore always emitted, which forces
-   *       the preceding optional arguments to be emitted at their Oracle defaults.</li>
-   *   <li><b>Integer casts,</b> because PostgreSQL resolves overloads by exact type and has no
-   *       implicit numeric-to-integer cast. A transformed Oracle expression is typically
-   *       {@code numeric}, which would fail with "function regexp_instr(text, text, numeric) does
-   *       not exist".</li>
-   * </ul>
-   *
-   * <h3>Examples:</h3>
-   * <pre>
-   * REGEXP_INSTR(email, '@')
-   *   → REGEXP_INSTR( email , '@' , 1 , 1 , 0 , 'p' )
-   *
-   * REGEXP_INSTR(text, '[0-9]+', 5, 2, 1, 'i')
-   *   → REGEXP_INSTR( text , '[0-9]+' , 5 , 2 , 1 , 'ip' )
-   * </pre>
-   */
-  private static String transformRegexpInstr(
-      PlSqlParser.General_element_partContext partCtx,
-      PostgresCodeBuilder b) {
-
-    List<PlSqlParser.ArgumentContext> args = extractFunctionArguments(partCtx);
-
-    if (args.size() < 2 || args.size() > 7) {
-      throw new TransformationException(
-          "REGEXP_INSTR requires 2-7 arguments (source, pattern[, position[, occurrence"
-          + "[, return_option[, match_parameter[, subexpr]]]]]), found: " + args.size());
-    }
-
-    String sourceExpr = transformArgument(args.get(0), b);
-    String patternExpr = transformArgument(args.get(1), b);
-
-    // Oracle defaults: position 1, occurrence 1, return_option 0 (start of match).
-    String positionExpr = args.size() >= 3 ? asIntegerArgument(transformArgument(args.get(2), b)) : "1";
-    String occurrenceExpr = args.size() >= 4 ? asIntegerArgument(transformArgument(args.get(3), b)) : "1";
-    String returnOptionExpr = args.size() >= 5 ? asIntegerArgument(transformArgument(args.get(4), b)) : "0";
-
-    String flags = OracleRegexFlags.toPostgres(
-        args.size() >= 6 ? extractMatchParameter(args.get(5), "REGEXP_INSTR") : null);
-
-    StringBuilder sql = new StringBuilder("REGEXP_INSTR( ")
-        .append(sourceExpr).append(" , ")
-        .append(patternExpr).append(" , ")
-        .append(positionExpr).append(" , ")
-        .append(occurrenceExpr).append(" , ")
-        .append(returnOptionExpr).append(" , ")
-        .append("'").append(flags).append("'");
-
-    if (args.size() >= 7) {
-      sql.append(" , ").append(asIntegerArgument(transformArgument(args.get(6), b)));
+    if (allowsSubexpr && args.size() > flagsIndex + 1) {
+      sql.append(" , ").append(asIntegerArgument(transformArgument(args.get(flagsIndex + 1), b)));
     }
 
     return sql.append(" )").toString();

@@ -174,8 +174,16 @@ Full write-up: [TRANSFORMATION.md](TRANSFORMATION.md#quoted-identifiers-oracle-d
 ### 5. View Transformation Gaps — driven by real-world cases
 
 **Problem:** Some complicated views still fail. Known candidate gaps from the review:
-PIVOT/UNPIVOT, MODEL clause, compound `(+)` outer-join expressions, `REGEXP_*` with
-position/occurrence > 1, `ORDER SIBLINGS BY`, RETURNING clause, cursor expressions.
+PIVOT/UNPIVOT, MODEL clause, compound `(+)` outer-join expressions, `ORDER SIBLINGS BY`,
+RETURNING clause, cursor expressions.
+
+**Fixed 2026-08-14 — the `REGEXP_*` family.** `REGEXP_INSTR` threw on sight and
+`REGEXP_SUBSTR` / `REGEXP_REPLACE` rejected position/occurrence > 1, all on the premise that
+PostgreSQL had no equivalents. PostgreSQL 15 added the whole family with Oracle-compatible
+signatures, so the emulations were replaced by positional mappings to the native functions.
+This also fixed a silent wrong-data defect: the `REGEXP_SUBSTR` emulation returned the first
+capture group rather than the whole match.
+Full write-up: [TRANSFORMATION.md](TRANSFORMATION.md#the-regexp-family-and-oracle-regex-flags--2026-08-14).
 
 **Approach — explicitly demand-driven, not coverage-driven:**
 - [ ] Take failures from the normal migration run. **The views are in a good state** (assessed

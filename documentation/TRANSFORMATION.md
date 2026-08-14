@@ -22,7 +22,7 @@ This document describes the ANTLR-based transformation module that converts Orac
 - ✅ CTEs (WITH clause) - recursive and non-recursive
 - ✅ CONNECT BY (hierarchical queries) - including LEVEL and SYS_CONNECT_BY_PATH
 - ✅ Date/Time Functions (ADD_MONTHS, MONTHS_BETWEEN, LAST_DAY, TRUNC, ROUND)
-- ✅ String Functions (INSTR, LPAD, RPAD, TRANSLATE, REGEXP_REPLACE, REGEXP_SUBSTR)
+- ✅ String Functions (INSTR, LPAD, RPAD, TRANSLATE, full REGEXP family)
 - ✅ Complete SELECT support (JOINs, subqueries, aggregation, window functions)
 - ✅ Oracle-specific functions (NVL, DECODE, TO_CHAR, TO_DATE, SYSDATE, ROWNUM)
 
@@ -90,7 +90,7 @@ This document describes the ANTLR-based transformation module that converts Orac
 - **Effort:** ~3 hours total
 - **Coverage Gain:** +2 percentage points (80% → 82%)
 - **Test Coverage:** 47/47 tests passing
-- **Functions:** INSTR, LPAD, RPAD, TRANSLATE, REGEXP_REPLACE, REGEXP_SUBSTR
+- **Functions:** INSTR, LPAD, RPAD, TRANSLATE, REGEXP_REPLACE, REGEXP_SUBSTR, REGEXP_INSTR, REGEXP_COUNT, REGEXP_LIKE
 
 **✅ CONNECT BY (Hierarchical Queries) - COMPLETED**
 - **Impact:** 10-20% of Oracle views use hierarchical queries
@@ -187,8 +187,7 @@ This document describes the ANTLR-based transformation module that converts Orac
 - INSTR(str, substr, pos, occ) → custom function call
 - LPAD/RPAD → pass-through (identical syntax)
 - TRANSLATE → pass-through (identical syntax)
-- REGEXP_REPLACE → adds 'g' flag for global replace
-- REGEXP_SUBSTR → (REGEXP_MATCH())[1] array extraction
+- REGEXP_* → same-named PostgreSQL function, mapped positionally (PostgreSQL 15+)
 - **Test Coverage:** 47/47 tests
 
 **✅ CONNECT BY (Hierarchical Queries):**
@@ -682,14 +681,13 @@ INSTR(email, '.', 1, 2) → instr_with_occurrence(email, '.', 1, 2)
 
 **REGEXP Functions:**
 ```sql
--- REGEXP_REPLACE (adds 'g' flag for global)
-REGEXP_REPLACE(text, '[0-9]', 'X') → REGEXP_REPLACE(text, '[0-9]', 'X', 'g')
-
--- REGEXP_SUBSTR (array extraction)
-REGEXP_SUBSTR(email, '[^@]+') → (REGEXP_MATCH(email, '[^@]+'))[1]
-
--- REGEXP_INSTR (native since PostgreSQL 15; 'p' is Oracle's default newline handling)
-REGEXP_INSTR(email, '@') → REGEXP_INSTR( email , '@' , 1 , 1 , 0 , 'p' )
+-- Native PostgreSQL 15+ equivalents, mapped positionally.
+-- 'p' is Oracle's default newline handling, which PostgreSQL does not default to.
+REGEXP_REPLACE(text, '[0-9]', 'X') → REGEXP_REPLACE( text , '[0-9]' , 'X' , 1 , 0 , 'p' )
+REGEXP_SUBSTR(email, '[^@]+')      → REGEXP_SUBSTR( email , '[^@]+' , 1 , 1 , 'p' )
+REGEXP_INSTR(email, '@')           → REGEXP_INSTR( email , '@' , 1 , 1 , 0 , 'p' )
+REGEXP_COUNT(text, '[0-9]')        → REGEXP_COUNT( text , '[0-9]' , 1 , 'p' )
+REGEXP_LIKE(email, '^[a-z]+@')     → REGEXP_LIKE( email , '^[a-z]+@' , 'p' )
 ```
 
 **Pass-through Functions:**
@@ -965,7 +963,7 @@ Full write-up: [completed/VISIT_GENERAL_ELEMENT_REFACTORING_PLAN.md](completed/V
 
 ---
 
-### REGEXP_INSTR and Oracle Regex Flags — ✅ 2026-08-14
+### The REGEXP Family and Oracle Regex Flags — ✅ 2026-08-14
 
 **The problem.** `REGEXP_INSTR` threw `TransformationException` on sight, on the premise that
 PostgreSQL has no equivalent. That premise expired in 2022: **PostgreSQL 15 added
@@ -1023,13 +1021,44 @@ base is `postgres:16-alpine`. There is no version detection anywhere in the code
 added — on an older server these calls fail loudly at `CREATE VIEW` with PostgreSQL's own
 "function does not exist" message, which is the correct outcome.
 
+**The whole family maps the same way.** `REGEXP_REPLACE` gained the Oracle-shaped
+`(string, pattern, replacement, start, N, flags)` overload in PostgreSQL 15 as well, and
+`REGEXP_COUNT` / `REGEXP_LIKE` mirror Oracle exactly. All five share one shape — leading string
+arguments, a run of positional integer parameters each with an Oracle default, the flags, and an
+optional trailing `subexpr` — so `StringFunctionTransformer.transformRegexpFunction()` encodes
+that shape once and each function is one line of configuration:
+
+| Oracle | leading strings | integer defaults | subexpr |
+|---|---|---|---|
+| `REGEXP_REPLACE` | 3 | position 1, occurrence 0 | no |
+| `REGEXP_SUBSTR` | 2 | position 1, occurrence 1 | yes |
+| `REGEXP_INSTR` | 2 | position 1, occurrence 1, return_option 0 | yes |
+| `REGEXP_COUNT` | 2 | position 1 | no |
+| `REGEXP_LIKE` | 2 | — | no |
+
+**Three latent defects were removed along the way:**
+
+1. **`REGEXP_SUBSTR` truncated at capture groups.** The old emulation was
+   `(REGEXP_MATCH(str, pattern))[1]`, but `regexp_match` returns the *capture groups*, not the
+   whole match. `REGEXP_SUBSTR('2024-01-15', '(\d+)-(\d+)')` returned `2024` where Oracle
+   returns `2024-01`. This produced wrong data while reporting success — it was never a
+   transformation failure. Native `REGEXP_SUBSTR` agrees with Oracle.
+2. **Artificial rejections.** `REGEXP_SUBSTR` threw on `position != 1` or `occurrence != 1`, and
+   `REGEXP_REPLACE` on `position != 1` or `occurrence > 1`, because neither `REGEXP_MATCH` nor
+   the 4-argument `REGEXP_REPLACE` can express those. The positional forms can, so all four
+   restrictions are gone.
+3. **`REGEXP_LIKE` and `REGEXP_COUNT` were never transformed at all** — they were listed in
+   `isKnownBuiltinFunction()` and emitted verbatim. That resolved on PostgreSQL 15+, but kept
+   PostgreSQL's newline defaults instead of Oracle's. Both now route through the mapper.
+
 **Key classes:** `transformer/builder/functions/OracleRegexFlags` (the mapping, no notion of
-quoting — the caller renders the literal), `StringFunctionTransformer.transformRegexpInstr()`.
+quoting — the caller renders the literal), `StringFunctionTransformer.transformRegexpFunction()`.
 
 **Test Coverage:** 8 tests in `OracleRegexFlagsTest` (every newline combination, pass-through
-order, unknown-flag rejection), 6 in `RegexpFunctionTransformationTest` (all argument counts,
-the integer cast, the non-literal-flag rejection). Expected values were verified by executing the
-emitted SQL against PostgreSQL 17 and comparing with Oracle's documented results.
+order, unknown-flag rejection), 27 in `RegexpFunctionTransformationTest` (all five functions,
+all argument counts, the integer cast, the non-literal-flag rejection, and the capture-group
+case that pins defect 1). Every emitted form was executed against PostgreSQL 17 and compared
+with Oracle's documented results.
 
 ---
 

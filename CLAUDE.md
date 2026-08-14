@@ -347,6 +347,23 @@ both branches of `VisitGeneralElement` that previously assumed "no parentheses �
 - **Standalone routines are indexed** (`isStandaloneFunction`); `indexPackageFunctions` alone
   cannot see them, and `hr.get_today` is the same shape as `hr.emp`.
 
+### Oracle REGEXP Family → Native PostgreSQL
+
+**PostgreSQL 15 added `regexp_count`/`regexp_instr`/`regexp_like`/`regexp_substr` with
+Oracle-compatible signatures**, and an Oracle-shaped `regexp_replace` overload. All five map
+positionally, so none of Oracle's optional parameters needs rejecting.
+`StringFunctionTransformer.transformRegexpFunction()` encodes the shared shape once.
+
+- **Flags are mapped, never passed through** (`OracleRegexFlags`). The engines disagree on the
+  *default*: Oracle's `.` does not match a newline, PostgreSQL's does. PostgreSQL spells Oracle's
+  default as `p`, so a newline flag is **always** emitted — which is why the preceding optional
+  arguments are emitted at their Oracle defaults too. A non-literal `match_parameter` cannot be
+  mapped at transformation time and is rejected rather than emitted unmapped.
+- **Integer arguments get `::integer` casts.** PostgreSQL resolves overloads by exact type with no
+  implicit `numeric` → `integer` cast, so an uncast column reference fails overload resolution.
+- **Assumes PostgreSQL ≥ 15**; the target is 17. There is no version detection anywhere in the
+  codebase and none was added — on an older server these calls fail loudly at `CREATE VIEW`.
+
 ### Synonym Resolution
 
 PostgreSQL has no synonyms. `StateService.resolveSynonym()`: current schema → PUBLIC → null.
