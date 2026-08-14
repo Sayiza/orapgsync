@@ -1,6 +1,7 @@
 package me.christianrobert.orapgsync.transformer.context;
 
 import me.christianrobert.orapgsync.core.job.model.function.FunctionMetadata;
+import me.christianrobert.orapgsync.core.job.model.function.FunctionParameter;
 import me.christianrobert.orapgsync.core.job.model.objectdatatype.ObjectDataTypeMetaData;
 import me.christianrobert.orapgsync.core.job.model.objectdatatype.ObjectDataTypeVariable;
 import me.christianrobert.orapgsync.core.job.model.synonym.SynonymMetadata;
@@ -76,6 +77,12 @@ public class MetadataIndexBuilder {
         Set<String> packageFunctions =
                 indexPackageFunctions(stateService, normalizedSchemas);
 
+        Set<String> standaloneFunctions =
+                indexStandaloneFunctions(stateService, normalizedSchemas);
+
+        Set<String> noArgCallableRoutines =
+                indexNoArgCallableRoutines(stateService, normalizedSchemas);
+
         Map<String, Map<String, String>> synonyms =
                 indexSynonyms(stateService);
 
@@ -85,10 +92,13 @@ public class MetadataIndexBuilder {
         Set<String> objectTypeNames =
                 indexObjectTypeNames(stateService, normalizedSchemas);
 
-        log.info("Indices built: {} tables, {} types with methods, {} package functions, {} synonym schemas, {} object types",
-                tableColumns.size(), typeMethods.size(), packageFunctions.size(), synonyms.size(), objectTypeNames.size());
+        log.info("Indices built: {} tables, {} types with methods, {} package functions, {} standalone functions, "
+                        + "{} no-arg-callable routines, {} synonym schemas, {} object types",
+                tableColumns.size(), typeMethods.size(), packageFunctions.size(), standaloneFunctions.size(),
+                noArgCallableRoutines.size(), synonyms.size(), objectTypeNames.size());
 
-        return new TransformationIndices(tableColumns, typeMethods, packageFunctions, synonyms, typeFieldTypes, objectTypeNames);
+        return new TransformationIndices(tableColumns, typeMethods, packageFunctions, synonyms, typeFieldTypes,
+                objectTypeNames, standaloneFunctions, noArgCallableRoutines);
     }
 
     /**
@@ -185,6 +195,99 @@ public class MetadataIndexBuilder {
 
         log.debug("Indexed {} package functions", index.size());
         return index;
+    }
+
+    /**
+     * Builds standalone routine index: Set of "schema.function".
+     *
+     * <p>The counterpart to {@link #indexPackageFunctions}: routines with no package. Needed
+     * because {@code hr.get_today} and {@code hr.emp} are the same two-part shape, so a
+     * standalone function written without parentheses can only be told from a table reference
+     * by looking it up.
+     */
+    private static Set<String> indexStandaloneFunctions(
+            StateService stateService, Set<String> schemas) {
+
+        Set<String> index = new HashSet<>();
+
+        for (FunctionMetadata function : stateService.getOracleFunctionMetadata()) {
+            String normalizedSchema = function.getSchema().toLowerCase();
+
+            if (!schemas.contains(normalizedSchema)) {
+                continue; // Skip functions not in target schemas
+            }
+
+            if (function.getPackageName() == null || function.getPackageName().isEmpty()) {
+                index.add(normalizedSchema + "." + function.getObjectName().toLowerCase());
+            }
+        }
+
+        log.debug("Indexed {} standalone functions", index.size());
+        return index;
+    }
+
+    /**
+     * Builds the no-argument-callable routine index, covering both standalone
+     * ("schema.function") and package ("schema.package.function") routines.
+     *
+     * <p>A routine qualifies when it declares no parameters, or when every parameter carries a
+     * DEFAULT — exactly the routines Oracle allows to be written without parentheses.
+     *
+     * <p>Overloads collapse onto one key, and a single no-arg-callable overload is enough: if any
+     * overload can be called bare, the bare reference is a call.
+     */
+    private static Set<String> indexNoArgCallableRoutines(
+            StateService stateService, Set<String> schemas) {
+
+        Set<String> index = new HashSet<>();
+
+        for (FunctionMetadata function : stateService.getOracleFunctionMetadata()) {
+            String normalizedSchema = function.getSchema().toLowerCase();
+
+            if (!schemas.contains(normalizedSchema)) {
+                continue; // Skip functions not in target schemas
+            }
+
+            if (!isCallableWithoutArguments(function)) {
+                continue;
+            }
+
+            String packageName = function.getPackageName();
+            if (packageName != null && !packageName.isEmpty()) {
+                index.add(normalizedSchema + "." + packageName.toLowerCase() + "."
+                        + function.getObjectName().toLowerCase());
+            } else {
+                index.add(normalizedSchema + "." + function.getObjectName().toLowerCase());
+            }
+        }
+
+        log.debug("Indexed {} no-arg-callable routines", index.size());
+        return index;
+    }
+
+    /**
+     * Reports whether a routine can be invoked without supplying any argument.
+     *
+     * <p>An OUT or IN OUT parameter disqualifies the routine even when defaulted: the caller has
+     * to supply a target to receive the value, so the reference cannot be a bare read.
+     */
+    private static boolean isCallableWithoutArguments(FunctionMetadata function) {
+        List<FunctionParameter> parameters = function.getParameters();
+        if (parameters == null || parameters.isEmpty()) {
+            return true;
+        }
+
+        for (FunctionParameter parameter : parameters) {
+            String inOut = parameter.getInOut();
+            if (inOut != null && inOut.toUpperCase().contains("OUT")) {
+                return false;
+            }
+            if (!parameter.isDefaulted()) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**

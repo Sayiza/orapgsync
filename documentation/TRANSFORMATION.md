@@ -1,6 +1,6 @@
 # Oracle to PostgreSQL SQL Transformation
 
-**Last Updated:** 2025-11-25
+**Last Updated:** 2026-08-14
 **Status:** ✅ **90% REAL-WORLD COVERAGE ACHIEVED** - 662+ tests passing (SQL views), 85-95% PL/SQL functions, Type inference integrated with date arithmetic
 **Implementation Time:** ~1.5 days actual (vs. 16-21 days estimated)
 
@@ -889,6 +889,76 @@ creation refuse the object with an error naming both Oracle columns.
 **Test Coverage:** 13 tests in `IdentifierHelperTest`, 6 in `QuotedIdentifierTransformationTest`
 (including the production view above and byte-identical non-regression assertions), 9 in
 `PostgresIdentifierNormalizerTest`.
+
+---
+
+### Routines Referenced Without Parentheses — ✅ 2026-08-14
+
+**Problem:** Oracle permits a routine that needs no arguments to be referenced bare —
+`pkg.get_status` rather than `pkg.get_status()`. In expression position that is the same parse
+shape as `table.column`, and PostgreSQL reads `a.b` as *column b of relation a*:
+
+```sql
+-- Oracle view
+SELECT e.ename, emp_pkg.get_status, get_today FROM emp e
+
+-- Was produced (fails: missing FROM-clause entry for table "emp_pkg")
+SELECT e . ename , emp_pkg . get_status , get_today FROM hr.emp e
+
+-- Now produced
+SELECT e . ename , hr.emp_pkg__get_status() , hr.get_today() FROM hr.emp e
+```
+
+The routine appears to have been mistaken for a table — which is exactly what PostgreSQL is
+reporting. The decision was purely syntactic (`VisitGeneralElement.java:151`): no parentheses sent
+the reference to `handleQualifiedColumn()`, and metadata was consulted only afterwards.
+
+The statement-level equivalent (`VisitCall_statement`) never had the problem, because
+`call_statement` is a grammar rule that only matches calls. In expression position — where view
+SQL lives — nothing but metadata can decide.
+
+**Four shapes, all handled:**
+
+| Oracle | Before | After |
+|---|---|---|
+| `pkg.func` | `pkg . func` | `hr.pkg__func()` |
+| `hr.pkg.func` | `hr . pkg . func` | `hr.pkg__func()` |
+| `hr.standalone_func` | `hr . standalone_func` | `hr.standalone_func()` |
+| `standalone_func` | `standalone_func` | `hr.standalone_func()` |
+
+**Solution:** `generalelement/ParameterlessFunctionDetector`, consulted from both
+`VisitGeneralElement` branches that assumed "no parentheses ⇒ column". Resolution order mirrors
+Oracle's: columns in scope → locals/package variables/CTEs → Oracle compatibility packages →
+routines in the current schema → synonyms.
+
+Three supporting changes made the decision possible, and each closed a real metadata gap:
+
+1. **Standalone routines are indexed.** `indexPackageFunctions()` explicitly skipped them, so
+   `hr.get_today` — the same two-part shape as `hr.emp` — was undecidable.
+2. **Arity is known.** Existence is not enough: a routine with a mandatory parameter could never
+   have been called bare, so a bare reference to it *is* a column. `isNoArgCallable()` records
+   which routines take no mandatory argument, which required extracting
+   `ALL_ARGUMENTS.DEFAULTED` — a routine with every parameter defaulted is callable bare. A
+   defaulted OUT parameter still disqualifies: the caller must supply a target.
+3. **FROM scope is tracked.** `tableAliases` cannot answer "which relations are in scope?",
+   because an unaliased table registers no alias. `TransformationContext.isColumnInScope()`, fed
+   from `TableReferenceHelper.resolveTableviewName()`, gives a real column precedence over a
+   same-named routine.
+
+**Why this cannot corrupt a column reference.** Every rewrite needs **positive** metadata
+evidence, and column-shaped readings are checked first. An identifier the metadata does not
+recognise is emitted exactly as before, so a miss is never worse than the previous behaviour. The
+inverse rule — *"the qualifier is not a known alias, therefore it is a package"* — is wrong and
+must not be added later: an unaliased table registers no alias, so it would misfire on every
+`FROM emp` / `emp.col` pair.
+
+**Test Coverage:** 13 tests in `ParameterlessFunctionTransformationTest` (all four shapes, plus
+aliased column, unaliased-table column, routine-requiring-arguments, unknown-identifier,
+quoted-name, Oracle-compat and explicit-`()` cases), 6 in `MetadataIndexBuilderRoutineIndexTest`
+(the no-arg-callable rule). Verified by mutation: removing the FROM-scope registration makes
+`columnOfUnaliasedTable_winsOverSameNamedFunction` produce `SELECT hr.ename() FROM hr.emp`.
+
+Full write-up: [completed/VISIT_GENERAL_ELEMENT_REFACTORING_PLAN.md](completed/VISIT_GENERAL_ELEMENT_REFACTORING_PLAN.md).
 
 ---
 

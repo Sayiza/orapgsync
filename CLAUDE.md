@@ -319,6 +319,34 @@ Lower-casing means Oracle's case-sensitive `"Foo"` and `"FOO"` collapse to one n
 `findCollisions()` detects that, and table and view-stub creation **refuse the object** with an
 error naming both Oracle columns rather than let a column be silently merged or dropped.
 
+### Routines Referenced Without Parentheses
+
+Oracle lets a routine needing no arguments be written bare — `pkg.get_status`, not
+`pkg.get_status()`. In expression position that is byte-identical to `table.column`, and
+PostgreSQL reads `a.b` as *column b of relation a*, so an unrewritten reference fails with
+`missing FROM-clause entry for table "pkg"` — the function looks like a table. Four shapes:
+`func`, `pkg.func`, `schema.func`, `schema.pkg.func`. The statement-level case
+(`VisitCall_statement`) never had the problem, because `call_statement` is a grammar rule that
+only matches calls; in expression position only metadata can decide.
+
+`transformer/builder/generalelement/ParameterlessFunctionDetector` decides it, consulted from
+both branches of `VisitGeneralElement` that previously assumed "no parentheses ⇒ column".
+
+- **Only positive metadata rewrites.** An unrecognised identifier is left exactly as before, so a
+  miss costs nothing. The inverse rule — *"the qualifier is not a known alias, therefore it is a
+  package"* — is wrong and must never be added: a table written without an alias registers no
+  alias at all.
+- **`isNoArgCallable` is the gate**, not mere existence. A routine with a mandatory parameter
+  could not have been called bare, so a bare reference to it is a column. This needs
+  `ALL_ARGUMENTS.DEFAULTED`, which is why `OracleFunctionExtractor` extracts it; a defaulted
+  OUT parameter still disqualifies, since the caller must supply a target.
+- **Columns win.** `TransformationContext.isColumnInScope()` answers from `fromRelations`,
+  registered in `TableReferenceHelper.resolveTableviewName()` for aliased *and* unaliased tables.
+  Without it, `SELECT ename FROM emp` silently becomes `hr.ename()` when a routine shares the
+  name — that regression is pinned by `columnOfUnaliasedTable_winsOverSameNamedFunction`.
+- **Standalone routines are indexed** (`isStandaloneFunction`); `indexPackageFunctions` alone
+  cannot see them, and `hr.get_today` is the same shape as `hr.emp`.
+
 ### Synonym Resolution
 
 PostgreSQL has no synonyms. `StateService.resolveSynonym()`: current schema → PUBLIC → null.
@@ -486,9 +514,6 @@ Every plan document, listed once. Prefer linking here over copying content into 
 **Open work**
 - [PLSQL_DML_STATEMENTS_IMPLEMENTATION_PLAN.md](documentation/PLSQL_DML_STATEMENTS_IMPLEMENTATION_PLAN.md) —
   Phase 1 (INSERT/UPDATE/DELETE) done; **Phase 2 RETURNING clause open**
-- [VISIT_GENERAL_ELEMENT_REFACTORING_PLAN.md](documentation/VISIT_GENERAL_ELEMENT_REFACTORING_PLAN.md) —
-  Milestone A (structural refactor) done; **Milestone B open**: parameterless functions are still
-  misidentified
 
 **Designed but not built / deferred**
 - [AI_TRANSFORMATION_IMPLEMENTATION_PLAN.md](documentation/AI_TRANSFORMATION_IMPLEMENTATION_PLAN.md) —
@@ -500,4 +525,5 @@ Every plan document, listed once. Prefer linking here over copying content into 
 detail behind sections above: `LOB_TO_OID_MIGRATION_PLAN.md` (staging workflow),
 `PACKAGE_SEGMENTATION_*` / `TYPE_METHOD_SEGMENTATION_*` (boundary scanners),
 `PACKAGE_VARIABLE_*`, `INLINE_TYPE_*`, `OBJECT_TYPE_FIELD_ACCESS_*`, `TRIGGER_*`,
-`PLSQL_CURSOR_ATTRIBUTES_*`, `PLSQL_EXCEPTION_HANDLING_ANALYSIS.md`.
+`PLSQL_CURSOR_ATTRIBUTES_*`, `PLSQL_EXCEPTION_HANDLING_ANALYSIS.md`,
+`VISIT_GENERAL_ELEMENT_REFACTORING_PLAN.md` (dot-navigation dispatcher; parenthesis-less routines).

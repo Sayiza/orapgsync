@@ -12,6 +12,7 @@ public class FunctionParameter {
     private boolean isCustomDataType;
     private String dataTypeOwner;
     private String dataTypeName;
+    private boolean defaulted; // true if the parameter has a DEFAULT clause (ALL_ARGUMENTS.DEFAULTED = 'Y')
 
     public FunctionParameter(String parameterName, int position, String dataType, String inOut) {
         this.parameterName = parameterName;
@@ -76,6 +77,20 @@ public class FunctionParameter {
 
     public void setDataTypeName(String dataTypeName) {
         this.dataTypeName = dataTypeName;
+    }
+
+    /**
+     * Whether this parameter has a DEFAULT clause and may therefore be omitted at the call site.
+     *
+     * <p>Needed to decide whether a routine referenced without parentheses — Oracle permits
+     * {@code pkg.f} for {@code pkg.f()} — is in fact callable with no arguments.
+     */
+    public boolean isDefaulted() {
+        return defaulted;
+    }
+
+    public void setDefaulted(boolean defaulted) {
+        this.defaulted = defaulted;
     }
 
     @Override

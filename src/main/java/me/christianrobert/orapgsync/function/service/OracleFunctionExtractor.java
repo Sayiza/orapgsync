@@ -160,7 +160,8 @@ public class OracleFunctionExtractor {
                 overload,
                 type_owner,
                 type_name,
-                data_level
+                data_level,
+                defaulted
             FROM all_arguments
             WHERE owner = ?
               AND object_name IN (
@@ -191,6 +192,7 @@ public class OracleFunctionExtractor {
                     String typeOwner = rs.getString("type_owner");
                     String typeName = rs.getString("type_name");
                     int dataLevel = rs.getInt("data_level");
+                    boolean defaulted = "Y".equalsIgnoreCase(rs.getString("defaulted"));
 
                     // Skip collection element types (data_level > 0)
                     if (dataLevel > 0) {
@@ -230,6 +232,7 @@ public class OracleFunctionExtractor {
                             dataType,
                             inOut != null ? inOut : "IN"
                         );
+                        param.setDefaulted(defaulted);
 
                         // Check if parameter type is custom
                         if (typeOwner != null && typeName != null) {

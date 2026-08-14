@@ -9,6 +9,7 @@ import me.christianrobert.orapgsync.transformer.builder.generalelement.GeneralEl
 import me.christianrobert.orapgsync.transformer.builder.generalelement.InlineTypeFieldTransformer;
 import me.christianrobert.orapgsync.transformer.builder.generalelement.ObjectFieldAccessAdapter;
 import me.christianrobert.orapgsync.transformer.builder.generalelement.PackageVariableTransformer;
+import me.christianrobert.orapgsync.transformer.builder.generalelement.ParameterlessFunctionDetector;
 import me.christianrobert.orapgsync.transformer.builder.generalelement.SequenceCallTransformer;
 import me.christianrobert.orapgsync.transformer.builder.objectfield.ObjectFieldAccessTransformer;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
@@ -194,6 +195,14 @@ public class VisitGeneralElement {
       // Not a type member method - assume package function
       return handlePackageFunctionCall(parts, b);
     } else {
+      // No parentheses. Oracle allows a routine needing no arguments to be written bare, which is
+      // the same syntax as table.column - only metadata tells the two apart. Tried before falling
+      // through to the column reading; returns null unless the metadata says otherwise.
+      String parameterlessCall = ParameterlessFunctionDetector.detect(parts, b);
+      if (parameterlessCall != null) {
+        return parameterlessCall;
+      }
+
       // COLUMN REFERENCE: table.column or table.column.subfield
       return handleQualifiedColumn(parts, b);
     }
@@ -621,6 +630,14 @@ public class VisitGeneralElement {
         // Transform unqualified variable reference to getter call
         return context.getPackageVariableGetter(currentPackageName, identifierLower);
       }
+    }
+
+    // A bare name may be a routine Oracle allows to be called without parentheses. The detector
+    // gives columns in scope, local variables and package variables precedence, so this only
+    // fires on a positive metadata match and otherwise leaves the identifier untouched.
+    String parameterlessCall = ParameterlessFunctionDetector.detect(List.of(partCtx), b);
+    if (parameterlessCall != null) {
+      return parameterlessCall;
     }
 
     // Simple identifier - column, local variable or parameter. Normalized so a quoted Oracle

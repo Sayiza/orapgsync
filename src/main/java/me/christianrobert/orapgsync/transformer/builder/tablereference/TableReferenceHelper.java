@@ -220,6 +220,11 @@ public class TableReferenceHelper {
                     tableName = context.getCurrentSchema().toLowerCase() + "." + tableName.toLowerCase();
                 }
             }
+
+            // Record the relation as in scope. Registered here rather than at the alias site
+            // because a table written without an alias must count too - it is the FROM scope that
+            // decides whether a bare identifier is a column or a parameterless function call.
+            context.registerFromRelation(tableName);
         }
         // If context not available, keep original name (e.g., in simple tests without metadata)
 

@@ -41,6 +41,15 @@ public class TransformationIndices {
     // Set of "schema.package.function" (lowercase)
     private final Set<String> packageFunctions;
 
+    // Standalone (non-package) function qualified names
+    // Set of "schema.function" (lowercase)
+    private final Set<String> standaloneFunctions;
+
+    // Routines callable with no arguments at all — either declared without parameters, or with
+    // every parameter DEFAULTed. Holds both shapes: "schema.function" and "schema.package.function".
+    // This is what makes a parenthesis-less reference decidable; see isNoArgCallable.
+    private final Set<String> noArgCallableRoutines;
+
     // Synonym resolution
     // Key: "schema" (lowercase), Value: Map of synonym name → "target_schema.target_table"
     private final Map<String, Map<String, String>> synonyms;
@@ -55,8 +64,11 @@ public class TransformationIndices {
     private final Set<String> objectTypeNames;
 
     /**
-     * Creates indices with all lookup maps.
-     * Maps are defensively copied to ensure immutability.
+     * Creates indices without routine-shape information.
+     *
+     * <p>Equivalent to the full constructor with empty standalone-function and no-arg-callable
+     * sets, which disables parenthesis-less routine detection. Kept for callers — chiefly tests —
+     * that build minimal indices and do not exercise that path.
      */
     public TransformationIndices(
             Map<String, Map<String, ColumnTypeInfo>> tableColumns,
@@ -66,12 +78,32 @@ public class TransformationIndices {
             Map<String, Map<String, String>> typeFieldTypes,
             Set<String> objectTypeNames) {
 
+        this(tableColumns, typeMethods, packageFunctions, synonyms, typeFieldTypes, objectTypeNames,
+                Collections.emptySet(), Collections.emptySet());
+    }
+
+    /**
+     * Creates indices with all lookup maps.
+     * Maps are defensively copied to ensure immutability.
+     */
+    public TransformationIndices(
+            Map<String, Map<String, ColumnTypeInfo>> tableColumns,
+            Map<String, Set<String>> typeMethods,
+            Set<String> packageFunctions,
+            Map<String, Map<String, String>> synonyms,
+            Map<String, Map<String, String>> typeFieldTypes,
+            Set<String> objectTypeNames,
+            Set<String> standaloneFunctions,
+            Set<String> noArgCallableRoutines) {
+
         this.tableColumns = deepCopyTableColumns(tableColumns);
         this.typeMethods = deepCopyTypeMethods(typeMethods);
         this.packageFunctions = Set.copyOf(packageFunctions);
         this.synonyms = deepCopySynonyms(synonyms);
         this.typeFieldTypes = deepCopyTypeFields(typeFieldTypes);
         this.objectTypeNames = Set.copyOf(objectTypeNames);
+        this.standaloneFunctions = Set.copyOf(standaloneFunctions);
+        this.noArgCallableRoutines = Set.copyOf(noArgCallableRoutines);
     }
 
     /**
@@ -135,6 +167,41 @@ public class TransformationIndices {
     }
 
     /**
+     * Checks if a qualified name is a standalone (non-package) function or procedure.
+     *
+     * @param qualifiedName Routine name in "schema.function" format (case-insensitive)
+     * @return true if this is a known standalone routine
+     */
+    public boolean isStandaloneFunction(String qualifiedName) {
+        if (qualifiedName == null) {
+            return false;
+        }
+
+        return standaloneFunctions.contains(qualifiedName.toLowerCase());
+    }
+
+    /**
+     * Checks if a routine can be invoked with no arguments — no parameters, or every parameter
+     * DEFAULTed.
+     *
+     * <p>This is the test that makes a parenthesis-less reference decidable. Oracle lets such a
+     * routine be written bare ({@code pkg.f} rather than {@code pkg.f()}), which is
+     * indistinguishable from {@code table.column} by syntax alone. Requiring a no-arg-callable
+     * match keeps the rewrite from firing on a routine that could never have been meant, so an
+     * ordinary column reference is never mistaken for a call.
+     *
+     * @param qualifiedName "schema.function" or "schema.package.function" (case-insensitive)
+     * @return true if the routine takes no mandatory arguments
+     */
+    public boolean isNoArgCallable(String qualifiedName) {
+        if (qualifiedName == null) {
+            return false;
+        }
+
+        return noArgCallableRoutines.contains(qualifiedName.toLowerCase());
+    }
+
+    /**
      * Resolves a synonym to its target.
      * Follows Oracle resolution rules: current schema → PUBLIC fallback.
      *
@@ -187,6 +254,20 @@ public class TransformationIndices {
      */
     public Set<String> getAllPackageFunctions() {
         return Collections.unmodifiableSet(packageFunctions);
+    }
+
+    /**
+     * Gets all standalone functions (for testing/debugging).
+     */
+    public Set<String> getAllStandaloneFunctions() {
+        return Collections.unmodifiableSet(standaloneFunctions);
+    }
+
+    /**
+     * Gets all no-argument-callable routines (for testing/debugging).
+     */
+    public Set<String> getAllNoArgCallableRoutines() {
+        return Collections.unmodifiableSet(noArgCallableRoutines);
     }
 
     /**

@@ -264,6 +264,16 @@ public class TransformationContext {
     private final Map<String, String> tableAliases;  // alias → table name (per query)
     private final Set<String> cteNames;  // CTE names (from WITH clause)
 
+    /**
+     * Qualified relations named in a FROM clause, aliased or not (e.g. "hr.emp").
+     *
+     * <p>{@link #tableAliases} cannot answer "which relations are in scope?", because a table
+     * written without an alias registers nothing there. This set can, and that is what lets
+     * {@link #isColumnInScope} give a real column precedence over a same-named parameterless
+     * function when an identifier appears bare.
+     */
+    private final Set<String> fromRelations;
+
     // ========== Variable Scope Stack (Implemented) ==========
 
     /**
@@ -345,6 +355,7 @@ public class TransformationContext {
         // Layer 3: Query-level context (mutable during transformation)
         this.tableAliases = new HashMap<>();
         this.cteNames = new HashSet<>();
+        this.fromRelations = new HashSet<>();
         this.variableScopeStack = new ArrayDeque<>();
     }
 
@@ -613,6 +624,27 @@ public class TransformationContext {
         return indices.isPackageFunction(qualifiedName);
     }
 
+    /**
+     * Checks if a qualified name is a standalone (non-package) routine.
+     *
+     * @param qualifiedName "schema.function" (case-insensitive)
+     * @return true if this is a known standalone routine
+     */
+    public boolean isStandaloneFunction(String qualifiedName) {
+        return indices.isStandaloneFunction(qualifiedName);
+    }
+
+    /**
+     * Checks if a routine can be invoked with no arguments.
+     *
+     * @param qualifiedName "schema.function" or "schema.package.function" (case-insensitive)
+     * @return true if the routine takes no mandatory arguments
+     * @see TransformationIndices#isNoArgCallable(String)
+     */
+    public boolean isNoArgCallable(String qualifiedName) {
+        return indices.isNoArgCallable(qualifiedName);
+    }
+
     // ========== Object Type Field Access Support ==========
 
     /**
@@ -775,6 +807,48 @@ public class TransformationContext {
             return null;
         }
         return tableAliases.get(alias.toLowerCase());
+    }
+
+    /**
+     * Records a relation named in a FROM clause, whether or not it carries an alias.
+     *
+     * @param qualifiedTable Resolved relation name in "schema.table" form
+     */
+    public void registerFromRelation(String qualifiedTable) {
+        if (qualifiedTable != null && !qualifiedTable.isEmpty()) {
+            fromRelations.add(qualifiedTable.toLowerCase());
+        }
+    }
+
+    /**
+     * Reports whether an unqualified name is a column of some relation currently in scope.
+     *
+     * <p>Consulted before rewriting a bare identifier into a parameterless function call, so a
+     * genuine column always wins over a same-named routine. Unknown names answer {@code false} —
+     * derived tables and CTEs contribute no column metadata — which is why the routine lookup
+     * must itself be a positive metadata match rather than a fallback.
+     *
+     * @param columnName Unqualified column name (case-insensitive)
+     * @return true if any relation in scope has a column of that name
+     */
+    public boolean isColumnInScope(String columnName) {
+        if (columnName == null) {
+            return false;
+        }
+
+        for (String relation : fromRelations) {
+            if (indices.getColumnType(relation, columnName) != null) {
+                return true;
+            }
+        }
+
+        for (String relation : tableAliases.values()) {
+            if (indices.getColumnType(relation, columnName) != null) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
