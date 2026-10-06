@@ -1,0 +1,621 @@
+package me.christianrobert.orapgsync.core.job.rest;
+
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import jakarta.ws.rs.*;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
+import me.christianrobert.orapgsync.constraint.rest.ConstraintResource;
+import me.christianrobert.orapgsync.core.job.model.JobProgress;
+import me.christianrobert.orapgsync.core.job.model.JobStatus;
+import me.christianrobert.orapgsync.core.job.model.function.FunctionImplementationResult;
+import me.christianrobert.orapgsync.core.job.model.objectdatatype.ObjectDataTypeMetaData;
+import me.christianrobert.orapgsync.core.job.model.objectdatatype.ObjectTypeCreationResult;
+import me.christianrobert.orapgsync.core.job.model.schema.SchemaCreationResult;
+import me.christianrobert.orapgsync.core.job.model.sequence.SequenceCreationResult;
+import me.christianrobert.orapgsync.core.job.model.sequence.SequenceMetadata;
+import me.christianrobert.orapgsync.core.job.model.table.ConstraintCreationResult;
+import me.christianrobert.orapgsync.core.job.model.table.ConstraintMetadata;
+import me.christianrobert.orapgsync.core.job.model.index.IndexCreationResult;
+import me.christianrobert.orapgsync.core.job.model.index.IndexMetadata;
+import me.christianrobert.orapgsync.core.job.model.table.FKIndexCreationResult;
+import me.christianrobert.orapgsync.index.rest.IndexResource;
+import me.christianrobert.orapgsync.core.job.model.table.TableCreationResult;
+import me.christianrobert.orapgsync.core.job.model.table.TableMetadata;
+import me.christianrobert.orapgsync.core.job.model.transfer.DataTransferResult;
+import me.christianrobert.orapgsync.core.job.model.transfer.RowCountMetadata;
+import me.christianrobert.orapgsync.core.job.model.view.ViewImplementationResult;
+import me.christianrobert.orapgsync.core.job.model.view.ViewImplementationVerificationResult;
+import me.christianrobert.orapgsync.core.job.model.view.ViewMetadata;
+import me.christianrobert.orapgsync.core.job.model.view.ViewStubCreationResult;
+import me.christianrobert.orapgsync.core.job.model.function.FunctionMetadata;
+import me.christianrobert.orapgsync.core.job.model.function.FunctionStubCreationResult;
+import me.christianrobert.orapgsync.core.job.model.typemethod.TypeMethodImplementationResult;
+import me.christianrobert.orapgsync.core.job.model.typemethod.TypeMethodMetadata;
+import me.christianrobert.orapgsync.core.job.model.typemethod.TypeMethodStubCreationResult;
+import me.christianrobert.orapgsync.core.job.model.trigger.TriggerMetadata;
+import me.christianrobert.orapgsync.core.job.model.trigger.TriggerImplementationResult;
+import me.christianrobert.orapgsync.core.job.model.synonym.SynonymReplacementViewCreationResult;
+import me.christianrobert.orapgsync.core.job.service.JobReportArchive;
+import me.christianrobert.orapgsync.core.job.service.JobService;
+import me.christianrobert.orapgsync.core.job.service.JobTextReportFormatter;
+import me.christianrobert.orapgsync.function.rest.FunctionResource;
+import me.christianrobert.orapgsync.objectdatatype.rest.ObjectTypeResource;
+import me.christianrobert.orapgsync.oraclecompat.model.OracleCompatInstallationResult;
+import me.christianrobert.orapgsync.oraclecompat.model.OracleCompatVerificationResult;
+import me.christianrobert.orapgsync.schema.rest.SchemaResource;
+import me.christianrobert.orapgsync.sequence.rest.SequenceResource;
+import me.christianrobert.orapgsync.table.rest.TableResource;
+import me.christianrobert.orapgsync.transfer.rest.DataTransferResource;
+import me.christianrobert.orapgsync.trigger.rest.TriggerResource;
+import me.christianrobert.orapgsync.synonym.rest.SynonymResource;
+import me.christianrobert.orapgsync.typemethod.rest.TypeMethodResource;
+import me.christianrobert.orapgsync.view.rest.ViewResource;
+import me.christianrobert.orapgsync.core.job.model.view.ViewVerificationResult;
+import me.christianrobert.orapgsync.core.job.model.function.FunctionVerificationResult;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Generic REST resource for job status and result retrieval.
+ * Domain-specific job endpoints are in their respective resource classes.
+ */
+@ApplicationScoped
+@Path("/api/jobs")
+@Produces(MediaType.APPLICATION_JSON)
+@Consumes(MediaType.APPLICATION_JSON)
+public class JobResource {
+
+    private static final Logger log = LoggerFactory.getLogger(JobResource.class);
+
+    @Inject
+    JobService jobService;
+
+    @Inject
+    JobReportArchive reportArchive;
+
+    @GET
+    @Path("/{jobId}/status")
+    public Response getJobStatus(@PathParam("jobId") String jobId) {
+        log.debug("Getting job status for: {}", jobId);
+
+        try {
+            JobService.JobExecution<?> execution = jobService.getJobExecution(jobId);
+
+            if (execution == null) {
+                Map<String, Object> errorResult = Map.of(
+                        "status", "error",
+                        "message", "Job not found: " + jobId
+                );
+                return Response.status(Response.Status.NOT_FOUND)
+                        .entity(errorResult)
+                        .build();
+            }
+
+            JobStatus status = execution.getStatus();
+            JobProgress progress = execution.getProgress();
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("jobId", jobId);
+            result.put("jobType", execution.getJob().getJobType());
+            result.put("status", status.name());
+            result.put("isComplete", jobService.isJobComplete(jobId));
+
+            if (progress != null) {
+                Map<String, Object> progressInfo = Map.of(
+                        "percentage", progress.getPercentage(),
+                        "currentTask", progress.getCurrentTask(),
+                        "details", progress.getDetails(),
+                        "lastUpdated", progress.getLastUpdated().toString()
+                );
+                result.put("progress", progressInfo);
+            }
+
+            if (status == JobStatus.FAILED) {
+                Exception error = jobService.getJobError(jobId);
+                if (error != null) {
+                    result.put("error", error.getMessage());
+                }
+            }
+
+            if (execution.getStartTime() != null) {
+                result.put("startTime", execution.getStartTime().toString());
+            }
+
+            if (execution.getEndTime() != null) {
+                result.put("endTime", execution.getEndTime().toString());
+            }
+
+            return Response.ok(result).build();
+
+        } catch (Exception e) {
+            log.error("Error getting job status for: " + jobId, e);
+
+            Map<String, Object> errorResult = Map.of(
+                    "status", "error",
+                    "message", "Error getting job status: " + e.getMessage()
+            );
+
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                    .entity(errorResult)
+                    .build();
+        }
+    }
+
+    /**
+     * Full job result as plain text, for opening in a browser tab.
+     *
+     * <p>The HTML panels render only a capped preview of large results — a full migration
+     * produces more rows than the DOM can carry. This endpoint is the complete list, in a
+     * format the browser renders instantly and can search, save and diff.
+     */
+    @GET
+    @Path("/{jobId}/report")
+    @Produces(MediaType.TEXT_PLAIN)
+    public Response getJobReport(@PathParam("jobId") String jobId) {
+        log.debug("Getting job report for: {}", jobId);
+
+        try {
+            JobService.JobExecution<?> execution = jobService.getJobExecution(jobId);
+
+            if (execution == null) {
+                // Not in memory: the process was restarted, or state was reset. The archived copy
+                // is the whole point -- a run's evidence must outlive the run.
+                return reportArchive.read(jobId)
+                        .map(archived -> Response.ok(archived)
+                                .header("Content-Disposition",
+                                        "inline; filename=\"job-" + jobId + ".txt\"")
+                                .build())
+                        .orElseGet(() -> Response.status(Response.Status.NOT_FOUND)
+                                .entity("Job not found: " + jobId + "\n")
+                                .build());
+            }
+
+            // Header built by the archive so the live response and the archived file cannot
+            // disagree about what a job report says.
+            Map<String, String> header = JobReportArchive.headerFor(execution);
+
+            Object result = jobService.isJobComplete(jobId) ? jobService.getJobResult(jobId) : null;
+            String report = JobTextReportFormatter.format(header, result);
+
+            return Response.ok(report)
+                    .header("Content-Disposition", "inline; filename=\"job-" + jobId + ".txt\"")
+                    .build();
+
+        } catch (Exception e) {
+            log.error("Error getting job report for: " + jobId, e);
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                    .entity("Error generating report: " + e.getMessage() + "\n")
+                    .build();
+        }
+    }
+
+    @GET
+    @Path("/{jobId}/result")
+    public Response getJobResult(@PathParam("jobId") String jobId) {
+        log.debug("Getting job result for: {}", jobId);
+
+        try {
+            JobService.JobExecution<?> execution = jobService.getJobExecution(jobId);
+
+            if (execution == null) {
+                Map<String, Object> errorResult = Map.of(
+                        "status", "error",
+                        "message", "Job not found: " + jobId
+                );
+                return Response.status(Response.Status.NOT_FOUND)
+                        .entity(errorResult)
+                        .build();
+            }
+
+            if (!jobService.isJobComplete(jobId)) {
+                Map<String, Object> errorResult = Map.of(
+                        "status", "error",
+                        "message", "Job is not yet complete: " + jobId
+                );
+                return Response.status(Response.Status.BAD_REQUEST)
+                        .entity(errorResult)
+                        .build();
+            }
+
+            if (execution.getStatus() == JobStatus.FAILED) {
+                Exception error = jobService.getJobError(jobId);
+                Map<String, Object> errorResult = Map.of(
+                        "status", "failed",
+                        "jobId", jobId,
+                        "message", error != null ? error.getMessage() : "Job failed with unknown error"
+                );
+                return Response.status(Response.Status.BAD_REQUEST)
+                        .entity(errorResult)
+                        .build();
+            }
+
+            Object result = jobService.getJobResult(jobId);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "success");
+            response.put("jobId", jobId);
+            response.put("jobType", execution.getJob().getJobType());
+
+            // Handle different job result types - delegate to domain resources for summaries
+            String jobType = execution.getJob().getJobType();
+
+            // Check result object type first (more specific), then fall back to jobType string matching for Lists
+            if (result instanceof IndexCreationResult) {
+                IndexCreationResult indexResult = (IndexCreationResult) result;
+                Map<String, Object> summary = IndexResource.generateIndexCreationSummary(indexResult);
+                response.put("summary", summary);
+                response.put("createdCount", indexResult.getCreatedCount());
+                response.put("skippedCount", indexResult.getSkippedCount());
+                response.put("unsupportedCount", indexResult.getUnsupportedCount());
+                response.put("errorCount", indexResult.getErrorCount());
+                response.put("isSuccessful", indexResult.isSuccessful());
+                response.put("result", result);
+            } else if (result instanceof FKIndexCreationResult) {
+                FKIndexCreationResult fkIndexResult = (FKIndexCreationResult) result;
+                Map<String, Object> summary = ConstraintResource.generateFKIndexCreationSummary(fkIndexResult);
+                response.put("summary", summary);
+                response.put("createdCount", fkIndexResult.getCreatedCount());
+                response.put("skippedCount", fkIndexResult.getSkippedCount());
+                response.put("errorCount", fkIndexResult.getErrorCount());
+                response.put("isSuccessful", fkIndexResult.isSuccessful());
+                response.put("result", result);
+            } else if (result instanceof ConstraintCreationResult) {
+                ConstraintCreationResult constraintResult = (ConstraintCreationResult) result;
+                Map<String, Object> summary = ConstraintResource.generateConstraintCreationSummary(constraintResult);
+                response.put("summary", summary);
+                response.put("createdCount", constraintResult.getCreatedCount());
+                response.put("skippedCount", constraintResult.getSkippedCount());
+                response.put("errorCount", constraintResult.getErrorCount());
+                response.put("isSuccessful", constraintResult.isSuccessful());
+                response.put("result", result);
+            } else if (result instanceof SequenceCreationResult) {
+                SequenceCreationResult sequenceResult = (SequenceCreationResult) result;
+                Map<String, Object> summary = SequenceResource.generateSequenceCreationSummary(sequenceResult);
+                response.put("summary", summary);
+                response.put("createdCount", sequenceResult.getCreatedCount());
+                response.put("skippedCount", sequenceResult.getSkippedCount());
+                response.put("errorCount", sequenceResult.getErrorCount());
+                response.put("isSuccessful", sequenceResult.isSuccessful());
+                response.put("result", result);
+            } else if (result instanceof SchemaCreationResult) {
+                SchemaCreationResult schemaResult = (SchemaCreationResult) result;
+                Map<String, Object> summary = SchemaResource.generateSchemaCreationSummary(schemaResult);
+                response.put("summary", summary);
+                response.put("createdCount", schemaResult.getCreatedCount());
+                response.put("skippedCount", schemaResult.getSkippedCount());
+                response.put("errorCount", schemaResult.getErrorCount());
+                response.put("isSuccessful", schemaResult.isSuccessful());
+                response.put("result", result);
+            } else if (result instanceof ObjectTypeCreationResult) {
+                ObjectTypeCreationResult objectTypeResult = (ObjectTypeCreationResult) result;
+                Map<String, Object> summary = ObjectTypeResource.generateObjectTypeCreationSummary(objectTypeResult);
+                response.put("summary", summary);
+                response.put("createdCount", objectTypeResult.getCreatedCount());
+                response.put("skippedCount", objectTypeResult.getSkippedCount());
+                response.put("errorCount", objectTypeResult.getErrorCount());
+                response.put("isSuccessful", objectTypeResult.isSuccessful());
+                response.put("result", result);
+            } else if (result instanceof TableCreationResult) {
+                TableCreationResult tableResult = (TableCreationResult) result;
+                Map<String, Object> summary = TableResource.generateTableCreationSummary(tableResult);
+                response.put("summary", summary);
+                response.put("createdCount", tableResult.getCreatedCount());
+                response.put("skippedCount", tableResult.getSkippedCount());
+                response.put("errorCount", tableResult.getErrorCount());
+                response.put("isSuccessful", tableResult.isSuccessful());
+                response.put("result", result);
+            } else if (result instanceof DataTransferResult) {
+                DataTransferResult transferResult = (DataTransferResult) result;
+                Map<String, Object> summary = DataTransferResource.generateDataTransferSummary(transferResult);
+                response.put("summary", summary);
+                response.put("transferredCount", transferResult.getTransferredCount());
+                response.put("skippedCount", transferResult.getSkippedCount());
+                response.put("errorCount", transferResult.getErrorCount());
+                response.put("totalRowsTransferred", transferResult.getTotalRowsTransferred());
+                response.put("isSuccessful", transferResult.isSuccessful());
+                response.put("result", result);
+            } else if (result instanceof ViewStubCreationResult) {
+                ViewStubCreationResult viewStubResult = (ViewStubCreationResult) result;
+                Map<String, Object> summary = ViewResource.generateViewStubCreationSummary(viewStubResult);
+                response.put("summary", summary);
+                response.put("createdCount", viewStubResult.getCreatedCount());
+                response.put("skippedCount", viewStubResult.getSkippedCount());
+                response.put("errorCount", viewStubResult.getErrorCount());
+                response.put("isSuccessful", viewStubResult.isSuccessful());
+                response.put("result", result);
+            } else if (result instanceof FunctionStubCreationResult) {
+                FunctionStubCreationResult functionStubResult = (FunctionStubCreationResult) result;
+                Map<String, Object> summary = FunctionResource.generateFunctionStubCreationSummary(functionStubResult);
+                response.put("summary", summary);
+                response.put("createdCount", functionStubResult.getCreatedCount());
+                response.put("skippedCount", functionStubResult.getSkippedCount());
+                response.put("errorCount", functionStubResult.getErrorCount());
+                response.put("isSuccessful", functionStubResult.isSuccessful());
+                response.put("result", result);
+            } else if (result instanceof FunctionImplementationResult) {
+                FunctionImplementationResult funcImplResult = (FunctionImplementationResult) result;
+                Map<String, Object> summary = FunctionResource.generateStandaloneFunctionImplementationSummary(funcImplResult);
+                response.put("summary", summary);
+                response.put("implementedCount", funcImplResult.getImplementedCount());
+                response.put("skippedCount", funcImplResult.getSkippedCount());
+                response.put("errorCount", funcImplResult.getErrorCount());
+                response.put("packageErrorCount", funcImplResult.getPackageErrorCount());
+                response.put("blockedCount", funcImplResult.getBlockedCount());
+                response.put("isSuccessful", funcImplResult.isSuccessful());
+                response.put("result", result);
+            } else if (result instanceof TriggerImplementationResult) {
+                TriggerImplementationResult triggerImplResult = (TriggerImplementationResult) result;
+                Map<String, Object> summary = TriggerResource.generateTriggerImplementationSummary(triggerImplResult);
+                response.put("summary", summary);
+                response.put("implementedCount", triggerImplResult.getImplementedCount());
+                response.put("skippedCount", triggerImplResult.getSkippedCount());
+                response.put("errorCount", triggerImplResult.getErrorCount());
+                response.put("isSuccessful", triggerImplResult.isSuccessful());
+                response.put("result", result);
+            } else if (result instanceof SynonymReplacementViewCreationResult) {
+                SynonymReplacementViewCreationResult synonymResult = (SynonymReplacementViewCreationResult) result;
+                Map<String, Object> summary = SynonymResource.generateSynonymReplacementViewCreationSummary(synonymResult);
+                response.put("summary", summary);
+                response.put("createdCount", synonymResult.getCreatedCount());
+                response.put("skippedCount", synonymResult.getSkippedCount());
+                response.put("errorCount", synonymResult.getErrorCount());
+                response.put("isSuccessful", synonymResult.isSuccessful());
+                response.put("result", result);
+            } else if (result instanceof TypeMethodStubCreationResult) {
+                TypeMethodStubCreationResult typeMethodStubResult = (TypeMethodStubCreationResult) result;
+                Map<String, Object> summary = TypeMethodResource.generateTypeMethodStubCreationSummary(typeMethodStubResult);
+                response.put("summary", summary);
+                response.put("createdCount", typeMethodStubResult.getCreatedCount());
+                response.put("skippedCount", typeMethodStubResult.getSkippedCount());
+                response.put("errorCount", typeMethodStubResult.getErrorCount());
+                response.put("isSuccessful", !typeMethodStubResult.hasErrors());
+                response.put("result", result);
+            } else if (result instanceof TypeMethodImplementationResult) {
+                // Without this branch the result falls through to the generic "result" handler at the
+                // bottom, which carries no counts and no summary. The frontend then reads
+                // `result.implementedCount || 0` and `if (!summary) return;`, so a run that
+                // implemented hundreds of methods and failed on hundreds more reported a badge of 0
+                // and an empty panel -- indistinguishable from "step 29 did nothing", which is
+                // exactly how the 2026-08-27 run was read.
+                TypeMethodImplementationResult typeMethodImplResult = (TypeMethodImplementationResult) result;
+                Map<String, Object> summary =
+                        TypeMethodResource.generateTypeMethodImplementationSummary(typeMethodImplResult);
+                response.put("summary", summary);
+                response.put("implementedCount", typeMethodImplResult.getImplementedCount());
+                response.put("skippedCount", typeMethodImplResult.getSkippedCount());
+                response.put("errorCount", typeMethodImplResult.getErrorCount());
+                response.put("isSuccessful", typeMethodImplResult.isSuccessful());
+                // Deliberately no raw "result": the summary already projects every field the panel
+                // renders, including the failing SQL per error. The raw model would repeat all of it
+                // plus the full metadata of every method. Full detail lives at /api/jobs/{id}/report.
+            } else if (result instanceof ViewImplementationResult) {
+                ViewImplementationResult viewImplResult = (ViewImplementationResult) result;
+                Map<String, Object> summary = ViewResource.generateViewImplementationSummary(viewImplResult);
+                response.put("summary", summary);
+                response.put("implementedCount", viewImplResult.getImplementedCount());
+                response.put("skippedCount", viewImplResult.getSkippedCount());
+                response.put("errorCount", viewImplResult.getErrorCount());
+                response.put("isSuccessful", viewImplResult.isSuccessful());
+                response.put("result", result);
+            } else if (result instanceof ViewImplementationVerificationResult) {
+                ViewImplementationVerificationResult viewImplVerifyResult = (ViewImplementationVerificationResult) result;
+                Map<String, Object> summary = ViewResource.generateViewImplementationVerificationSummary(viewImplVerifyResult);
+                response.put("summary", summary);
+                response.put("verifiedCount", viewImplVerifyResult.getVerifiedCount());
+                response.put("failedCount", viewImplVerifyResult.getFailedCount());
+                response.put("warningCount", viewImplVerifyResult.getWarningCount());
+                response.put("isSuccessful", viewImplVerifyResult.isSuccessful());
+                response.put("result", result);
+            } else if (result instanceof List<?> && jobType.contains("VIEW_IMPLEMENTATION_VERIFICATION")) {
+                // Handle List<ViewImplementationVerificationResult> - unwrap single element
+                @SuppressWarnings("unchecked")
+                List<ViewImplementationVerificationResult> viewImplVerifyResults = (List<ViewImplementationVerificationResult>) result;
+                if (!viewImplVerifyResults.isEmpty()) {
+                    ViewImplementationVerificationResult viewImplVerifyResult = viewImplVerifyResults.get(0);
+                    Map<String, Object> summary = ViewResource.generateViewImplementationVerificationSummary(viewImplVerifyResult);
+                    response.put("summary", summary);
+                    response.put("verifiedCount", viewImplVerifyResult.getVerifiedCount());
+                    response.put("failedCount", viewImplVerifyResult.getFailedCount());
+                    response.put("warningCount", viewImplVerifyResult.getWarningCount());
+                    response.put("isSuccessful", viewImplVerifyResult.isSuccessful());
+                    response.put("result", viewImplVerifyResult); // Unwrap the single element
+                }
+            } else if (result instanceof ViewVerificationResult) {
+                ViewVerificationResult viewVerifyResult = (ViewVerificationResult) result;
+                Map<String, Object> summary = ViewResource.generateViewVerificationSummary(viewVerifyResult);
+                response.put("summary", summary);
+                response.put("totalViews", viewVerifyResult.getTotalViews());
+                response.put("implementedCount", viewVerifyResult.getImplementedCount());
+                response.put("stubCount", viewVerifyResult.getStubCount());
+                response.put("errorCount", viewVerifyResult.getErrorCount());
+                response.put("result", result);
+            } else if (result instanceof List<?> && jobType.contains("VIEW_VERIFICATION")) {
+                // Handle List<ViewVerificationResult> - unwrap single element
+                @SuppressWarnings("unchecked")
+                List<ViewVerificationResult> viewVerifyResults = (List<ViewVerificationResult>) result;
+                if (!viewVerifyResults.isEmpty()) {
+                    ViewVerificationResult viewVerifyResult = viewVerifyResults.get(0);
+                    Map<String, Object> summary = ViewResource.generateViewVerificationSummary(viewVerifyResult);
+                    response.put("summary", summary);
+                    response.put("totalViews", viewVerifyResult.getTotalViews());
+                    response.put("implementedCount", viewVerifyResult.getImplementedCount());
+                    response.put("stubCount", viewVerifyResult.getStubCount());
+                    response.put("errorCount", viewVerifyResult.getErrorCount());
+                    response.put("result", viewVerifyResult); // Unwrap the single element
+                }
+            } else if (result instanceof FunctionVerificationResult) {
+                FunctionVerificationResult funcVerifyResult = (FunctionVerificationResult) result;
+                Map<String, Object> summary = FunctionResource.generateFunctionVerificationSummary(funcVerifyResult);
+                response.put("summary", summary);
+                response.put("totalFunctions", funcVerifyResult.getTotalFunctions());
+                response.put("implementedCount", funcVerifyResult.getImplementedCount());
+                response.put("stubCount", funcVerifyResult.getStubCount());
+                response.put("errorCount", funcVerifyResult.getErrorCount());
+                response.put("result", result);
+            } else if (result instanceof List<?> && jobType.contains("FUNCTION_VERIFICATION")) {
+                // Handle List<FunctionVerificationResult> - unwrap single element
+                @SuppressWarnings("unchecked")
+                List<FunctionVerificationResult> funcVerifyResults = (List<FunctionVerificationResult>) result;
+                if (!funcVerifyResults.isEmpty()) {
+                    FunctionVerificationResult funcVerifyResult = funcVerifyResults.get(0);
+                    Map<String, Object> summary = FunctionResource.generateFunctionVerificationSummary(funcVerifyResult);
+                    response.put("summary", summary);
+                    response.put("totalFunctions", funcVerifyResult.getTotalFunctions());
+                    response.put("implementedCount", funcVerifyResult.getImplementedCount());
+                    response.put("stubCount", funcVerifyResult.getStubCount());
+                    response.put("errorCount", funcVerifyResult.getErrorCount());
+                    response.put("result", funcVerifyResult); // Unwrap the single element
+                }
+            } else if (result instanceof OracleCompatInstallationResult) {
+                OracleCompatInstallationResult oracleCompatInstallResult = (OracleCompatInstallationResult) result;
+                response.put("totalFunctions", oracleCompatInstallResult.getTotalFunctions());
+                response.put("installedFull", oracleCompatInstallResult.getInstalledFull());
+                response.put("installedPartial", oracleCompatInstallResult.getInstalledPartial());
+                response.put("installedStubs", oracleCompatInstallResult.getInstalledStubs());
+                response.put("failed", oracleCompatInstallResult.getFailed());
+                response.put("errorMessages", oracleCompatInstallResult.getErrorMessages());
+                response.put("executionTimeMs", oracleCompatInstallResult.getExecutionTimeMs());
+                response.put("result", result);
+            } else if (result instanceof List<?> && jobType.contains("ORACLE_COMPAT_VERIFICATION")) {
+                @SuppressWarnings("unchecked")
+                List<OracleCompatVerificationResult> oracleCompatVerifyResults = (List<OracleCompatVerificationResult>) result;
+                if (!oracleCompatVerifyResults.isEmpty()) {
+                    OracleCompatVerificationResult oracleCompatVerifyResult = oracleCompatVerifyResults.get(0);
+                    response.put("totalExpected", oracleCompatVerifyResult.getTotalExpected());
+                    response.put("verified", oracleCompatVerifyResult.getVerified());
+                    response.put("missing", oracleCompatVerifyResult.getMissing());
+                    response.put("errors", oracleCompatVerifyResult.getErrors());
+                    response.put("executionTimeMs", oracleCompatVerifyResult.getExecutionTimeMs());
+                    response.put("result", oracleCompatVerifyResult);
+                }
+            } else if (result instanceof List<?> && jobType.contains("STANDALONE_FUNCTION_IMPLEMENTATION_VERIFICATION")) {
+                // Handle List<FunctionImplementationVerificationResult> - unwrap single element
+                @SuppressWarnings("unchecked")
+                List<me.christianrobert.orapgsync.core.job.model.function.FunctionImplementationVerificationResult> funcImplVerifyResults =
+                    (List<me.christianrobert.orapgsync.core.job.model.function.FunctionImplementationVerificationResult>) result;
+                if (!funcImplVerifyResults.isEmpty()) {
+                    me.christianrobert.orapgsync.core.job.model.function.FunctionImplementationVerificationResult funcImplVerifyResult = funcImplVerifyResults.get(0);
+                    response.put("verifiedCount", funcImplVerifyResult.getVerifiedCount());
+                    response.put("failedCount", funcImplVerifyResult.getFailedCount());
+                    response.put("warningCount", funcImplVerifyResult.getWarningCount());
+                    response.put("isSuccessful", funcImplVerifyResult.isSuccessful());
+                    response.put("result", funcImplVerifyResult); // Unwrap the single element
+                }
+            } else if (result instanceof List<?>) {
+                // Handle List results based on jobType.
+                //
+                // Extraction results do NOT put the raw metadata list under "result". Each
+                // summary carries a projection with only the fields the UI renders — the raw
+                // models hold view SQL, trigger bodies, column lists and parameter lists that
+                // add up to megabytes over a real schema and that nothing on this endpoint's
+                // side reads. The full result stays available at /api/jobs/{jobId}/report.
+                if (jobType.contains("INDEX")) {
+                    @SuppressWarnings("unchecked")
+                    List<IndexMetadata> indexMetadata = (List<IndexMetadata>) result;
+                    Map<String, Object> summary = IndexResource.generateIndexExtractionSummary(indexMetadata);
+                    response.put("summary", summary);
+                    response.put("indexCount", indexMetadata.size());
+                } else if (jobType.contains("SCHEMA") && !jobType.contains("SCHEMA_CREATION")) {
+                    @SuppressWarnings("unchecked")
+                    List<String> schemas = (List<String>) result;
+                    Map<String, Object> summary = SchemaResource.generateSchemaExtractionSummary(schemas);
+                    response.put("summary", summary);
+                    response.put("count", schemas.size());
+                    response.put("schemas", schemas);
+                } else if (jobType.contains("TABLE_METADATA")) {
+                    @SuppressWarnings("unchecked")
+                    List<TableMetadata> tableMetadata = (List<TableMetadata>) result;
+                    Map<String, Object> summary = TableResource.generateTableMetadataSummary(tableMetadata);
+                    response.put("summary", summary);
+                    response.put("tableCount", tableMetadata.size());
+                } else if (jobType.contains("OBJECT_DATATYPE")) {
+                    @SuppressWarnings("unchecked")
+                    List<ObjectDataTypeMetaData> objectDataTypes = (List<ObjectDataTypeMetaData>) result;
+                    Map<String, Object> summary = ObjectTypeResource.generateObjectDataTypeSummary(objectDataTypes);
+                    response.put("summary", summary);
+                    response.put("objectDataTypeCount", objectDataTypes.size());
+                    response.put("result", result);
+                } else if (jobType.contains("ROW_COUNT")) {
+                    @SuppressWarnings("unchecked")
+                    List<RowCountMetadata> rowCounts = (List<RowCountMetadata>) result;
+                    Map<String, Object> summary = DataTransferResource.generateRowCountSummary(rowCounts);
+                    response.put("summary", summary);
+                    response.put("rowCountDataCount", rowCounts.size());
+                } else if (jobType.contains("SYNONYM")) {
+                    @SuppressWarnings("unchecked")
+                    List<?> synonyms = (List<?>) result;
+                    Map<String, Object> summary = DataTransferResource.generateSynonymSummary(synonyms);
+                    response.put("summary", summary);
+                    response.put("synonymCount", synonyms.size());
+                    response.put("result", result);
+                } else if (jobType.contains("SEQUENCE") && !jobType.contains("SEQUENCE_CREATION")) {
+                    @SuppressWarnings("unchecked")
+                    List<SequenceMetadata> sequences = (List<SequenceMetadata>) result;
+                    Map<String, Object> summary = SequenceResource.generateSequenceSummary(sequences);
+                    response.put("summary", summary);
+                    response.put("sequenceCount", sequences.size());
+                } else if (jobType.contains("CONSTRAINT") && !jobType.contains("CONSTRAINT_CREATION")) {
+                    @SuppressWarnings("unchecked")
+                    List<ConstraintMetadata> constraints = (List<ConstraintMetadata>) result;
+                    Map<String, Object> summary = ConstraintResource.generateConstraintSummary(constraints);
+                    response.put("summary", summary);
+                    response.put("constraintCount", constraints.size());
+                } else if (jobType.contains("VIEW")
+                        && !jobType.contains("VIEW_STUB_CREATION")
+                        && !jobType.contains("VIEW_IMPLEMENTATION")
+                        && !jobType.contains("VIEW_IMPLEMENTATION_VERIFICATION")) {
+                    @SuppressWarnings("unchecked")
+                    List<ViewMetadata> viewDefinitions = (List<ViewMetadata>) result;
+                    Map<String, Object> summary = ViewResource.generateViewDefinitionSummary(viewDefinitions);
+                    response.put("summary", summary);
+                    response.put("viewCount", viewDefinitions.size());
+                } else if (jobType.contains("FUNCTION") && !jobType.contains("FUNCTION_STUB_CREATION")) {
+                    @SuppressWarnings("unchecked")
+                    List<FunctionMetadata> functions = (List<FunctionMetadata>) result;
+                    Map<String, Object> summary = FunctionResource.generateFunctionSummary(functions);
+                    response.put("summary", summary);
+                    response.put("functionCount", functions.size());
+                } else if (jobType.contains("TYPE_METHOD") && !jobType.contains("TYPE_METHOD_STUB_CREATION")) {
+                    @SuppressWarnings("unchecked")
+                    List<TypeMethodMetadata> typeMethods = (List<TypeMethodMetadata>) result;
+                    Map<String, Object> summary = TypeMethodResource.generateTypeMethodSummary(typeMethods);
+                    response.put("summary", summary);
+                    response.put("typeMethodCount", typeMethods.size());
+                } else if (jobType.contains("TRIGGER")
+                        && !jobType.contains("TRIGGER_IMPLEMENTATION")) {
+                    // Handle both TRIGGER extraction and TRIGGER_VERIFICATION
+                    @SuppressWarnings("unchecked")
+                    List<TriggerMetadata> triggers = (List<TriggerMetadata>) result;
+                    Map<String, Object> summary = TriggerResource.generateTriggerSummary(triggers);
+                    response.put("summary", summary);
+                    response.put("triggerCount", triggers.size());
+                } else {
+                    // Generic list result
+                    response.put("result", result);
+                }
+            } else {
+                response.put("result", result);
+            }
+
+            return Response.ok(response).build();
+
+        } catch (Exception e) {
+            log.error("Error getting job result for: " + jobId, e);
+
+            Map<String, Object> errorResult = Map.of(
+                    "status", "error",
+                    "message", "Error getting job result: " + e.getMessage()
+            );
+
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                    .entity(errorResult)
+                    .build();
+        }
+    }
+}

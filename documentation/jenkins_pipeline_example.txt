@@ -1,0 +1,2640 @@
+pipeline {
+    agent any
+
+    options {
+        timeout(time: 24, unit: 'HOURS')
+        disableConcurrentBuilds()
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════
+    // SCOPE PARAMETERS
+    //
+    // The migration is 32 steps; not every target needs all of them. These flags skip
+    // whole stages rather than having you delete them — a skipped stage is recorded in
+    // the build log ("Stage 'x' skipped due to when conditional"), so every run states
+    // its own scope. Deleting the stages instead works, but loses that record.
+    //
+    // Defaults are the FULL migration. Narrow deliberately.
+    // ══════════════════════════════════════════════════════════════════════════════
+    parameters {
+        booleanParam(
+            name: 'MIGRATE_PLSQL',
+            defaultValue: true,
+            description: '''Migrate PL/SQL routines: functions and package members (steps 22-23, 28) plus object type methods (steps 24-25, 29). This is by far the slowest part of the run.
+
+TURN OFF ONLY IF no view in scope calls PL/SQL. Doing so is a claim about the SOURCE database, not just a speed preference: step 22 is what builds the package spec type index, so with this off, any view referencing a pkg.type resolves to nothing. If the views are plain SQL, that is fine and the run is dramatically faster.
+
+The Oracle compatibility layer (step 26) runs either way -- view SQL needs it for BITAND and the to_char overloads.''')
+
+        booleanParam(
+            name: 'MIGRATE_TRIGGERS',
+            defaultValue: true,
+            description: 'Extract and implement triggers (steps 30-31). Trigger bodies are PL/SQL, but this is a separate decision from MIGRATE_PLSQL -- triggers are migrated from their own extraction and do not need function stubs to exist.')
+    }
+
+    environment {
+        PG_CONTAINER_NAME = 'pgtest'
+        PG_PASSWORD       = 'secret'
+        APP_PORT          = '8067'
+        QUARKUS_LOG       = 'quarkus-app.log'
+
+        // Oracle credentials (configured in Jenkins: Manage Jenkins → Credentials)
+        ORACLE_URL      = credentials('oracle-url')
+        ORACLE_USER     = credentials('oracle-user')
+        ORACLE_PASSWORD = credentials('oracle-password')
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                git url: 'https://github.com/Sayiza/orapgsync.git',
+                    branch: 'main'
+            }
+        }
+
+        stage('Start PostgreSQL') {
+            steps {
+                sh '''
+                    # No pre-cleanup anymore — assuming previous run cleaned up
+                    # If container still exists → docker run will fail (good for noticing issues)
+
+                    # Failsafe removal of any previous container (won't fail build if missing)
+                    docker rm -f ${PG_CONTAINER_NAME} || true
+
+                    docker run --name ${PG_CONTAINER_NAME} \
+                        -e POSTGRES_PASSWORD=${PG_PASSWORD} \
+                        -e PGDATA=/var/lib/postgresql/pgdata \
+                        -p 5432:5432 \
+                        -d postgres
+
+                    for i in {1..30}; do
+                        if docker exec ${PG_CONTAINER_NAME} pg_isready -U postgres; then
+                            echo "PostgreSQL is ready on localhost:5432"
+                            break
+                        fi
+                        echo "Waiting for PostgreSQL... attempt $i/30"
+                        sleep 3
+                    done
+
+                    docker exec ${PG_CONTAINER_NAME} pg_isready -U postgres || {
+                        echo "ERROR: PostgreSQL failed to start"
+                        docker logs ${PG_CONTAINER_NAME}
+                        exit 1
+                    }
+                '''
+            }
+        }
+
+        stage('Build & Test') {
+            steps {
+                withMaven(maven: 'Maven-3') {          // ← use your actual Maven tool name
+                    sh 'mvn clean install'
+                }
+            }
+        }
+
+        stage('Init: Config & Connection Tests') {
+            steps {
+                sh '''
+                    echo "Starting Quarkus application on port ${APP_PORT} ..."
+
+                    # Start in background
+                    nohup java \
+                        -Dquarkus.http.port=${APP_PORT} \
+                        -jar target/quarkus-app/quarkus-run.jar > ${QUARKUS_LOG} 2>&1 &
+
+                    APP_PID=$!
+                    echo $APP_PID > app.pid
+
+                    echo "Waiting 60 seconds for application startup and initialization..."
+                    sleep 60
+
+                    echo "=== Checking if application process is still running ==="
+                    ps -p $APP_PID -o pid= || echo "WARNING: Process already dead"
+
+                    echo "=== Last 60 lines of application log ==="
+                    tail -n 60 ${QUARKUS_LOG} || echo "Log file empty or missing"
+
+                    # ── Send Configuration ───────────────────────────────────────────────────
+                    echo "Sending configuration to http://localhost:${APP_PORT}/api/config ..."
+
+                    RESPONSE=$(curl -s -o response.json -w "%{http_code}" \
+                        -X POST "http://localhost:${APP_PORT}/api/config" \
+                        -H 'Content-Type: application/json' \
+                        --data-raw '{
+                            "do.all-schemas": true,
+                            "do.only-test-schema": "exampleschema,userschema2",
+                            "oracle.url": "'"${ORACLE_URL}"'",
+                            "oracle.user": "'"${ORACLE_USER}"'",
+                            "oracle.password": "'"${ORACLE_PASSWORD}"'",
+                            "java.generated-package-name": "me.christianrobert.ora2pgsync.autogen",
+                            "path.target-project-java": "/src/main/java",
+                            "path.target-project-resources": "/src/main/resources",
+                            "path.target-project-postgre": "/postgre/autoddl",
+                            "postgre.url": "jdbc:postgresql://localhost:5432/postgres",
+                            "postgre.username": "postgres",
+                            "postgre.password": "secret",
+                            "transfer.parallel-workers": 4,
+                            "index.parallel-workers": 4
+                        }')
+
+                    echo "HTTP response code: $RESPONSE"
+
+                    if [ "$RESPONSE" -ge 200 ] && [ "$RESPONSE" -lt 300 ]; then
+                        echo "SUCCESS: Configuration accepted (HTTP $RESPONSE)"
+                        cat response.json || echo "No response body"
+                    else
+                        echo "ERROR: Configuration failed (HTTP $RESPONSE)"
+                        cat response.json || echo "No response body"
+                        tail -n 100 ${QUARKUS_LOG}
+                        exit 1
+                    fi
+
+                    sleep 5
+
+                    # ── Oracle connection test ───────────────────────────────────────────────
+                    echo "Testing Oracle connection..."
+                    ORACLE_HTTP=$(curl -s -o oracle_test.json -w "%{http_code}" \
+                        "http://localhost:${APP_PORT}/api/database/test/oracle")
+
+                    echo "Oracle test HTTP status: $ORACLE_HTTP"
+
+                    if [ "$ORACLE_HTTP" -ge 200 ] && [ "$ORACLE_HTTP" -lt 300 ]; then
+                        echo "SUCCESS: Oracle connection test passed"
+                        cat oracle_test.json || echo "(no response body)"
+                    else
+                        echo "ERROR: Oracle connection test failed (HTTP $ORACLE_HTTP)"
+                        cat oracle_test.json || echo "(no response body)"
+                        tail -n 60 ${QUARKUS_LOG}
+                        exit 1
+                    fi
+
+                    # ── PostgreSQL connection test ───────────────────────────────────────────
+                    echo "Testing PostgreSQL connection..."
+                    PG_HTTP=$(curl -s -o pg_test.json -w "%{http_code}" \
+                        "http://localhost:${APP_PORT}/api/database/test/postgres")
+
+                    echo "PostgreSQL test HTTP status: $PG_HTTP"
+
+                    if [ "$PG_HTTP" -ge 200 ] && [ "$PG_HTTP" -lt 300 ]; then
+                        echo "SUCCESS: PostgreSQL connection test passed"
+                        cat pg_test.json || echo "(no response body)"
+                    else
+                        echo "ERROR: PostgreSQL connection test failed (HTTP $PG_HTTP)"
+                        cat pg_test.json || echo "(no response body)"
+                        tail -n 60 ${QUARKUS_LOG}
+                        exit 1
+                    fi
+
+                    echo "Init phase completed: Config loaded, both connections verified."
+                '''
+            }
+        }
+        stage('Schemas and Synonyms') {
+            steps {
+                sh '''
+                    set -eu # fail fast on errors
+
+                    # ══════════════════════════════════════════════════════════════════════════
+                    # SCHEMA EXTRACTION
+                    # ══════════════════════════════════════════════════════════════════════════
+                    echo "Starting Oracle schema extraction job..."
+
+                    RESPONSE=$(curl -s -w "\\n%{http_code}" \
+                        -X POST "http://localhost:${APP_PORT}/api/schemas/oracle/extract" \
+                        -H 'Content-Type: application/json')
+
+                    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+                    BODY=$(echo "$RESPONSE" | head -n-1)
+
+                    echo "Start request HTTP code: $HTTP_CODE"
+
+                    if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+                        echo "ERROR: Failed to start schema extraction job"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    JOB_ID=$(echo "$BODY" | jq -r '.jobId // empty')
+
+                    if [ -z "$JOB_ID" ]; then
+                        echo "ERROR: No jobId found in response"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    echo "Extraction job started. Job ID: $JOB_ID"
+                    echo "Polling status every 10 seconds (max 60 attempts = ~10 min)"
+
+                    ATTEMPT=0
+                    MAX_ATTEMPTS=60
+
+                    while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+                        ATTEMPT=$((ATTEMPT + 1))
+
+                        STATUS_RESP=$(curl -s "http://localhost:${APP_PORT}/api/jobs/${JOB_ID}/status")
+
+                        STATUS=$(echo "$STATUS_RESP" | jq -r '.status // "UNKNOWN"')
+                        IS_COMPLETE=$(echo "$STATUS_RESP" | jq -r '.isComplete // "false"')
+                        PERCENTAGE=$(echo "$STATUS_RESP" | jq -r '.progress.percentage // 0')
+                        DETAILS=$(echo "$STATUS_RESP" | jq -r '.progress.details // "No details"')
+
+                        echo "Schema Extract $ATTEMPT/$MAX_ATTEMPTS | Status: $STATUS | $PERCENTAGE% | $DETAILS"
+
+                        if [ "$IS_COMPLETE" = "true" ]; then
+                            if [ "$STATUS" = "COMPLETED" ]; then
+                                echo "SUCCESS: Schema extraction completed"
+                                break
+                            else
+                                echo "ERROR: Extraction job finished with status: $STATUS"
+                                echo "$STATUS_RESP"
+                                exit 1
+                            fi
+                        fi
+
+                        if [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "ERROR" ] || [ "$STATUS" = "CANCELLED" ]; then
+                            echo "ERROR: Extraction job entered failure state: $STATUS"
+                            echo "$STATUS_RESP"
+                            exit 1
+                        fi
+
+                        sleep 10
+                    done
+
+                    if [ "$IS_COMPLETE" != "true" ]; then
+                        echo "ERROR: Extraction timeout after $MAX_ATTEMPTS attempts"
+                        echo "$STATUS_RESP"
+                        exit 1
+                    fi
+
+                    # ══════════════════════════════════════════════════════════════════════════
+                    # SCHEMA CREATION
+                    # ══════════════════════════════════════════════════════════════════════════
+                    echo ""
+                    echo "Starting PostgreSQL schema creation job..."
+
+                    RESPONSE=$(curl -s -w "\\n%{http_code}" \
+                        -X POST "http://localhost:${APP_PORT}/api/schemas/postgres/create" \
+                        -H 'Content-Type: application/json')
+
+                    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+                    BODY=$(echo "$RESPONSE" | head -n-1)
+
+                    echo "Start request HTTP code: $HTTP_CODE"
+
+                    if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+                        echo "ERROR: Failed to start schema creation job"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    JOB_ID=$(echo "$BODY" | jq -r '.jobId // empty')
+
+                    if [ -z "$JOB_ID" ]; then
+                        echo "ERROR: No jobId found in response"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    echo "Creation job started. Job ID: $JOB_ID"
+                    echo "Polling status every 10 seconds (max 60 attempts = ~10 min)"
+
+                    ATTEMPT=0
+                    MAX_ATTEMPTS=60
+
+                    while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+                        ATTEMPT=$((ATTEMPT + 1))
+
+                        STATUS_RESP=$(curl -s "http://localhost:${APP_PORT}/api/jobs/${JOB_ID}/status")
+
+                        STATUS=$(echo "$STATUS_RESP" | jq -r '.status // "UNKNOWN"')
+                        IS_COMPLETE=$(echo "$STATUS_RESP" | jq -r '.isComplete // "false"')
+                        PERCENTAGE=$(echo "$STATUS_RESP" | jq -r '.progress.percentage // 0')
+                        DETAILS=$(echo "$STATUS_RESP" | jq -r '.progress.details // "No details"')
+
+                        echo "Schema Create $ATTEMPT/$MAX_ATTEMPTS | Status: $STATUS | $PERCENTAGE% | $DETAILS"
+
+                        if [ "$IS_COMPLETE" = "true" ]; then
+                            if [ "$STATUS" = "COMPLETED" ]; then
+                                echo "SUCCESS: Schema creation completed"
+                                break
+                            else
+                                echo "ERROR: Creation job finished with status: $STATUS"
+                                echo "$STATUS_RESP"
+                                exit 1
+                            fi
+                        fi
+
+                        if [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "ERROR" ] || [ "$STATUS" = "CANCELLED" ]; then
+                            echo "ERROR: Creation job entered failure state: $STATUS"
+                            echo "$STATUS_RESP"
+                            exit 1
+                        fi
+
+                        sleep 10
+                    done
+
+                    if [ "$IS_COMPLETE" != "true" ]; then
+                        echo "ERROR: Creation timeout after $MAX_ATTEMPTS attempts"
+                        echo "$STATUS_RESP"
+                        exit 1
+                    fi
+
+                    # ══════════════════════════════════════════════════════════════════════════
+                    # SYNONYM EXTRACTION
+                    # ══════════════════════════════════════════════════════════════════════════
+                    echo ""
+                    echo "Starting Oracle synonym extraction job..."
+
+                    RESPONSE=$(curl -s -w "\\n%{http_code}" \
+                        -X POST "http://localhost:${APP_PORT}/api/transfer/oracle/synonyms" \
+                        -H 'Content-Type: application/json')
+
+                    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+                    BODY=$(echo "$RESPONSE" | head -n-1)
+
+                    echo "Start request HTTP code: $HTTP_CODE"
+
+                    if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+                        echo "ERROR: Failed to start synonym extraction job"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    JOB_ID=$(echo "$BODY" | jq -r '.jobId // empty')
+
+                    if [ -z "$JOB_ID" ]; then
+                        echo "ERROR: No jobId found in response"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    echo "Synonym extraction job started. Job ID: $JOB_ID"
+                    echo "Polling status every 10 seconds (max 60 attempts = ~10 min)"
+
+                    ATTEMPT=0
+                    MAX_ATTEMPTS=60
+
+                    while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+                        ATTEMPT=$((ATTEMPT + 1))
+
+                        STATUS_RESP=$(curl -s "http://localhost:${APP_PORT}/api/jobs/${JOB_ID}/status")
+
+                        STATUS=$(echo "$STATUS_RESP" | jq -r '.status // "UNKNOWN"')
+                        IS_COMPLETE=$(echo "$STATUS_RESP" | jq -r '.isComplete // "false"')
+                        PERCENTAGE=$(echo "$STATUS_RESP" | jq -r '.progress.percentage // 0')
+                        DETAILS=$(echo "$STATUS_RESP" | jq -r '.progress.details // "No details"')
+
+                        echo "Synonym Extract $ATTEMPT/$MAX_ATTEMPTS | Status: $STATUS | $PERCENTAGE% | $DETAILS"
+
+                        if [ "$IS_COMPLETE" = "true" ]; then
+                            if [ "$STATUS" = "COMPLETED" ]; then
+                                echo "SUCCESS: Synonym extraction completed"
+                                break
+                            else
+                                echo "ERROR: Synonym extraction job finished with status: $STATUS"
+                                echo "$STATUS_RESP"
+                                exit 1
+                            fi
+                        fi
+
+                        if [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "ERROR" ] || [ "$STATUS" = "CANCELLED" ]; then
+                            echo "ERROR: Synonym extraction job entered failure state: $STATUS"
+                            echo "$STATUS_RESP"
+                            exit 1
+                        fi
+
+                        sleep 10
+                    done
+
+                    if [ "$IS_COMPLETE" != "true" ]; then
+                        echo "ERROR: Synonym extraction timeout after $MAX_ATTEMPTS attempts"
+                        echo "$STATUS_RESP"
+                        exit 1
+                    fi
+
+                    echo ""
+                    echo "Schemas and Synonyms stage completed successfully."
+                '''
+            }
+        }
+
+        stage('Object Types: Extract & Create') {
+            steps {
+                sh '''
+                    set -eu # fail fast on errors
+
+                    # ══════════════════════════════════════════════════════════════════════════
+                    # OBJECT TYPE EXTRACTION
+                    # ══════════════════════════════════════════════════════════════════════════
+                    echo "Starting Oracle object type extraction job..."
+
+                    RESPONSE=$(curl -s -w "\\n%{http_code}" \
+                        -X POST "http://localhost:${APP_PORT}/api/objects/oracle/extract" \
+                        -H 'Content-Type: application/json')
+
+                    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+                    BODY=$(echo "$RESPONSE" | head -n-1)
+
+                    echo "Start request HTTP code: $HTTP_CODE"
+
+                    if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+                        echo "ERROR: Failed to start object type extraction job"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    JOB_ID=$(echo "$BODY" | jq -r '.jobId // empty')
+
+                    if [ -z "$JOB_ID" ]; then
+                        echo "ERROR: No jobId found in response"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    echo "Object type extraction job started. Job ID: $JOB_ID"
+                    echo "Polling status every 10 seconds (max 60 attempts = ~10 min)"
+
+                    ATTEMPT=0
+                    MAX_ATTEMPTS=60
+
+                    while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+                        ATTEMPT=$((ATTEMPT + 1))
+
+                        STATUS_RESP=$(curl -s "http://localhost:${APP_PORT}/api/jobs/${JOB_ID}/status")
+
+                        STATUS=$(echo "$STATUS_RESP" | jq -r '.status // "UNKNOWN"')
+                        IS_COMPLETE=$(echo "$STATUS_RESP" | jq -r '.isComplete // "false"')
+                        PERCENTAGE=$(echo "$STATUS_RESP" | jq -r '.progress.percentage // 0')
+                        DETAILS=$(echo "$STATUS_RESP" | jq -r '.progress.details // "No details"')
+
+                        echo "ObjType Extract $ATTEMPT/$MAX_ATTEMPTS | Status: $STATUS | $PERCENTAGE% | $DETAILS"
+
+                        if [ "$IS_COMPLETE" = "true" ]; then
+                            if [ "$STATUS" = "COMPLETED" ]; then
+                                echo "SUCCESS: Object type extraction completed"
+                                break
+                            else
+                                echo "ERROR: Object type extraction job finished with status: $STATUS"
+                                echo "$STATUS_RESP"
+                                exit 1
+                            fi
+                        fi
+
+                        if [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "ERROR" ] || [ "$STATUS" = "CANCELLED" ]; then
+                            echo "ERROR: Object type extraction job entered failure state: $STATUS"
+                            echo "$STATUS_RESP"
+                            exit 1
+                        fi
+
+                        sleep 10
+                    done
+
+                    if [ "$IS_COMPLETE" != "true" ]; then
+                        echo "ERROR: Object type extraction timeout after $MAX_ATTEMPTS attempts"
+                        echo "$STATUS_RESP"
+                        exit 1
+                    fi
+
+                    # ══════════════════════════════════════════════════════════════════════════
+                    # OBJECT TYPE CREATION
+                    # ══════════════════════════════════════════════════════════════════════════
+                    echo ""
+                    echo "Starting PostgreSQL object type creation job..."
+
+                    RESPONSE=$(curl -s -w "\\n%{http_code}" \
+                        -X POST "http://localhost:${APP_PORT}/api/objects/postgres/create" \
+                        -H 'Content-Type: application/json')
+
+                    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+                    BODY=$(echo "$RESPONSE" | head -n-1)
+
+                    echo "Start request HTTP code: $HTTP_CODE"
+
+                    if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+                        echo "ERROR: Failed to start object type creation job"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    JOB_ID=$(echo "$BODY" | jq -r '.jobId // empty')
+
+                    if [ -z "$JOB_ID" ]; then
+                        echo "ERROR: No jobId found in response"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    echo "Object type creation job started. Job ID: $JOB_ID"
+                    echo "Polling status every 10 seconds (max 60 attempts = ~10 min)"
+
+                    ATTEMPT=0
+                    MAX_ATTEMPTS=60
+
+                    while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+                        ATTEMPT=$((ATTEMPT + 1))
+
+                        STATUS_RESP=$(curl -s "http://localhost:${APP_PORT}/api/jobs/${JOB_ID}/status")
+
+                        STATUS=$(echo "$STATUS_RESP" | jq -r '.status // "UNKNOWN"')
+                        IS_COMPLETE=$(echo "$STATUS_RESP" | jq -r '.isComplete // "false"')
+                        PERCENTAGE=$(echo "$STATUS_RESP" | jq -r '.progress.percentage // 0')
+                        DETAILS=$(echo "$STATUS_RESP" | jq -r '.progress.details // "No details"')
+
+                        echo "ObjType Create $ATTEMPT/$MAX_ATTEMPTS | Status: $STATUS | $PERCENTAGE% | $DETAILS"
+
+                        if [ "$IS_COMPLETE" = "true" ]; then
+                            if [ "$STATUS" = "COMPLETED" ]; then
+                                echo "SUCCESS: Object type creation completed"
+                                break
+                            else
+                                echo "ERROR: Object type creation job finished with status: $STATUS"
+                                echo "$STATUS_RESP"
+                                exit 1
+                            fi
+                        fi
+
+                        if [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "ERROR" ] || [ "$STATUS" = "CANCELLED" ]; then
+                            echo "ERROR: Object type creation job entered failure state: $STATUS"
+                            echo "$STATUS_RESP"
+                            exit 1
+                        fi
+
+                        sleep 10
+                    done
+
+                    if [ "$IS_COMPLETE" != "true" ]; then
+                        echo "ERROR: Object type creation timeout after $MAX_ATTEMPTS attempts"
+                        echo "$STATUS_RESP"
+                        exit 1
+                    fi
+
+                    echo ""
+                    echo "Object Types stage completed successfully."
+                '''
+            }
+        }
+
+        stage('Sequences: Extract & Create') {
+            steps {
+                sh '''
+                    set -eu # fail fast on errors
+
+                    # ══════════════════════════════════════════════════════════════════════════
+                    # SEQUENCE EXTRACTION
+                    # ══════════════════════════════════════════════════════════════════════════
+                    echo "Starting Oracle sequence extraction job..."
+
+                    RESPONSE=$(curl -s -w "\\n%{http_code}" \
+                        -X POST "http://localhost:${APP_PORT}/api/sequences/oracle/extract" \
+                        -H 'Content-Type: application/json')
+
+                    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+                    BODY=$(echo "$RESPONSE" | head -n-1)
+
+                    echo "Start request HTTP code: $HTTP_CODE"
+
+                    if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+                        echo "ERROR: Failed to start sequence extraction job"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    JOB_ID=$(echo "$BODY" | jq -r '.jobId // empty')
+
+                    if [ -z "$JOB_ID" ]; then
+                        echo "ERROR: No jobId found in response"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    echo "Sequence extraction job started. Job ID: $JOB_ID"
+                    echo "Polling status every 10 seconds (max 60 attempts = ~10 min)"
+
+                    ATTEMPT=0
+                    MAX_ATTEMPTS=60
+
+                    while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+                        ATTEMPT=$((ATTEMPT + 1))
+
+                        STATUS_RESP=$(curl -s "http://localhost:${APP_PORT}/api/jobs/${JOB_ID}/status")
+
+                        STATUS=$(echo "$STATUS_RESP" | jq -r '.status // "UNKNOWN"')
+                        IS_COMPLETE=$(echo "$STATUS_RESP" | jq -r '.isComplete // "false"')
+                        PERCENTAGE=$(echo "$STATUS_RESP" | jq -r '.progress.percentage // 0')
+                        DETAILS=$(echo "$STATUS_RESP" | jq -r '.progress.details // "No details"')
+
+                        echo "Seq Extract $ATTEMPT/$MAX_ATTEMPTS | Status: $STATUS | $PERCENTAGE% | $DETAILS"
+
+                        if [ "$IS_COMPLETE" = "true" ]; then
+                            if [ "$STATUS" = "COMPLETED" ]; then
+                                echo "SUCCESS: Sequence extraction completed"
+                                break
+                            else
+                                echo "ERROR: Sequence extraction job finished with status: $STATUS"
+                                echo "$STATUS_RESP"
+                                exit 1
+                            fi
+                        fi
+
+                        if [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "ERROR" ] || [ "$STATUS" = "CANCELLED" ]; then
+                            echo "ERROR: Sequence extraction job entered failure state: $STATUS"
+                            echo "$STATUS_RESP"
+                            exit 1
+                        fi
+
+                        sleep 10
+                    done
+
+                    if [ "$IS_COMPLETE" != "true" ]; then
+                        echo "ERROR: Sequence extraction timeout after $MAX_ATTEMPTS attempts"
+                        echo "$STATUS_RESP"
+                        exit 1
+                    fi
+
+                    # ══════════════════════════════════════════════════════════════════════════
+                    # SEQUENCE CREATION
+                    # ══════════════════════════════════════════════════════════════════════════
+                    echo ""
+                    echo "Starting PostgreSQL sequence creation job..."
+
+                    RESPONSE=$(curl -s -w "\\n%{http_code}" \
+                        -X POST "http://localhost:${APP_PORT}/api/sequences/postgres/create" \
+                        -H 'Content-Type: application/json')
+
+                    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+                    BODY=$(echo "$RESPONSE" | head -n-1)
+
+                    echo "Start request HTTP code: $HTTP_CODE"
+
+                    if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+                        echo "ERROR: Failed to start sequence creation job"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    JOB_ID=$(echo "$BODY" | jq -r '.jobId // empty')
+
+                    if [ -z "$JOB_ID" ]; then
+                        echo "ERROR: No jobId found in response"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    echo "Sequence creation job started. Job ID: $JOB_ID"
+                    echo "Polling status every 10 seconds (max 60 attempts = ~10 min)"
+
+                    ATTEMPT=0
+                    MAX_ATTEMPTS=60
+
+                    while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+                        ATTEMPT=$((ATTEMPT + 1))
+
+                        STATUS_RESP=$(curl -s "http://localhost:${APP_PORT}/api/jobs/${JOB_ID}/status")
+
+                        STATUS=$(echo "$STATUS_RESP" | jq -r '.status // "UNKNOWN"')
+                        IS_COMPLETE=$(echo "$STATUS_RESP" | jq -r '.isComplete // "false"')
+                        PERCENTAGE=$(echo "$STATUS_RESP" | jq -r '.progress.percentage // 0')
+                        DETAILS=$(echo "$STATUS_RESP" | jq -r '.progress.details // "No details"')
+
+                        echo "Seq Create $ATTEMPT/$MAX_ATTEMPTS | Status: $STATUS | $PERCENTAGE% | $DETAILS"
+
+                        if [ "$IS_COMPLETE" = "true" ]; then
+                            if [ "$STATUS" = "COMPLETED" ]; then
+                                echo "SUCCESS: Sequence creation completed"
+                                break
+                            else
+                                echo "ERROR: Sequence creation job finished with status: $STATUS"
+                                echo "$STATUS_RESP"
+                                exit 1
+                            fi
+                        fi
+
+                        if [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "ERROR" ] || [ "$STATUS" = "CANCELLED" ]; then
+                            echo "ERROR: Sequence creation job entered failure state: $STATUS"
+                            echo "$STATUS_RESP"
+                            exit 1
+                        fi
+
+                        sleep 10
+                    done
+
+                    if [ "$IS_COMPLETE" != "true" ]; then
+                        echo "ERROR: Sequence creation timeout after $MAX_ATTEMPTS attempts"
+                        echo "$STATUS_RESP"
+                        exit 1
+                    fi
+
+                    echo ""
+                    echo "Sequences stage completed successfully."
+                '''
+            }
+        }
+
+        stage('Tables: Extract & Create') {
+            steps {
+                sh '''
+                    set -eu # fail fast on errors
+
+                    # ══════════════════════════════════════════════════════════════════════════
+                    # TABLE EXTRACTION
+                    # ══════════════════════════════════════════════════════════════════════════
+                    echo "Starting Oracle table extraction job..."
+
+                    RESPONSE=$(curl -s -w "\\n%{http_code}" \
+                        -X POST "http://localhost:${APP_PORT}/api/tables/oracle/extract" \
+                        -H 'Content-Type: application/json')
+
+                    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+                    BODY=$(echo "$RESPONSE" | head -n-1)
+
+                    echo "Start request HTTP code: $HTTP_CODE"
+
+                    if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+                        echo "ERROR: Failed to start table extraction job"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    JOB_ID=$(echo "$BODY" | jq -r '.jobId // empty')
+
+                    if [ -z "$JOB_ID" ]; then
+                        echo "ERROR: No jobId found in response"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    echo "Table extraction job started. Job ID: $JOB_ID"
+                    echo "Polling status every 10 seconds (max 120 attempts = ~20 min)"
+
+                    ATTEMPT=0
+                    MAX_ATTEMPTS=120
+
+                    while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+                        ATTEMPT=$((ATTEMPT + 1))
+
+                        STATUS_RESP=$(curl -s "http://localhost:${APP_PORT}/api/jobs/${JOB_ID}/status")
+
+                        STATUS=$(echo "$STATUS_RESP" | jq -r '.status // "UNKNOWN"')
+                        IS_COMPLETE=$(echo "$STATUS_RESP" | jq -r '.isComplete // "false"')
+                        PERCENTAGE=$(echo "$STATUS_RESP" | jq -r '.progress.percentage // 0')
+                        DETAILS=$(echo "$STATUS_RESP" | jq -r '.progress.details // "No details"')
+
+                        echo "Table Extract $ATTEMPT/$MAX_ATTEMPTS | Status: $STATUS | $PERCENTAGE% | $DETAILS"
+
+                        if [ "$IS_COMPLETE" = "true" ]; then
+                            if [ "$STATUS" = "COMPLETED" ]; then
+                                echo "SUCCESS: Table extraction completed"
+                                break
+                            else
+                                echo "ERROR: Table extraction job finished with status: $STATUS"
+                                echo "$STATUS_RESP"
+                                exit 1
+                            fi
+                        fi
+
+                        if [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "ERROR" ] || [ "$STATUS" = "CANCELLED" ]; then
+                            echo "ERROR: Table extraction job entered failure state: $STATUS"
+                            echo "$STATUS_RESP"
+                            exit 1
+                        fi
+
+                        sleep 10
+                    done
+
+                    if [ "$IS_COMPLETE" != "true" ]; then
+                        echo "ERROR: Table extraction timeout after $MAX_ATTEMPTS attempts"
+                        echo "$STATUS_RESP"
+                        exit 1
+                    fi
+
+                    # ══════════════════════════════════════════════════════════════════════════
+                    # TABLE CREATION
+                    # ══════════════════════════════════════════════════════════════════════════
+                    echo ""
+                    echo "Starting PostgreSQL table creation job..."
+
+                    RESPONSE=$(curl -s -w "\\n%{http_code}" \
+                        -X POST "http://localhost:${APP_PORT}/api/tables/postgres/create" \
+                        -H 'Content-Type: application/json')
+
+                    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+                    BODY=$(echo "$RESPONSE" | head -n-1)
+
+                    echo "Start request HTTP code: $HTTP_CODE"
+
+                    if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+                        echo "ERROR: Failed to start table creation job"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    JOB_ID=$(echo "$BODY" | jq -r '.jobId // empty')
+
+                    if [ -z "$JOB_ID" ]; then
+                        echo "ERROR: No jobId found in response"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    echo "Table creation job started. Job ID: $JOB_ID"
+                    echo "Polling status every 10 seconds (max 240 attempts = ~40 min)"
+
+                    ATTEMPT=0
+                    MAX_ATTEMPTS=240
+
+                    while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+                        ATTEMPT=$((ATTEMPT + 1))
+
+                        STATUS_RESP=$(curl -s "http://localhost:${APP_PORT}/api/jobs/${JOB_ID}/status")
+
+                        STATUS=$(echo "$STATUS_RESP" | jq -r '.status // "UNKNOWN"')
+                        IS_COMPLETE=$(echo "$STATUS_RESP" | jq -r '.isComplete // "false"')
+                        PERCENTAGE=$(echo "$STATUS_RESP" | jq -r '.progress.percentage // 0')
+                        DETAILS=$(echo "$STATUS_RESP" | jq -r '.progress.details // "No details"')
+
+                        echo "Table Create $ATTEMPT/$MAX_ATTEMPTS | Status: $STATUS | $PERCENTAGE% | $DETAILS"
+
+                        if [ "$IS_COMPLETE" = "true" ]; then
+                            if [ "$STATUS" = "COMPLETED" ]; then
+                                echo "SUCCESS: Table creation completed"
+                                break
+                            else
+                                echo "ERROR: Table creation job finished with status: $STATUS"
+                                echo "$STATUS_RESP"
+                                exit 1
+                            fi
+                        fi
+
+                        if [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "ERROR" ] || [ "$STATUS" = "CANCELLED" ]; then
+                            echo "ERROR: Table creation job entered failure state: $STATUS"
+                            echo "$STATUS_RESP"
+                            exit 1
+                        fi
+
+                        sleep 10
+                    done
+
+                    if [ "$IS_COMPLETE" != "true" ]; then
+                        echo "ERROR: Table creation timeout after $MAX_ATTEMPTS attempts"
+                        echo "$STATUS_RESP"
+                        exit 1
+                    fi
+
+                    echo ""
+                    echo "Tables stage completed successfully."
+                '''
+            }
+        }
+
+        stage('Data Transfer') {
+            steps {
+                sh '''
+                    set -eu # fail fast on errors
+
+                    # ══════════════════════════════════════════════════════════════════════════
+                    # ROW COUNT EXTRACTION
+                    # Must run BEFORE the transfer: the row counts are what let the transfer
+                    # schedule tables largest-first across its worker pool. Without them the
+                    # transfer still runs, but one huge table can start last and leave every
+                    # other worker idle for hours.
+                    # ══════════════════════════════════════════════════════════════════════════
+                    echo "Starting Oracle row count extraction job..."
+
+                    RESPONSE=$(curl -s -w "\\n%{http_code}" \
+                        -X POST "http://localhost:${APP_PORT}/api/transfer/oracle/row-counts" \
+                        -H 'Content-Type: application/json')
+
+                    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+                    BODY=$(echo "$RESPONSE" | head -n-1)
+
+                    echo "Start request HTTP code: $HTTP_CODE"
+
+                    if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+                        echo "ERROR: Failed to start row count extraction job"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    JOB_ID=$(echo "$BODY" | jq -r '.jobId // empty')
+
+                    if [ -z "$JOB_ID" ]; then
+                        echo "ERROR: No jobId found in response"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    echo "Row count extraction job started. Job ID: $JOB_ID"
+                    echo "Polling status every 10 seconds (max 120 attempts = ~20 min)"
+
+                    ATTEMPT=0
+                    MAX_ATTEMPTS=120
+
+                    while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+                        ATTEMPT=$((ATTEMPT + 1))
+
+                        STATUS_RESP=$(curl -s "http://localhost:${APP_PORT}/api/jobs/${JOB_ID}/status")
+
+                        STATUS=$(echo "$STATUS_RESP" | jq -r '.status // "UNKNOWN"')
+                        IS_COMPLETE=$(echo "$STATUS_RESP" | jq -r '.isComplete // "false"')
+                        PERCENTAGE=$(echo "$STATUS_RESP" | jq -r '.progress.percentage // 0')
+                        DETAILS=$(echo "$STATUS_RESP" | jq -r '.progress.details // "No details"')
+
+                        echo "Row Count Extract $ATTEMPT/$MAX_ATTEMPTS | Status: $STATUS | $PERCENTAGE% | $DETAILS"
+
+                        if [ "$IS_COMPLETE" = "true" ]; then
+                            if [ "$STATUS" = "COMPLETED" ]; then
+                                echo "SUCCESS: Row count extraction completed"
+                                break
+                            else
+                                echo "ERROR: Row count extraction job finished with status: $STATUS"
+                                echo "$STATUS_RESP"
+                                exit 1
+                            fi
+                        fi
+
+                        if [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "ERROR" ] || [ "$STATUS" = "CANCELLED" ]; then
+                            echo "ERROR: Row count extraction job entered failure state: $STATUS"
+                            echo "$STATUS_RESP"
+                            exit 1
+                        fi
+
+                        sleep 10
+                    done
+
+                    if [ "$IS_COMPLETE" != "true" ]; then
+                        echo "ERROR: Row count extraction timeout after $MAX_ATTEMPTS attempts"
+                        echo "$STATUS_RESP"
+                        exit 1
+                    fi
+
+                    # ══════════════════════════════════════════════════════════════════════════
+                    # DATA TRANSFER (Oracle → PostgreSQL)
+                    # ══════════════════════════════════════════════════════════════════════════
+                    echo ""
+                    echo "Starting data transfer job (Oracle → PostgreSQL)..."
+                    echo "NOTE: This can take up to 8 hours for large datasets"
+
+                    RESPONSE=$(curl -s -w "\\n%{http_code}" \
+                        -X POST "http://localhost:${APP_PORT}/api/transfer/postgres/execute" \
+                        -H 'Content-Type: application/json')
+
+                    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+                    BODY=$(echo "$RESPONSE" | head -n-1)
+
+                    echo "Start request HTTP code: $HTTP_CODE"
+
+                    if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+                        echo "ERROR: Failed to start data transfer job"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    JOB_ID=$(echo "$BODY" | jq -r '.jobId // empty')
+
+                    if [ -z "$JOB_ID" ]; then
+                        echo "ERROR: No jobId found in response"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    echo "Data transfer job started. Job ID: $JOB_ID"
+                    echo "Polling status every 20 seconds (max 1440 attempts = ~8 hours)"
+
+                    ATTEMPT=0
+                    MAX_ATTEMPTS=1440
+
+                    while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+                        ATTEMPT=$((ATTEMPT + 1))
+
+                        STATUS_RESP=$(curl -s "http://localhost:${APP_PORT}/api/jobs/${JOB_ID}/status")
+
+                        STATUS=$(echo "$STATUS_RESP" | jq -r '.status // "UNKNOWN"')
+                        IS_COMPLETE=$(echo "$STATUS_RESP" | jq -r '.isComplete // "false"')
+                        PERCENTAGE=$(echo "$STATUS_RESP" | jq -r '.progress.percentage // 0')
+                        DETAILS=$(echo "$STATUS_RESP" | jq -r '.progress.details // "No details"')
+
+                        echo "Data Transfer $ATTEMPT/$MAX_ATTEMPTS | Status: $STATUS | $PERCENTAGE% | $DETAILS"
+
+                        if [ "$IS_COMPLETE" = "true" ]; then
+                            if [ "$STATUS" = "COMPLETED" ]; then
+                                echo "SUCCESS: Data transfer completed"
+                                break
+                            else
+                                echo "ERROR: Data transfer job finished with status: $STATUS"
+                                echo "$STATUS_RESP"
+                                exit 1
+                            fi
+                        fi
+
+                        if [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "ERROR" ] || [ "$STATUS" = "CANCELLED" ]; then
+                            echo "ERROR: Data transfer job entered failure state: $STATUS"
+                            echo "$STATUS_RESP"
+                            exit 1
+                        fi
+
+                        sleep 20
+                    done
+
+                    if [ "$IS_COMPLETE" != "true" ]; then
+                        echo "ERROR: Data transfer timeout after $MAX_ATTEMPTS attempts"
+                        echo "$STATUS_RESP"
+                        exit 1
+                    fi
+
+                    echo ""
+                    echo "Data Transfer stage completed successfully."
+                '''
+            }
+        }
+
+        stage('Constraints and Indexes') {
+            steps {
+                sh '''
+                    set -eu # fail fast on errors
+
+                    # ══════════════════════════════════════════════════════════════════════════
+                    # CONSTRAINT CREATION
+                    # ══════════════════════════════════════════════════════════════════════════
+                    echo "Starting PostgreSQL constraint creation job..."
+                    echo "Creating constraints in dependency order: PK → UK → FK → CHECK"
+
+                    RESPONSE=$(curl -s -w "\\n%{http_code}" \
+                        -X POST "http://localhost:${APP_PORT}/api/constraints/postgres/create" \
+                        -H 'Content-Type: application/json')
+
+                    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+                    BODY=$(echo "$RESPONSE" | head -n-1)
+
+                    echo "Start request HTTP code: $HTTP_CODE"
+
+                    if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+                        echo "ERROR: Failed to start constraint creation job"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    JOB_ID=$(echo "$BODY" | jq -r '.jobId // empty')
+
+                    if [ -z "$JOB_ID" ]; then
+                        echo "ERROR: No jobId found in response"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    echo "Constraint creation job started. Job ID: $JOB_ID"
+                    echo "Polling status every 10 seconds (max 360 attempts = ~60 min)"
+
+                    ATTEMPT=0
+                    MAX_ATTEMPTS=360
+
+                    while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+                        ATTEMPT=$((ATTEMPT + 1))
+
+                        STATUS_RESP=$(curl -s "http://localhost:${APP_PORT}/api/jobs/${JOB_ID}/status")
+
+                        STATUS=$(echo "$STATUS_RESP" | jq -r '.status // "UNKNOWN"')
+                        IS_COMPLETE=$(echo "$STATUS_RESP" | jq -r '.isComplete // "false"')
+                        PERCENTAGE=$(echo "$STATUS_RESP" | jq -r '.progress.percentage // 0')
+                        DETAILS=$(echo "$STATUS_RESP" | jq -r '.progress.details // "No details"')
+
+                        echo "Constraint Create $ATTEMPT/$MAX_ATTEMPTS | Status: $STATUS | $PERCENTAGE% | $DETAILS"
+
+                        if [ "$IS_COMPLETE" = "true" ]; then
+                            if [ "$STATUS" = "COMPLETED" ]; then
+                                echo "SUCCESS: Constraint creation completed"
+                                break
+                            else
+                                echo "ERROR: Constraint creation job finished with status: $STATUS"
+                                echo "$STATUS_RESP"
+                                exit 1
+                            fi
+                        fi
+
+                        if [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "ERROR" ] || [ "$STATUS" = "CANCELLED" ]; then
+                            echo "ERROR: Constraint creation job entered failure state: $STATUS"
+                            echo "$STATUS_RESP"
+                            exit 1
+                        fi
+
+                        sleep 10
+                    done
+
+                    if [ "$IS_COMPLETE" != "true" ]; then
+                        echo "ERROR: Constraint creation timeout after $MAX_ATTEMPTS attempts"
+                        echo "$STATUS_RESP"
+                        exit 1
+                    fi
+
+                    # ══════════════════════════════════════════════════════════════════════════
+                    # ORACLE INDEX EXTRACTION
+                    # Non-constraint Oracle indexes. Constraint-backed ones (PK/UK) are excluded —
+                    # PostgreSQL created those itself during constraint creation above.
+                    # ══════════════════════════════════════════════════════════════════════════
+                    echo ""
+                    echo "Starting Oracle index extraction job..."
+
+                    RESPONSE=$(curl -s -w "\\n%{http_code}" \
+                        -X POST "http://localhost:${APP_PORT}/api/indexes/oracle/extract" \
+                        -H 'Content-Type: application/json')
+
+                    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+                    BODY=$(echo "$RESPONSE" | head -n-1)
+
+                    echo "Start request HTTP code: $HTTP_CODE"
+
+                    if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+                        echo "ERROR: Failed to start index extraction job"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    JOB_ID=$(echo "$BODY" | jq -r '.jobId // empty')
+
+                    if [ -z "$JOB_ID" ]; then
+                        echo "ERROR: No jobId found in response"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    echo "Index extraction job started. Job ID: $JOB_ID"
+                    echo "Polling status every 10 seconds (max 120 attempts = ~20 min)"
+
+                    ATTEMPT=0
+                    MAX_ATTEMPTS=120
+
+                    while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+                        ATTEMPT=$((ATTEMPT + 1))
+
+                        STATUS_RESP=$(curl -s "http://localhost:${APP_PORT}/api/jobs/${JOB_ID}/status")
+
+                        STATUS=$(echo "$STATUS_RESP" | jq -r '.status // "UNKNOWN"')
+                        IS_COMPLETE=$(echo "$STATUS_RESP" | jq -r '.isComplete // "false"')
+                        PERCENTAGE=$(echo "$STATUS_RESP" | jq -r '.progress.percentage // 0')
+                        DETAILS=$(echo "$STATUS_RESP" | jq -r '.progress.details // "No details"')
+
+                        echo "Index Extract $ATTEMPT/$MAX_ATTEMPTS | Status: $STATUS | $PERCENTAGE% | $DETAILS"
+
+                        if [ "$IS_COMPLETE" = "true" ]; then
+                            if [ "$STATUS" = "COMPLETED" ]; then
+                                echo "SUCCESS: Index extraction completed"
+                                break
+                            else
+                                echo "ERROR: Index extraction job finished with status: $STATUS"
+                                echo "$STATUS_RESP"
+                                exit 1
+                            fi
+                        fi
+
+                        if [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "ERROR" ] || [ "$STATUS" = "CANCELLED" ]; then
+                            echo "ERROR: Index extraction job entered failure state: $STATUS"
+                            echo "$STATUS_RESP"
+                            exit 1
+                        fi
+
+                        sleep 10
+                    done
+
+                    if [ "$IS_COMPLETE" != "true" ]; then
+                        echo "ERROR: Index extraction timeout after $MAX_ATTEMPTS attempts"
+                        echo "$STATUS_RESP"
+                        exit 1
+                    fi
+
+                    # ══════════════════════════════════════════════════════════════════════════
+                    # INDEX CREATION (Oracle indexes → PostgreSQL)
+                    # Runs on a worker pool (index.parallel-workers). Individual indexes that
+                    # cannot be migrated are reported as SKIPPED/UNSUPPORTED/ERROR without
+                    # failing the job — see the job result for the per-index reasons.
+                    # ══════════════════════════════════════════════════════════════════════════
+                    echo ""
+                    echo "Starting PostgreSQL index creation job..."
+                    echo "Recreating non-constraint Oracle indexes"
+
+                    RESPONSE=$(curl -s -w "\\n%{http_code}" \
+                        -X POST "http://localhost:${APP_PORT}/api/indexes/postgres/create" \
+                        -H 'Content-Type: application/json')
+
+                    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+                    BODY=$(echo "$RESPONSE" | head -n-1)
+
+                    echo "Start request HTTP code: $HTTP_CODE"
+
+                    if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+                        echo "ERROR: Failed to start index creation job"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    JOB_ID=$(echo "$BODY" | jq -r '.jobId // empty')
+
+                    if [ -z "$JOB_ID" ]; then
+                        echo "ERROR: No jobId found in response"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    echo "Index creation job started. Job ID: $JOB_ID"
+                    echo "Polling status every 20 seconds (max 360 attempts = ~2 hours)"
+
+                    ATTEMPT=0
+                    MAX_ATTEMPTS=360
+
+                    while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+                        ATTEMPT=$((ATTEMPT + 1))
+
+                        STATUS_RESP=$(curl -s "http://localhost:${APP_PORT}/api/jobs/${JOB_ID}/status")
+
+                        STATUS=$(echo "$STATUS_RESP" | jq -r '.status // "UNKNOWN"')
+                        IS_COMPLETE=$(echo "$STATUS_RESP" | jq -r '.isComplete // "false"')
+                        PERCENTAGE=$(echo "$STATUS_RESP" | jq -r '.progress.percentage // 0')
+                        DETAILS=$(echo "$STATUS_RESP" | jq -r '.progress.details // "No details"')
+
+                        echo "Index Create $ATTEMPT/$MAX_ATTEMPTS | Status: $STATUS | $PERCENTAGE% | $DETAILS"
+
+                        if [ "$IS_COMPLETE" = "true" ]; then
+                            if [ "$STATUS" = "COMPLETED" ]; then
+                                echo "SUCCESS: Index creation completed"
+                                break
+                            else
+                                echo "ERROR: Index creation job finished with status: $STATUS"
+                                echo "$STATUS_RESP"
+                                exit 1
+                            fi
+                        fi
+
+                        if [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "ERROR" ] || [ "$STATUS" = "CANCELLED" ]; then
+                            echo "ERROR: Index creation job entered failure state: $STATUS"
+                            echo "$STATUS_RESP"
+                            exit 1
+                        fi
+
+                        sleep 20
+                    done
+
+                    if [ "$IS_COMPLETE" != "true" ]; then
+                        echo "ERROR: Index creation timeout after $MAX_ATTEMPTS attempts"
+                        echo "$STATUS_RESP"
+                        exit 1
+                    fi
+
+                    # ══════════════════════════════════════════════════════════════════════════
+                    # POSTGRESQL INDEX VERIFICATION (optional, informational)
+                    # Reads back the indexes that now exist in PostgreSQL, excluding
+                    # constraint-backed ones, so the count is directly comparable with the
+                    # Oracle extraction above.
+                    # ══════════════════════════════════════════════════════════════════════════
+                    echo ""
+                    echo "Starting PostgreSQL index extraction (verification) job..."
+
+                    RESPONSE=$(curl -s -w "\\n%{http_code}" \
+                        -X POST "http://localhost:${APP_PORT}/api/indexes/postgres/extract" \
+                        -H 'Content-Type: application/json')
+
+                    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+                    BODY=$(echo "$RESPONSE" | head -n-1)
+
+                    echo "Start request HTTP code: $HTTP_CODE"
+
+                    if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+                        echo "ERROR: Failed to start PostgreSQL index extraction job"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    JOB_ID=$(echo "$BODY" | jq -r '.jobId // empty')
+
+                    if [ -z "$JOB_ID" ]; then
+                        echo "ERROR: No jobId found in response"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    echo "PostgreSQL index extraction job started. Job ID: $JOB_ID"
+                    echo "Polling status every 10 seconds (max 120 attempts = ~20 min)"
+
+                    ATTEMPT=0
+                    MAX_ATTEMPTS=120
+
+                    while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+                        ATTEMPT=$((ATTEMPT + 1))
+
+                        STATUS_RESP=$(curl -s "http://localhost:${APP_PORT}/api/jobs/${JOB_ID}/status")
+
+                        STATUS=$(echo "$STATUS_RESP" | jq -r '.status // "UNKNOWN"')
+                        IS_COMPLETE=$(echo "$STATUS_RESP" | jq -r '.isComplete // "false"')
+                        PERCENTAGE=$(echo "$STATUS_RESP" | jq -r '.progress.percentage // 0')
+                        DETAILS=$(echo "$STATUS_RESP" | jq -r '.progress.details // "No details"')
+
+                        echo "PG Index Extract $ATTEMPT/$MAX_ATTEMPTS | Status: $STATUS | $PERCENTAGE% | $DETAILS"
+
+                        if [ "$IS_COMPLETE" = "true" ]; then
+                            if [ "$STATUS" = "COMPLETED" ]; then
+                                echo "SUCCESS: PostgreSQL index extraction completed"
+                                break
+                            else
+                                echo "ERROR: PostgreSQL index extraction job finished with status: $STATUS"
+                                echo "$STATUS_RESP"
+                                exit 1
+                            fi
+                        fi
+
+                        if [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "ERROR" ] || [ "$STATUS" = "CANCELLED" ]; then
+                            echo "ERROR: PostgreSQL index extraction job entered failure state: $STATUS"
+                            echo "$STATUS_RESP"
+                            exit 1
+                        fi
+
+                        sleep 10
+                    done
+
+                    if [ "$IS_COMPLETE" != "true" ]; then
+                        echo "ERROR: PostgreSQL index extraction timeout after $MAX_ATTEMPTS attempts"
+                        echo "$STATUS_RESP"
+                        exit 1
+                    fi
+
+                    # ══════════════════════════════════════════════════════════════════════════
+                    # FK INDEX CREATION (gap-fill)
+                    # Deliberately runs AFTER index migration: it asks "what *should* exist?",
+                    # index migration asks "what *did* Oracle have?". Running it first would
+                    # duplicate every hand-made FK index under a generated idx_fk_* name.
+                    # ══════════════════════════════════════════════════════════════════════════
+                    echo ""
+                    echo "Starting PostgreSQL FK index creation job..."
+                    echo "Creating indexes on foreign key columns not already covered by a migrated index"
+
+                    RESPONSE=$(curl -s -w "\\n%{http_code}" \
+                        -X POST "http://localhost:${APP_PORT}/api/constraints/postgres/fk-indexes/create" \
+                        -H 'Content-Type: application/json')
+
+                    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+                    BODY=$(echo "$RESPONSE" | head -n-1)
+
+                    echo "Start request HTTP code: $HTTP_CODE"
+
+                    if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+                        echo "ERROR: Failed to start FK index creation job"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    JOB_ID=$(echo "$BODY" | jq -r '.jobId // empty')
+
+                    if [ -z "$JOB_ID" ]; then
+                        echo "ERROR: No jobId found in response"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    echo "FK index creation job started. Job ID: $JOB_ID"
+                    echo "Polling status every 10 seconds (max 120 attempts = ~20 min)"
+
+                    ATTEMPT=0
+                    MAX_ATTEMPTS=120
+
+                    while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+                        ATTEMPT=$((ATTEMPT + 1))
+
+                        STATUS_RESP=$(curl -s "http://localhost:${APP_PORT}/api/jobs/${JOB_ID}/status")
+
+                        STATUS=$(echo "$STATUS_RESP" | jq -r '.status // "UNKNOWN"')
+                        IS_COMPLETE=$(echo "$STATUS_RESP" | jq -r '.isComplete // "false"')
+                        PERCENTAGE=$(echo "$STATUS_RESP" | jq -r '.progress.percentage // 0')
+                        DETAILS=$(echo "$STATUS_RESP" | jq -r '.progress.details // "No details"')
+
+                        echo "FK Index Create $ATTEMPT/$MAX_ATTEMPTS | Status: $STATUS | $PERCENTAGE% | $DETAILS"
+
+                        if [ "$IS_COMPLETE" = "true" ]; then
+                            if [ "$STATUS" = "COMPLETED" ]; then
+                                echo "SUCCESS: FK index creation completed"
+                                break
+                            else
+                                echo "ERROR: FK index creation job finished with status: $STATUS"
+                                echo "$STATUS_RESP"
+                                exit 1
+                            fi
+                        fi
+
+                        if [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "ERROR" ] || [ "$STATUS" = "CANCELLED" ]; then
+                            echo "ERROR: FK index creation job entered failure state: $STATUS"
+                            echo "$STATUS_RESP"
+                            exit 1
+                        fi
+
+                        sleep 10
+                    done
+
+                    if [ "$IS_COMPLETE" != "true" ]; then
+                        echo "ERROR: FK index creation timeout after $MAX_ATTEMPTS attempts"
+                        echo "$STATUS_RESP"
+                        exit 1
+                    fi
+
+                    echo ""
+                    echo "Constraints and Indexes stage completed successfully."
+                '''
+            }
+        }
+
+        // ──────────────────────────────────────────────────────────────────────────────
+        // Steps 19-29 follow the documented migration order exactly, and the order is
+        // load-bearing: stubs for every code object must exist before ANY implementation
+        // runs, because implementations reference each other (function → view → function).
+        // That is why view implementation is its own stage further down rather than
+        // sitting with view extraction here.
+        // ──────────────────────────────────────────────────────────────────────────────
+        stage('Views: Extract, Stubs & Synonym Views') {
+            steps {
+                sh '''
+                    set -eu # fail fast on errors
+
+                    # ══════════════════════════════════════════════════════════════════════════
+                    # VIEW EXTRACTION
+                    # ══════════════════════════════════════════════════════════════════════════
+                    echo "Starting Oracle view extraction job..."
+
+                    RESPONSE=$(curl -s -w "\\n%{http_code}" \
+                        -X POST "http://localhost:${APP_PORT}/api/views/oracle/extract" \
+                        -H 'Content-Type: application/json')
+
+                    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+                    BODY=$(echo "$RESPONSE" | head -n-1)
+
+                    echo "Start request HTTP code: $HTTP_CODE"
+
+                    if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+                        echo "ERROR: Failed to start view extraction job"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    JOB_ID=$(echo "$BODY" | jq -r '.jobId // empty')
+
+                    if [ -z "$JOB_ID" ]; then
+                        echo "ERROR: No jobId found in response"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    echo "View extraction job started. Job ID: $JOB_ID"
+                    echo "Polling status every 20 seconds (max 120 attempts = ~40 min)"
+
+                    ATTEMPT=0
+                    MAX_ATTEMPTS=120
+
+                    while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+                        ATTEMPT=$((ATTEMPT + 1))
+
+                        STATUS_RESP=$(curl -s "http://localhost:${APP_PORT}/api/jobs/${JOB_ID}/status")
+
+                        STATUS=$(echo "$STATUS_RESP" | jq -r '.status // "UNKNOWN"')
+                        IS_COMPLETE=$(echo "$STATUS_RESP" | jq -r '.isComplete // "false"')
+                        PERCENTAGE=$(echo "$STATUS_RESP" | jq -r '.progress.percentage // 0')
+                        DETAILS=$(echo "$STATUS_RESP" | jq -r '.progress.details // "No details"')
+
+                        echo "View Extract $ATTEMPT/$MAX_ATTEMPTS | Status: $STATUS | $PERCENTAGE% | $DETAILS"
+
+                        if [ "$IS_COMPLETE" = "true" ]; then
+                            if [ "$STATUS" = "COMPLETED" ]; then
+                                echo "SUCCESS: View extraction completed"
+                                break
+                            else
+                                echo "ERROR: View extraction job finished with status: $STATUS"
+                                echo "$STATUS_RESP"
+                                exit 1
+                            fi
+                        fi
+
+                        if [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "ERROR" ] || [ "$STATUS" = "CANCELLED" ]; then
+                            echo "ERROR: View extraction job entered failure state: $STATUS"
+                            echo "$STATUS_RESP"
+                            exit 1
+                        fi
+
+                        sleep 20
+                    done
+
+                    if [ "$IS_COMPLETE" != "true" ]; then
+                        echo "ERROR: View extraction timeout after $MAX_ATTEMPTS attempts"
+                        echo "$STATUS_RESP"
+                        exit 1
+                    fi
+
+                    # ══════════════════════════════════════════════════════════════════════════
+                    # VIEW STUB CREATION
+                    # ══════════════════════════════════════════════════════════════════════════
+                    echo ""
+                    echo "Starting PostgreSQL view stub creation job..."
+
+                    RESPONSE=$(curl -s -w "\\n%{http_code}" \
+                        -X POST "http://localhost:${APP_PORT}/api/views/postgres/stubs/create" \
+                        -H 'Content-Type: application/json')
+
+                    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+                    BODY=$(echo "$RESPONSE" | head -n-1)
+
+                    echo "Start request HTTP code: $HTTP_CODE"
+
+                    if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+                        echo "ERROR: Failed to start view stub creation job"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    JOB_ID=$(echo "$BODY" | jq -r '.jobId // empty')
+
+                    if [ -z "$JOB_ID" ]; then
+                        echo "ERROR: No jobId found in response"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    echo "View stub creation job started. Job ID: $JOB_ID"
+                    echo "Polling status every 20 seconds (max 120 attempts = ~40 min)"
+
+                    ATTEMPT=0
+                    MAX_ATTEMPTS=120
+
+                    while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+                        ATTEMPT=$((ATTEMPT + 1))
+
+                        STATUS_RESP=$(curl -s "http://localhost:${APP_PORT}/api/jobs/${JOB_ID}/status")
+
+                        STATUS=$(echo "$STATUS_RESP" | jq -r '.status // "UNKNOWN"')
+                        IS_COMPLETE=$(echo "$STATUS_RESP" | jq -r '.isComplete // "false"')
+                        PERCENTAGE=$(echo "$STATUS_RESP" | jq -r '.progress.percentage // 0')
+                        DETAILS=$(echo "$STATUS_RESP" | jq -r '.progress.details // "No details"')
+
+                        echo "View Stub Create $ATTEMPT/$MAX_ATTEMPTS | Status: $STATUS | $PERCENTAGE% | $DETAILS"
+
+                        if [ "$IS_COMPLETE" = "true" ]; then
+                            if [ "$STATUS" = "COMPLETED" ]; then
+                                echo "SUCCESS: View stub creation completed"
+                                break
+                            else
+                                echo "ERROR: View stub creation job finished with status: $STATUS"
+                                echo "$STATUS_RESP"
+                                exit 1
+                            fi
+                        fi
+
+                        if [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "ERROR" ] || [ "$STATUS" = "CANCELLED" ]; then
+                            echo "ERROR: View stub creation job entered failure state: $STATUS"
+                            echo "$STATUS_RESP"
+                            exit 1
+                        fi
+
+                        sleep 20
+                    done
+
+                    if [ "$IS_COMPLETE" != "true" ]; then
+                        echo "ERROR: View stub creation timeout after $MAX_ATTEMPTS attempts"
+                        echo "$STATUS_RESP"
+                        exit 1
+                    fi
+
+                    # ══════════════════════════════════════════════════════════════════════════
+                    # SYNONYM REPLACEMENT VIEWS
+                    # Must run after view stubs (targets must exist) but before view/trigger
+                    # implementations, which may reference synonym names the transformer
+                    # could not resolve inline.
+                    # ══════════════════════════════════════════════════════════════════════════
+                    echo ""
+                    echo "Starting PostgreSQL synonym replacement view creation job..."
+                    echo "Creating views to emulate Oracle synonym behavior"
+
+                    RESPONSE=$(curl -s -w "\\n%{http_code}" \
+                        -X POST "http://localhost:${APP_PORT}/api/synonyms/postgres/replacement-views/create" \
+                        -H 'Content-Type: application/json')
+
+                    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+                    BODY=$(echo "$RESPONSE" | head -n-1)
+
+                    echo "Start request HTTP code: $HTTP_CODE"
+
+                    if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+                        echo "ERROR: Failed to start synonym replacement view creation job"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    JOB_ID=$(echo "$BODY" | jq -r '.jobId // empty')
+
+                    if [ -z "$JOB_ID" ]; then
+                        echo "ERROR: No jobId found in response"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    echo "Synonym replacement view creation job started. Job ID: $JOB_ID"
+                    echo "Polling status every 20 seconds (max 120 attempts = ~40 min)"
+
+                    ATTEMPT=0
+                    MAX_ATTEMPTS=120
+
+                    while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+                        ATTEMPT=$((ATTEMPT + 1))
+
+                        STATUS_RESP=$(curl -s "http://localhost:${APP_PORT}/api/jobs/${JOB_ID}/status")
+
+                        STATUS=$(echo "$STATUS_RESP" | jq -r '.status // "UNKNOWN"')
+                        IS_COMPLETE=$(echo "$STATUS_RESP" | jq -r '.isComplete // "false"')
+                        PERCENTAGE=$(echo "$STATUS_RESP" | jq -r '.progress.percentage // 0')
+                        DETAILS=$(echo "$STATUS_RESP" | jq -r '.progress.details // "No details"')
+
+                        echo "Synonym Views $ATTEMPT/$MAX_ATTEMPTS | Status: $STATUS | $PERCENTAGE% | $DETAILS"
+
+                        if [ "$IS_COMPLETE" = "true" ]; then
+                            if [ "$STATUS" = "COMPLETED" ]; then
+                                echo "SUCCESS: Synonym replacement view creation completed"
+                                break
+                            else
+                                echo "ERROR: Synonym replacement view creation job finished with status: $STATUS"
+                                echo "$STATUS_RESP"
+                                exit 1
+                            fi
+                        fi
+
+                        if [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "ERROR" ] || [ "$STATUS" = "CANCELLED" ]; then
+                            echo "ERROR: Synonym replacement view creation job entered failure state: $STATUS"
+                            echo "$STATUS_RESP"
+                            exit 1
+                        fi
+
+                        sleep 20
+                    done
+
+                    if [ "$IS_COMPLETE" != "true" ]; then
+                        echo "ERROR: Synonym replacement view creation timeout after $MAX_ATTEMPTS attempts"
+                        echo "$STATUS_RESP"
+                        exit 1
+                    fi
+
+                    echo ""
+                    echo "Views: Extract, Stubs & Synonym Views stage completed successfully."
+                '''
+            }
+        }
+
+        stage('Functions: Extract & Stubs') {
+            when { expression { params.MIGRATE_PLSQL } }
+            steps {
+                sh '''
+                    set -eu # fail fast on errors
+
+                    # ══════════════════════════════════════════════════════════════════════════
+                    # FUNCTION EXTRACTION (step 22)
+                    # Also indexes package SPEC TYPES, which every later pkg.type resolution
+                    # reads -- so this step costs more than functions if it is skipped.
+                    # Package private functions are invisible in ALL_PROCEDURES, so package
+                    # bodies are scanned here too; expect this to be slow on large packages.
+                    # ══════════════════════════════════════════════════════════════════════════
+                    echo "Starting Oracle function extraction job..."
+
+                    RESPONSE=$(curl -s -w "\\n%{http_code}" \
+                        -X POST "http://localhost:${APP_PORT}/api/functions/oracle/extract" \
+                        -H 'Content-Type: application/json')
+
+                    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+                    BODY=$(echo "$RESPONSE" | head -n-1)
+
+                    echo "Start request HTTP code: $HTTP_CODE"
+
+                    if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+                        echo "ERROR: Failed to start function extraction job"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    JOB_ID=$(echo "$BODY" | jq -r '.jobId // empty')
+
+                    if [ -z "$JOB_ID" ]; then
+                        echo "ERROR: No jobId found in response"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    echo "Function extraction job started. Job ID: $JOB_ID"
+                    echo "Polling status every 20 seconds (max 180 attempts = ~60 min)"
+
+                    ATTEMPT=0
+                    MAX_ATTEMPTS=180
+
+                    while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+                        ATTEMPT=$((ATTEMPT + 1))
+
+                        STATUS_RESP=$(curl -s "http://localhost:${APP_PORT}/api/jobs/${JOB_ID}/status")
+
+                        STATUS=$(echo "$STATUS_RESP" | jq -r '.status // "UNKNOWN"')
+                        IS_COMPLETE=$(echo "$STATUS_RESP" | jq -r '.isComplete // "false"')
+                        PERCENTAGE=$(echo "$STATUS_RESP" | jq -r '.progress.percentage // 0')
+                        DETAILS=$(echo "$STATUS_RESP" | jq -r '.progress.details // "No details"')
+
+                        echo "Function Extract $ATTEMPT/$MAX_ATTEMPTS | Status: $STATUS | $PERCENTAGE% | $DETAILS"
+
+                        if [ "$IS_COMPLETE" = "true" ]; then
+                            if [ "$STATUS" = "COMPLETED" ]; then
+                                echo "SUCCESS: Function extraction completed"
+                                break
+                            else
+                                echo "ERROR: Function extraction job finished with status: $STATUS"
+                                echo "$STATUS_RESP"
+                                exit 1
+                            fi
+                        fi
+
+                        if [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "ERROR" ] || [ "$STATUS" = "CANCELLED" ]; then
+                            echo "ERROR: Function extraction job entered failure state: $STATUS"
+                            echo "$STATUS_RESP"
+                            exit 1
+                        fi
+
+                        sleep 20
+                    done
+
+                    if [ "$IS_COMPLETE" != "true" ]; then
+                        echo "ERROR: Function extraction timeout after $MAX_ATTEMPTS attempts"
+                        echo "$STATUS_RESP"
+                        exit 1
+                    fi
+
+                    # ══════════════════════════════════════════════════════════════════════════
+                    # FUNCTION STUB CREATION (step 23)
+                    # Signatures only, from ALL_ARGUMENTS. Package members are flattened to
+                    # packagename__functionname. Always created as FUNCTIONs (never PROCEDUREs)
+                    # so the implementation step can CREATE OR REPLACE them.
+                    # ══════════════════════════════════════════════════════════════════════════
+                    echo ""
+                    echo "Starting PostgreSQL function stub creation job..."
+
+                    RESPONSE=$(curl -s -w "\\n%{http_code}" \
+                        -X POST "http://localhost:${APP_PORT}/api/functions/postgres/stubs/create" \
+                        -H 'Content-Type: application/json')
+
+                    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+                    BODY=$(echo "$RESPONSE" | head -n-1)
+
+                    echo "Start request HTTP code: $HTTP_CODE"
+
+                    if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+                        echo "ERROR: Failed to start function stub creation job"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    JOB_ID=$(echo "$BODY" | jq -r '.jobId // empty')
+
+                    if [ -z "$JOB_ID" ]; then
+                        echo "ERROR: No jobId found in response"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    echo "Function stub creation job started. Job ID: $JOB_ID"
+                    echo "Polling status every 20 seconds (max 180 attempts = ~60 min)"
+
+                    ATTEMPT=0
+                    MAX_ATTEMPTS=180
+
+                    while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+                        ATTEMPT=$((ATTEMPT + 1))
+
+                        STATUS_RESP=$(curl -s "http://localhost:${APP_PORT}/api/jobs/${JOB_ID}/status")
+
+                        STATUS=$(echo "$STATUS_RESP" | jq -r '.status // "UNKNOWN"')
+                        IS_COMPLETE=$(echo "$STATUS_RESP" | jq -r '.isComplete // "false"')
+                        PERCENTAGE=$(echo "$STATUS_RESP" | jq -r '.progress.percentage // 0')
+                        DETAILS=$(echo "$STATUS_RESP" | jq -r '.progress.details // "No details"')
+
+                        echo "Function Stubs $ATTEMPT/$MAX_ATTEMPTS | Status: $STATUS | $PERCENTAGE% | $DETAILS"
+
+                        if [ "$IS_COMPLETE" = "true" ]; then
+                            if [ "$STATUS" = "COMPLETED" ]; then
+                                echo "SUCCESS: Function stub creation completed"
+                                break
+                            else
+                                echo "ERROR: Function stub creation job finished with status: $STATUS"
+                                echo "$STATUS_RESP"
+                                exit 1
+                            fi
+                        fi
+
+                        if [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "ERROR" ] || [ "$STATUS" = "CANCELLED" ]; then
+                            echo "ERROR: Function stub creation job entered failure state: $STATUS"
+                            echo "$STATUS_RESP"
+                            exit 1
+                        fi
+
+                        sleep 20
+                    done
+
+                    if [ "$IS_COMPLETE" != "true" ]; then
+                        echo "ERROR: Function stub creation timeout after $MAX_ATTEMPTS attempts"
+                        echo "$STATUS_RESP"
+                        exit 1
+                    fi
+
+                    echo ""
+                    echo "Functions: Extract & Stubs stage completed successfully."
+                '''
+            }
+        }
+
+        stage('Type Methods: Extract & Stubs') {
+            when { expression { params.MIGRATE_PLSQL } }
+            steps {
+                sh '''
+                    set -eu # fail fast on errors
+
+                    # ══════════════════════════════════════════════════════════════════════════
+                    # TYPE METHOD EXTRACTION (step 24)
+                    # Private type methods are invisible in ALL_TYPE_METHODS, so the type body
+                    # is scanned rather than queried.
+                    # ══════════════════════════════════════════════════════════════════════════
+                    echo "Starting Oracle type method extraction job..."
+
+                    RESPONSE=$(curl -s -w "\\n%{http_code}" \
+                        -X POST "http://localhost:${APP_PORT}/api/type-methods/oracle/extract" \
+                        -H 'Content-Type: application/json')
+
+                    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+                    BODY=$(echo "$RESPONSE" | head -n-1)
+
+                    echo "Start request HTTP code: $HTTP_CODE"
+
+                    if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+                        echo "ERROR: Failed to start type method extraction job"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    JOB_ID=$(echo "$BODY" | jq -r '.jobId // empty')
+
+                    if [ -z "$JOB_ID" ]; then
+                        echo "ERROR: No jobId found in response"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    echo "Type method extraction job started. Job ID: $JOB_ID"
+                    echo "Polling status every 10 seconds (max 120 attempts = ~20 min)"
+
+                    ATTEMPT=0
+                    MAX_ATTEMPTS=120
+
+                    while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+                        ATTEMPT=$((ATTEMPT + 1))
+
+                        STATUS_RESP=$(curl -s "http://localhost:${APP_PORT}/api/jobs/${JOB_ID}/status")
+
+                        STATUS=$(echo "$STATUS_RESP" | jq -r '.status // "UNKNOWN"')
+                        IS_COMPLETE=$(echo "$STATUS_RESP" | jq -r '.isComplete // "false"')
+                        PERCENTAGE=$(echo "$STATUS_RESP" | jq -r '.progress.percentage // 0')
+                        DETAILS=$(echo "$STATUS_RESP" | jq -r '.progress.details // "No details"')
+
+                        echo "TypeMethod Extract $ATTEMPT/$MAX_ATTEMPTS | Status: $STATUS | $PERCENTAGE% | $DETAILS"
+
+                        if [ "$IS_COMPLETE" = "true" ]; then
+                            if [ "$STATUS" = "COMPLETED" ]; then
+                                echo "SUCCESS: Type method extraction completed"
+                                break
+                            else
+                                echo "ERROR: Type method extraction job finished with status: $STATUS"
+                                echo "$STATUS_RESP"
+                                exit 1
+                            fi
+                        fi
+
+                        if [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "ERROR" ] || [ "$STATUS" = "CANCELLED" ]; then
+                            echo "ERROR: Type method extraction job entered failure state: $STATUS"
+                            echo "$STATUS_RESP"
+                            exit 1
+                        fi
+
+                        sleep 10
+                    done
+
+                    if [ "$IS_COMPLETE" != "true" ]; then
+                        echo "ERROR: Type method extraction timeout after $MAX_ATTEMPTS attempts"
+                        echo "$STATUS_RESP"
+                        exit 1
+                    fi
+
+                    # ══════════════════════════════════════════════════════════════════════════
+                    # TYPE METHOD STUB CREATION (step 25)
+                    # Named typename__methodname. Oracle overloads that collapse to one
+                    # PostgreSQL signature after type mapping are refused as a set rather than
+                    # silently overwriting each other -- expect those as reported failures.
+                    # ══════════════════════════════════════════════════════════════════════════
+                    echo ""
+                    echo "Starting PostgreSQL type method stub creation job..."
+
+                    RESPONSE=$(curl -s -w "\\n%{http_code}" \
+                        -X POST "http://localhost:${APP_PORT}/api/type-methods/postgres/stubs/create" \
+                        -H 'Content-Type: application/json')
+
+                    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+                    BODY=$(echo "$RESPONSE" | head -n-1)
+
+                    echo "Start request HTTP code: $HTTP_CODE"
+
+                    if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+                        echo "ERROR: Failed to start type method stub creation job"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    JOB_ID=$(echo "$BODY" | jq -r '.jobId // empty')
+
+                    if [ -z "$JOB_ID" ]; then
+                        echo "ERROR: No jobId found in response"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    echo "Type method stub creation job started. Job ID: $JOB_ID"
+                    echo "Polling status every 10 seconds (max 120 attempts = ~20 min)"
+
+                    ATTEMPT=0
+                    MAX_ATTEMPTS=120
+
+                    while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+                        ATTEMPT=$((ATTEMPT + 1))
+
+                        STATUS_RESP=$(curl -s "http://localhost:${APP_PORT}/api/jobs/${JOB_ID}/status")
+
+                        STATUS=$(echo "$STATUS_RESP" | jq -r '.status // "UNKNOWN"')
+                        IS_COMPLETE=$(echo "$STATUS_RESP" | jq -r '.isComplete // "false"')
+                        PERCENTAGE=$(echo "$STATUS_RESP" | jq -r '.progress.percentage // 0')
+                        DETAILS=$(echo "$STATUS_RESP" | jq -r '.progress.details // "No details"')
+
+                        echo "TypeMethod Stubs $ATTEMPT/$MAX_ATTEMPTS | Status: $STATUS | $PERCENTAGE% | $DETAILS"
+
+                        if [ "$IS_COMPLETE" = "true" ]; then
+                            if [ "$STATUS" = "COMPLETED" ]; then
+                                echo "SUCCESS: Type method stub creation completed"
+                                break
+                            else
+                                echo "ERROR: Type method stub creation job finished with status: $STATUS"
+                                echo "$STATUS_RESP"
+                                exit 1
+                            fi
+                        fi
+
+                        if [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "ERROR" ] || [ "$STATUS" = "CANCELLED" ]; then
+                            echo "ERROR: Type method stub creation job entered failure state: $STATUS"
+                            echo "$STATUS_RESP"
+                            exit 1
+                        fi
+
+                        sleep 10
+                    done
+
+                    if [ "$IS_COMPLETE" != "true" ]; then
+                        echo "ERROR: Type method stub creation timeout after $MAX_ATTEMPTS attempts"
+                        echo "$STATUS_RESP"
+                        exit 1
+                    fi
+
+                    echo ""
+                    echo "Type Methods: Extract & Stubs stage completed successfully."
+                '''
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════════════════════════
+        // NOT gated by MIGRATE_PLSQL, on purpose.
+        // Step 26 installs the oracle_compat schema: PostgreSQL equivalents for Oracle
+        // built-ins (DBMS_OUTPUT, DBMS_LOB, UTL_FILE, ...) plus the standalone entries
+        // oracle_compat.bitand and the oracle_compat.to_char overloads. Plain view SQL
+        // reaches for those, so this must run even on a PL/SQL-free migration -- and it
+        // must run BEFORE any implementation step, since a view referencing
+        // oracle_compat.bitand fails to create if the schema is not there yet.
+        // ══════════════════════════════════════════════════════════════════════════════
+        stage('Oracle Compatibility Layer') {
+            steps {
+                sh '''
+                    set -eu # fail fast on errors
+
+                    echo "Starting Oracle compatibility layer installation job (step 26)..."
+                    echo "Installing PostgreSQL equivalents for Oracle built-ins into schema oracle_compat"
+
+                    RESPONSE=$(curl -s -w "\\n%{http_code}" \
+                        -X POST "http://localhost:${APP_PORT}/api/oracle-compat/postgres/install" \
+                        -H 'Content-Type: application/json')
+
+                    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+                    BODY=$(echo "$RESPONSE" | head -n-1)
+
+                    echo "Start request HTTP code: $HTTP_CODE"
+
+                    if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+                        echo "ERROR: Failed to start Oracle compatibility installation job"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    JOB_ID=$(echo "$BODY" | jq -r '.jobId // empty')
+
+                    if [ -z "$JOB_ID" ]; then
+                        echo "ERROR: No jobId found in response"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    echo "Oracle compatibility installation job started. Job ID: $JOB_ID"
+                    echo "Polling status every 10 seconds (max 60 attempts = ~10 min)"
+
+                    ATTEMPT=0
+                    MAX_ATTEMPTS=60
+
+                    while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+                        ATTEMPT=$((ATTEMPT + 1))
+
+                        STATUS_RESP=$(curl -s "http://localhost:${APP_PORT}/api/jobs/${JOB_ID}/status")
+
+                        STATUS=$(echo "$STATUS_RESP" | jq -r '.status // "UNKNOWN"')
+                        IS_COMPLETE=$(echo "$STATUS_RESP" | jq -r '.isComplete // "false"')
+                        PERCENTAGE=$(echo "$STATUS_RESP" | jq -r '.progress.percentage // 0')
+                        DETAILS=$(echo "$STATUS_RESP" | jq -r '.progress.details // "No details"')
+
+                        echo "Oracle Compat Install $ATTEMPT/$MAX_ATTEMPTS | Status: $STATUS | $PERCENTAGE% | $DETAILS"
+
+                        if [ "$IS_COMPLETE" = "true" ]; then
+                            if [ "$STATUS" = "COMPLETED" ]; then
+                                echo "SUCCESS: Oracle compatibility layer installed"
+                                break
+                            else
+                                echo "ERROR: Oracle compatibility installation job finished with status: $STATUS"
+                                echo "$STATUS_RESP"
+                                exit 1
+                            fi
+                        fi
+
+                        if [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "ERROR" ] || [ "$STATUS" = "CANCELLED" ]; then
+                            echo "ERROR: Oracle compatibility installation job entered failure state: $STATUS"
+                            echo "$STATUS_RESP"
+                            exit 1
+                        fi
+
+                        sleep 10
+                    done
+
+                    if [ "$IS_COMPLETE" != "true" ]; then
+                        echo "ERROR: Oracle compatibility installation timeout after $MAX_ATTEMPTS attempts"
+                        echo "$STATUS_RESP"
+                        exit 1
+                    fi
+
+                    # ── Verification (informational) ─────────────────────────────────────────
+                    echo ""
+                    echo "Starting Oracle compatibility layer verification job..."
+
+                    RESPONSE=$(curl -s -w "\\n%{http_code}" \
+                        -X POST "http://localhost:${APP_PORT}/api/oracle-compat/postgres/verify" \
+                        -H 'Content-Type: application/json')
+
+                    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+                    BODY=$(echo "$RESPONSE" | head -n-1)
+
+                    echo "Start request HTTP code: $HTTP_CODE"
+
+                    if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+                        echo "ERROR: Failed to start Oracle compatibility verification job"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    JOB_ID=$(echo "$BODY" | jq -r '.jobId // empty')
+
+                    if [ -z "$JOB_ID" ]; then
+                        echo "ERROR: No jobId found in response"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    echo "Oracle compatibility verification job started. Job ID: $JOB_ID"
+                    echo "Polling status every 10 seconds (max 60 attempts = ~10 min)"
+
+                    ATTEMPT=0
+                    MAX_ATTEMPTS=60
+
+                    while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+                        ATTEMPT=$((ATTEMPT + 1))
+
+                        STATUS_RESP=$(curl -s "http://localhost:${APP_PORT}/api/jobs/${JOB_ID}/status")
+
+                        STATUS=$(echo "$STATUS_RESP" | jq -r '.status // "UNKNOWN"')
+                        IS_COMPLETE=$(echo "$STATUS_RESP" | jq -r '.isComplete // "false"')
+                        PERCENTAGE=$(echo "$STATUS_RESP" | jq -r '.progress.percentage // 0')
+                        DETAILS=$(echo "$STATUS_RESP" | jq -r '.progress.details // "No details"')
+
+                        echo "Oracle Compat Verify $ATTEMPT/$MAX_ATTEMPTS | Status: $STATUS | $PERCENTAGE% | $DETAILS"
+
+                        if [ "$IS_COMPLETE" = "true" ]; then
+                            if [ "$STATUS" = "COMPLETED" ]; then
+                                echo "SUCCESS: Oracle compatibility verification completed"
+                                break
+                            else
+                                echo "ERROR: Oracle compatibility verification job finished with status: $STATUS"
+                                echo "$STATUS_RESP"
+                                exit 1
+                            fi
+                        fi
+
+                        if [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "ERROR" ] || [ "$STATUS" = "CANCELLED" ]; then
+                            echo "ERROR: Oracle compatibility verification job entered failure state: $STATUS"
+                            echo "$STATUS_RESP"
+                            exit 1
+                        fi
+
+                        sleep 10
+                    done
+
+                    if [ "$IS_COMPLETE" != "true" ]; then
+                        echo "ERROR: Oracle compatibility verification timeout after $MAX_ATTEMPTS attempts"
+                        echo "$STATUS_RESP"
+                        exit 1
+                    fi
+
+                    echo ""
+                    echo "Oracle Compatibility Layer stage completed successfully."
+                '''
+            }
+        }
+
+        stage('Views: Implement') {
+            steps {
+                sh '''
+                    set -eu # fail fast on errors
+
+                    # ══════════════════════════════════════════════════════════════════════════
+                    # VIEW IMPLEMENTATION (step 27, full SQL transformation)
+                    # CREATE OR REPLACE VIEW preserves dependencies, so the stubs created
+                    # earlier are replaced in place rather than dropped.
+                    # Runs AFTER the compatibility layer (needs oracle_compat.bitand etc.) and,
+                    # when MIGRATE_PLSQL is on, after function stubs -- a view calling a
+                    # package function fails with "function X() does not exist" otherwise.
+                    # ══════════════════════════════════════════════════════════════════════════
+                    echo "Starting PostgreSQL view implementation job..."
+                    echo "Transforming Oracle view SQL to PostgreSQL"
+
+                    RESPONSE=$(curl -s -w "\\n%{http_code}" \
+                        -X POST "http://localhost:${APP_PORT}/api/views/postgres/implementation/create" \
+                        -H 'Content-Type: application/json')
+
+                    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+                    BODY=$(echo "$RESPONSE" | head -n-1)
+
+                    echo "Start request HTTP code: $HTTP_CODE"
+
+                    if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+                        echo "ERROR: Failed to start view implementation job"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    JOB_ID=$(echo "$BODY" | jq -r '.jobId // empty')
+
+                    if [ -z "$JOB_ID" ]; then
+                        echo "ERROR: No jobId found in response"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    echo "View implementation job started. Job ID: $JOB_ID"
+                    echo "Polling status every 20 seconds (max 240 attempts = ~80 min)"
+
+                    ATTEMPT=0
+                    MAX_ATTEMPTS=240
+
+                    while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+                        ATTEMPT=$((ATTEMPT + 1))
+
+                        STATUS_RESP=$(curl -s "http://localhost:${APP_PORT}/api/jobs/${JOB_ID}/status")
+
+                        STATUS=$(echo "$STATUS_RESP" | jq -r '.status // "UNKNOWN"')
+                        IS_COMPLETE=$(echo "$STATUS_RESP" | jq -r '.isComplete // "false"')
+                        PERCENTAGE=$(echo "$STATUS_RESP" | jq -r '.progress.percentage // 0')
+                        DETAILS=$(echo "$STATUS_RESP" | jq -r '.progress.details // "No details"')
+
+                        echo "View Impl $ATTEMPT/$MAX_ATTEMPTS | Status: $STATUS | $PERCENTAGE% | $DETAILS"
+
+                        if [ "$IS_COMPLETE" = "true" ]; then
+                            if [ "$STATUS" = "COMPLETED" ]; then
+                                echo "SUCCESS: View implementation completed"
+                                break
+                            else
+                                echo "ERROR: View implementation job finished with status: $STATUS"
+                                echo "$STATUS_RESP"
+                                exit 1
+                            fi
+                        fi
+
+                        if [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "ERROR" ] || [ "$STATUS" = "CANCELLED" ]; then
+                            echo "ERROR: View implementation job entered failure state: $STATUS"
+                            echo "$STATUS_RESP"
+                            exit 1
+                        fi
+
+                        sleep 20
+                    done
+
+                    if [ "$IS_COMPLETE" != "true" ]; then
+                        echo "ERROR: View implementation timeout after $MAX_ATTEMPTS attempts"
+                        echo "$STATUS_RESP"
+                        exit 1
+                    fi
+
+                    echo ""
+                    echo "Views: Implement stage completed successfully."
+                '''
+            }
+        }
+
+        stage('Functions: Implement') {
+            when { expression { params.MIGRATE_PLSQL } }
+            steps {
+                sh '''
+                    set -eu # fail fast on errors
+
+                    # ══════════════════════════════════════════════════════════════════════════
+                    # FUNCTION IMPLEMENTATION (step 28)
+                    # Standalone AND package functions, despite the endpoint name.
+                    # This is the longest-running job in the pipeline -- it transforms every
+                    # PL/SQL body in scope.
+                    # ══════════════════════════════════════════════════════════════════════════
+                    echo "Starting PostgreSQL function implementation job..."
+                    echo "Transforming standalone and package PL/SQL to PL/pgSQL"
+                    echo "NOTE: This is the slowest stage; allow several hours on a large schema"
+
+                    RESPONSE=$(curl -s -w "\\n%{http_code}" \
+                        -X POST "http://localhost:${APP_PORT}/api/functions/postgres/standalone-implementation/create" \
+                        -H 'Content-Type: application/json')
+
+                    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+                    BODY=$(echo "$RESPONSE" | head -n-1)
+
+                    echo "Start request HTTP code: $HTTP_CODE"
+
+                    if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+                        echo "ERROR: Failed to start function implementation job"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    JOB_ID=$(echo "$BODY" | jq -r '.jobId // empty')
+
+                    if [ -z "$JOB_ID" ]; then
+                        echo "ERROR: No jobId found in response"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    echo "Function implementation job started. Job ID: $JOB_ID"
+                    echo "Polling status every 30 seconds (max 480 attempts = ~4 hours)"
+
+                    ATTEMPT=0
+                    MAX_ATTEMPTS=480
+
+                    while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+                        ATTEMPT=$((ATTEMPT + 1))
+
+                        STATUS_RESP=$(curl -s "http://localhost:${APP_PORT}/api/jobs/${JOB_ID}/status")
+
+                        STATUS=$(echo "$STATUS_RESP" | jq -r '.status // "UNKNOWN"')
+                        IS_COMPLETE=$(echo "$STATUS_RESP" | jq -r '.isComplete // "false"')
+                        PERCENTAGE=$(echo "$STATUS_RESP" | jq -r '.progress.percentage // 0')
+                        DETAILS=$(echo "$STATUS_RESP" | jq -r '.progress.details // "No details"')
+
+                        echo "Function Impl $ATTEMPT/$MAX_ATTEMPTS | Status: $STATUS | $PERCENTAGE% | $DETAILS"
+
+                        if [ "$IS_COMPLETE" = "true" ]; then
+                            if [ "$STATUS" = "COMPLETED" ]; then
+                                echo "SUCCESS: Function implementation completed"
+                                break
+                            else
+                                echo "ERROR: Function implementation job finished with status: $STATUS"
+                                echo "$STATUS_RESP"
+                                exit 1
+                            fi
+                        fi
+
+                        if [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "ERROR" ] || [ "$STATUS" = "CANCELLED" ]; then
+                            echo "ERROR: Function implementation job entered failure state: $STATUS"
+                            echo "$STATUS_RESP"
+                            exit 1
+                        fi
+
+                        sleep 30
+                    done
+
+                    if [ "$IS_COMPLETE" != "true" ]; then
+                        echo "ERROR: Function implementation timeout after $MAX_ATTEMPTS attempts"
+                        echo "$STATUS_RESP"
+                        exit 1
+                    fi
+
+                    echo ""
+                    echo "Functions: Implement stage completed successfully."
+                '''
+            }
+        }
+
+        stage('Type Methods: Implement') {
+            when { expression { params.MIGRATE_PLSQL } }
+            steps {
+                sh '''
+                    set -eu # fail fast on errors
+
+                    # ══════════════════════════════════════════════════════════════════════════
+                    # TYPE METHOD IMPLEMENTATION (step 29)
+                    # ══════════════════════════════════════════════════════════════════════════
+                    echo "Starting PostgreSQL type method implementation job..."
+                    echo "Transforming Oracle object type method bodies to PL/pgSQL"
+
+                    RESPONSE=$(curl -s -w "\\n%{http_code}" \
+                        -X POST "http://localhost:${APP_PORT}/api/type-methods/postgres/implementation/create" \
+                        -H 'Content-Type: application/json')
+
+                    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+                    BODY=$(echo "$RESPONSE" | head -n-1)
+
+                    echo "Start request HTTP code: $HTTP_CODE"
+
+                    if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+                        echo "ERROR: Failed to start type method implementation job"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    JOB_ID=$(echo "$BODY" | jq -r '.jobId // empty')
+
+                    if [ -z "$JOB_ID" ]; then
+                        echo "ERROR: No jobId found in response"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    echo "Type method implementation job started. Job ID: $JOB_ID"
+                    echo "Polling status every 20 seconds (max 240 attempts = ~80 min)"
+
+                    ATTEMPT=0
+                    MAX_ATTEMPTS=240
+
+                    while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+                        ATTEMPT=$((ATTEMPT + 1))
+
+                        STATUS_RESP=$(curl -s "http://localhost:${APP_PORT}/api/jobs/${JOB_ID}/status")
+
+                        STATUS=$(echo "$STATUS_RESP" | jq -r '.status // "UNKNOWN"')
+                        IS_COMPLETE=$(echo "$STATUS_RESP" | jq -r '.isComplete // "false"')
+                        PERCENTAGE=$(echo "$STATUS_RESP" | jq -r '.progress.percentage // 0')
+                        DETAILS=$(echo "$STATUS_RESP" | jq -r '.progress.details // "No details"')
+
+                        echo "TypeMethod Impl $ATTEMPT/$MAX_ATTEMPTS | Status: $STATUS | $PERCENTAGE% | $DETAILS"
+
+                        if [ "$IS_COMPLETE" = "true" ]; then
+                            if [ "$STATUS" = "COMPLETED" ]; then
+                                echo "SUCCESS: Type method implementation completed"
+                                break
+                            else
+                                echo "ERROR: Type method implementation job finished with status: $STATUS"
+                                echo "$STATUS_RESP"
+                                exit 1
+                            fi
+                        fi
+
+                        if [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "ERROR" ] || [ "$STATUS" = "CANCELLED" ]; then
+                            echo "ERROR: Type method implementation job entered failure state: $STATUS"
+                            echo "$STATUS_RESP"
+                            exit 1
+                        fi
+
+                        sleep 20
+                    done
+
+                    if [ "$IS_COMPLETE" != "true" ]; then
+                        echo "ERROR: Type method implementation timeout after $MAX_ATTEMPTS attempts"
+                        echo "$STATUS_RESP"
+                        exit 1
+                    fi
+
+                    echo ""
+                    echo "Type Methods: Implement stage completed successfully."
+                '''
+            }
+        }
+
+        stage('Triggers: Extract & Implement') {
+            when { expression { params.MIGRATE_TRIGGERS } }
+            steps {
+                sh '''
+                    set -eu # fail fast on errors
+
+                    # ══════════════════════════════════════════════════════════════════════════
+                    # TRIGGER EXTRACTION
+                    # ══════════════════════════════════════════════════════════════════════════
+                    echo "Starting Oracle trigger extraction job..."
+
+                    RESPONSE=$(curl -s -w "\\n%{http_code}" \
+                        -X POST "http://localhost:${APP_PORT}/api/triggers/oracle/extract" \
+                        -H 'Content-Type: application/json')
+
+                    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+                    BODY=$(echo "$RESPONSE" | head -n-1)
+
+                    echo "Start request HTTP code: $HTTP_CODE"
+
+                    if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+                        echo "ERROR: Failed to start trigger extraction job"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    JOB_ID=$(echo "$BODY" | jq -r '.jobId // empty')
+
+                    if [ -z "$JOB_ID" ]; then
+                        echo "ERROR: No jobId found in response"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    echo "Trigger extraction job started. Job ID: $JOB_ID"
+                    echo "Polling status every 10 seconds (max 120 attempts = ~20 min)"
+
+                    ATTEMPT=0
+                    MAX_ATTEMPTS=120
+
+                    while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+                        ATTEMPT=$((ATTEMPT + 1))
+
+                        STATUS_RESP=$(curl -s "http://localhost:${APP_PORT}/api/jobs/${JOB_ID}/status")
+
+                        STATUS=$(echo "$STATUS_RESP" | jq -r '.status // "UNKNOWN"')
+                        IS_COMPLETE=$(echo "$STATUS_RESP" | jq -r '.isComplete // "false"')
+                        PERCENTAGE=$(echo "$STATUS_RESP" | jq -r '.progress.percentage // 0')
+                        DETAILS=$(echo "$STATUS_RESP" | jq -r '.progress.details // "No details"')
+
+                        echo "Trigger Extract $ATTEMPT/$MAX_ATTEMPTS | Status: $STATUS | $PERCENTAGE% | $DETAILS"
+
+                        if [ "$IS_COMPLETE" = "true" ]; then
+                            if [ "$STATUS" = "COMPLETED" ]; then
+                                echo "SUCCESS: Trigger extraction completed"
+                                break
+                            else
+                                echo "ERROR: Trigger extraction job finished with status: $STATUS"
+                                echo "$STATUS_RESP"
+                                exit 1
+                            fi
+                        fi
+
+                        if [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "ERROR" ] || [ "$STATUS" = "CANCELLED" ]; then
+                            echo "ERROR: Trigger extraction job entered failure state: $STATUS"
+                            echo "$STATUS_RESP"
+                            exit 1
+                        fi
+
+                        sleep 10
+                    done
+
+                    if [ "$IS_COMPLETE" != "true" ]; then
+                        echo "ERROR: Trigger extraction timeout after $MAX_ATTEMPTS attempts"
+                        echo "$STATUS_RESP"
+                        exit 1
+                    fi
+
+                    # ══════════════════════════════════════════════════════════════════════════
+                    # TRIGGER IMPLEMENTATION
+                    # ══════════════════════════════════════════════════════════════════════════
+                    echo ""
+                    echo "Starting PostgreSQL trigger implementation job..."
+                    echo "Transforming Oracle PL/SQL triggers to PostgreSQL PL/pgSQL"
+
+                    RESPONSE=$(curl -s -w "\\n%{http_code}" \
+                        -X POST "http://localhost:${APP_PORT}/api/triggers/postgres/implementation/create" \
+                        -H 'Content-Type: application/json')
+
+                    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+                    BODY=$(echo "$RESPONSE" | head -n-1)
+
+                    echo "Start request HTTP code: $HTTP_CODE"
+
+                    if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+                        echo "ERROR: Failed to start trigger implementation job"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    JOB_ID=$(echo "$BODY" | jq -r '.jobId // empty')
+
+                    if [ -z "$JOB_ID" ]; then
+                        echo "ERROR: No jobId found in response"
+                        echo "$BODY"
+                        exit 1
+                    fi
+
+                    echo "Trigger implementation job started. Job ID: $JOB_ID"
+                    echo "Polling status every 10 seconds (max 240 attempts = ~40 min)"
+
+                    ATTEMPT=0
+                    MAX_ATTEMPTS=240
+
+                    while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+                        ATTEMPT=$((ATTEMPT + 1))
+
+                        STATUS_RESP=$(curl -s "http://localhost:${APP_PORT}/api/jobs/${JOB_ID}/status")
+
+                        STATUS=$(echo "$STATUS_RESP" | jq -r '.status // "UNKNOWN"')
+                        IS_COMPLETE=$(echo "$STATUS_RESP" | jq -r '.isComplete // "false"')
+                        PERCENTAGE=$(echo "$STATUS_RESP" | jq -r '.progress.percentage // 0')
+                        DETAILS=$(echo "$STATUS_RESP" | jq -r '.progress.details // "No details"')
+
+                        echo "Trigger Impl $ATTEMPT/$MAX_ATTEMPTS | Status: $STATUS | $PERCENTAGE% | $DETAILS"
+
+                        if [ "$IS_COMPLETE" = "true" ]; then
+                            if [ "$STATUS" = "COMPLETED" ]; then
+                                echo "SUCCESS: Trigger implementation completed"
+                                break
+                            else
+                                echo "ERROR: Trigger implementation job finished with status: $STATUS"
+                                echo "$STATUS_RESP"
+                                exit 1
+                            fi
+                        fi
+
+                        if [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "ERROR" ] || [ "$STATUS" = "CANCELLED" ]; then
+                            echo "ERROR: Trigger implementation job entered failure state: $STATUS"
+                            echo "$STATUS_RESP"
+                            exit 1
+                        fi
+
+                        sleep 10
+                    done
+
+                    if [ "$IS_COMPLETE" != "true" ]; then
+                        echo "ERROR: Trigger implementation timeout after $MAX_ATTEMPTS attempts"
+                        echo "$STATUS_RESP"
+                        exit 1
+                    fi
+
+                    echo ""
+                    echo "Triggers stage completed successfully."
+                '''
+            }
+        }
+    }
+
+    post {
+        always {
+            // Automatic cleanup
+
+            sh '''
+                # Stop Quarkus app if PID file exists
+                if [ -f app.pid ]; then
+                    kill $(cat app.pid) || true
+                    rm -f app.pid
+                fi
+                # Optional: remove log too (or keep for next run debugging)
+                # rm -f ${QUARKUS_LOG}
+            '''
+
+            archiveArtifacts artifacts: '*.log, app.pid',
+                           allowEmptyArchive: true,
+                           fingerprint: true
+
+            echo """
+╔════════════════════════════════════════════════════════════════════════════╗
+║                         BUILD COMPLETED — CLEANUP PERFORMED                ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+MIGRATION SCOPE OF THIS RUN
+  PL/SQL routines (steps 22-25, 28-29) : ${params.MIGRATE_PLSQL ? 'MIGRATED' : 'SKIPPED — views were assumed free of PL/SQL calls'}
+  Triggers (steps 30-31)               : ${params.MIGRATE_TRIGGERS ? 'MIGRATED' : 'SKIPPED'}
+  Oracle compatibility layer (step 26) : ALWAYS INSTALLED
+
+A stage reported as green means its job ended COMPLETED, NOT that every object
+in it migrated. Per-object failures are business outcomes, not job failures --
+read the per-step counts above, or the archived report in logs/reports/, before
+treating a green build as a complete migration.
+
+PostgreSQL container '${PG_CONTAINER_NAME}' was left running for manual review.
+Quarkus application (port ${APP_PORT}) has been terminated.
+
+Logs and PID file (if any) have been archived as build artifacts.
+
+Next run will remove the old container and start fresh.
+            """
+        }
+
+        success {
+            echo "SUCCESS — build, smoke test, and cleanup completed."
+        }
+
+        failure {
+            echo "Build failed — cleanup was still attempted."
+            echo "Check console and archived logs if needed."
+        }
+    }
+}

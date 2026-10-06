@@ -1,0 +1,426 @@
+package me.christianrobert.orapgsync.transformer.context;
+
+import me.christianrobert.orapgsync.core.job.model.function.FunctionMetadata;
+import me.christianrobert.orapgsync.core.job.model.function.FunctionParameter;
+import me.christianrobert.orapgsync.core.job.model.function.PackageTypeMetadata;
+import me.christianrobert.orapgsync.core.job.model.objectdatatype.ObjectDataTypeMetaData;
+import me.christianrobert.orapgsync.core.job.model.objectdatatype.ObjectDataTypeVariable;
+import me.christianrobert.orapgsync.core.job.model.synonym.SynonymMetadata;
+import me.christianrobert.orapgsync.core.job.model.table.ColumnMetadata;
+import me.christianrobert.orapgsync.core.job.model.table.TableMetadata;
+import me.christianrobert.orapgsync.core.job.model.typemethod.TypeMethodMetadata;
+import me.christianrobert.orapgsync.core.service.StateService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+/**
+ * Builds metadata indices from StateService for fast lookups during transformation.
+ *
+ * <p>This is the bridge between StateService and the transformation module.
+ * It's the ONLY class that directly depends on StateService.
+ *
+ * <p>Usage:
+ * <pre>
+ * // In a job, build indices once at start
+ * TransformationIndices indices = MetadataIndexBuilder.build(
+ *     stateService,
+ *     stateService.getOracleSchemaNames()
+ * );
+ *
+ * // Pass indices to transformation service for all views
+ * for (ViewMetadata view : views) {
+ *     service.transformViewSql(view.getSql(), view.getSchema(), indices);
+ * }
+ * </pre>
+ */
+public class MetadataIndexBuilder {
+
+    private static final Logger log = LoggerFactory.getLogger(MetadataIndexBuilder.class);
+
+    /**
+     * Builds transformation indices from StateService metadata.
+     * Called once at start of transformation session.
+     *
+     * @param stateService StateService containing Oracle metadata
+     * @param schemas List of schemas to include in indices
+     * @return Immutable TransformationIndices ready for fast lookups
+     */
+    public static TransformationIndices build(StateService stateService, List<String> schemas) {
+        if (stateService == null) {
+            throw new IllegalArgumentException("StateService cannot be null");
+        }
+        if (schemas == null || schemas.isEmpty()) {
+            throw new IllegalArgumentException("Schemas list cannot be null or empty");
+        }
+
+        log.info("Building transformation indices for {} schemas", schemas.size());
+
+        // Normalize schemas to lowercase for case-insensitive lookups
+        Set<String> normalizedSchemas = new HashSet<>();
+        for (String schema : schemas) {
+            normalizedSchemas.add(schema.toLowerCase());
+        }
+
+        // Build each index
+        Map<String, Map<String, TransformationIndices.ColumnTypeInfo>> tableColumns =
+                indexTableColumns(stateService, normalizedSchemas);
+
+        Map<String, Set<String>> typeMethods =
+                indexTypeMethods(stateService, normalizedSchemas);
+
+        Set<String> packageFunctions =
+                indexPackageFunctions(stateService, normalizedSchemas);
+
+        Set<String> standaloneFunctions =
+                indexStandaloneFunctions(stateService, normalizedSchemas);
+
+        Set<String> noArgCallableRoutines =
+                indexNoArgCallableRoutines(stateService, normalizedSchemas);
+
+        Map<String, Map<String, String>> synonyms =
+                indexSynonyms(stateService);
+
+        Map<String, Map<String, String>> typeFieldTypes =
+                indexTypeFields(stateService, normalizedSchemas);
+
+        Set<String> objectTypeNames =
+                indexObjectTypeNames(stateService, normalizedSchemas);
+
+        Map<String, PackageTypeMetadata> packageTypes =
+                indexPackageTypes(stateService, normalizedSchemas);
+
+        log.info("Indices built: {} tables, {} types with methods, {} package functions, {} standalone functions, "
+                        + "{} no-arg-callable routines, {} synonym schemas, {} object types, {} packages with types",
+                tableColumns.size(), typeMethods.size(), packageFunctions.size(), standaloneFunctions.size(),
+                noArgCallableRoutines.size(), synonyms.size(), objectTypeNames.size(), packageTypes.size());
+
+        return new TransformationIndices(tableColumns, typeMethods, packageFunctions, synonyms, typeFieldTypes,
+                objectTypeNames, standaloneFunctions, noArgCallableRoutines, packageTypes);
+    }
+
+    /**
+     * Builds the package type index: "schema.package" → the types that package's spec declares.
+     *
+     * <p>Extracted at step 22 rather than derived here, because deriving it needs the spec source
+     * and an ANTLR parse per package. Filtered by schema for the same reason as every other index.
+     */
+    private static Map<String, PackageTypeMetadata> indexPackageTypes(
+            StateService stateService, Set<String> schemas) {
+
+        Map<String, PackageTypeMetadata> index = new HashMap<>();
+
+        for (PackageTypeMetadata packageTypes : stateService.getAllPackageTypes().values()) {
+            if (schemas.contains(packageTypes.getSchema().toLowerCase())) {
+                index.put(packageTypes.getQualifiedName(), packageTypes);
+            }
+        }
+
+        log.debug("Indexed types for {} packages", index.size());
+        return index;
+    }
+
+    /**
+     * Builds table column index: "schema.table" → column → type info.
+     */
+    private static Map<String, Map<String, TransformationIndices.ColumnTypeInfo>> indexTableColumns(
+            StateService stateService, Set<String> schemas) {
+
+        Map<String, Map<String, TransformationIndices.ColumnTypeInfo>> index = new HashMap<>();
+        int columnCount = 0;
+
+        for (TableMetadata table : stateService.getOracleTableMetadata()) {
+            String normalizedSchema = table.getSchema().toLowerCase();
+
+            if (!schemas.contains(normalizedSchema)) {
+                continue; // Skip tables not in target schemas
+            }
+
+            String qualifiedTable = normalizedSchema + "." + table.getTableName().toLowerCase();
+            Map<String, TransformationIndices.ColumnTypeInfo> columns = new HashMap<>();
+
+            for (ColumnMetadata column : table.getColumns()) {
+                String columnName = column.getColumnName().toLowerCase();
+                String typeName = column.getDataType();
+                String typeOwner = column.getDataTypeOwner();
+
+                // Normalize type owner (may be null for built-in types)
+                if (typeOwner != null) {
+                    typeOwner = typeOwner.toLowerCase();
+                }
+
+                columns.put(columnName, new TransformationIndices.ColumnTypeInfo(typeName, typeOwner));
+                columnCount++;
+            }
+
+            index.put(qualifiedTable, columns);
+        }
+
+        log.debug("Indexed {} columns across {} tables", columnCount, index.size());
+        return index;
+    }
+
+    /**
+     * Builds type method index: "schema.typename" → Set of method names.
+     */
+    private static Map<String, Set<String>> indexTypeMethods(
+            StateService stateService, Set<String> schemas) {
+
+        Map<String, Set<String>> index = new HashMap<>();
+        int methodCount = 0;
+
+        for (TypeMethodMetadata method : stateService.getOracleTypeMethodMetadata()) {
+            String normalizedSchema = method.getSchema().toLowerCase();
+
+            if (!schemas.contains(normalizedSchema)) {
+                continue; // Skip methods not in target schemas
+            }
+
+            String qualifiedType = normalizedSchema + "." + method.getTypeName().toLowerCase();
+            String methodName = method.getMethodName().toLowerCase();
+
+            index.computeIfAbsent(qualifiedType, k -> new HashSet<>()).add(methodName);
+            methodCount++;
+        }
+
+        log.debug("Indexed {} methods across {} types", methodCount, index.size());
+        return index;
+    }
+
+    /**
+     * Builds package function index: Set of "schema.package.function".
+     */
+    private static Set<String> indexPackageFunctions(
+            StateService stateService, Set<String> schemas) {
+
+        Set<String> index = new HashSet<>();
+
+        for (FunctionMetadata function : stateService.getOracleFunctionMetadata()) {
+            String normalizedSchema = function.getSchema().toLowerCase();
+
+            if (!schemas.contains(normalizedSchema)) {
+                continue; // Skip functions not in target schemas
+            }
+
+            // Only index package functions (not standalone functions)
+            if (function.getPackageName() != null && !function.getPackageName().isEmpty()) {
+                String qualifiedFunction = normalizedSchema + "." +
+                        function.getPackageName().toLowerCase() + "." +
+                        function.getObjectName().toLowerCase();
+
+                index.add(qualifiedFunction);
+            }
+        }
+
+        log.debug("Indexed {} package functions", index.size());
+        return index;
+    }
+
+    /**
+     * Builds standalone routine index: Set of "schema.function".
+     *
+     * <p>The counterpart to {@link #indexPackageFunctions}: routines with no package. Needed
+     * because {@code hr.get_today} and {@code hr.emp} are the same two-part shape, so a
+     * standalone function written without parentheses can only be told from a table reference
+     * by looking it up.
+     */
+    private static Set<String> indexStandaloneFunctions(
+            StateService stateService, Set<String> schemas) {
+
+        Set<String> index = new HashSet<>();
+
+        for (FunctionMetadata function : stateService.getOracleFunctionMetadata()) {
+            String normalizedSchema = function.getSchema().toLowerCase();
+
+            if (!schemas.contains(normalizedSchema)) {
+                continue; // Skip functions not in target schemas
+            }
+
+            if (function.getPackageName() == null || function.getPackageName().isEmpty()) {
+                index.add(normalizedSchema + "." + function.getObjectName().toLowerCase());
+            }
+        }
+
+        log.debug("Indexed {} standalone functions", index.size());
+        return index;
+    }
+
+    /**
+     * Builds the no-argument-callable routine index, covering both standalone
+     * ("schema.function") and package ("schema.package.function") routines.
+     *
+     * <p>A routine qualifies when it declares no parameters, or when every parameter carries a
+     * DEFAULT — exactly the routines Oracle allows to be written without parentheses.
+     *
+     * <p>Overloads collapse onto one key, and a single no-arg-callable overload is enough: if any
+     * overload can be called bare, the bare reference is a call.
+     */
+    private static Set<String> indexNoArgCallableRoutines(
+            StateService stateService, Set<String> schemas) {
+
+        Set<String> index = new HashSet<>();
+
+        for (FunctionMetadata function : stateService.getOracleFunctionMetadata()) {
+            String normalizedSchema = function.getSchema().toLowerCase();
+
+            if (!schemas.contains(normalizedSchema)) {
+                continue; // Skip functions not in target schemas
+            }
+
+            if (!isCallableWithoutArguments(function)) {
+                continue;
+            }
+
+            String packageName = function.getPackageName();
+            if (packageName != null && !packageName.isEmpty()) {
+                index.add(normalizedSchema + "." + packageName.toLowerCase() + "."
+                        + function.getObjectName().toLowerCase());
+            } else {
+                index.add(normalizedSchema + "." + function.getObjectName().toLowerCase());
+            }
+        }
+
+        log.debug("Indexed {} no-arg-callable routines", index.size());
+        return index;
+    }
+
+    /**
+     * Reports whether a routine can be invoked without supplying any argument.
+     *
+     * <p>An OUT or IN OUT parameter disqualifies the routine even when defaulted: the caller has
+     * to supply a target to receive the value, so the reference cannot be a bare read.
+     */
+    private static boolean isCallableWithoutArguments(FunctionMetadata function) {
+        List<FunctionParameter> parameters = function.getParameters();
+        if (parameters == null || parameters.isEmpty()) {
+            return true;
+        }
+
+        for (FunctionParameter parameter : parameters) {
+            String inOut = parameter.getInOut();
+            if (inOut != null && inOut.toUpperCase().contains("OUT")) {
+                return false;
+            }
+            if (!parameter.isDefaulted()) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Builds synonym index from StateService synonym map.
+     * Preserves StateService's dual-map structure: schema → synonym → target.
+     */
+    private static Map<String, Map<String, String>> indexSynonyms(StateService stateService) {
+        Map<String, Map<String, String>> index = new HashMap<>();
+        int synonymCount = 0;
+
+        for (Map.Entry<String, Map<String, SynonymMetadata>> schemaEntry :
+                stateService.getOracleSynonymsByOwnerAndName().entrySet()) {
+
+            String schema = schemaEntry.getKey().toLowerCase();
+            Map<String, String> schemaSynonyms = new HashMap<>();
+
+            for (Map.Entry<String, SynonymMetadata> synonymEntry : schemaEntry.getValue().entrySet()) {
+                String synonymName = synonymEntry.getKey().toLowerCase();
+                SynonymMetadata synonym = synonymEntry.getValue();
+
+                String target = synonym.getTableOwner().toLowerCase() + "." +
+                        synonym.getTableName().toLowerCase();
+
+                schemaSynonyms.put(synonymName, target);
+                synonymCount++;
+            }
+
+            if (!schemaSynonyms.isEmpty()) {
+                index.put(schema, schemaSynonyms);
+            }
+        }
+
+        log.debug("Indexed {} synonyms across {} schemas", synonymCount, index.size());
+        return index;
+    }
+
+    /**
+     * Builds object type field index: "schema.typename" → field → type.
+     * Includes all fields from Oracle object types for field access transformation.
+     */
+    private static Map<String, Map<String, String>> indexTypeFields(
+            StateService stateService, Set<String> schemas) {
+
+        Map<String, Map<String, String>> index = new HashMap<>();
+        int fieldCount = 0;
+
+        for (ObjectDataTypeMetaData type : stateService.getOracleObjectDataTypeMetaData()) {
+            String normalizedSchema = type.getSchema().toLowerCase();
+
+            if (!schemas.contains(normalizedSchema)) {
+                continue; // Skip types not in target schemas
+            }
+
+            String qualifiedTypeName = normalizedSchema + "." + type.getName().toLowerCase();
+            Map<String, String> fields = new HashMap<>();
+
+            if (type.getVariables() != null) {
+                for (ObjectDataTypeVariable variable : type.getVariables()) {
+                    String fieldName = variable.getName().toLowerCase();
+                    String fieldType = variable.getDataType(); // Keep original case for built-in types
+
+                    fields.put(fieldName, fieldType);
+                    fieldCount++;
+                }
+            }
+
+            index.put(qualifiedTypeName, fields);
+        }
+
+        log.debug("Indexed {} fields across {} object types", fieldCount, index.size());
+        return index;
+    }
+
+    /**
+     * Builds object type name index: Set of qualified type names.
+     * Used for quick existence checks during type name qualification.
+     */
+    private static Set<String> indexObjectTypeNames(
+            StateService stateService, Set<String> schemas) {
+
+        Set<String> index = new HashSet<>();
+
+        for (ObjectDataTypeMetaData type : stateService.getOracleObjectDataTypeMetaData()) {
+            String normalizedSchema = type.getSchema().toLowerCase();
+
+            if (!schemas.contains(normalizedSchema)) {
+                continue; // Skip types not in target schemas
+            }
+
+            String qualifiedTypeName = normalizedSchema + "." + type.getName().toLowerCase();
+            index.add(qualifiedTypeName);
+        }
+
+        log.debug("Indexed {} object type names", index.size());
+        return index;
+    }
+
+    /**
+     * Creates empty indices (for testing with no metadata).
+     */
+    public static TransformationIndices buildEmpty() {
+        return new TransformationIndices(
+                Collections.emptyMap(),
+                Collections.emptyMap(),
+                Collections.emptySet(),
+                Collections.emptyMap(),
+                Collections.emptyMap(),
+                Collections.emptySet()
+        );
+    }
+}

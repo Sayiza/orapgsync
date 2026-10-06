@@ -1,0 +1,416 @@
+package me.christianrobert.orapgsync.view.rest;
+
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import jakarta.ws.rs.*;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
+import me.christianrobert.orapgsync.core.job.Job;
+import me.christianrobert.orapgsync.core.job.model.view.ViewImplementationResult;
+import me.christianrobert.orapgsync.core.job.model.view.ViewImplementationVerificationResult;
+import me.christianrobert.orapgsync.core.job.model.view.ViewMetadata;
+import me.christianrobert.orapgsync.core.job.model.view.ViewStubCreationResult;
+import me.christianrobert.orapgsync.core.job.model.view.ViewVerificationResult;
+import me.christianrobert.orapgsync.core.job.service.JobRegistry;
+import me.christianrobert.orapgsync.core.job.service.JobService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * REST resource for view-related operations.
+ * Handles view extraction, stub creation, stub verification, implementation, and implementation verification.
+ */
+@ApplicationScoped
+@Path("/api/views")
+@Produces(MediaType.APPLICATION_JSON)
+@Consumes(MediaType.APPLICATION_JSON)
+public class ViewResource {
+
+    private static final Logger log = LoggerFactory.getLogger(ViewResource.class);
+
+    @Inject
+    JobService jobService;
+
+    @Inject
+    JobRegistry jobRegistry;
+
+    @Inject
+    me.christianrobert.orapgsync.database.service.PostgresConnectionService postgresConnectionService;
+
+    @Inject
+    me.christianrobert.orapgsync.core.service.StateService stateService;
+
+    @POST
+    @Path("/oracle/extract")
+    public Response extractOracleViews() {
+        return startJob("ORACLE", "VIEW", "Oracle view extraction");
+    }
+
+    /**
+     * Get view DDL on demand for a specific view.
+     * This endpoint is used for lazy-loading view source code in the frontend.
+     *
+     * @param schema the schema name
+     * @param viewName the view name
+     * @return JSON with oracleSql (if available) and postgresSql
+     */
+    @GET
+    @Path("/postgres/source/{schema}/{viewName}")
+    public Response getViewSource(@PathParam("schema") String schema,
+                                  @PathParam("viewName") String viewName) {
+        log.info("Fetching view source for: {}.{}", schema, viewName);
+
+        try (java.sql.Connection conn = postgresConnectionService.getConnection()) {
+            // Get PostgreSQL view definition
+            String sql = "SELECT pg_get_viewdef(quote_ident(?) || '.' || quote_ident(?), true) AS viewdef";
+            try (java.sql.PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setString(1, schema);
+                ps.setString(2, viewName);
+                try (java.sql.ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        String postgresSql = rs.getString("viewdef");
+
+                        Map<String, Object> result = new LinkedHashMap<>();
+                        result.put("status", "success");
+                        result.put("schema", schema);
+                        result.put("viewName", viewName);
+                        result.put("postgresSql", postgresSql != null ? postgresSql : "-- View definition not available");
+                        result.put("oracleSql", findOracleViewSource(schema, viewName));
+
+                        return Response.ok(result).build();
+                    } else {
+                        throw new IllegalArgumentException("View not found: " + schema + "." + viewName);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.error("Failed to fetch view source for {}.{}", schema, viewName, e);
+
+            Map<String, Object> errorResult = Map.of(
+                    "status", "error",
+                    "message", "Failed to fetch view source: " + e.getMessage()
+            );
+
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                    .entity(errorResult)
+                    .build();
+        }
+    }
+
+    /**
+     * The original Oracle view SQL, from the extracted metadata held in state.
+     *
+     * <p>The extraction list response no longer carries {@code sqlDefinition} — a few thousand
+     * views made it megabytes and the list does not render it — so this is where it is read
+     * from when a single view is opened. Returns null when views have not been extracted in
+     * this session, which the frontend renders as "not available".
+     */
+    private String findOracleViewSource(String schema, String viewName) {
+        return stateService.getOracleViewMetadata().stream()
+                .filter(view -> schema.equalsIgnoreCase(view.getSchema())
+                        && viewName.equalsIgnoreCase(view.getViewName()))
+                .map(ViewMetadata::getSqlDefinition)
+                .findFirst()
+                .orElse(null);
+    }
+
+    @POST
+    @Path("/postgres/stubs/create")
+    public Response createPostgresViewStubs() {
+        return startJob("POSTGRES", "VIEW_STUB_CREATION", "PostgreSQL view stub creation");
+    }
+
+    @POST
+    @Path("/postgres/stubs/verify")
+    public Response verifyPostgresViewStubs() {
+        return startJob("POSTGRES", "VIEW_STUB_VERIFICATION", "PostgreSQL view stub verification");
+    }
+
+    @POST
+    @Path("/postgres/implementation/create")
+    public Response createPostgresViewImplementation() {
+        return startJob("POSTGRES", "VIEW_IMPLEMENTATION", "PostgreSQL view implementation");
+    }
+
+    @POST
+    @Path("/postgres/implementation/verify")
+    public Response verifyPostgresViewImplementation() {
+        return startJob("POSTGRES", "VIEW_IMPLEMENTATION_VERIFICATION", "PostgreSQL view implementation verification");
+    }
+
+    @POST
+    @Path("/postgres/verify")
+    public Response verifyAllPostgresViews() {
+        return startJob("POSTGRES", "VIEW_VERIFICATION", "PostgreSQL unified view verification");
+    }
+
+    /**
+     * Generic method to start any view-related job.
+     */
+    private Response startJob(String database, String operationType, String friendlyName) {
+        log.info("Starting {} job via REST API", friendlyName);
+
+        try {
+            Job<?> job = jobRegistry.createJob(database, operationType)
+                    .orElseThrow(() -> new IllegalArgumentException(
+                            String.format("No job available for %s %s operation", database, operationType)));
+
+            String jobId = jobService.submitJob(job);
+
+            Map<String, Object> result = Map.of(
+                    "status", "success",
+                    "jobId", jobId,
+                    "message", friendlyName + " job started successfully"
+            );
+
+            log.info("{} job started with ID: {}", friendlyName, jobId);
+            return Response.ok(result).build();
+
+        } catch (Exception e) {
+            log.error("Failed to start {} job", friendlyName, e);
+
+            Map<String, Object> errorResult = Map.of(
+                    "status", "error",
+                    "message", "Failed to start " + friendlyName + ": " + e.getMessage()
+            );
+
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                    .entity(errorResult)
+                    .build();
+        }
+    }
+
+    /**
+     * Generate summary for view metadata extraction results.
+     */
+    public static Map<String, Object> generateViewDefinitionSummary(List<ViewMetadata> viewDefinitions) {
+        Map<String, Integer> schemaViewCounts = new HashMap<>();
+        int totalColumns = 0;
+
+        // Projection for the UI list. Deliberately excludes sqlDefinition (the full Oracle view
+        // source) and the column list — a few thousand views make those megabytes, and the list
+        // renders neither. The source is one click away at /postgres/source/{schema}/{view},
+        // and the complete result is at /api/jobs/{jobId}/report.
+        List<Map<String, Object>> views = new ArrayList<>();
+
+        for (ViewMetadata view : viewDefinitions) {
+            String schema = view.getSchema();
+            schemaViewCounts.put(schema, schemaViewCounts.getOrDefault(schema, 0) + 1);
+            totalColumns += view.getColumns().size();
+
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("schema", schema);
+            entry.put("viewName", view.getViewName());
+            entry.put("columnCount", view.getColumns().size());
+            views.add(entry);
+        }
+
+        return Map.of(
+                "totalViews", viewDefinitions.size(),
+                "totalColumns", totalColumns,
+                "schemaViewCounts", schemaViewCounts,
+                "views", views,
+                "message", String.format("Extraction completed: %d views with %d columns from %d schemas",
+                        viewDefinitions.size(), totalColumns, schemaViewCounts.size())
+        );
+    }
+
+    /**
+     * One error entry for a view summary, carrying {@code sql} only when there is one.
+     *
+     * <p>Deliberately not {@code Map.of}, which throws {@link NullPointerException} on a null
+     * value: both view jobs record an error with no SQL when the failure happened before any was
+     * generated. That path had never fired in a measured run, and the identical shape in the
+     * function stub summary aborted a whole run the first time its equivalent did — the job had
+     * completed, and the frontend asking for the result is what failed.
+     *
+     * <p>Omitting the key rather than sending an empty string is what {@code results-panel.js}
+     * expects; it reads {@code item.sql || item.statement}.
+     */
+    private static Map<String, Object> viewErrorEntry(String viewName, String errorMessage, String sql) {
+        Map<String, Object> entry = new HashMap<>();
+        entry.put("viewName", viewName);
+        entry.put("status", "error");
+        entry.put("error", errorMessage);
+        if (sql != null) {
+            entry.put("sql", sql);
+        }
+        return entry;
+    }
+
+    /**
+     * Generate summary for view stub creation results.
+     */
+    public static Map<String, Object> generateViewStubCreationSummary(ViewStubCreationResult viewStubResult) {
+        Map<String, Object> createdDetails = new HashMap<>();
+        Map<String, Object> skippedDetails = new HashMap<>();
+        Map<String, Object> errorDetails = new HashMap<>();
+
+        // Created view stubs details
+        for (String viewName : viewStubResult.getCreatedViews()) {
+            createdDetails.put(viewName, Map.of(
+                    "viewName", viewName,
+                    "status", "created",
+                    "timestamp", viewStubResult.getExecutionDateTime().toString()
+            ));
+        }
+
+        // Skipped view stubs details
+        for (String viewName : viewStubResult.getSkippedViews()) {
+            skippedDetails.put(viewName, Map.of(
+                    "viewName", viewName,
+                    "status", "skipped",
+                    "reason", "already exists"
+            ));
+        }
+
+        // Error details
+        for (ViewStubCreationResult.ViewCreationError error : viewStubResult.getErrors()) {
+            errorDetails.put(error.getViewName(),
+                    viewErrorEntry(error.getViewName(), error.getErrorMessage(), error.getSqlStatement()));
+        }
+
+        return Map.of(
+                "totalProcessed", viewStubResult.getTotalProcessed(),
+                "createdCount", viewStubResult.getCreatedCount(),
+                "skippedCount", viewStubResult.getSkippedCount(),
+                "errorCount", viewStubResult.getErrorCount(),
+                "isSuccessful", viewStubResult.isSuccessful(),
+                "executionTimestamp", viewStubResult.getExecutionTimestamp(),
+                "createdViews", createdDetails,
+                "skippedViews", skippedDetails,
+                "errors", errorDetails
+        );
+    }
+
+    /**
+     * Generate summary for view implementation results.
+     */
+    public static Map<String, Object> generateViewImplementationSummary(ViewImplementationResult viewImplResult) {
+        Map<String, Object> implementedDetails = new HashMap<>();
+        Map<String, Object> skippedDetails = new HashMap<>();
+        Map<String, Object> errorDetails = new HashMap<>();
+
+        // Implemented views details
+        for (String viewName : viewImplResult.getImplementedViews()) {
+            implementedDetails.put(viewName, Map.of(
+                    "viewName", viewName,
+                    "status", "implemented",
+                    "timestamp", viewImplResult.getExecutionDateTime().toString()
+            ));
+        }
+
+        // Skipped views details
+        for (String viewName : viewImplResult.getSkippedViews()) {
+            skippedDetails.put(viewName, Map.of(
+                    "viewName", viewName,
+                    "status", "skipped",
+                    "reason", "already implemented or no SQL available"
+            ));
+        }
+
+        // Error details
+        for (ViewImplementationResult.ViewImplementationError error : viewImplResult.getErrors()) {
+            errorDetails.put(error.getViewName(),
+                    viewErrorEntry(error.getViewName(), error.getErrorMessage(), error.getSqlStatement()));
+        }
+
+        return Map.of(
+                "totalProcessed", viewImplResult.getTotalProcessed(),
+                "implementedCount", viewImplResult.getImplementedCount(),
+                "skippedCount", viewImplResult.getSkippedCount(),
+                "errorCount", viewImplResult.getErrorCount(),
+                "isSuccessful", viewImplResult.isSuccessful(),
+                "executionTimestamp", viewImplResult.getExecutionTimestamp(),
+                "implementedViews", implementedDetails,
+                "skippedViews", skippedDetails,
+                "errors", errorDetails
+        );
+    }
+
+    /**
+     * Generate summary for view implementation verification results.
+     */
+    public static Map<String, Object> generateViewImplementationVerificationSummary(ViewImplementationVerificationResult viewImplVerifyResult) {
+        Map<String, Object> verifiedDetails = new HashMap<>();
+        Map<String, Object> failedDetails = new HashMap<>();
+        List<String> warnings = viewImplVerifyResult.getWarnings();
+
+        // Verified views details
+        for (ViewImplementationVerificationResult.VerifiedView verifiedView : viewImplVerifyResult.getVerifiedViews()) {
+            verifiedDetails.put(verifiedView.getViewName(), Map.of(
+                    "viewName", verifiedView.getViewName(),
+                    "status", "verified",
+                    "rowCount", verifiedView.getRowCount(),
+                    "timestamp", viewImplVerifyResult.getExecutionDateTime().toString()
+            ));
+        }
+
+        // Failed views details
+        Map<String, String> failureReasons = viewImplVerifyResult.getFailureReasons();
+        for (String viewName : viewImplVerifyResult.getFailedViews()) {
+            String reason = failureReasons.getOrDefault(viewName, "Unknown failure");
+            failedDetails.put(viewName, Map.of(
+                    "viewName", viewName,
+                    "status", "failed",
+                    "reason", reason
+            ));
+        }
+
+        return Map.of(
+                "totalProcessed", viewImplVerifyResult.getTotalProcessed(),
+                "verifiedCount", viewImplVerifyResult.getVerifiedCount(),
+                "failedCount", viewImplVerifyResult.getFailedCount(),
+                "warningCount", viewImplVerifyResult.getWarningCount(),
+                "isSuccessful", viewImplVerifyResult.isSuccessful(),
+                "executionTimestamp", viewImplVerifyResult.getExecutionTimestamp(),
+                "verifiedViews", verifiedDetails,
+                "failedViews", failedDetails,
+                "warnings", warnings
+        );
+    }
+
+    /**
+     * Generate summary for unified view verification results.
+     */
+    public static Map<String, Object> generateViewVerificationSummary(ViewVerificationResult viewVerifyResult) {
+        Map<String, Object> viewsBySchemaDetails = new HashMap<>();
+
+        // Process views grouped by schema
+        Map<String, List<ViewVerificationResult.ViewInfo>> viewsBySchema = viewVerifyResult.getViewsBySchema();
+        for (Map.Entry<String, List<ViewVerificationResult.ViewInfo>> entry : viewsBySchema.entrySet()) {
+            String schema = entry.getKey();
+            List<ViewVerificationResult.ViewInfo> views = entry.getValue();
+
+            List<Map<String, Object>> viewDetails = views.stream()
+                    .map(view -> {
+                        Map<String, Object> viewMap = new HashMap<>();
+                        viewMap.put("viewName", view.getViewName());
+                        viewMap.put("status", view.getStatus().toString());
+                        // DDL excluded for performance - fetch on demand via /api/views/postgres/source/{schema}/{viewName}
+                        if (view.getErrorMessage() != null) {
+                            viewMap.put("errorMessage", view.getErrorMessage());
+                        }
+                        return viewMap;
+                    })
+                    .toList();
+
+            viewsBySchemaDetails.put(schema, viewDetails);
+        }
+
+        return Map.of(
+                "totalViews", viewVerifyResult.getTotalViews(),
+                "implementedCount", viewVerifyResult.getImplementedCount(),
+                "stubCount", viewVerifyResult.getStubCount(),
+                "errorCount", viewVerifyResult.getErrorCount(),
+                "executionTimestamp", viewVerifyResult.getExecutionDateTime(),
+                "viewsBySchema", viewsBySchemaDetails
+        );
+    }
+}
