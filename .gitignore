@@ -1,4 +1,9 @@
-### COnX project ###
+### Project ###
+
+# Local-only material about the real migration's source database: connection
+# details, notes, extracted source, query output. Never committed — the source
+# database is third-party IP and this repository is public. See local/SOURCE_DB.md.
+/local/
 
 # node bin installation dir
 node/
