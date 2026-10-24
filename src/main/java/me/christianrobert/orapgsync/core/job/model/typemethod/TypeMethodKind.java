@@ -11,7 +11,7 @@ package me.christianrobert.orapgsync.core.job.model.typemethod;
  * {@code FUNCTION}/{@code PROCEDURE} and {@code INSTANTIABLE} as member-vs-static. Both were wrong:
  * {@code METHOD_TYPE} only ever carries {@code MAP}/{@code ORDER}/{@code PUBLIC}, and
  * {@code INSTANTIABLE} marks concrete-vs-abstract. See section 2 of
- * documentation/TYPE_METHOD_IMPLEMENTATION_PLAN.md.
+ * documentation/completed/TYPE_METHOD_IMPLEMENTATION_PLAN.md.
  */
 public enum TypeMethodKind {
 

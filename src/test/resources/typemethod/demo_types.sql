@@ -5,7 +5,7 @@
 -- derived from real data: the domain is a deliberately dull order-line/tag pair.
 --
 -- Purpose: exercise every *transformable* row of the coverage matrix in
--- documentation/TYPE_METHOD_IMPLEMENTATION_PLAN.md section 3.1. Constructs that
+-- documentation/completed/TYPE_METHOD_IMPLEMENTATION_PLAN.md section 3.1. Constructs that
 -- must be rejected instead live in demo_types_rejected.sql.
 --
 -- DEMO_ITEM_T is deliberately multi-attribute, so it also triggers the section 6

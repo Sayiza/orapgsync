@@ -1,3 +1,5 @@
+> **Deferred, planning only.** As of 2026-10-24 only `JobCancelledException` and the state-reset `future.cancel(true)` exist; no cancellation token, no cooperative checks. Not on the [roadmap](../ROADMAP.md) — revisit if local runs against the source database make aborting a run a real need.
+
 # Job Cancellation Implementation Plan
 
 **Status:** Planning Phase
@@ -1041,9 +1043,9 @@ public class CancellationToken {
 ## 11. References
 
 ### Related Documentation
-- [CLAUDE.md](../CLAUDE.md) - Project architecture overview
-- [TRANSFORMATION.md](TRANSFORMATION.md) - SQL/PL-SQL transformation details
-- [PACKAGE_SEGMENTATION_IMPLEMENTATION_PLAN.md](completed/PACKAGE_SEGMENTATION_IMPLEMENTATION_PLAN.md) - Memory optimization strategy
+- [CLAUDE.md](../../CLAUDE.md) - Project architecture overview
+- [TRANSFORMATION.md](../TRANSFORMATION.md) - SQL/PL-SQL transformation details
+- [PACKAGE_SEGMENTATION_IMPLEMENTATION_PLAN.md](../completed/PACKAGE_SEGMENTATION_IMPLEMENTATION_PLAN.md) - Memory optimization strategy
 
 ### Java Concurrency Resources
 - [Java Concurrency in Practice](https://jcip.net/) - Chapter 7: Cancellation and Shutdown

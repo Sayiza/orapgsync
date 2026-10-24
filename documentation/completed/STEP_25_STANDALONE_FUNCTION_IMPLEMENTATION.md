@@ -1,3 +1,5 @@
+> **Archived 2026-10-24 — stale since 2025-11.** Its coverage figures ("90–98%") were never measured against a run and were contradicted by the 2026-08-28 run (~22%). Kept as a history of which PL/SQL constructs got visitors and when. Current plan: [ROADMAP.md](../ROADMAP.md).
+
 # Step 25: Function/Procedure Implementation
 
 **Status:** 🔄 **90-98%+ COMPLETE** - Core PL/SQL features + exception handling + cursor operations + DML statements working, advanced features pending
@@ -17,7 +19,7 @@
 - ✅ 5 integration tests verify stub→transformation replacement works
 - ✅ 837 total tests passing with zero regressions
 
-See: [PLSQL_OUT_PARAMETER_CONSISTENCY_PLAN.md](documentation/completed/PLSQL_OUT_PARAMETER_CONSISTENCY_PLAN.md)
+See: [PLSQL_OUT_PARAMETER_CONSISTENCY_PLAN.md](PLSQL_OUT_PARAMETER_CONSISTENCY_PLAN.md)
 
 ---
 
@@ -185,7 +187,7 @@ Transforms Oracle functions/procedures to PostgreSQL using PL/SQL→PL/pgSQL via
   - Package variable references transformed to getter/setter calls
   - 26 tests passing (PackageContextExtractorTest, PackageHelperGeneratorTest, PackageVariableTransformationTest)
   - Location: `transformer/packagevariable/`
-  - See [PACKAGE_VARIABLE_IMPLEMENTATION_PLAN.md](documentation/PACKAGE_VARIABLE_IMPLEMENTATION_PLAN.md)
+  - See [PACKAGE_VARIABLE_IMPLEMENTATION_PLAN.md](PACKAGE_VARIABLE_IMPLEMENTATION_PLAN.md)
 - Loops:
   - **Basic LOOP**: `LOOP ... END LOOP` (identical syntax)
   - **WHILE LOOP**: `WHILE condition LOOP ... END LOOP` (identical syntax)
@@ -418,7 +420,7 @@ END;
 - Tracking variables use double underscore naming convention (cursor__found, cursor__rowcount, cursor__isopen)
 
 **References:**
-- Plan: [PLSQL_CURSOR_ATTRIBUTES_PLAN.md](documentation/PLSQL_CURSOR_ATTRIBUTES_PLAN.md)
+- Plan: [PLSQL_CURSOR_ATTRIBUTES_PLAN.md](PLSQL_CURSOR_ATTRIBUTES_PLAN.md)
 - PostgreSQL docs: [PL/pgSQL Cursors](https://www.postgresql.org/docs/current/plpgsql-cursors.html)
 - PostgreSQL docs: [FOUND Variable](https://www.postgresql.org/docs/current/plpgsql-statements.html#PLPGSQL-STATEMENTS-DIAGNOSTICS)
 
@@ -531,7 +533,7 @@ END;
 - STRICT keyword ALWAYS added to SELECT INTO to ensure Oracle semantic equivalence
 
 **References:**
-- Plan: [PLSQL_EXCEPTION_HANDLING_ANALYSIS.md](documentation/PLSQL_EXCEPTION_HANDLING_ANALYSIS.md)
+- Plan: [PLSQL_EXCEPTION_HANDLING_ANALYSIS.md](PLSQL_EXCEPTION_HANDLING_ANALYSIS.md)
 - PostgreSQL docs: [PL/pgSQL Control Structures - Trapping Errors](https://www.postgresql.org/docs/current/plpgsql-control-structures.html#PLPGSQL-ERROR-TRAPPING)
 
 ---
@@ -580,7 +582,7 @@ END;
   - Phase 3 candidate if usage patterns warrant it
 
 **References:**
-- Plan: [PLSQL_EXCEPTION_HANDLING_ANALYSIS.md](documentation/PLSQL_EXCEPTION_HANDLING_ANALYSIS.md)
+- Plan: [PLSQL_EXCEPTION_HANDLING_ANALYSIS.md](PLSQL_EXCEPTION_HANDLING_ANALYSIS.md)
 - PostgreSQL docs: [RAISE Statement](https://www.postgresql.org/docs/current/plpgsql-errors-and-messages.html)
 
 ---
@@ -649,7 +651,7 @@ END;
   - Will add package-level exception registry alongside existing stack
 
 **References:**
-- Plan: [PLSQL_EXCEPTION_HANDLING_ANALYSIS.md](documentation/PLSQL_EXCEPTION_HANDLING_ANALYSIS.md)
+- Plan: [PLSQL_EXCEPTION_HANDLING_ANALYSIS.md](PLSQL_EXCEPTION_HANDLING_ANALYSIS.md)
 - PostgreSQL docs: [Exception Handling](https://www.postgresql.org/docs/current/plpgsql-control-structures.html#PLPGSQL-ERROR-TRAPPING)
 
 ---
@@ -701,9 +703,9 @@ END;
 ## References
 
 - **Grammar:** `PlSqlParser.g4` (ANTLR 4.13.2)
-- **Transformation Guide:** [TRANSFORMATION.md](TRANSFORMATION.md)
-- **Consistency Fix:** [PLSQL_OUT_PARAMETER_CONSISTENCY_PLAN.md](documentation/completed/PLSQL_OUT_PARAMETER_CONSISTENCY_PLAN.md)
-- **Call Statements:** [PLSQL_CALL_STATEMENT_PLAN.md](documentation/completed/PLSQL_CALL_STATEMENT_PLAN.md)
+- **Transformation Guide:** [TRANSFORMATION.md](../TRANSFORMATION.md)
+- **Consistency Fix:** [PLSQL_OUT_PARAMETER_CONSISTENCY_PLAN.md](PLSQL_OUT_PARAMETER_CONSISTENCY_PLAN.md)
+- **Call Statements:** [PLSQL_CALL_STATEMENT_PLAN.md](PLSQL_CALL_STATEMENT_PLAN.md)
 
 ---
 
@@ -777,7 +779,7 @@ END;
 
 **Next Step Priority Recommendations:**
 1. ✅ **Variable Scope Tracking Infrastructure** - **COMPLETE** (2025-11-07)
-   - See: [VARIABLE_SCOPE_TRACKING_PLAN.md](completed/VARIABLE_SCOPE_TRACKING_PLAN.md)
+   - See: [VARIABLE_SCOPE_TRACKING_PLAN.md](VARIABLE_SCOPE_TRACKING_PLAN.md)
    - ✅ **Unblocked:** RECORD RHS field access, collection element access fixes
    - ✅ **Fixed:** Function call misidentification bugs (all tests passing in `PostgresPlSqlCallStatementValidationTest`)
    - ✅ **Replaced** heuristic detection with deterministic scope lookups
@@ -785,7 +787,7 @@ END;
    - **Impact:** Foundational infrastructure for all variable-dependent features now in place
 
 2. ✅ **RECORD RHS Field Access** (Phase 1B.5) - **COMPLETE** (2025-11-07)
-   - See: [INLINE_TYPE_IMPLEMENTATION_PLAN.md](completed/INLINE_TYPE_IMPLEMENTATION_PLAN.md) Phase 1B.5
+   - See: [INLINE_TYPE_IMPLEMENTATION_PLAN.md](INLINE_TYPE_IMPLEMENTATION_PLAN.md) Phase 1B.5
    - ✅ **Implemented:** `x := v.field` transformations for inline RECORD types
    - ✅ Uses deterministic variable lookup via `context.lookupVariable()`
    - ✅ All 7 integration tests passing (previously 3 failed due to missing RHS)

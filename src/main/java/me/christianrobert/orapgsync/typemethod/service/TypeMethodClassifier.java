@@ -7,7 +7,7 @@ import me.christianrobert.orapgsync.core.job.model.typemethod.TypeMethodKind;
  *
  * <p>Pure logic with no database dependency, so it is unit-testable against the dictionary value
  * combinations directly. The rules are section 2 of
- * documentation/TYPE_METHOD_IMPLEMENTATION_PLAN.md, verified against a production Oracle database:
+ * documentation/completed/TYPE_METHOD_IMPLEMENTATION_PLAN.md, verified against a production Oracle database:
  *
  * <table>
  *   <tr><th>Test</th><th>Conclusion</th></tr>

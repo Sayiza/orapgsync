@@ -9,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * The dictionary value combinations from the Phase 0 verification, plus the combinations that must
- * throw. See section 2 of documentation/TYPE_METHOD_IMPLEMENTATION_PLAN.md.
+ * throw. See section 2 of documentation/completed/TYPE_METHOD_IMPLEMENTATION_PLAN.md.
  */
 class TypeMethodClassifierTest {
 

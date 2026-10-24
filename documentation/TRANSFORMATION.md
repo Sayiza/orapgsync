@@ -76,7 +76,7 @@ This document describes the ANTLR-based transformation module that converts Orac
 - **Effort:** ~2 hours (vs. estimated 4-5 days)
 - **Coverage Gain:** +25 percentage points (50% → 75%)
 - **Test Coverage:** 38/38 tests passing
-- **Details:** See [CTE_IMPLEMENTATION_PLAN.md](documentation/completed/CTE_IMPLEMENTATION_PLAN.md)
+- **Details:** See [CTE_IMPLEMENTATION_PLAN.md](completed/CTE_IMPLEMENTATION_PLAN.md)
 
 **✅ Date/Time Functions - COMPLETED**
 - **Impact:** 20-30% of Oracle views use date functions
@@ -414,7 +414,7 @@ ViewTransformationService (CDI @ApplicationScoped)
   transformer as fragments on the first full run and failed with `mismatched input '<EOF>'`. Segment
   counts could not detect it — the orphaned tail carries no modifier keyword — and the scanner tests
   asserted only name and count, so they passed against it. See
-  [type method plan, Phase 2b](TYPE_METHOD_IMPLEMENTATION_PLAN.md#phase-2b--extraction-hardening)
+  [type method plan, Phase 2b](completed/TYPE_METHOD_IMPLEMENTATION_PLAN.md#phase-2b--extraction-hardening)
 - **Documentation:** [TYPE_METHOD_SEGMENTATION_IMPLEMENTATION_PLAN.md](completed/TYPE_METHOD_SEGMENTATION_IMPLEMENTATION_PLAN.md)
 
 **Segmentation Pipeline:**
@@ -592,7 +592,7 @@ SELECT * FROM emp_tree;
 - Multiple CTEs: mixed recursive/non-recursive supported
 - All existing transformations work inside CTE subqueries
 
-**See:** [CTE_IMPLEMENTATION_PLAN.md](documentation/completed/CTE_IMPLEMENTATION_PLAN.md)
+**See:** [CTE_IMPLEMENTATION_PLAN.md](completed/CTE_IMPLEMENTATION_PLAN.md)
 
 ### CONNECT BY (Hierarchical Queries)
 
@@ -924,7 +924,7 @@ creation refuse the object with an error naming both Oracle columns.
   reserved-word case nor preserve today's lower-casing — it would emit `MY_FUNC` where every
   existing test expects `my_func`. A *declaration* is a DDL name, so the authority is
   `PostgresIdentifierNormalizer`, the same one the stub job calls. Deliberately left unfixed in
-  [type-method Phase 2a](TYPE_METHOD_IMPLEMENTATION_PLAN.md#phase-2a--extract-the-reusable-body-machinery)
+  [type-method Phase 2a](completed/TYPE_METHOD_IMPLEMENTATION_PLAN.md#phase-2a--extract-the-reusable-body-machinery)
   because it changes emitted SQL and deserves its own decision.
 - **Fixed in Phase 2a:** the same block registered parameters in the variable scope under
   `getText().toLowerCase()`. There the quoted case *was* broken — `"Foo"` registered as the literal
@@ -1846,7 +1846,7 @@ reaches `VisitGeneralElement` normally. Verified.
 
 Detailed implementation documentation:
 
-- **[CTE_IMPLEMENTATION_PLAN.md](documentation/completed/CTE_IMPLEMENTATION_PLAN.md)** - WITH clause support (COMPLETED)
+- **[CTE_IMPLEMENTATION_PLAN.md](completed/CTE_IMPLEMENTATION_PLAN.md)** - WITH clause support (COMPLETED)
   - Non-recursive and recursive CTEs
   - Automatic RECURSIVE keyword detection
   - 38/38 tests passing
@@ -1927,11 +1927,11 @@ Detailed implementation documentation:
   - No separate extraction/creation jobs (maintains ANTLR-only-in-transformation pattern)
   - 26 tests passing (PackageContextExtractorTest, PackageHelperGeneratorTest, PackageVariableTransformationTest)
   - Location: `transformer/packagevariable/`
-  - See [PACKAGE_VARIABLE_IMPLEMENTATION_PLAN.md](documentation/PACKAGE_VARIABLE_IMPLEMENTATION_PLAN.md)
+  - See [PACKAGE_VARIABLE_IMPLEMENTATION_PLAN.md](completed/PACKAGE_VARIABLE_IMPLEMENTATION_PLAN.md)
 - 🔄 Explicit cursor operations (OPEN/FETCH/CLOSE with cursor attributes - infrastructure complete, testing in progress)
 - 📋 Missing (~5-15%): BULK COLLECT, OUT/INOUT in call statements, named parameters, collections
 - Replace function/procedure stubs with actual implementations
-- See [STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md](STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md) for detailed status
+- See [STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md](completed/STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md) for detailed status
 
 **3. Type Method Implementation** 🔄 **Phases 1–5 complete 2026-08-27; awaiting re-measurement**
 
@@ -1939,9 +1939,9 @@ Detailed implementation documentation:
 reported success. It now transforms them: the entry rule is `type_body_elements`, not `function_body`,
 and a failed transformation is an error rather than a skip. The remaining failures are measured and
 ranked, not estimated — full taxonomy in
-[the plan, §11](TYPE_METHOD_IMPLEMENTATION_PLAN.md#11-first-full-run-measurement--2026-08-27); grammar
+[the plan, §11](completed/TYPE_METHOD_IMPLEMENTATION_PLAN.md#11-first-full-run-measurement--2026-08-27); grammar
 coverage matrix and phases in
-[TYPE_METHOD_IMPLEMENTATION_PLAN.md](TYPE_METHOD_IMPLEMENTATION_PLAN.md).
+[TYPE_METHOD_IMPLEMENTATION_PLAN.md](completed/TYPE_METHOD_IMPLEMENTATION_PLAN.md).
 
 - ✅ Shell jobs, REST endpoints, frontend row, `TypeMethodImplementationResult`
 - ✅ **Phase 1 (extraction) — classification rebuilt on the data dictionary rules that actually

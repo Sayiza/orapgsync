@@ -10,49 +10,33 @@ for extensible database object migration with centralized in-memory state.
 It is **in production use** on a real migration, where PL/SQL is being rewritten to Java
 piecewise. That context drives every priority call below.
 
-## Current Focus (August 2026)
+## Current Focus (from 2026-10-24)
 
-**Consolidating the features actually used in the real migration** — DDL migration, view
-transformation, data transfer. Plan: [CONSOLIDATION_PLAN.md](documentation/CONSOLIDATION_PLAN.md).
+**Plan: [ROADMAP.md](documentation/ROADMAP.md) — the single active plan. Read §1–§5 before
+picking anything up.** Goal: make as many PL/SQL routines as possible *usable from Java* on
+PostgreSQL, with per-routine evidence of how far each can be trusted. Tables, data and SQL views are
+in maintenance mode.
 
-**Priorities were reset 2026-08-30 by the whole-pipeline taxonomy. Read
-[type-method plan §15](documentation/TYPE_METHOD_IMPLEMENTATION_PLAN.md#15-fourth-full-run-measurement--2026-08-30)
-before picking anything up** — despite living in that file it is pipeline-wide, and the ordering
-below is what it justifies, not what the code suggests from inside. §13–§14 are its history.
+What a fresh session would otherwise get wrong:
 
-| # | Item | Status |
-|---|---|---|
-| 10 | **Boundary-scanner truncation** — Phase 2b. One defect, two symptoms: 1,950 `<EOF>` parse failures *and* the 1,070 packages whose reduced body will not parse | ⬜ **next** — ranked by the next run |
-| 11 | **Function stub↔implementation signature agreement test**, the equivalent of `TypeMethodStubSignatureAgreementTest` | ⬜ ~1,788 step-28 errors |
-| 9 | Package spec type index, built at step 22, read by both jobs | ✅ done 2026-09-01, [§16](documentation/TYPE_METHOD_IMPLEMENTATION_PLAN.md#16-package-spec-type-index--implemented-2026-09-01) |
-| 4 | **Oracle collection types — make step 7 loud** (extract `TYPECODE`, refuse `CREATE TYPE … AS ()`) | ⬜ still live; §15.3 withdrew the *evidence* wrongly credited to it, not the defect |
-| 5 | Collection type *representation*, scoped by what (4) measures | ⬜ blocked on 4 |
-| 6 | Transformer hardening — eliminate silent statement drops, no new features | 🔄 |
-| 7 | View transformation gaps | 🔄 — 60% of view failures are missing *function stubs*, so re-measure after item 9 before touching the view transformer |
-| 8 | Package helper-generation bugs · type emission via `TypeResolver` · body-parse refusal | ✅ done 2026-08-30, §15.5 |
-| 2 | Taxonomise step 28, verify its denominator | ✅ done 2026-08-30, §14 — denominator confirmed real at 74,428 |
-| 1 · 3 | Error transparency (`JobReportArchive`) · function job skip → error | ✅ done 2026-08-28, §13.6 |
-| — | Package-context restructure · frontend perf · parallel transfer · index migration · type methods 0–5 | ✅ done |
+- **`implemented` is no longer the success measure.** Routines are ranked on the roadmap's
+  **readiness ladder** (extracted → stubbed → implemented → resolves → smoke-tested → equivalent to
+  Oracle → approved), using the *effective* rung over transitive callees. A transformer fix is worth
+  what it moves up the ladder for routines the Java team asks for, not its raw failure count.
+- **There is a local, read-only Oracle source database with test data** — `local/SOURCE_DB.md`,
+  git-ignored. Read its §1 first. Nothing from it (names, code, values, identifying counts) enters
+  the repo; reproduce failures under invented names. Its account **cannot execute** other schemas'
+  code, so calling functions for Oracle-side equivalence needs a decision (roadmap D3).
+- **The baseline is the 2026-10-24 run against that database** (ROADMAP §10; named detail in
+  `local/runs/2026-10-24/`). The 2026-08/09 runs (`completed/TYPE_METHOD_IMPLEMENTATION_PLAN.md`
+  §11–§16) were evidently against the same database and are broadly comparable.
+- **A faster run is not a better run** — compare counts per rung, never wall-clock. And **check
+  `logs/reports/` (or `local/runs/`) before concluding a measurement needs a new run.**
 
-**Reading the next run** — full expectations in
-[§15.6](documentation/TYPE_METHOD_IMPLEMENTATION_PLAN.md#156-what-this-does-not-fix-and-what-to-measure-next).
-Two that will otherwise be misread: step 28's **runtime should rise**, because ~30,000 previously
-blocked members get genuinely attempted for the first time; and the new named errors (`cannot
-resolve Oracle type 'X'`, `Package body failed to parse: …`) are re-attributions, not regressions.
-
-**A faster run is not a better run.** The 2026-08-30 run was 2× faster than 2026-08-28 entirely
-because step 28 stopped re-attempting ~46,000 blocked members — it did less work because more was
-broken. Compare implemented counts, never wall-clock.
-
-**Check `logs/reports/` before concluding a measurement needs a new run.** §13 declared the step-28
-taxonomy blocked on a run that had already happened hours earlier; the archived evidence sat unread
-for two days.
-
-**Deferred — do not invest here without an explicit decision:**
-- 🔒 PL/SQL long tail (BULK COLLECT, `%ROWTYPE`, dynamic SQL, autonomous transactions). Decide with
-  real failure data, not by intuition. **Collections came off this list** — they are items 4–5.
-- 🔒 Mod-PL/SQL web gateway (`web/`, orchestration step 32). Partially built, paused.
-- 🔒 State persistence / resume. Transfers run all-or-nothing in practice; not needed.
+**Deferred — do not invest here without an explicit decision:** mod_plsql web gateway (`web/`,
+step 32; [deferred/](documentation/deferred/MOD_PLSQL_IMPLEMENTATION_PLAN.md)) · state persistence /
+resume · AI-assisted transformation (until the roadmap's verification harness exists) · job
+cancellation.
 
 ## Build and Development Commands
 
@@ -90,7 +74,7 @@ through, so job types added later are covered without anyone remembering; **fail
 archived too, since their partial result holds the errors up to the point they gave up; the report
 is **streamed** via `JobTextReportFormatter.write`, because a step-28 report is hundreds of
 megabytes; and archiving **never** changes a job's outcome. Why it was needed:
-[§13.4](documentation/TYPE_METHOD_IMPLEMENTATION_PLAN.md#134-the-measurement-instrument-is-broken).
+[§13.4](documentation/completed/TYPE_METHOD_IMPLEMENTATION_PLAN.md#134-the-measurement-instrument-is-broken).
 
 ### Domain Modules
 
@@ -106,11 +90,11 @@ Each database element type is an independent module depending only on `core/`, `
 | `table/` | columns, type mapping, NOT NULL | ✅ |
 | `transfer/` | CSV bulk transfer via PostgreSQL COPY, parallel | ✅ |
 | `constraint/` | dependency-ordered PK → UK → FK → CHECK (`ConstraintDependencyAnalyzer`) | ✅ |
-| `index/` | non-constraint Oracle indexes, signature-matched, parallel | ✅ |
-| `view/` | stubs + SQL transformation | ✅ stubs · 🔴 **63%** (2026-08-30 run). **60% of the failures are `function X() does not exist`** — missing function *stubs*, not view transformation. [§15.2](documentation/TYPE_METHOD_IMPLEMENTATION_PLAN.md#152-step-23-is-at-62-and-nobody-had-measured-it) |
-| `function/` | stubs + PL/SQL transformation, standalone **and** package members | 🔴 stubs **62%** · 🔴 impl **~22%** (2026-08-30 run). Both dominated by type resolution and by package context, not PL/SQL. [§15](documentation/TYPE_METHOD_IMPLEMENTATION_PLAN.md#15-fourth-full-run-measurement--2026-08-30) |
-| `typemethod/` | stubs + PL/SQL transformation | 🟡 **84%** (2026-08-28 run), of whose failures 157 of 255 are correct-by-design rejections. Plan Phases 0–5 done, Phase 6 deprioritised. [§13](documentation/TYPE_METHOD_IMPLEMENTATION_PLAN.md#13-third-full-run-measurement--2026-08-28) |
-| `trigger/` | extraction + transformation, idempotent drop-and-recreate | 🟡 **70%** (2026-08-28 run); untaxonomised |
+| `index/` | non-constraint Oracle indexes, signature-matched, parallel | ✅ **98.2%** (2026-10-24 run) |
+| `view/` | stubs + SQL transformation | ✅ stubs · 🔴 **63%** (2026-10-24 run). Mostly *stub* defects, not view transformation: 30% of failures are calls omitting defaulted args (stubs carry no `DEFAULT`), 21% two call-site bugs. [ROADMAP §10](documentation/ROADMAP.md#10-baseline--2026-10-24-full-run-local-source-database-dba_-mode) |
+| `function/` | stubs + PL/SQL transformation, standalone **and** package members | 🟡 stubs **83%** · 🔴 impl **27%**, 59% blocked by failed package contexts (2026-10-24 run). Dominated by the boundary scanner and signature extraction, not PL/SQL. [ROADMAP §10](documentation/ROADMAP.md#10-baseline--2026-10-24-full-run-local-source-database-dba_-mode) |
+| `typemethod/` | stubs + PL/SQL transformation | 🟡 **74%** (2026-10-24 run); most failures are correct-by-design rejections (OVERRIDING, mutating members). Phases 0–5 done, Phase 6 deprioritised. |
+| `trigger/` | extraction + transformation, idempotent drop-and-recreate | 🟡 **70%** (2026-10-24 run); untaxonomised |
 | `oraclecompat/` | PostgreSQL equivalents for Oracle built-ins | ✅ |
 | `web/` | mod_plsql gateway project generator | 🔒 deferred |
 
@@ -172,7 +156,7 @@ account can read every one** — `OracleConnectionService.getConnection()` hands
 to the user, so a read-only account would otherwise extract a fraction of the code with no error.
 The choice is all-or-nothing, never per view. A query on a dictionary view not in
 `OracleDataDictionary.VIEWS` fails a test. Details:
-[CONSOLIDATION_PLAN.md](documentation/CONSOLIDATION_PLAN.md#oracle-data-dictionary-dba_-with-all_-fallback-implemented-2026-10-23).
+[CONSOLIDATION_PLAN.md](documentation/completed/CONSOLIDATION_PLAN.md#oracle-data-dictionary-dba_-with-all_-fallback-implemented-2026-10-23).
 `config/` — `ConfigService` + REST; connections are configured at **runtime** via UI/REST, not
 in `application.properties`.
 
@@ -201,7 +185,7 @@ rules, and they are the reason it stays responsive:
 Panel and list ids are conventional: `{panel}-results`/`{panel}-details`, `{x}-list`/`{x}-items`.
 Toggle state lives in the helper registries, not in `element.style.display`. `escapeHtml` is
 defined once, here — every interpolated value goes through it, because Oracle SQL contains `<`
-and `&`. Details: [CONSOLIDATION_PLAN.md](documentation/CONSOLIDATION_PLAN.md#frontend-rendering-implemented-2026-08-12).
+and `&`. Details: [CONSOLIDATION_PLAN.md](documentation/completed/CONSOLIDATION_PLAN.md#frontend-rendering-implemented-2026-08-12).
 
 `oracle-compat-service.js` and `web-gateway-service.js` deliberately still render directly —
 their output is bounded.
@@ -374,7 +358,7 @@ which is null for them, so every branch misses. `EXTEND` and `TRIM` are unimplem
 **The fix starts diagnostic, not representational** — extract `TYPECODE` and refuse `AS ()` with a
 named error first, then choose a representation against real numbers. Full chain, evidence and the
 argument against picking a representation early:
-[§13.3](documentation/TYPE_METHOD_IMPLEMENTATION_PLAN.md#133-collection-types--one-root-cause-and-it-is-not-in-the-transformer).
+[§13.3](documentation/completed/TYPE_METHOD_IMPLEMENTATION_PLAN.md#133-collection-types--one-root-cause-and-it-is-not-in-the-transformer).
 
 ### LOB→OID Staging Workflow
 
@@ -445,7 +429,7 @@ a job happens to hold — `OracleFunctionExtractor` parses every package spec on
 subtypes and structured-type names in `StateService`, `MetadataIndexBuilder` puts them in
 `TransformationIndices`, and every job therefore answers `pkg.type` identically. Resolving it from
 the loaded contexts instead made the answer depend on processing order
-([§16.1](documentation/TYPE_METHOD_IMPLEMENTATION_PLAN.md#161-what-was-wrong)). The index carries
+([§16.1](documentation/completed/TYPE_METHOD_IMPLEMENTATION_PLAN.md#161-what-was-wrong)). The index carries
 **no field lists** — a signature needs only `jsonb`, and `core/` must not gain a dependency on
 `transformer/` — so a declaration site naming *another* package's RECORD still gets `jsonb` with no
 initializer.
@@ -454,8 +438,8 @@ Remainders still out of scope: a bare **cross-schema** reference emits unqualifi
 synonyms → current schema → `PUBLIC` → `SYS`), and Oracle **collection** types have no composite
 type in the target at all.
 Details: [TRANSFORMATION.md](documentation/TRANSFORMATION.md#object-type-names-in-emitted-types--one-authority-typeresolver--2026-08-27)
-· [§15.5](documentation/TYPE_METHOD_IMPLEMENTATION_PLAN.md#155-implemented-2026-08-30)
-· [§16](documentation/TYPE_METHOD_IMPLEMENTATION_PLAN.md#16-package-spec-type-index--implemented-2026-09-01).
+· [§15.5](documentation/completed/TYPE_METHOD_IMPLEMENTATION_PLAN.md#155-implemented-2026-08-30)
+· [§16](documentation/completed/TYPE_METHOD_IMPLEMENTATION_PLAN.md#16-package-spec-type-index--implemented-2026-09-01).
 
 ### Transformer — Rules That Generalize
 
@@ -508,7 +492,7 @@ before touching the construct. Listed here so a fresh session knows the decision
   parenthesized *expression* (`(a + 1)`) does. Parentheses must survive into the output: `(a).b` is
   composite field access, `a.b` a qualified column, and flattening either way silently resolves
   against the wrong relation.
-- **[Object type methods](documentation/TYPE_METHOD_IMPLEMENTATION_PLAN.md)** — four decisions, each
+- **[Object type methods](documentation/completed/TYPE_METHOD_IMPLEMENTATION_PLAN.md)** — four decisions, each
   failing at *call* time rather than CREATE time when got wrong. Entry rule is `type_body_elements`
   (`AntlrParser.parseTypeMethod`), **not** `function_body`, with **total** dispatch over its four
   alternatives — implemented or a named throw, never relying on a parse failure (§3.1–3.2); the owning
@@ -584,21 +568,24 @@ string literal from a real one. **A truncated segment is invisible to a count ch
 orphaned tail carries no modifier keyword and segment counts still tally against the dictionary. So a
 scanner test must assert the *extracted text*, and one test must feed every scanned segment through
 the parser it feeds in production.
-[Plan Phase 2b](documentation/TYPE_METHOD_IMPLEMENTATION_PLAN.md#phase-2b--extraction-hardening).
+[Plan Phase 2b](documentation/completed/TYPE_METHOD_IMPLEMENTATION_PLAN.md#phase-2b--extraction-hardening).
 
 **The "~90% coverage" figure is from the design, not from a run, and truncation has a signature.**
 `mismatched input '<EOF>'` in a function's parse error means the *source was cut short*, not that
 the PL/SQL is unsupported — 1,950 of step 28's 2,236 parse failures on 2026-08-30. The same defect
 also leaves statement tails (`else`, `then`, bare assignments) in the **reduced package body**,
-which is why 1,070 package bodies will not parse. One defect, both symptoms; grep the archived
-report for `<EOF>` before attributing a parse failure to a grammar gap.
+which is why most package bodies that fail to parse do. One defect, both symptoms; grep the
+archived report for `<EOF>` before attributing a parse failure to a grammar gap. **Mechanism,
+reproduced 2026-10-24:** `FunctionBoundaryScanner` skips `END IF/LOOP/CASE` but does not count open
+CASE *expressions*, so a function ends at the first `x := CASE … END;` — exactly what Phase 2b fixed
+in `TypeMethodBoundaryScanner` and never ported (ROADMAP P1.1).
 
 ### Parallel Jobs — one pattern, two users
 
 Data transfer and index creation share this; a third parallel job should follow it rather than
 invent a second shape. Write-ups:
-[transfer](documentation/CONSOLIDATION_PLAN.md#parallel-data-transfer-implemented-2026-08-08) ·
-[index](documentation/CONSOLIDATION_PLAN.md#index-migration-implemented-2026-08-08).
+[transfer](documentation/completed/CONSOLIDATION_PLAN.md#parallel-data-transfer-implemented-2026-08-08) ·
+[index](documentation/completed/CONSOLIDATION_PLAN.md#index-migration-implemented-2026-08-08).
 
 - **Worker loop, not task-per-item** — each worker holds its own connection(s) and pulls from a
   shared queue, capping connections at the worker count and self-balancing.
@@ -618,7 +605,7 @@ Oracle indexes **not** backed by a PK/UK constraint are recreated; constraint-ba
 excluded because PostgreSQL creates them with the constraint. Two decisions carry the design — the
 rest, including the Oracle extraction traps and the deliberate choice to let non-`IMMUTABLE`
 expressions fail at `CREATE INDEX`, is in the
-[write-up](documentation/CONSOLIDATION_PLAN.md#index-migration-implemented-2026-08-08).
+[write-up](documentation/completed/CONSOLIDATION_PLAN.md#index-migration-implemented-2026-08-08).
 
 - **Signature-based matching, never name-based** — Oracle's `PK_EMP` is PostgreSQL's `emp_pkey`, so
   a name check would miss and duplicate every constraint index. Two rules: **exact match** for
@@ -669,7 +656,7 @@ parse error and carried on, and the extractor then read a recovered `gitemtab or
 variable *named* `.` and shipped `CREATE FUNCTION pkg__get_itemtab() RETURNS .` — DDL for a variable
 Oracle does not have, generated from a failure already detected and discarded. If a parse fails,
 refuse the thing it was parsing. Cost of refusing is measurable and was measured first:
-[§15.3](documentation/TYPE_METHOD_IMPLEMENTATION_PLAN.md#153-the-package-errors-named-at-last).
+[§15.3](documentation/completed/TYPE_METHOD_IMPLEMENTATION_PLAN.md#153-the-package-errors-named-at-last).
 **The rule is "never build on a failed parse", not "always throw".** Step 22's package spec type
 indexing swallows a spec that will not parse *on purpose* — it is filling an index, and a missing
 entry degrades to the caller refusing by name, whereas throwing would take the whole extraction
@@ -696,7 +683,7 @@ is copied onto every item that needed it and the real culprit is never named —
 only on success re-runs the failing setup once per item. Both held in step 28: one broken package
 context became **44,693 opaque function errors, 79% of the job**, re-attempted ~16× per package. A
 count of such errors ranks nothing, because it counts members per package rather than causes.
-[§14](documentation/TYPE_METHOD_IMPLEMENTATION_PLAN.md#14-step-28-taxonomised--2026-08-30) ·
+[§14](documentation/completed/TYPE_METHOD_IMPLEMENTATION_PLAN.md#14-step-28-taxonomised--2026-08-30) ·
 **counted-not-skipped still applies to the blocked items** — they are failures that merely share a
 cause.
 
@@ -756,7 +743,7 @@ cost is paid on every task; it had to be cut by ~40% twice because these rules w
 - **No discovery narrative.** Keep the invariant and the consequence of breaking it; the evidence
   ("184 → 7", "449 methods on one run", how it was found, what it was before) belongs in the plan.
   If a sentence would still be true had the bug never happened, it stays; otherwise it goes.
-- **No run statistics outside the module table and priority table**, and those cite the run date and
+- **No run statistics outside the module table**, and those cite the run date and
   link rather than reproducing the taxonomy. Run numbers are the fastest-perishing content here.
 - **A new transformer construct gets its write-up in TRANSFORMATION.md and *one bullet* under
   "Transformer — Per-Construct Decisions"** — the shortest statement of what would be got wrong
@@ -770,31 +757,24 @@ cost is paid on every task; it had to be cut by ~40% twice because these rules w
 Every plan document, listed once. Prefer linking here over copying content into this file.
 
 **Current plan**
-- [CONSOLIDATION_PLAN.md](documentation/CONSOLIDATION_PLAN.md) — the active plan; per-item status,
-  acceptance criteria, and full implementation write-ups for parallel transfer and index migration
-- [TYPE_METHOD_IMPLEMENTATION_PLAN.md](documentation/TYPE_METHOD_IMPLEMENTATION_PLAN.md) — type
-  methods are done through Phase 5, but **§11–§13 are the only full-run measurements the project
-  has**, and §13 is pipeline-wide: it is what set the priorities at the top of this file. Read §13
-  before choosing any transformer or DDL work, whatever the module.
+- [ROADMAP.md](documentation/ROADMAP.md) — the single active plan: goal, readiness ladder, Phase 0
+  baseline, workstreams A–E, open decisions D1–D7, and where every old plan's open items went (§8)
 
 **Living references**
 - [TRANSFORMATION.md](documentation/TRANSFORMATION.md) — SQL/view transformation feature list and
   history; **the full rationale behind every per-construct decision indexed above**
-- [STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md](documentation/STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md) — PL/SQL function transformation
 - [TESTING.md](documentation/TESTING.md) — testing strategy
 
-**Open work**
-- [PLSQL_DML_STATEMENTS_IMPLEMENTATION_PLAN.md](documentation/PLSQL_DML_STATEMENTS_IMPLEMENTATION_PLAN.md) —
-  Phase 1 (INSERT/UPDATE/DELETE) done; **Phase 2 RETURNING clause open**
+**`documentation/deferred/`** — designed but not built: `AI_TRANSFORMATION_IMPLEMENTATION_PLAN.md`,
+`MOD_PLSQL_IMPLEMENTATION_PLAN.md` (web gateway), `JOB_CANCELLATION_IMPLEMENTATION_PLAN.md`.
 
-**Designed but not built / deferred**
-- [AI_TRANSFORMATION_IMPLEMENTATION_PLAN.md](documentation/AI_TRANSFORMATION_IMPLEMENTATION_PLAN.md) —
-  AI-assisted transformation queue; the fallback if the PL/SQL long tail turns out to be genuinely long
-- [MOD_PLSQL_IMPLEMENTATION_PLAN.md](documentation/MOD_PLSQL_IMPLEMENTATION_PLAN.md) — web gateway
-- [JOB_CANCELLATION_IMPLEMENTATION_PLAN.md](documentation/JOB_CANCELLATION_IMPLEMENTATION_PLAN.md) — planning only
-
-**`documentation/completed/`** — finished plans and investigations, history only. Includes the
-detail behind sections above: `LOB_TO_OID_MIGRATION_PLAN.md` (staging workflow),
+**`documentation/completed/`** — finished plans and investigations, history only. Two are still
+linked from this file for their write-ups: `CONSOLIDATION_PLAN.md` (frontend rendering, payloads,
+parallel transfer, index migration, `DBA_*` dictionary) and `TYPE_METHOD_IMPLEMENTATION_PLAN.md`
+(type-method design decisions; **§11–§16 are the 2026-08/09 full-run measurements and the
+taxonomy method** the roadmap's Phase 0 reuses). Also: `STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md`
+and `PLSQL_DML_STATEMENTS_IMPLEMENTATION_PLAN.md` (PL/SQL visitor history; RETURNING grammar notes),
+`LOB_TO_OID_MIGRATION_PLAN.md` (staging workflow),
 `PACKAGE_SEGMENTATION_*` / `TYPE_METHOD_SEGMENTATION_*` (boundary scanners),
 `PACKAGE_VARIABLE_*`, `INLINE_TYPE_*`, `OBJECT_TYPE_FIELD_ACCESS_*`, `TRIGGER_*`,
 `PLSQL_CURSOR_ATTRIBUTES_*`, `PLSQL_EXCEPTION_HANDLING_ANALYSIS.md`,

@@ -1,3 +1,5 @@
+> **Archived 2026-10-24 — superseded by [ROADMAP.md](../ROADMAP.md).** Phases 0–5 done; Phase 6 and the pipeline-wide items from §13–§16 were carried into the roadmap (§8 there). §11–§16 remain the record of the 2026-08/09 full-run measurements and the method used to taxonomise them.
+
 # Type Method Implementation Plan
 
 **Status:** 🟡 **largely complete, and no longer the constraint** · started 2026-08-17 ·
@@ -363,7 +365,7 @@ remaining bucket lives in orchestration step 7. Read §13.5 before starting Phas
   `isMemberMethod()` deliberately excludes constructors: they carry SELF in Oracle but map to
   `t(…) RETURNS t` with SELF as an injected local, not a parameter.
 - ✅ `getIdentityKey()` includes `method_no`.
-- ✅ Status corrected in CLAUDE.md and [TRANSFORMATION.md](TRANSFORMATION.md).
+- ✅ Status corrected in CLAUDE.md and [TRANSFORMATION.md](../TRANSFORMATION.md).
 
 **Two further silent failures found while doing this, both fixed by the above:**
 
@@ -1027,7 +1029,7 @@ Phase 2 fixed. Fixed by lifting that logic into `transformer/util/TypeResolver` 
 through it — the `table_element` blind-spot shape in a tenth form. **Not type-method-specific**: the
 same run shows the standalone and package function job failing on `optionlist`, `url`, `cardrow`,
 `propmap`. Full write-up:
-[TRANSFORMATION.md](TRANSFORMATION.md#object-type-names-in-emitted-types--one-authority-typeresolver--2026-08-27).
+[TRANSFORMATION.md](../TRANSFORMATION.md#object-type-names-in-emitted-types--one-authority-typeresolver--2026-08-27).
 
 Two sub-buckets are **not** covered by that fix and remain: **cross-schema** references
 (`web_api` → `common_types.url`; ~8 including the 6 constructor calls), because `qualifyTypeName`

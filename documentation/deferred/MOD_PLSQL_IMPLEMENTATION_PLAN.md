@@ -1,3 +1,5 @@
+> **Deferred / paused (2026-08), confirmed 2026-10-24.** The web gateway is not the primary target — see [ROADMAP.md](../ROADMAP.md) §1. Known open state: parameter passing in `PlsqlExecutor`, HTF functions, cookies, package-variable session state under connection pooling.
+
 # Mod-PL/SQL Web Gateway Implementation Plan
 
 **Created:** 2026-03-29

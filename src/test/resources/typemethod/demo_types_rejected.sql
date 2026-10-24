@@ -2,7 +2,7 @@
 -- Constructs that MUST be rejected, not transformed.
 --
 -- Companion to demo_types.sql. Every construct below corresponds to a row of the
--- rejection catalogue in documentation/TYPE_METHOD_IMPLEMENTATION_PLAN.md section
+-- rejection catalogue in documentation/completed/TYPE_METHOD_IMPLEMENTATION_PLAN.md section
 -- 3.2, and each must produce a named TransformationException identifying the
 -- construct -- never an approximation, and never a silent skip.
 --

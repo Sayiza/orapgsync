@@ -1,3 +1,5 @@
+> **Archived 2026-10-24 — superseded by [ROADMAP.md](../ROADMAP.md).** Kept for its implementation write-ups (frontend rendering, result payloads, parallel transfer, index migration, `DBA_*` dictionary), which CLAUDE.md links to. Open items were carried into the roadmap (§8 there).
+
 # Consolidation Plan (July 2026)
 
 ## Strategic Context
@@ -165,7 +167,7 @@ took the wrong branch and still reported success. Fixed by routing all identifie
 `transformer/util/IdentifierHelper`; unquoted identifiers are emitted byte-identical, so the
 change cannot regress a working view. Case-colliding column names (`"Foo"` / `"FOO"`) are now
 refused at table and view-stub creation instead of silently merging.
-Full write-up: [TRANSFORMATION.md](TRANSFORMATION.md#quoted-identifiers-oracle-delimited_id--2026-08-14).
+Full write-up: [TRANSFORMATION.md](../TRANSFORMATION.md#quoted-identifiers-oracle-delimited_id--2026-08-14).
 
 ### 5. View Transformation Gaps — driven by real-world cases
 
@@ -179,7 +181,7 @@ PostgreSQL had no equivalents. PostgreSQL 15 added the whole family with Oracle-
 signatures, so the emulations were replaced by positional mappings to the native functions.
 This also fixed a silent wrong-data defect: the `REGEXP_SUBSTR` emulation returned the first
 capture group rather than the whole match.
-Full write-up: [TRANSFORMATION.md](TRANSFORMATION.md#the-regexp-family-and-oracle-regex-flags--2026-08-14).
+Full write-up: [TRANSFORMATION.md](../TRANSFORMATION.md#the-regexp-family-and-oracle-regex-flags--2026-08-14).
 
 **Approach — explicitly demand-driven, not coverage-driven:**
 - [ ] Take failures from the normal migration run. **The views are in a good state** (assessed
@@ -490,7 +492,7 @@ same columns.
 Decide with data, not intuition: the hardened error reporting from Phase 1 will show which constructs actually block the real codebase and how often.
 - If failures cluster in 2–3 constructs → consider targeted deterministic support.
 - If long-tail → implement the already-designed AI-assisted transformation queue
-  (`AI_TRANSFORMATION_IMPLEMENTATION_PLAN.md`, designed but never built) instead of
+  (`deferred/AI_TRANSFORMATION_IMPLEMENTATION_PLAN.md`, designed but never built) instead of
   writing more visitors.
 
 ## Phase 3: Mod_plsql Web Gateway (DEFERRED — paused)

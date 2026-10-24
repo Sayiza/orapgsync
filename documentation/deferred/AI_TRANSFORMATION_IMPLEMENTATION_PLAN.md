@@ -1,3 +1,5 @@
+> **Deferred, designed but not built (2026-04).** Parked 2026-10-24 under [ROADMAP.md](../ROADMAP.md) §6.D: it becomes worth revisiting only once the verification ladder (smoke + Oracle equivalence) exists, because an AI-drafted body is only usable with that evidence. Provider/model details below are dated.
+
 # AI-Assisted Transformation Implementation Plan
 
 ## Overview

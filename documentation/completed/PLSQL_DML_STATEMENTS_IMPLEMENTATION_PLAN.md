@@ -1,3 +1,5 @@
+> **Archived 2026-10-24.** Phase 1 (INSERT/UPDATE/DELETE + `SQL%` tracking) is done. Phase 2 (RETURNING) and Phase 3 (multi-table INSERT) were moved to the demand-ranked backlog in [ROADMAP.md](../ROADMAP.md) §6.D; the grammar analysis below is still the reference for them.
+
 # PL/SQL DML Statements Implementation Plan
 
 **Status:** ✅ **PHASE 1 COMPLETE** - Basic DML fully implemented and tested
@@ -923,8 +925,8 @@ SELECT 100 AS empno, 'Alice' AS ename FROM dual;
 - **Disabled Tests:** `PostgresPlSqlCursorAttributesValidationTest.java` lines 431-690
 - **Related Documentation:**
   - [TRANSFORMATION.md](../TRANSFORMATION.md)
-  - [STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md](../STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md)
-  - [PLSQL_CURSOR_ATTRIBUTES_PLAN.md](completed/PLSQL_CURSOR_ATTRIBUTES_PLAN.md)
+  - [STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md](STEP_25_STANDALONE_FUNCTION_IMPLEMENTATION.md)
+  - [PLSQL_CURSOR_ATTRIBUTES_PLAN.md](PLSQL_CURSOR_ATTRIBUTES_PLAN.md)
 
 ---
 
