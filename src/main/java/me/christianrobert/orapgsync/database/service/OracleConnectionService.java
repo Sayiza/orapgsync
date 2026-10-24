@@ -12,6 +12,7 @@ import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 @ApplicationScoped
 public class OracleConnectionService {
@@ -20,6 +21,9 @@ public class OracleConnectionService {
 
     @Inject
     ConfigService configService;
+
+    /** Dictionary family per {@code url + user}; connections are configured at runtime. */
+    private final Map<String, OracleDataDictionary.Choice> dictionaryChoices = new ConcurrentHashMap<>();
 
     public Map<String, Object> testConnection() {
         Map<String, Object> result = new HashMap<>();
@@ -53,6 +57,12 @@ public class OracleConnectionService {
                 result.put("url", metaData.getURL());
                 result.put("userName", metaData.getUserName());
 
+                OracleDataDictionary.Choice dictionary = dictionaryChoice(url, user, connection);
+                result.put("dataDictionary", dictionary.family().name());
+                if (dictionary.reason() != null) {
+                    result.put("dataDictionaryReason", dictionary.reason());
+                }
+
                 log.info("Oracle connection test successful - Connected in {}ms", connectionTime);
             }
 
@@ -83,7 +93,32 @@ public class OracleConnectionService {
         }
 
         log.debug("Creating Oracle database connection to: {}", url);
-        return DriverManager.getConnection(url, user, password);
+        Connection connection = DriverManager.getConnection(url, user, password);
+        try {
+            return OracleDataDictionary.wrap(connection, dictionaryChoice(url, user, connection).family());
+        } catch (RuntimeException e) {
+            connection.close();
+            throw e;
+        }
+    }
+
+    /**
+     * Which dictionary views this account reads — see {@link OracleDataDictionary}. Probed once per
+     * {@code url + user} and cached, including a fallback to ALL, which is logged loudly because it
+     * means every extraction sees only objects granted to the user.
+     */
+    private OracleDataDictionary.Choice dictionaryChoice(String url, String user, Connection connection) {
+        return dictionaryChoices.computeIfAbsent(url + "\0" + user.toUpperCase(), key -> {
+            OracleDataDictionary.Choice choice = OracleDataDictionary.probe(connection);
+            if (choice.family() == OracleDataDictionary.Family.DBA) {
+                log.info("Oracle data dictionary: reading DBA_* views as {}", user);
+            } else {
+                log.warn("Oracle data dictionary: falling back to ALL_* views as {} ({}). "
+                        + "Extraction will see only objects granted to this user, which for PL/SQL "
+                        + "means EXECUTE; grant SELECT ANY DICTIONARY to see everything.", user, choice.reason());
+            }
+            return choice;
+        });
     }
 
     public boolean isConfigured() {

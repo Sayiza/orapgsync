@@ -339,7 +339,7 @@ public class PostgresFunctionImplementationJob extends AbstractDatabaseWriteJob<
 
         if (result.isEmpty()) {
             throw new SQLException(String.format(
-                "No source found in ALL_SOURCE for %s %s.%s",
+                "No source found in ALL_SOURCE/DBA_SOURCE for %s %s.%s",
                 type, schema, name
             ));
         }
@@ -715,7 +715,7 @@ public class PostgresFunctionImplementationJob extends AbstractDatabaseWriteJob<
 
         if (result.isEmpty()) {
             throw new SQLException(String.format(
-                "No package spec found in ALL_SOURCE for %s.%s",
+                "No package spec found in ALL_SOURCE/DBA_SOURCE for %s.%s",
                 schema.toUpperCase(), packageName.toUpperCase()
             ));
         }
@@ -768,7 +768,7 @@ public class PostgresFunctionImplementationJob extends AbstractDatabaseWriteJob<
 
         if (result.isEmpty()) {
             throw new SQLException(String.format(
-                "No package body found in ALL_SOURCE for %s.%s",
+                "No package body found in ALL_SOURCE/DBA_SOURCE for %s.%s",
                 schema.toUpperCase(), packageName.toUpperCase()
             ));
         }

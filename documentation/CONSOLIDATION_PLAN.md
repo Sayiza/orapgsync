@@ -450,6 +450,41 @@ matter of running both sides and reading the badges.
 
 ---
 
+## Oracle Data Dictionary: DBA_* with ALL_* Fallback (implemented 2026-10-23)
+
+**Problem.** Every extractor read `ALL_*` views. Those show only objects the connected user has
+been granted, and for PL/SQL that means `EXECUTE`. A genuinely read-only migration account
+(`CREATE SESSION`, `READ ANY TABLE`, `SELECT ANY DICTIONARY`) therefore saw a few percent of the
+source in `ALL_SOURCE`, `ALL_PROCEDURES` and `ALL_ARGUMENTS`, and well under 1% of the sequences
+and triggers (`READ ANY TABLE` covers neither), while tables and views looked mostly complete. On
+a live check through the real extractors, switching to `DBA_*` raised every one of these counts by
+one to two orders of magnitude. Nothing failed: every PL/SQL step would simply have measured a far smaller
+database. Granting `EXECUTE ANY PROCEDURE` would make the code visible, but also lets the account
+run code that writes, so it is no fix for a read-only account.
+
+**Decision.** `database/service/OracleDataDictionary` probes the `DBA_*` twin of every dictionary
+view the tool reads (`SELECT 1 FROM dba_x WHERE 1 = 0`). If **all** are readable, queries go to
+`DBA_*`; if **any** is not, **all** stay on `ALL_*` and a warning names the view that failed.
+
+- **All-or-nothing, never per view.** Mixing families (`DBA_PROCEDURES` with `ALL_ARGUMENTS`)
+  would extract routines without their parameters and build wrong stub signatures with no error.
+  `DBA_ARGUMENTS` only exists from 18c, so on 12c the whole dictionary stays on `ALL_*`.
+- **Rewritten at the single connection choke point.** `OracleConnectionService.getConnection()`
+  returns a proxy that rewrites `all_<view>` → `dba_<view>` in `prepareStatement`, `prepareCall` and
+  plain `Statement` SQL. Query sites keep naming `all_*` views (so they still run as-is in a SQL
+  client) and new ones are covered without anyone remembering. Quoted, qualified (`x.all_source`),
+  literal (`'ALL_SOURCE'`) and longer names (`all_sources`) are left alone.
+- **Probed once per `url + user`** and cached; the Oracle connection test (`/api/database/test/oracle`) reports the
+  outcome as `dataDictionary` (`DBA`/`ALL`) plus `dataDictionaryReason`.
+- **Columns verified identical** between each `ALL_*`/`DBA_*` pair the tool uses on Oracle 19c, with
+  one exception the tool does not read: `ALL_TYPE_ATTRS.CHAR_USED` has no `DBA_TYPE_ATTRS` column.
+
+**Guard.** `OracleDataDictionaryTest.mainCodeQueriesOnlyDictionaryViewsTheProbeCovers` scans
+`src/main/java` for `FROM`/`JOIN all_<view>` and fails on any view missing from
+`OracleDataDictionary.VIEWS`. Such a view would be neither probed nor rewritten, and would stay on
+`ALL_*` while its neighbours read `DBA_*`. Adding one means checking its `DBA_*` twin has the
+same columns.
+
 ## Phase 2: PL/SQL Long Tail (DEFERRED — decide after Phase 1)
 
 Decide with data, not intuition: the hardened error reporting from Phase 1 will show which constructs actually block the real codebase and how often.

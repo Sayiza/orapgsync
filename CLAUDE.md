@@ -166,6 +166,13 @@ every DDL job and by the transformer's `IdentifierHelper`), `PostgreSqlIdentifie
 ### Database & Config
 
 `database/` — `OracleConnectionService`, `PostgresConnectionService`, `PostgresIndexCatalogService`.
+**Oracle dictionary queries are written against `all_*` views but run against `dba_*` when the
+account can read every one** — `OracleConnectionService.getConnection()` hands out a proxy from
+`OracleDataDictionary` that rewrites them. `ALL_*` hides every PL/SQL unit not granted `EXECUTE`
+to the user, so a read-only account would otherwise extract a fraction of the code with no error.
+The choice is all-or-nothing, never per view. A query on a dictionary view not in
+`OracleDataDictionary.VIEWS` fails a test. Details:
+[CONSOLIDATION_PLAN.md](documentation/CONSOLIDATION_PLAN.md#oracle-data-dictionary-dba_-with-all_-fallback-implemented-2026-10-23).
 `config/` — `ConfigService` + REST; connections are configured at **runtime** via UI/REST, not
 in `application.properties`.
 
