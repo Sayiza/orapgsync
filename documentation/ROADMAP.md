@@ -175,8 +175,14 @@ reduced package bodies that will not parse because statement tails were left beh
 `then`, bare assignments). On 2026-08-30 this was ~97% of step 28's parse failures and the cause of
 the largest group of refused packages. Fix it the way Phase 2b fixed `TypeMethodBoundaryScanner`:
 lexer-based, CASE-expression aware, with tests that assert the *extracted text*, plus one test that
-feeds every scanned segment through the production parser. *Confirm on baseline:* grep the step-28
-report for `<EOF>` and for `Package body failed to parse`.
+feeds every scanned segment through the production parser. **Confirmed on the 2026-10-24
+baseline (§10):** `FunctionBoundaryScanner` does not count open CASE *expressions*. Prefer one
+shared depth-tracking implementation over a second copy; two scanners drifting apart is how this
+defect survived. **Acceptance without a full run:** stream every package body from the local source
+database through scanner → `PackageBodyReducer` → `parsePackageBody`, and compare the share of
+reduced bodies that parse before and after the fix. The probes for this
+(`local/tools/src/probe/ReduceProbe.java`, `FetchSource.java`) and a reproducing package are listed
+in `local/runs/2026-10-24/ANALYSIS.md`. Repo tests use invented names only.
 
 **A2 — Function stub↔implementation signature agreement.** The function equivalent of
 `TypeMethodStubSignatureAgreementTest`: build both sides from the same Oracle object and compare,
