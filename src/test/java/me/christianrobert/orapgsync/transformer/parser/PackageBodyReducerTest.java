@@ -200,6 +200,7 @@ class PackageBodyReducerTest {
         for (int i = 0; i < 10; i++) {
             largePackage.append("\n  FUNCTION func").append(i).append(" RETURN NUMBER IS\n");
             largePackage.append("    v_result NUMBER := 0;\n");
+            largePackage.append("  BEGIN\n");
             // Simulate large body (50 lines each)
             for (int j = 0; j < 50; j++) {
                 largePackage.append("    v_result := v_result + ").append(j).append(";\n");

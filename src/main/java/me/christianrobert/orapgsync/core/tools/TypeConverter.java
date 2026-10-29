@@ -75,6 +75,24 @@ public class TypeConverter {
       return "interval";
     }
 
+    // A length or precision on a built-in that is not one of the prefix families above. Each is
+    // listed rather than stripping any "(...)" generically, because the length can change what
+    // the type is: INTEGER(11) is NUMBER(11,0) and outgrows a PostgreSQL integer, so it maps as
+    // NUMBER(p) does. An unlisted type with a length stays unrecognised and is refused by name.
+    int paren = returnType.indexOf('(');
+    if (paren > 0 && returnType.endsWith(")")) {
+      switch (returnType.substring(0, paren).trim()) {
+        case "varchar":   // Oracle's synonym of VARCHAR2; the length is dropped as VARCHAR2's is
+        case "string":    // PL/SQL subtype of VARCHAR2
+          return "varchar";
+        case "integer":
+        case "int":
+          return "numeric";
+        default:
+          return null;
+      }
+    }
+
     // Handle exact type matches
     switch (returnType) {
       // Integer types

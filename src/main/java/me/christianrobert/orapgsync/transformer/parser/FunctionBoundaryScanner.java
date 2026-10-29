@@ -27,10 +27,18 @@ import java.util.List;
  *
  * **Correctly handles:**
  * - END LOOP, END IF, END CASE (don't close BEGIN blocks)
- * - Nested functions/procedures (inner END doesn't close outer function)
+ * - The bare END of a CASE *expression* (`x := CASE … END;`) — see {@link PlSqlBlockScanner},
+ *   which finds the closing END for this scanner and {@link TypeMethodBoundaryScanner} alike
+ * - Nested functions/procedures, including ones declared in a nested DECLARE block
  * - Forward declarations (signature without body)
+ * - Call specs (`IS LANGUAGE JAVA NAME '…';`) — recorded, ending at their semicolon
  * - Mixed case keywords
  * - String literals containing keywords
+ *
+ * **A truncated segment is invisible to a count check**: the orphaned tail carries no FUNCTION
+ * keyword, so segment counts still tally. It shows up instead as `mismatched input '<EOF>'` when
+ * the segment is parsed, and as statement debris (`else`, `then`, bare assignments) in the reduced
+ * package body, which then does not parse. Tests therefore assert the extracted text.
  *
  * **Performance:**
  * - O(n) tokenization + O(n) scan = O(n) total
@@ -170,116 +178,51 @@ public class FunctionBoundaryScanner {
             i++;
         }
 
-        // Now we're after IS/AS - record body start position
-        // Find first non-whitespace token position for body start
-        int bodyStartPos = -1;
-        while (i < tokens.size() && bodyStartPos < 0) {
-            Token t = tokens.get(i);
-            if (t.getType() != PlSqlLexer.EOF && t.getChannel() == Token.DEFAULT_CHANNEL) {
-                bodyStartPos = t.getStartIndex();
+        // Now we're after IS/AS: the body starts at the next token
+        if (i >= tokens.size() || tokens.get(i).getType() == PlSqlLexer.EOF) {
+            log.warn("No body after IS/AS for function {} starting at position {}", functionName, startPos);
+            return null;
+        }
+        int bodyStartPos = tokens.get(i).getStartIndex();
+
+        // call_spec (IS LANGUAGE JAVA NAME '...';) has no BEGIN/END and ends at its semicolon.
+        // Recorded rather than skipped, so the transformer rejects it by name instead of the scan
+        // hunting for an END that belongs to the next function.
+        if (PlSqlBlockScanner.isCallSpec(tokens, i)) {
+            int semicolon = PlSqlBlockScanner.findCallSpecEnd(tokens, i);
+            if (semicolon < 0) {
+                log.warn("Unterminated call spec for function {} starting at position {}", functionName, startPos);
+                return null;
             }
-            if (t.getType() == PlSqlLexer.BEGIN || t.getType() == PlSqlLexer.FUNCTION ||
-                t.getType() == PlSqlLexer.PROCEDURE || t.getType() == PlSqlLexer.CURSOR ||
-                t.getType() == PlSqlLexer.TYPE || isIdentifierToken(t)) {
-                // Found start of declarations or BEGIN
-                break;
-            }
-            i++;
+            Token t = tokens.get(semicolon);
+            return segment(functionName, startPos, t.getStopIndex() + 1, bodyStartPos, t.getStartIndex(),
+                    isFunction, semicolon + 1);
         }
 
-        if (bodyStartPos < 0 && i < tokens.size()) {
-            bodyStartPos = tokens.get(i).getStartIndex();
+        int endIndex = PlSqlBlockScanner.findBodyEnd(tokens, i);
+        if (endIndex < 0) {
+            log.warn("Could not find END for function {} starting at position {}", functionName, startPos);
+            return null;
         }
+        int bodyEndPos = tokens.get(endIndex).getStartIndex();
 
-        // Track block depth to find the matching END
-        // BEGIN increments, END (not followed by IF/LOOP/CASE) decrements
-        // Also track nested FUNCTION/PROCEDURE definitions
-        int blockDepth = 0;
-        int nestedFunctionDepth = 0;
-        int bodyEndPos = -1;
-        int endPos = -1;
-
-        while (i < tokens.size()) {
-            Token t = tokens.get(i);
-            int type = t.getType();
-
-            if (type == PlSqlLexer.EOF) {
-                break;
+        // Find the semicolon after END [name]
+        for (int j = endIndex + 1; j < tokens.size(); j++) {
+            if (tokens.get(j).getType() == PlSqlLexer.SEMICOLON) {
+                return segment(functionName, startPos, tokens.get(j).getStopIndex() + 1, bodyStartPos,
+                        bodyEndPos, isFunction, j + 1);
             }
-
-            // Check for nested FUNCTION/PROCEDURE declaration
-            if (type == PlSqlLexer.FUNCTION || type == PlSqlLexer.PROCEDURE) {
-                // Look ahead to see if this is a declaration (has IS/AS before semicolon)
-                if (isNestedFunctionDeclaration(tokens, i)) {
-                    nestedFunctionDepth++;
-                    log.trace("Nested function detected at token {}, depth now {}", i, nestedFunctionDepth);
-                }
-            }
-
-            // Track BEGIN
-            if (type == PlSqlLexer.BEGIN) {
-                blockDepth++;
-                log.trace("BEGIN at token {}, depth now {}", i, blockDepth);
-            }
-
-            // Track END
-            if (type == PlSqlLexer.END) {
-                // Peek at next token to check for IF/LOOP/CASE
-                Token nextToken = getNextDefaultChannelToken(tokens, i + 1);
-
-                if (nextToken != null && isEndControlStructure(nextToken.getType())) {
-                    // END IF, END LOOP, END CASE - skip, doesn't close BEGIN
-                    log.trace("END {} at token {} - skipping (control structure)", nextToken.getText(), i);
-                    i++; // Skip past the IF/LOOP/CASE token (will be incremented again at loop end)
-                } else {
-                    // Plain END or END <name> - closes a BEGIN block
-                    blockDepth--;
-                    log.trace("END at token {}, depth now {}", i, blockDepth);
-
-                    if (blockDepth <= 0) {
-                        if (nestedFunctionDepth > 0) {
-                            // This END closes a nested function, not the outer one
-                            nestedFunctionDepth--;
-                            blockDepth = 0; // Reset to avoid going more negative
-                            log.trace("END closes nested function, nested depth now {}", nestedFunctionDepth);
-                        } else {
-                            // This END closes the main function
-                            bodyEndPos = t.getStartIndex();
-
-                            // Find the semicolon after END [name]
-                            int j = i + 1;
-                            while (j < tokens.size()) {
-                                Token semicolonCandidate = tokens.get(j);
-                                if (semicolonCandidate.getType() == PlSqlLexer.SEMICOLON) {
-                                    endPos = semicolonCandidate.getStopIndex() + 1;
-                                    break;
-                                } else if (semicolonCandidate.getType() == PlSqlLexer.EOF) {
-                                    endPos = source.length();
-                                    break;
-                                }
-                                j++;
-                            }
-
-                            PackageSegments.FunctionSegment segment = new PackageSegments.FunctionSegment(
-                                    functionName,
-                                    startPos,
-                                    endPos,
-                                    bodyStartPos,
-                                    bodyEndPos,
-                                    isFunction
-                            );
-
-                            return new ScanResult(functionName, j + 1, false, segment);
-                        }
-                    }
-                }
-            }
-
-            i++;
         }
+        // END at the very end of the source without its semicolon
+        return segment(functionName, startPos, source.length(), bodyStartPos, bodyEndPos, isFunction,
+                tokens.size());
+    }
 
-        log.warn("Could not find END for function {} starting at position {}", functionName, startPos);
-        return null;
+    private ScanResult segment(String functionName, int startPos, int endPos, int bodyStartPos,
+                               int bodyEndPos, boolean isFunction, int nextTokenIndex) {
+        PackageSegments.FunctionSegment segment = new PackageSegments.FunctionSegment(
+                functionName, startPos, endPos, bodyStartPos, bodyEndPos, isFunction);
+        return new ScanResult(functionName, nextTokenIndex, false, segment);
     }
 
     /**
@@ -322,57 +265,6 @@ public class FunctionBoundaryScanner {
         // Most other tokens (including many keywords) can be used as identifiers
         // in Oracle. For example: TYPE, CURSOR, EXCEPTION, etc. can be function names.
         return true;
-    }
-
-    /**
-     * Checks if the token type indicates END LOOP, END IF, or END CASE.
-     */
-    private boolean isEndControlStructure(int tokenType) {
-        return tokenType == PlSqlLexer.LOOP ||
-               tokenType == PlSqlLexer.IF ||
-               tokenType == PlSqlLexer.CASE;
-    }
-
-    /**
-     * Gets the next token on the default channel (skipping hidden channel tokens).
-     */
-    private Token getNextDefaultChannelToken(List<Token> tokens, int startIndex) {
-        for (int i = startIndex; i < tokens.size(); i++) {
-            Token t = tokens.get(i);
-            if (t.getChannel() == Token.DEFAULT_CHANNEL && t.getType() != PlSqlLexer.EOF) {
-                return t;
-            }
-        }
-        return null;
-    }
-
-    /**
-     * Checks if the FUNCTION/PROCEDURE at the given index is a nested function declaration
-     * (has IS/AS before semicolon).
-     */
-    private boolean isNestedFunctionDeclaration(List<Token> tokens, int funcIndex) {
-        int parenDepth = 0;
-        for (int i = funcIndex + 1; i < tokens.size(); i++) {
-            Token t = tokens.get(i);
-            int type = t.getType();
-
-            if (type == PlSqlLexer.LEFT_PAREN) {
-                parenDepth++;
-            } else if (type == PlSqlLexer.RIGHT_PAREN) {
-                parenDepth--;
-            } else if (parenDepth == 0) {
-                if (type == PlSqlLexer.IS || type == PlSqlLexer.AS) {
-                    return true; // Has body
-                } else if (type == PlSqlLexer.SEMICOLON) {
-                    return false; // Forward declaration
-                }
-            }
-
-            if (type == PlSqlLexer.EOF) {
-                break;
-            }
-        }
-        return false;
     }
 
     /**

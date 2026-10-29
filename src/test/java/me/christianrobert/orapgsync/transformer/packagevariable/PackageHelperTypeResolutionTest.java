@@ -68,12 +68,12 @@ class PackageHelperTypeResolutionTest {
     @Test
     @DisplayName("A migrated object type is named the way the DDL migration created it")
     void objectTypeVariableIsSchemaQualified() {
-        PackageContext pkg = packageWith("gerrortable", "PROPMAP");
+        PackageContext pkg = packageWith("gfaultmap", "PROPMAP");
 
         List<String> sql = generator.generateHelperSql(
                 pkg, contextFor("main_app", "courseutil", pkg));
 
-        String getter = getterOf(sql, "gerrortable");
+        String getter = getterOf(sql, "gfaultmap");
         assertTrue(getter.contains("RETURNS main_app.propmap"), getter);
         assertFalse(getter.contains("RETURNS propmap\n"),
                 "an unqualified name resolves only if search_path happens to cover the schema, "

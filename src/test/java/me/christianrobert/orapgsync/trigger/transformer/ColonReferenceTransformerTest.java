@@ -151,14 +151,14 @@ class ColonReferenceTransformerTest {
     void testRealTriggerExample() {
         // From the user's original trigger
         String input = """
-            SELECT i.PERSON_UID INTO vPersonUid
+            SELECT i.MEMBER_UID INTO vMemberUid
             FROM IDENTITY_API.LEARNER_PERSON_V i
             INNER JOIN ACADEMIC.ENROLMENTS s ON i.STUDENT_ID = s.LEARNER_NR
             WHERE s.NR = :pOld.STUDY_ID;
 
             IF coalesce( :pOld.CREDITS, -1 ) <> coalesce( :pNew.CREDITS, -1 )
-               OR coalesce( :pOld.ACHIEVEMENT_DATE, TO_TIMESTAMP( '01.01.1900', 'DD.MM.YYYY' ) )
-                  <> coalesce( :pNew.ACHIEVEMENT_DATE, TO_TIMESTAMP( '01.01.1900', 'DD.MM.YYYY' ) )
+               OR coalesce( :pOld.COMPLETED_ON, TO_TIMESTAMP( '01.01.1900', 'DD.MM.YYYY' ) )
+                  <> coalesce( :pNew.COMPLETED_ON, TO_TIMESTAMP( '01.01.1900', 'DD.MM.YYYY' ) )
             THEN
                UPDATE course_core.course_revision
                SET revision = vStudyRevNr
@@ -167,14 +167,14 @@ class ColonReferenceTransformerTest {
             """;
 
         String expected = """
-            SELECT i.PERSON_UID INTO vPersonUid
+            SELECT i.MEMBER_UID INTO vMemberUid
             FROM IDENTITY_API.LEARNER_PERSON_V i
             INNER JOIN ACADEMIC.ENROLMENTS s ON i.STUDENT_ID = s.LEARNER_NR
             WHERE s.NR = OLD.STUDY_ID;
 
             IF coalesce( OLD.CREDITS, -1 ) <> coalesce( NEW.CREDITS, -1 )
-               OR coalesce( OLD.ACHIEVEMENT_DATE, TO_TIMESTAMP( '01.01.1900', 'DD.MM.YYYY' ) )
-                  <> coalesce( NEW.ACHIEVEMENT_DATE, TO_TIMESTAMP( '01.01.1900', 'DD.MM.YYYY' ) )
+               OR coalesce( OLD.COMPLETED_ON, TO_TIMESTAMP( '01.01.1900', 'DD.MM.YYYY' ) )
+                  <> coalesce( NEW.COMPLETED_ON, TO_TIMESTAMP( '01.01.1900', 'DD.MM.YYYY' ) )
             THEN
                UPDATE course_core.course_revision
                SET revision = vStudyRevNr

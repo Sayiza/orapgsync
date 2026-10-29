@@ -91,8 +91,8 @@ Each database element type is an independent module depending only on `core/`, `
 | `transfer/` | CSV bulk transfer via PostgreSQL COPY, parallel | ✅ |
 | `constraint/` | dependency-ordered PK → UK → FK → CHECK (`ConstraintDependencyAnalyzer`) | ✅ |
 | `index/` | non-constraint Oracle indexes, signature-matched, parallel | ✅ **98.2%** (2026-10-24 run) |
-| `view/` | stubs + SQL transformation | ✅ stubs · 🔴 **63%** (2026-10-24 run). Mostly *stub* defects, not view transformation: 30% of failures are calls omitting defaulted args (stubs carry no `DEFAULT`), 21% two call-site bugs. [ROADMAP §10](documentation/ROADMAP.md#10-baseline--2026-10-24-full-run-local-source-database-dba_-mode) |
-| `function/` | stubs + PL/SQL transformation, standalone **and** package members | 🟡 stubs **83%** · 🔴 impl **27%**, 59% blocked by failed package contexts (2026-10-24 run). Dominated by the boundary scanner and signature extraction, not PL/SQL. [ROADMAP §10](documentation/ROADMAP.md#10-baseline--2026-10-24-full-run-local-source-database-dba_-mode) |
+| `view/` | stubs + SQL transformation | ✅ stubs · 🟡 **71%** (2026-10-26 run; 63% before P1.2; some of these had silently lost `(+)` outer joins, fixed since by P1.14). Remaining failures are mostly missing functions and two call-site bugs, not view transformation. [ROADMAP §10.4](documentation/ROADMAP.md#104-re-run-2026-10-26--after-p12-p13-and-p14-part-1) |
+| `function/` | stubs + PL/SQL transformation, standalone **and** package members | 🟡 stubs **92%** · 🟡 impl **69%**, 9% blocked by failed package contexts — a third of them `%ROWTYPE` (2026-10-26 evening run). On that run overloads still shared one source, so "implemented" overstates them; fixed since by P1.8, not yet re-measured. [ROADMAP §10.5](documentation/ROADMAP.md#105-re-run-2026-10-26-evening--after-p14-part-2-and-p15) |
 | `typemethod/` | stubs + PL/SQL transformation | 🟡 **74%** (2026-10-24 run); most failures are correct-by-design rejections (OVERRIDING, mutating members). Phases 0–5 done, Phase 6 deprioritised. |
 | `trigger/` | extraction + transformation, idempotent drop-and-recreate | 🟡 **70%** (2026-10-24 run); untaxonomised |
 | `oraclecompat/` | PostgreSQL equivalents for Oracle built-ins | ✅ |
@@ -133,8 +133,10 @@ using the raw text fails twice over — case-sensitively against PostgreSQL *and
 lower-case-keyed indices, so synonym resolution, CTE detection and type inference silently take the
 wrong branch. Route every identifier through `util/IdentifierHelper`, picking by purpose:
 `canonical()` for metadata lookup keys and comparisons, `emit()` for anything landing in output SQL,
-`unquote()` for name fragments and jsonb keys. `emit()` deliberately leaves unquoted identifiers
-byte-identical — that is what keeps bare `USER` and `LEVEL` working as PostgreSQL keywords. **Column
+`unquote()` for name fragments and jsonb keys, `declare()` for the name a local declaration
+introduces (it must match `emit()`'s references, so `i#` is quoted on both sides). `emit()`
+deliberately leaves unquoted identifiers byte-identical — that is what keeps bare `USER` and
+`LEVEL` working as PostgreSQL keywords. **Column
 aliases are excluded on purpose** (an alias defines a name rather than referencing one; it is the
 view's contract). Details and known gaps:
 [TRANSFORMATION.md](documentation/TRANSFORMATION.md#quoted-identifiers-oracle-delimited_id--2026-08-14).
@@ -354,6 +356,10 @@ a package or routine) map to `jsonb` and have full machinery — element read/wr
 `LAST`/`EXISTS`/`DELETE` in `CollectionMethodTransformer`, package variable getters/setters.
 *Schema-level* collections have none of it: `VariableDefinition.isCollection()` keys on `inlineType`,
 which is null for them, so every branch misses. `EXTEND` and `TRIM` are unimplemented for **both**.
+**The inline model is not whole either:** for an integer-keyed associative array (`INDEX BY
+PLS_INTEGER`), element writes and reads disagree, so a read returns NULL silently and `.COUNT`
+raises. A collection-typed *parameter* is not registered as a collection at all
+([ROADMAP A3c](documentation/ROADMAP.md#a-known-pipeline-defects-carried-over)).
 
 **The fix starts diagnostic, not representational** — extract `TYPECODE` and refuse `AS ()` with a
 named error first, then choose a representation against real numbers. Full chain, evidence and the
@@ -386,7 +392,7 @@ error naming both Oracle columns rather than let a column be silently merged or 
 ### Object Type Names — one authority, `TypeResolver`
 
 Every Oracle type **anyone** emits goes through `transformer/util/TypeResolver` and nothing else:
-`%TYPE` anchor → package type → migrated object type → built-in. It is to types what
+`%TYPE` anchor → enclosing package (a bare name) → package type → migrated object type → built-in. It is to types what
 `IdentifierHelper` is to identifiers, and exists for the same reason. **This includes the DDL
 jobs** — a stub signature and the implementation that replaces it are one signature, so both sides
 must get the same answer, and the only way to guarantee that is one resolver. `PostgresFunctionStubCreationJob`
@@ -415,24 +421,28 @@ not type resolution.
 
 Three things the dictionary and the anchor syntax get wrong if taken literally:
 
-- **`%TYPE` keeps its anchor and gains the table's schema** — `semester_def.nr%TYPE` →
+- **`%TYPE` keeps its anchor and gains the relation's schema** — `semester_def.nr%TYPE` →
   `academic.semester_def.nr%TYPE`. PostgreSQL accepts `%TYPE` in a signature and merely could not find
-  the relation; flattening it to the column's current type would discard the intent. **`%ROWTYPE`
-  is not accepted there** and is deliberately left unresolved rather than approximated.
+  the relation; flattening it to the column's current type would discard the intent. The relation
+  may be a **view** (`getRelationColumnType`); `getColumnType` stays tables-only on purpose.
+  **`%ROWTYPE` is not accepted there** and is deliberately left unresolved rather than approximated.
 - **`PUBLIC` is not a schema.** It is Oracle's public-synonym namespace, reported in the dictionary's
   owner column exactly where a real schema goes. Taken literally it becomes PostgreSQL's `public`.
 - **`ALL_ARGUMENTS` needs `TYPE_SUBNAME`.** Without it a package-declared type composes to
   `TYPE_OWNER.TYPE_NAME` = `schema.package`, naming a package as though it were a type.
 
 **Package-declared types come from an index built at step 22**, not from whatever `PackageContext`
-a job happens to hold — `OracleFunctionExtractor` parses every package spec once and stores the
-subtypes and structured-type names in `StateService`, `MetadataIndexBuilder` puts them in
+a job happens to hold — `OracleFunctionExtractor` parses every package spec (and reduced body) once
+and stores the subtypes and structured-type names in `StateService`, `MetadataIndexBuilder` puts them in
 `TransformationIndices`, and every job therefore answers `pkg.type` identically. Resolving it from
 the loaded contexts instead made the answer depend on processing order
 ([§16.1](documentation/completed/TYPE_METHOD_IMPLEMENTATION_PLAN.md#161-what-was-wrong)). The index carries
 **no field lists** — a signature needs only `jsonb`, and `core/` must not gain a dependency on
 `transformer/` — so a declaration site naming *another* package's RECORD still gets `jsonb` with no
-initializer.
+initializer. **Body declarations are private** — the index keeps them apart, and only a lookup from
+inside the package sees them; the stub job therefore resolves per package, not per schema, and must
+stay that way, since a private member's signature names its package's types bare
+([TRANSFORMATION.md](documentation/TRANSFORMATION.md#object-type-names-in-emitted-types--one-authority-typeresolver--2026-08-27), ROADMAP P1.5).
 
 Remainders still out of scope: a bare **cross-schema** reference emits unqualified (the search is
 synonyms → current schema → `PUBLIC` → `SYS`), and Oracle **collection** types have no composite
@@ -506,6 +516,13 @@ before touching the construct. Listed here so a fresh session knows the decision
   PostgreSQL returning a different row set, with no error anywhere. `UNIQUE` is Oracle's synonym for
   `DISTINCT` and cannot be passed through — PostgreSQL reads it as a column name. Under `CONNECT BY`
   it belongs on the **final** SELECT of the recursive CTE, never the base or recursive case.
+- **[Oracle `(+)` outer joins](documentation/TRANSFORMATION.md#oracle--outer-joins--2026-10-29)**
+  — every WHERE conjunct containing `(+)`, whatever its shape (parenthesized, `BETWEEN`, inside a
+  function, against a constant), joins the `ON` of the item its `(+)` columns qualify. The output is
+  always `LEFT JOIN`, never `RIGHT JOIN`. `visitOuter_join_sign` drops only markers the analyzer
+  claimed and **throws** on any other: returning `""` unconditionally is what silently turned outer
+  joins into inner joins. Dependencies are read off tokens, because `table_element` hides column
+  references from rule-based walks.
 - **[`BITAND`](documentation/TRANSFORMATION.md#bitand--2026-09-15)** → `oracle_compat.bitand`.
   PostgreSQL's `&` has no `numeric` overload, and the conversion is not a cast: Oracle truncates its
   arguments *toward zero* where `::bigint` rounds. The compat function must stay `LANGUAGE sql` and
@@ -526,7 +543,8 @@ Views, functions and type methods get structural placeholders first, so circular
 
 - **View stubs:** `SELECT NULL::type AS col1, ... WHERE false`, columns from `ALL_TAB_COLUMNS`.
 - **Function/procedure stubs:** signatures from `ALL_ARGUMENTS`. Package members are flattened to
-  `packagename__functionname`. **Always created as PostgreSQL `FUNCTION`s, never `PROCEDURE`s**, so
+  `packagename__functionname`, by `PostgresIdentifierNormalizer.normalizeRoutineName` on both sides.
+  It quotes the whole name (`"pkg__skip all"`). **Always created as PostgreSQL `FUNCTION`s, never `PROCEDURE`s**, so
   implementation can use `CREATE OR REPLACE`. RETURNS is derived: no OUT/INOUT → `void`;
   one OUT/INOUT → that type; several → `RECORD`.
 - **Type method stubs:** `typename__methodname`, from `ALL_TYPE_METHODS` / `ALL_METHOD_RESULTS`
@@ -542,6 +560,12 @@ so they drift silently. Any new stubbed element needs the equivalent of
 plus an execution test asserting **exactly one function of that name exists** afterwards, which is
 the only way to tell "replaced" from "added beside".
 
+**Parameter defaults are part of that agreement.** The stub writes `DEFAULT NULL`, because the
+dictionary holds no default values. The implementation writes the real expression. `CREATE OR REPLACE`
+may change a default but never drop one, so both sides must choose the same parameters, and both ask
+`transformer/util/ParameterDefaults`. PostgreSQL accepts only a trailing run of defaulted inputs.
+[ROADMAP §6 P1.2](documentation/ROADMAP.md#a-known-pipeline-defects-carried-over).
+
 **Overloads that collapse after type mapping must be refused, loudly.** Oracle distinguishes
 `VARCHAR2` from `CHAR` and `NUMBER(10)` from `NUMBER`; the mapping merges both pairs, so two Oracle
 overloads can produce one PostgreSQL signature and the second `CREATE OR REPLACE` silently overwrites
@@ -553,32 +577,40 @@ for columns. Do **not** re-add an "already exists" pre-check to avoid this: keyi
 **Package private functions** are invisible in `ALL_PROCEDURES` (spec-only), so package bodies are
 parsed with ANTLR to extract them; they are marked `isPackagePrivate = true`.
 
+**A package member's body is identified by signature, never by name or by position.** Many members
+share a name, so sources are stored as a list per name, and step 22 pairs each body with its
+`ALL_ARGUMENTS` overload (`FunctionSourcePairing`), refusing by name what it cannot pair. Body order
+differs from overload order for one overloaded name in five, so the rank pairing
+`TypeMethodSourcePairing` uses must not be copied here, and is itself wrong for a few types.
+[ROADMAP §6.P1.8](documentation/ROADMAP.md#a-known-pipeline-defects-carried-over).
+
 ### Code Segmentation
 
 Large Oracle packages (5000+ lines) caused OutOfMemoryErrors under a full ANTLR parse. Lightweight
 boundary scanners (`FunctionBoundaryScanner`, `TypeMethodBoundaryScanner`) replace it during
-extraction: ~800× less memory, ~42× faster, ~90% real-world coverage. Type bodies are the simpler
+extraction: ~800× less memory, ~42× faster; 99.8% of package bodies reduce to a parseable body
+(corpus measurement 2026-10-24, [ROADMAP §6.A1](documentation/ROADMAP.md#a-known-pipeline-defects-carried-over)). Type bodies are the simpler
 case (no variables). Private type methods are likewise invisible in `ALL_TYPE_METHODS`, which is
 why the type body is scanned rather than queried.
 
-**Both scanners run on the ANTLR lexer, and a third must too.** Boundary detection needs to know what
-a keyword *is*: `END IF`, `END LOOP`, `END CASE` and the bare `END` of a CASE **expression** close no
-`BEGIN`, and character matching can tell none of these apart — nor a keyword inside a comment or
-string literal from a real one. **A truncated segment is invisible to a count check**, because the
-orphaned tail carries no modifier keyword and segment counts still tally against the dictionary. So a
-scanner test must assert the *extracted text*, and one test must feed every scanned segment through
-the parser it feeds in production.
-[Plan Phase 2b](documentation/completed/TYPE_METHOD_IMPLEMENTATION_PLAN.md#phase-2b--extraction-hardening).
+**Both scanners run on the ANTLR lexer and share one block walker, `PlSqlBlockScanner`; a third
+scanner must use it too.** Finding the `END` that closes a subprogram needs to know what a keyword
+*is*, and adjacency is not enough: a CASE *expression* closes with a bare `END` (sometimes directly
+before a FOR loop's `LOOP`), `END` is a legal column alias, `b.begin` is a column, and local
+subprograms can sit in a nested `DECLARE` block. The walker answers each from a stack of what is open
+plus the grammar's `END [label];` shape. The two scanners used to carry separate copies, and a fix
+made in one never reached the other — the largest cause of blocked functions until 2026-10-24.
+**A truncated segment is invisible to a count check**, because the orphaned tail carries no
+`FUNCTION` keyword and segment counts still tally. So a scanner test must assert the *extracted
+text*, and feed the segments and the reduced body through the parsers they feed in production.
+[ROADMAP §6.A1](documentation/ROADMAP.md#a-known-pipeline-defects-carried-over).
 
-**The "~90% coverage" figure is from the design, not from a run, and truncation has a signature.**
-`mismatched input '<EOF>'` in a function's parse error means the *source was cut short*, not that
-the PL/SQL is unsupported — 1,950 of step 28's 2,236 parse failures on 2026-08-30. The same defect
-also leaves statement tails (`else`, `then`, bare assignments) in the **reduced package body**,
-which is why most package bodies that fail to parse do. One defect, both symptoms; grep the
-archived report for `<EOF>` before attributing a parse failure to a grammar gap. **Mechanism,
-reproduced 2026-10-24:** `FunctionBoundaryScanner` skips `END IF/LOOP/CASE` but does not count open
-CASE *expressions*, so a function ends at the first `x := CASE … END;` — exactly what Phase 2b fixed
-in `TypeMethodBoundaryScanner` and never ported (ROADMAP P1.1).
+**Truncation has a signature.** `mismatched input '<EOF>'` in a function's parse error means the
+*source was cut short*, not that the PL/SQL is unsupported; the same defect leaves statement tails
+(`else`, `then`, bare assignments) in the **reduced package body**, which then does not parse. Grep
+the archived report for `<EOF>` before attributing a parse failure to a grammar gap. **Conditional
+compilation (`$IF … $END`) around package members is the known remaining cause** of reduced bodies
+that do not parse: removing the member leaves an empty `$IF` branch.
 
 ### Parallel Jobs — one pattern, two users
 
@@ -625,13 +657,19 @@ the SQL in `oraclecompat/implementations/`.
 It also holds **standalone** entries (`packageName = "STANDALONE"`), which keep their own name
 rather than being flattened: `oracle_compat.sqlcode` and the `oracle_compat.to_char` overloads.
 
+**It installs functions, never types.** A type these packages declare (`OWA.VC_ARR`) resolves from
+`transformer/context/OracleBuiltinPackageTypes`, Oracle's documented declaration, to `jsonb` like
+any package collection. Never emit `oracle_compat.pkg__type`; a package added to the catalog needs
+its types listed there too ([TRANSFORMATION.md](documentation/TRANSFORMATION.md#object-type-names-in-emitted-types--one-authority-typeresolver--2026-08-27)).
+
 ### Unanchored Grammar Entry Rules — a live silent-failure trap
 
 `select_statement` / `function_body` are **not anchored to EOF**. When the parser meets a construct
 it cannot place, it ends the rule early, leaves the rest of the source unread and reports **no
 error** — the transformation then "succeeds" on a fragment. Measured:
 `SELECT ... FROM sales_view MODEL PARTITION BY ...` consumes 49 of 149 characters, reads `MODEL` as
-a table alias, and produces a silently truncated view.
+a table alias, and produces a silently truncated view. Likewise an unaliased table before a bare
+`JOIN` (`FROM a JOIN b ON …`) reads `JOIN` as the alias and emits `FROM a JOIN`.
 
 This is unfixed and unguarded — no detector exists. Making the transformer *reject* truncated
 parses is still an open decision: it converts an unknown number of currently "successful" views

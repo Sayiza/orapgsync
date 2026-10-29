@@ -2,9 +2,16 @@ package me.christianrobert.orapgsync.function.service;
 
 import me.christianrobert.orapgsync.core.job.model.function.PackageTypeMetadata;
 import me.christianrobert.orapgsync.core.service.StateService;
+import me.christianrobert.orapgsync.transformer.context.TransformationContext;
+import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
+import me.christianrobert.orapgsync.transformer.type.SimpleTypeEvaluator;
+import me.christianrobert.orapgsync.transformer.util.TypeResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+
+import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -36,12 +43,44 @@ class PackageSpecTypeIndexTest {
     @Test
     @DisplayName("Subtypes are indexed with the Oracle type they alias")
     void subtypesAreIndexed() {
-        assertTrue(index("type", "  SUBTYPE string IS VARCHAR2(4000);\n  SUBTYPE flag IS VARCHAR2(1);"));
+        assertTrue(index("kindlib", "  SUBTYPE label IS VARCHAR2(4000);\n  SUBTYPE flag IS VARCHAR2(1);"));
 
-        PackageTypeMetadata types = stateService.getPackageTypes("MAIN_APP", "type");
+        PackageTypeMetadata types = stateService.getPackageTypes("MAIN_APP", "kindlib");
         assertNotNull(types);
-        assertEquals("VARCHAR2(4000)", types.getSubtypes().get("string"));
+        assertEquals("VARCHAR2(4000)", types.getSubtypes().get("label"));
         assertEquals("VARCHAR2(1)", types.getSubtypes().get("flag"));
+    }
+
+    /**
+     * ROADMAP P1.3. The grammar took a length only as a literal or a bare name, so a spec sizing its
+     * subtypes by another package's constant did not parse at all — and the package that does this
+     * is typically the one defining the most widely used subtypes, so every {@code pkg.subtype}
+     * reference into it was unplaceable.
+     */
+    @Test
+    @DisplayName("A subtype sized by a package-qualified constant is indexed and resolves to its base type")
+    void subtypeWithConstantLengthIsIndexed() {
+        assertTrue(index("units", """
+                  TEXT_CAP constant pls_integer := Size_Limits.TEXT_CAP;
+                  subtype Label is varchar2(Size_Limits.TEXT_CAP CHAR);
+                  subtype Tag   is varchar2(main_app.Size_Limits.TAG_LEN);
+                  subtype Price is number(Size_Limits.PRICE_DIGITS, 2);
+                  type LabelList is table of Label index by pls_integer;"""),
+                "the spec must parse");
+
+        PackageTypeMetadata types = stateService.getPackageTypes("MAIN_APP", "units");
+        assertNotNull(types);
+        assertEquals(Set.of("label", "tag", "price"), types.getSubtypes().keySet());
+
+        TransformationIndices indices = new TransformationIndices(
+                Map.of(), Map.of(), Set.of(), Map.of(), Map.of(), Set.of(), Set.of(), Set.of(),
+                Map.of(types.getQualifiedName(), types));
+        TransformationContext context = new TransformationContext(
+                "main_app", indices, new SimpleTypeEvaluator("main_app", indices));
+
+        assertEquals("text", TypeResolver.toPostgresOrNull("Units.Label", context));
+        assertEquals("text", TypeResolver.toPostgresOrNull("units.tag", context));
+        assertEquals("numeric", TypeResolver.toPostgresOrNull("units.price", context));
     }
 
     @Test
@@ -63,10 +102,10 @@ class PackageSpecTypeIndexTest {
     @Test
     @DisplayName("Lookup is case-insensitive on both schema and package")
     void lookupIsCaseInsensitive() {
-        index("Type", "  SUBTYPE string IS VARCHAR2(10);");
+        index("Kindlib", "  SUBTYPE label IS VARCHAR2(10);");
 
-        assertNotNull(stateService.getPackageTypes("main_app", "type"));
-        assertNotNull(stateService.getPackageTypes("MAIN_APP", "TYPE"));
+        assertNotNull(stateService.getPackageTypes("main_app", "kindlib"));
+        assertNotNull(stateService.getPackageTypes("MAIN_APP", "KINDLIB"));
     }
 
     @Test

@@ -151,6 +151,35 @@ public final class IdentifierHelper {
     }
 
     /**
+     * Returns the name a PL/SQL <i>declaration</i> introduces — a local variable, a FOR loop
+     * index or record, a cursor or cursor parameter — spelled so that every reference
+     * {@link #emit} produces for it resolves.
+     *
+     * <pre>
+     * v_Count  → v_count     (plain: lower-cased, as these sites always did)
+     * i#       → "i#"        (what emit() makes of each reference to it)
+     * "Total"  → total
+     * </pre>
+     *
+     * <p>Declaration sites used to lower-case the raw text. For a plain name that agrees with
+     * {@code emit}, which is why it went unnoticed; for {@code i#}, which Oracle permits unquoted,
+     * the declaration reached PostgreSQL as {@code i# integer;}, a syntax error, while every
+     * reference was already quoted (ROADMAP P1.13).
+     *
+     * @param ctx identifier context of the declared name
+     * @return the declared PostgreSQL name, or {@code null} if {@code ctx} is {@code null}
+     */
+    public static String declare(ParserRuleContext ctx) {
+        return ctx == null ? null : declare(ctx.getText());
+    }
+
+    /** String form of {@link #declare(ParserRuleContext)}. */
+    public static String declare(String rawText) {
+        String emitted = emit(rawText);
+        return emitted == null || isQuoted(emitted) ? emitted : emitted.toLowerCase();
+    }
+
+    /**
      * An identifier PostgreSQL can read unquoted, case-folding it to the migrated name.
      *
      * <p>Underscore-leading names are included; digit-leading and anything containing

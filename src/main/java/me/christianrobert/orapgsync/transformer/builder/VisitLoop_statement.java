@@ -2,6 +2,7 @@ package me.christianrobert.orapgsync.transformer.builder;
 
 import me.christianrobert.orapgsync.antlr.PlSqlParser;
 import me.christianrobert.orapgsync.transformer.context.TransformationException;
+import me.christianrobert.orapgsync.transformer.util.IdentifierHelper;
 
 /**
  * Static helper for visiting PL/SQL loop statements.
@@ -126,7 +127,9 @@ public class VisitLoop_statement {
                 if (indexNameCtx == null) {
                     throw new TransformationException("Numeric range FOR loop missing index_name");
                 }
-                String indexName = indexNameCtx.getText().toLowerCase();
+                String indexName = indexNameCtx.id_expression() == null
+                        ? IdentifierHelper.declare(indexNameCtx.identifier())
+                        : indexNameCtx.getText().toLowerCase();
 
                 // Extract REVERSE keyword (optional)
                 boolean isReverse = cursorParam.REVERSE() != null;
@@ -175,7 +178,7 @@ public class VisitLoop_statement {
                 String recordName;
                 if (recordNameCtx.identifier() != null) {
                     // Normal case: identifier (e.g., emp_rec)
-                    recordName = recordNameCtx.identifier().getText().toLowerCase();
+                    recordName = IdentifierHelper.declare(recordNameCtx.identifier());
                 } else if (recordNameCtx.bind_variable() != null) {
                     // Bind variable case: :emp_rec → emp_rec (strip : prefix)
                     recordName = b.visit(recordNameCtx.bind_variable());
@@ -210,8 +213,7 @@ public class VisitLoop_statement {
                     // Register the loop variable for RECORD declaration
                     b.registerLoopRecordVariable(recordName);
 
-                    // Extract cursor name (may include parameters)
-                    String cursorName = cursorNameCtx.getText().toLowerCase();
+                    String cursorName = cursorReference(cursorNameCtx, b);
 
                     // Check if cursor has parameters: cursor_name(param1, param2)
                     // Grammar: cursor_name ('(' expressions_? ')')?
@@ -255,6 +257,42 @@ public class VisitLoop_statement {
             result.append(" ").append(endLabel);
         }
 
+        return result.toString();
+    }
+
+    /**
+     * A local cursor named in a cursor FOR loop, with its arguments if any.
+     *
+     * <p>The grammar reads {@code c(a, b)} as one {@code general_element}, arguments included, so
+     * its raw text used to be emitted as the cursor name: arguments untransformed, and a name like
+     * {@code c#} unquoted (ROADMAP P1.13). The name is now spelled as its declaration spells it
+     * ({@link IdentifierHelper#declare}), and each argument is transformed; Oracle's named
+     * notation {@code p => v} becomes PL/pgSQL's {@code p := v}. Anything else — a qualified name,
+     * a bind variable — is emitted as before.
+     */
+    private static String cursorReference(PlSqlParser.Cursor_nameContext ctx, PostgresCodeBuilder b) {
+        PlSqlParser.General_elementContext element = ctx.general_element();
+        PlSqlParser.General_element_partContext part =
+                element == null || element.general_element() != null || element.general_element_part().size() != 1
+                        ? null : element.general_element_part(0);
+        if (part == null || part.INTRODUCER() != null || part.link_name() != null
+                || part.function_argument().size() > 1) {
+            return ctx.getText().toLowerCase();
+        }
+        StringBuilder result = new StringBuilder(IdentifierHelper.declare(part.id_expression()));
+        if (!part.function_argument().isEmpty()) {
+            StringBuilder args = new StringBuilder();
+            for (PlSqlParser.ArgumentContext arg : part.function_argument(0).argument()) {
+                if (args.length() > 0) {
+                    args.append(", ");
+                }
+                if (arg.identifier() != null) {
+                    args.append(IdentifierHelper.declare(arg.identifier())).append(" := ");
+                }
+                args.append(b.visit(arg.expression()));
+            }
+            result.append("(").append(args).append(")");
+        }
         return result.toString();
     }
 }

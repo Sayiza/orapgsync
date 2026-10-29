@@ -132,4 +132,24 @@ class IdentifierHelperTest {
             assertFalse(IdentifierHelper.isQuoted("\""));
         }
     }
+
+    @Nested
+    @DisplayName("declare")
+    class Declare {
+
+        @Test
+        void lowerCasesPlainNamesAsDeclarationsAlwaysDid() {
+            assertEquals("v_count", IdentifierHelper.declare("V_Count"));
+            assertEquals("level", IdentifierHelper.declare("LEVEL"));
+        }
+
+        @Test
+        void spellsOtherNamesAsEmitSpellsTheirReferences() {
+            assertEquals("\"i#\"", IdentifierHelper.declare("I#"));
+            assertEquals(IdentifierHelper.emit("i#"), IdentifierHelper.declare("I#"));
+            assertEquals("\"n$\"", IdentifierHelper.declare("n$"));
+            assertEquals("total", IdentifierHelper.declare("\"Total\""));
+            assertNull(IdentifierHelper.declare((String) null));
+        }
+    }
 }

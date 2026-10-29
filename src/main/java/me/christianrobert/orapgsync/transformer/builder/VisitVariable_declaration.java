@@ -4,6 +4,7 @@ import me.christianrobert.orapgsync.antlr.PlSqlParser;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
 import me.christianrobert.orapgsync.transformer.inline.InlineTypeDefinition;
 import me.christianrobert.orapgsync.transformer.util.TypeResolver;
+import me.christianrobert.orapgsync.transformer.util.IdentifierHelper;
 
 /**
  * Static helper for visiting PL/SQL variable declarations.
@@ -65,8 +66,10 @@ public class VisitVariable_declaration {
         StringBuilder result = new StringBuilder();
 
         // STEP 1: Extract variable name
-        String varName = ctx.identifier().getText().toLowerCase();
-        result.append(varName).append(" ");
+        // The scope key is the bare name; the output spells it as references to it are spelled,
+        // which quotes a name like i# that Oracle allows unquoted (ROADMAP P1.13).
+        String varName = IdentifierHelper.canonical(ctx.identifier()).toLowerCase();
+        result.append(IdentifierHelper.declare(ctx.identifier())).append(" ");
 
         // STEP 2: Handle CONSTANT keyword (optional)
         if (ctx.CONSTANT() != null) {

@@ -1019,7 +1019,7 @@ PL/pgSQL resolves bodies at call time.
 The largest single cause, and **it was not in §11's table** because the failures it would have
 produced were masked: those methods were failing earlier, at parse, on truncated sources.
 
-The shape is a method naming its *own* type: `common_types.linkurl.setBaseUrl` → `type "linkurl" does not
+The shape is a method naming its *own* type: `common_types.linkurl.withBase` → `type "linkurl" does not
 exist`. The composite type exists — 33 other `linkurl` methods succeeded with `self common_types.linkurl` —
 so this was a qualification failure, not a missing type. `VisitVariable_declaration` sent the type
 straight to `TypeConverter`, which has no metadata and returns unrecognised names unchanged.
@@ -1027,7 +1027,7 @@ straight to `TypeConverter`, which has no metadata and returns unrecognised name
 **Exactly one of ten type-emission sites consulted metadata**: `VisitTypeElementsParameter`, the site
 Phase 2 fixed. Fixed by lifting that logic into `transformer/util/TypeResolver` and routing all ten
 through it — the `table_element` blind-spot shape in a tenth form. **Not type-method-specific**: the
-same run shows the standalone and package function job failing on `optionlist`, `url`, `cardrow`,
+same run shows the standalone and package function job failing on `choicelist`, `url`, `cardrow`,
 `propmap`. Full write-up:
 [TRANSFORMATION.md](../TRANSFORMATION.md#object-type-names-in-emitted-types--one-authority-typeresolver--2026-08-27).
 
@@ -1039,19 +1039,19 @@ in the target at all and are a modelling question, not a qualification one.
 
 ### 12.2 The 43 — element assignment into an attribute — ✅ partly closed 2026-08-28
 
-The failing names are type attributes and parameters (`mbindvars`, `mfvars`, `vrowcollection`,
-`akey`, `pmessages`). The mechanism is provable from the code:
+The failing names are type attributes and parameters (`mslots`, `mfields`, `vrowstash`,
+`akey`, `pnotes`). The mechanism is provable from the code:
 `VisitAssignment_statement.tryTransformCollectionElementAssignment` reads the base variable name
 **verbatim from the parse tree** and emits it on both sides of a `jsonb_set`, never consulting the
-scope tracker or `ImplicitSelfAttributeDetector`. So `mbindvars(i) := x` emits
-`mbindvars := jsonb_set(mbindvars, …)` and PL/pgSQL answers `"mbindvars" is not a known variable`.
+scope tracker or `ImplicitSelfAttributeDetector`. So `mslots(i) := x` emits
+`mslots := jsonb_set(mslots, …)` and PL/pgSQL answers `"mslots" is not a known variable`.
 `tryTransformInlineTypeFieldAssignment` reads its base the same way.
 
 **Resolving the name is only half the fix, and the wrong half alone.** That branch also *assumes the
 base is jsonb*, which is true for the inline collection types it was written for (`TYPE … IS TABLE OF`
 inside a package or routine) and false for an attribute. **An object type attribute is never an inline
-type** — an attribute always names a schema-level Oracle type. Rewriting `mbindvars` to
-`self.mbindvars` while keeping `jsonb_set` would trade a loud CREATE-time error for
+type** — an attribute always names a schema-level Oracle type. Rewriting `mslots` to
+`self.mslots` while keeping `jsonb_set` would trade a loud CREATE-time error for
 `jsonb_set(composite, …) does not exist` at *call* time: precisely the silent corruption Phase 3
 removed from the sibling field-assignment branch, re-introduced one branch over.
 
@@ -1069,7 +1069,7 @@ from two sides; the same types produce both (`main_app.propmap` fails on `akey` 
 
 > **Coverage is a subset, and deliberately unquantified.** The guard covers `attr(i) := …`, which is
 > what the code proves wrong. How many of the 43 take that exact shape is **not known** — the log
-> carries no source, and `common_types.rowset` and `common_types.messagelist` fail *only* with "not a known
+> carries no source, and `common_types.row_list` and `common_types.notelist` fail *only* with "not a known
 > variable" and never on a missing type, which suggests at least one other mechanism. Per §2's
 > negative-observation rule that is not guessed at here; the next run's rejection messages will split
 > it.
@@ -1082,8 +1082,8 @@ merely present.
 
 ### 12.3 The 4 — parameter-name drift, on overloads only
 
-`cannot change name of input parameter` on `customfieldset.customfieldset`, `fetchtoken`, `fetchserver`,
-`existsrefreshtoken` — **all four overloaded**. That is the shape of the residual risk Phase 1
+`cannot change name of input parameter` on `customfieldset.customfieldset`, `loadtoken`, `loadserver`,
+`hasrenewaltoken` — **all four overloaded**. That is the shape of the residual risk Phase 1
 accepted explicitly: two overloads of one name paired to the wrong body segments, which the
 count check cannot detect because the counts tally either way. `TypeMethodStubSignatureAgreementTest`
 compares parameter *types*, not names, so it would not catch it either. Cheap to confirm, and it is
@@ -1138,13 +1138,13 @@ no longer where the work is.
 | **6** | ODCI | correct — §3.2 |
 | 38 | `syntax error at or near …` — 28 of them `"common_types"`, then `DECLARE` (5), `IF` (2), `main_app`, `PERFORM`, `INTO` | tail, §13.3 |
 | 15 | `… does not exist` — **8 collection / cross-schema constructor calls**, 6 `json_object_t`, 1 `cref` | §13.3 |
-| 12 | package function call with `>2` path parts (`[LangType, new, setText]`) | tail |
+| 12 | package function call with `>2` path parts (`[I18nText, new, setText]`) | tail |
 | 7 | input parameters after one with a default | tail |
-| 7 | **source not found** — `common_types.treedata` (5), `programmes.query` (2) | §13.5 — likely mis-filed |
+| 7 | **source not found** — `common_types.nodedata` (5), `programmes.query` (2) | §13.5 — likely mis-filed |
 | 5 | `dml_table_expression_clause` | tail |
 | 4 | `cannot change name of input parameter` | §12.3 — all four still on overloads |
 | 3 | `syntax error at end of input` | tail |
-| 2+2+1+1+1 | `CURRENT OF`, chained calls, `PRIOR`, CAST-to-UDT, `"mbindvars" is not a known variable` | tail |
+| 2+2+1+1+1 | `CURRENT OF`, chained calls, `PRIOR`, CAST-to-UDT, `"mslots" is not a known variable` | tail |
 
 **157 of the 255 are named rejections working as designed** (56 + 51 + 44 + 6), up from 106 in §12
 — because §12.2 converted 51 silent-corruption candidates into honest refusals. The denominator for
@@ -1222,8 +1222,8 @@ origin is upstream of every visitor: it is in orchestration steps 6–7.
 
 Step 29's evidence for the schema-level column: **51** element-assignment rejections, **8** of the 15
 `does not exist` failures, and — very likely — the **28** `syntax error at or near "common_types"`, whose
-failing methods are *all* collection-wrapper types (`bindvars.bind`, `filters.filter`,
-`optionlist.addoption`, `configvalues.addval`, `replacementtable.setreplacement`). That last link is
+failing methods are *all* collection-wrapper types (`paramset.bind`, `filters.filter`,
+`choicelist.addpick`, `settingmap.addsetting`, `substitutions.setsubstitution`). That last link is
 **a hypothesis, not a measurement**: the failing SQL is captured in the job result and never written
 to the log, so it could not be confirmed here. Per §2's negative-observation rule it is not counted
 as if it were.
@@ -1277,7 +1277,7 @@ Ahead of everything in this plan:
 Within this plan, once the above has run:
 
 - The **7 "source not found"** are worth one look first, because they may be **mis-filed rather than
-  broken**: they are on `common_types.treedata` and `programmes.query`, the *base* types whose subtypes
+  broken**: they are on `common_types.nodedata` and `programmes.query`, the *base* types whose subtypes
   supply the 44 `OVERRIDING` rejections. §3.2 says an abstract method "is a skip, not an error —
   skip must mean 'nothing to do'". If these are abstract, the count is honest but the category is
   wrong, and the fix is small.
@@ -1387,7 +1387,7 @@ All 56,338 archived error entries, first line, normalised:
 |---|---|---|
 | 14,727 | `syntax error at or near …` — 11,234 of them `"."` | 564 (for the `"."` group) |
 | 14,579 | `type "X" does not exist` | — |
-| 10,804 | `schema "X" does not exist` — 5,913 of them `"type"` | **300** (for the `"type"` group) |
+| 10,804 | `schema "X" does not exist` — 5,913 of them `"kindlib"` | **300** (for the `"kindlib"` group) |
 | 3,314 | `relation "X" does not exist` — 1,645 `semester_def` | — |
 | 919 | `cannot change return type of existing function` | — |
 | 714 + 349 | `mismatched input '<EOF>'` | — |
@@ -1481,7 +1481,7 @@ speculatively.**
 
 Then, in order:
 
-1. **Fix the concentrated helper-generation bugs** the package errors name. `schema "type" does not
+1. **Fix the concentrated helper-generation bugs** the package errors name. `schema "kindlib" does not
    exist` (300 packages) and `syntax error at or near "."` (564 packages) are the two largest, and
    the archived SQL will now say what generated them. The `schema "X"` names read like Oracle
    *package* names (`uicomponent`, `docstore`, `webmodule`) and Oracle built-ins (`owa`, `utl`),
@@ -1544,7 +1544,7 @@ two defects:
 
 | Cause | Packages | Functions blocked | Mechanism |
 |---|---|---|---|
-| `PackageHelperGenerator` → `TypeConverter` | ~1,067 | **29,705 (65%)** | `type "propmap" does not exist` (446), `schema "type" does not exist` (496), `relation "semester_def" does not exist` (125) |
+| `PackageHelperGenerator` → `TypeConverter` | ~1,067 | **29,705 (65%)** | `type "propmap" does not exist` (446), `schema "kindlib" does not exist` (496), `relation "semester_def" does not exist` (125) |
 | package body parse errors ignored | ~680 | **14,781 (32%)** | `RETURNS .` (554), `RETURNS when` (101) |
 | package **spec** parse failure (wrapped packages) | 84 | 1,170 | |
 
@@ -1612,7 +1612,7 @@ consistently wrong one:
 - **Package `SUBTYPE`s are extracted.** The grammar has carried `subtype_declaration` in
   `package_obj_spec` all along; the extractor read only variables and TYPE declarations, so every
   `pkg.subtype` fell through `resolvePackageQualifiedType` to its "unknown, assume jsonb" branch.
-  `TYPE.STRING` is `VARCHAR2` — 1,339 parameter occurrences, and the largest single named package
+  `KINDLIB.LABEL` is `VARCHAR2` — 1,339 parameter occurrences, and the largest single named package
   error at 295 packages. Subtypes are kept in their own map, *not* in the inline-type map, because
   an alias is not a structure.
 - **`PackageTypeResolution` now records whether it came from metadata.** The visitor layer still
@@ -1684,7 +1684,7 @@ Two jobs need the same answer and neither had it.
   meant *refused*: correct, loud, and still no stub.
 - **The implementation job had one, for the wrong scope.** It builds a context for the package it
   is currently transforming and caches it, so a reference to *another* package's type resolved only
-  if that package happened to have been processed earlier in the same schema. `type.string`
+  if that package happened to have been processed earlier in the same schema. `kindlib.label`
   resolved to `text` or fell back to `jsonb` **depending on processing order** — an answer that
   changes between runs and cannot be reconstructed from the report.
 
@@ -1696,7 +1696,7 @@ different answers consistently, but one route giving different answers at differ
 `ALL_SOURCE` is streamed a second time for `type = 'PACKAGE'`, one spec at a time exactly as the
 body pass does, each spec parsed and reduced to a `PackageTypeMetadata`:
 
-- **subtype name → the Oracle type it aliases**, so `type.string` is `VARCHAR2` and emits `text`;
+- **subtype name → the Oracle type it aliases**, so `kindlib.label` is `VARCHAR2` and emits `text`;
 - **the names of RECORD / TABLE OF / VARRAY / INDEX BY declarations**, because every one of them is
   `jsonb` and a signature needs nothing more.
 
@@ -1740,11 +1740,11 @@ Tests +17, suite 1,966 → 1,983. Verified by mutation: forcing the index lookup
 6 of them, including all three "same answer whatever else is loaded" cases.
 
 **On the next run**, expect the stub job's `cannot resolve Oracle type 'X'` errors to fall by
-roughly the package-qualified share — `type.*`, `uicomponent.*`, `global.*`, `typ.*` and friends,
+roughly the package-qualified share — `kindlib.*`, `uicomponent.*`, `shared.*` and friends,
 about 4,000–5,000 of the 17,339 type-resolution failures §15.2 measured. Step 22 will take somewhat
 longer, since it now parses every package spec in the database rather than none; the parse is small
 relative to the body scanning that dominates that step, but it is not free. Step 28's package
-errors should lose their `schema "type" does not exist` family.
+errors should lose their `schema "kindlib" does not exist` family.
 
 **If the stub count does not move**, the thing to check first is whether the specs parsed at all:
 the log line `Indexed package spec types for schema X: N packages declare types, M specs did not

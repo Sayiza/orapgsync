@@ -1,447 +1,362 @@
 package me.christianrobert.orapgsync.transformer.builder.outerjoin;
 
 import me.christianrobert.orapgsync.antlr.PlSqlParser;
-import me.christianrobert.orapgsync.antlr.PlSqlParserBaseVisitor;
 import me.christianrobert.orapgsync.transformer.context.TransformationException;
+import me.christianrobert.orapgsync.transformer.util.IdentifierHelper;
+import org.antlr.v4.runtime.ParserRuleContext;
 import org.antlr.v4.runtime.tree.ParseTree;
+import org.antlr.v4.runtime.tree.TerminalNode;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
- * Analyzes FROM and WHERE clauses to identify Oracle (+) outer join syntax.
+ * Analyzes one query block's FROM and WHERE clauses for Oracle (+) outer joins.
  *
- * <p>This analyzer performs two passes:
- * <ol>
- *   <li><b>FROM clause analysis:</b> Extract table names and aliases</li>
- *   <li><b>WHERE clause analysis:</b> Identify (+) conditions and determine join types</li>
- * </ol>
+ * <p><b>Oracle's rule</b>, which this reproduces: a (+) marks the <em>optional</em> side. Every
+ * top-level WHERE conjunct containing (+) belongs to the join condition of the one FROM item its
+ * (+) columns qualify, whatever the conjunct's shape — a comparison, {@code BETWEEN}, a function
+ * call, a comparison with a constant. All other conjuncts stay in WHERE and are applied after the
+ * joins. An item whose (+) conjuncts reference no other item is not outer-joined at all; Oracle
+ * applies them as plain filters, and so does this.
  *
- * <p>The analyzer populates an {@link OuterJoinContext} with all discovered information.
+ * <p><b>Conjuncts</b> are found by splitting the WHERE condition on AND and unwrapping redundant
+ * parentheses: {@code ( a.k = b.k(+) )} is the same conjunct as {@code a.k = b.k(+)}.
  *
- * <p>Example:
- * <pre>
- * FROM a, b, c
- * WHERE a.field1 = b.field1(+)
- *   AND b.field2 = c.field2(+)
- *   AND a.col1 > 10
+ * <p><b>What is refused</b>, by name, rather than approximated — each is also an Oracle error, so
+ * valid source does not contain it, but a silent translation would hide a misreading of the tree:
+ * (+) in an OR (ORA-01719), (+) together with a subquery (ORA-01799), (+) columns of two items in
+ * one conjunct (ORA-01468), two items outer-joined to each other (ORA-01416), (+) with ANSI joins
+ * in the same FROM (ORA-25156). Also refused: an unqualified (+) column, which would need column
+ * metadata to place.
  *
- * Results in:
- * - Tables: a, b, c
- * - Outer joins: a LEFT JOIN b ON a.field1 = b.field1
- *                b LEFT JOIN c ON b.field2 = c.field2
- * - Regular WHERE: a.col1 > 10
- * </pre>
+ * <p>The (+) markers of every conjunct handled here are claimed in the context; any other (+)
+ * makes {@code visitOuter_join_sign} throw.
  */
 public class OuterJoinAnalyzer {
 
+    private static final int AMBIGUOUS = -1;
+
     /**
-     * Analyzes FROM and WHERE clauses to populate outer join context.
-     *
-     * @param fromClauseCtx FROM clause context
-     * @param whereClauseCtx WHERE clause context (can be null)
-     * @return Populated OuterJoinContext
+     * @param fromClauseCtx FROM clause (null for none)
+     * @param whereClauseCtx WHERE clause (null for none)
      */
     public static OuterJoinContext analyze(
             PlSqlParser.From_clauseContext fromClauseCtx,
             PlSqlParser.Where_clauseContext whereClauseCtx) {
 
-        OuterJoinContext context = new OuterJoinContext();
-
-        // Step 1: Analyze FROM clause to extract tables and aliases
-        analyzeFromClause(fromClauseCtx, context);
-
-        // Step 2: Analyze WHERE clause to extract outer join conditions
-        if (whereClauseCtx != null) {
-            analyzeWhereClause(whereClauseCtx, context);
+        OuterJoinContext context = new OuterJoinContext(fromClauseCtx, whereClauseCtx);
+        if (fromClauseCtx != null) {
+            claimRedundantInLeftJoins(fromClauseCtx, context);
+        }
+        if (fromClauseCtx == null || whereClauseCtx == null || whereClauseCtx.condition() == null) {
+            return context;
+        }
+        PlSqlParser.ConditionContext condition = whereClauseCtx.condition();
+        if (collect(condition, PlSqlParser.Outer_join_signContext.class).isEmpty()) {
+            return context;
         }
 
+        PlSqlParser.Logical_expressionContext top =
+            condition.expression() == null ? null : condition.expression().logical_expression();
+        if (top == null) {
+            throw new TransformationException("Oracle outer join (+): unsupported WHERE condition form: "
+                + condition.getText());
+        }
+
+        Map<String, Integer> keyToItem = analyzeFromClause(fromClauseCtx, context);
+
+        // Pass 1: classify each conjunct
+        List<PlSqlParser.Logical_expressionContext> conjuncts = new ArrayList<>();
+        flatten(top, conjuncts);
+        List<Integer> optionalItemOf = new ArrayList<>();
+        List<Set<Integer>> dependenciesOf = new ArrayList<>();
+        Map<Integer, Set<Integer>> itemDependencies = new HashMap<>();
+        for (PlSqlParser.Logical_expressionContext conjunct : conjuncts) {
+            List<PlSqlParser.Outer_join_signContext> signs = collect(conjunct, PlSqlParser.Outer_join_signContext.class);
+            if (signs.isEmpty()) {
+                optionalItemOf.add(null);
+                dependenciesOf.add(Set.of());
+                continue;
+            }
+            int item = optionalItem(conjunct, signs, keyToItem);
+            Set<Integer> dependencies = referencedItems(conjunct, keyToItem);
+            dependencies.remove(item);
+            optionalItemOf.add(item);
+            dependenciesOf.add(dependencies);
+            itemDependencies.computeIfAbsent(item, k -> new HashSet<>()).addAll(dependencies);
+            signs.forEach(context::claim);
+        }
+
+        // Pass 2: distribute, keeping the source order within WHERE and within each ON
+        for (int i = 0; i < conjuncts.size(); i++) {
+            Integer item = optionalItemOf.get(i);
+            if (item == null || itemDependencies.get(item).isEmpty()) {
+                context.addRegularWhereConditionNode(conjuncts.get(i));
+            } else {
+                context.addOuterJoinCondition(item, conjuncts.get(i), dependenciesOf.get(i));
+            }
+        }
         return context;
     }
 
-    /**
-     * Analyzes FROM clause to extract table names and aliases.
-     */
-    private static void analyzeFromClause(PlSqlParser.From_clauseContext ctx, OuterJoinContext context) {
-        PlSqlParser.Table_ref_listContext tableRefListCtx = ctx.table_ref_list();
-        if (tableRefListCtx == null) {
-            throw new TransformationException("FROM clause missing table_ref_list");
-        }
-
-        // Visit each table_ref
-        for (PlSqlParser.Table_refContext tableRefCtx : tableRefListCtx.table_ref()) {
-            extractTableInfo(tableRefCtx, context);
-        }
-    }
+    // ========== FROM clause ==========
 
     /**
-     * Extracts table name and alias from a table_ref.
+     * Claims a (+) inside the ON of an ANSI {@code LEFT JOIN} when it marks a column of the
+     * joined table: the table is optional already, so Oracle gives the marker no effect (verified
+     * against Oracle 19c). Any other (+) in an ON stays unclaimed and is refused — in an inner
+     * {@code JOIN} it would turn the join into an outer join.
      */
-    private static void extractTableInfo(PlSqlParser.Table_refContext ctx, OuterJoinContext context) {
-        PlSqlParser.Table_ref_auxContext auxCtx = ctx.table_ref_aux();
-        if (auxCtx == null) {
+    private static void claimRedundantInLeftJoins(PlSqlParser.From_clauseContext ctx, OuterJoinContext context) {
+        if (ctx.table_ref_list() == null) {
             return;
         }
-
-        // Navigate: table_ref -> table_ref_aux -> table_ref_aux_internal
-        PlSqlParser.Table_ref_aux_internalContext internal = auxCtx.table_ref_aux_internal();
-        if (internal == null) {
-            return;
-        }
-
-        // Handle different table_ref_aux_internal types (labeled alternatives in ANTLR grammar)
-        PlSqlParser.Dml_table_expression_clauseContext dmlTable = null;
-
-        if (internal instanceof PlSqlParser.Table_ref_aux_internal_oneContext) {
-            PlSqlParser.Table_ref_aux_internal_oneContext internalOne =
-                (PlSqlParser.Table_ref_aux_internal_oneContext) internal;
-            dmlTable = internalOne.dml_table_expression_clause();
-        } else if (internal instanceof PlSqlParser.Table_ref_aux_internal_threContext) {
-            // ONLY (table) syntax
-            PlSqlParser.Table_ref_aux_internal_threContext internalThree =
-                (PlSqlParser.Table_ref_aux_internal_threContext) internal;
-            dmlTable = internalThree.dml_table_expression_clause();
-        }
-
-        if (dmlTable == null) {
-            // Unsupported table reference type - skip
-            return;
-        }
-
-        // Extract table name
-        PlSqlParser.Tableview_nameContext tableviewName = dmlTable.tableview_name();
-        if (tableviewName == null) {
-            return;
-        }
-
-        String tableName = tableviewName.getText();
-
-        // Extract alias (if present)
-        String alias = null;
-        PlSqlParser.Table_aliasContext aliasCtx = auxCtx.table_alias();
-        if (aliasCtx != null) {
-            alias = aliasCtx.getText();
-        }
-
-        // Register table
-        context.registerTable(tableName, alias);
-    }
-
-    /**
-     * Analyzes WHERE clause to extract outer join conditions.
-     */
-    private static void analyzeWhereClause(PlSqlParser.Where_clauseContext ctx, OuterJoinContext context) {
-        if (ctx.CURRENT() != null) {
-            // CURRENT OF cursor - not relevant for outer joins
-            return;
-        }
-
-        PlSqlParser.ConditionContext conditionCtx = ctx.condition();
-        if (conditionCtx == null) {
-            return;
-        }
-
-        // Use a visitor to traverse the condition tree and find (+) operators
-        OuterJoinConditionVisitor visitor = new OuterJoinConditionVisitor(context);
-        visitor.visit(conditionCtx);
-    }
-
-    /**
-     * Visitor that traverses WHERE clause conditions looking for (+) operators.
-     */
-    private static class OuterJoinConditionVisitor extends PlSqlParserBaseVisitor<Void> {
-
-        private final OuterJoinContext context;
-
-        public OuterJoinConditionVisitor(OuterJoinContext context) {
-            this.context = context;
-        }
-
-        @Override
-        public Void visitLogical_expression(PlSqlParser.Logical_expressionContext ctx) {
-            // Grammar: logical_expression : unary_logical_expression
-            //                              | logical_expression AND logical_expression
-            //                              | logical_expression OR logical_expression
-
-            // Check if this is an AND expression
-            if (ctx.AND() != null) {
-                // Visit both sides of AND
-                return visitChildren(ctx);
-            } else if (ctx.OR() != null) {
-                // OR expressions are more complex - for now just treat the whole thing as regular
-                // (Outer joins with OR are rare and complex)
-                // Store the AST node instead of text for proper transformation
-                context.addRegularWhereConditionNode(ctx);
-                return null;
-            }
-
-            // Continue traversing
-            return visitChildren(ctx);
-        }
-
-        @Override
-        public Void visitUnary_logical_expression(PlSqlParser.Unary_logical_expressionContext ctx) {
-            // Grammar: unary_logical_expression : NOT? multiset_expression
-
-            // Continue traversing to find relational expressions
-            return visitChildren(ctx);
-        }
-
-        @Override
-        public Void visitMultiset_expression(PlSqlParser.Multiset_expressionContext ctx) {
-            // Grammar: multiset_expression : relational_expression ...
-
-            // Continue traversing
-            return visitChildren(ctx);
-        }
-
-        @Override
-        public Void visitRelational_expression(PlSqlParser.Relational_expressionContext ctx) {
-            // Grammar: relational_expression : relational_expression relational_operator relational_expression
-            //                                 | compound_expression
-
-            // IMPORTANT: Don't drill into subqueries - they will be analyzed when their query_block is visited
-            if (containsSubquery(ctx)) {
-                // This relational expression contains a subquery - treat whole thing as regular condition
-                // Store the AST node instead of text for proper transformation
-                context.addRegularWhereConditionNode(ctx);
-                return null;
-            }
-
-            // Check if this is a comparison with (+)
-            if (hasOuterJoinSign(ctx)) {
-                processOuterJoinCondition(ctx);
-                // Don't traverse children - we've handled this condition
-                return null;
-            }
-
-            // Not an outer join - check if this is a simple comparison (leaf condition)
-            // If it's a leaf condition (not containing other logical operators), add it as regular
-            if (isLeafCondition(ctx)) {
-                // Skip ROWNUM conditions - they're handled by RownumAnalyzer
-                if (containsRownum(ctx)) {
-                    return null;  // Don't store as regular condition
+        for (PlSqlParser.Table_refContext ref : ctx.table_ref_list().table_ref()) {
+            for (PlSqlParser.Join_clauseContext join : ref.join_clause()) {
+                if (join.outer_join_type() == null || join.outer_join_type().LEFT() == null) {
+                    continue;
                 }
-                // Store the AST node instead of text for proper transformation
-                context.addRegularWhereConditionNode(ctx);
-                return null;
-            }
-
-            // Continue traversing to find leaf conditions
-            return visitChildren(ctx);
-        }
-
-        @Override
-        public Void visitCompound_expression(PlSqlParser.Compound_expressionContext ctx) {
-            // Grammar: compound_expression : concatenation (NOT? (IN ... | BETWEEN ... | LIKE ...))
-
-            // Check if this contains a subquery
-            // Subqueries will be analyzed and transformed separately when their query_block is visited
-            // We should NOT drill into them during this analysis phase
-            if (containsSubquery(ctx)) {
-                // This is a compound condition with subquery (e.g., IN (SELECT ...))
-                // Check if the outer part has (+) - if so, that's not supported
-                if (hasOuterJoinSignInCompound(ctx)) {
-                    throw new TransformationException(
-                        "Outer join operator (+) in compound expression with subquery not supported: " + ctx.getText()
-                    );
-                }
-                // Add this as a regular WHERE condition
-                // Store the AST node instead of text for proper transformation
-                // When builder.visit() encounters the subquery, it will recursively transform it
-                context.addRegularWhereConditionNode(ctx);
-                // Don't traverse children - we've marked this for WHERE
-                return null;
-            }
-
-            // Check if this contains (+)
-            if (hasOuterJoinSignInCompound(ctx)) {
-                // Compound expression with (+) - not common, but possible
-                throw new TransformationException(
-                    "Outer join operator (+) in compound expression not supported: " + ctx.getText()
-                );
-            }
-
-            // This is a compound condition (IN, BETWEEN, LIKE, etc.) without (+) or subquery
-            // Add as regular WHERE condition - store node for proper transformation
-            context.addRegularWhereConditionNode(ctx);
-            return null;
-        }
-
-        /**
-         * Checks if a parse tree contains a subquery.
-         * Used to avoid drilling into subqueries during analysis.
-         */
-        private boolean containsSubquery(ParseTree tree) {
-            if (tree instanceof PlSqlParser.SubqueryContext) {
-                return true;
-            }
-
-            for (int i = 0; i < tree.getChildCount(); i++) {
-                if (containsSubquery(tree.getChild(i))) {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        /**
-         * Checks if a compound expression contains (+).
-         */
-        private boolean hasOuterJoinSignInCompound(PlSqlParser.Compound_expressionContext ctx) {
-            return findOuterJoinSign(ctx) != null;
-        }
-
-        /**
-         * Checks if a relational expression is a leaf condition (simple comparison).
-         */
-        private boolean isLeafCondition(PlSqlParser.Relational_expressionContext ctx) {
-            // A leaf condition has:
-            // - A relational operator (=, <, >, etc.)
-            // - Two child relational expressions (left and right)
-            // - No nested logical operators (AND, OR)
-
-            if (ctx.relational_operator() != null && ctx.relational_expression().size() == 2) {
-                // This is a comparison - it's a leaf if children don't have operators
-                for (PlSqlParser.Relational_expressionContext child : ctx.relational_expression()) {
-                    if (child.relational_operator() != null) {
-                        // Child has operator - not a leaf
-                        return false;
+                Map<String, Integer> joinedTable = new HashMap<>();
+                keysOf(join.table_ref_aux()).forEach(key -> joinedTable.put(key, 0));
+                for (PlSqlParser.Join_on_partContext on : join.join_on_part()) {
+                    for (PlSqlParser.Outer_join_signContext sign : collect(on, PlSqlParser.Outer_join_signContext.class)) {
+                        if (sign.getParent() instanceof PlSqlParser.AtomContext atom && atom.general_element() != null) {
+                            List<PlSqlParser.General_element_partContext> parts = parts(atom.general_element());
+                            if (parts.size() >= 2 && match(parts, parts.size() - 1, joinedTable) != null) {
+                                context.claim(sign);
+                            }
+                        }
                     }
                 }
-                return true;
             }
-
-            return false;
         }
+    }
 
-        /**
-         * Checks if a relational expression contains the (+) operator.
-         */
-        private boolean hasOuterJoinSign(PlSqlParser.Relational_expressionContext ctx) {
-            // Look for outer_join_sign in any descendant
-            return findOuterJoinSign(ctx) != null;
+    /** Registers each comma-separated FROM item and returns canonical key → FROM position. */
+    private static Map<String, Integer> analyzeFromClause(PlSqlParser.From_clauseContext ctx, OuterJoinContext context) {
+        PlSqlParser.Table_ref_listContext list = ctx.table_ref_list();
+        if (list == null) {
+            throw new TransformationException("FROM clause missing table_ref_list");
         }
-
-        /**
-         * Recursively searches for outer_join_sign in the tree.
-         */
-        private PlSqlParser.Outer_join_signContext findOuterJoinSign(ParseTree tree) {
-            if (tree instanceof PlSqlParser.Outer_join_signContext) {
-                return (PlSqlParser.Outer_join_signContext) tree;
+        Map<String, Integer> keyToItem = new HashMap<>();
+        List<PlSqlParser.Table_refContext> refs = list.table_ref();
+        for (int i = 0; i < refs.size(); i++) {
+            PlSqlParser.Table_refContext ref = refs.get(i);
+            if (!ref.join_clause().isEmpty()) {
+                throw new TransformationException("Oracle outer join (+) cannot be combined with ANSI joins in the same "
+                    + "FROM clause (Oracle rejects it too, ORA-25156): " + ref.getText());
             }
+            List<String> keys = keysOf(ref.table_ref_aux());
+            context.addTable(new TableInfo(i, keys));
+            for (String key : keys) {
+                keyToItem.merge(key, i, (a, b) -> AMBIGUOUS);
+            }
+        }
+        return keyToItem;
+    }
 
-            for (int i = 0; i < tree.getChildCount(); i++) {
-                PlSqlParser.Outer_join_signContext result = findOuterJoinSign(tree.getChild(i));
-                if (result != null) {
-                    return result;
+    private static List<String> keysOf(PlSqlParser.Table_ref_auxContext aux) {
+        List<String> keys = new ArrayList<>();
+        if (aux == null) {
+            return keys;
+        }
+        if (aux.table_alias() != null) {
+            keys.add(IdentifierHelper.canonical(aux.table_alias()));
+            return keys;
+        }
+        PlSqlParser.Dml_table_expression_clauseContext dml = null;
+        if (aux.table_ref_aux_internal() instanceof PlSqlParser.Table_ref_aux_internal_oneContext one) {
+            dml = one.dml_table_expression_clause();
+        } else if (aux.table_ref_aux_internal() instanceof PlSqlParser.Table_ref_aux_internal_threContext three) {
+            dml = three.dml_table_expression_clause();
+        }
+        PlSqlParser.Tableview_nameContext name = dml == null ? null : dml.tableview_name();
+        if (name == null || name.identifier() == null) {
+            return keys;
+        }
+        String first = IdentifierHelper.canonical(name.identifier());
+        if (name.id_expression() != null) {
+            String table = IdentifierHelper.canonical(name.id_expression());
+            keys.add(table);
+            keys.add(first + "." + table);
+        } else {
+            keys.add(first);
+        }
+        return keys;
+    }
+
+    // ========== WHERE clause ==========
+
+    /** Splits on AND, unwrapping parentheses that enclose a conjunct or an AND group. */
+    private static void flatten(PlSqlParser.Logical_expressionContext expr,
+                                List<PlSqlParser.Logical_expressionContext> out) {
+        if (expr.AND() != null) {
+            expr.logical_expression().forEach(e -> flatten(e, out));
+            return;
+        }
+        PlSqlParser.Logical_expressionContext inner = parenthesized(expr);
+        // An OR group keeps its parentheses: unwrapped, it would bind looser than the AND it is joined into
+        if (inner != null && inner.OR() == null) {
+            flatten(inner, out);
+        } else {
+            out.add(expr);
+        }
+    }
+
+    /**
+     * If {@code expr} is nothing but {@code ( condition )}, returns the inner condition.
+     * Descends only through single-child wrappers of the condition chain, so any operator, NOT,
+     * IN, BETWEEN or function call on the way means "not just parentheses".
+     */
+    private static PlSqlParser.Logical_expressionContext parenthesized(PlSqlParser.Logical_expressionContext expr) {
+        ParseTree node = expr;
+        while (!(node instanceof PlSqlParser.AtomContext)) {
+            boolean wrapper = node instanceof PlSqlParser.Logical_expressionContext
+                || node instanceof PlSqlParser.Unary_logical_expressionContext
+                || node instanceof PlSqlParser.Multiset_expressionContext
+                || node instanceof PlSqlParser.Relational_expressionContext
+                || node instanceof PlSqlParser.Compound_expressionContext
+                || node instanceof PlSqlParser.ConcatenationContext
+                || node instanceof PlSqlParser.Model_expressionContext
+                || node instanceof PlSqlParser.Unary_expressionContext;
+            if (!wrapper || node.getChildCount() != 1) {
+                return null;
+            }
+            node = node.getChild(0);
+        }
+        PlSqlParser.AtomContext atom = (PlSqlParser.AtomContext) node;
+        if (atom.expressions_() == null || atom.expressions_().expression().size() != 1) {
+            return null;
+        }
+        return atom.expressions_().expression(0).logical_expression();
+    }
+
+    /** The FROM position of the item whose columns carry the conjunct's (+) markers. */
+    private static int optionalItem(PlSqlParser.Logical_expressionContext conjunct,
+                                    List<PlSqlParser.Outer_join_signContext> signs,
+                                    Map<String, Integer> keyToItem) {
+        if (!collect(conjunct, PlSqlParser.SubqueryContext.class).isEmpty()) {
+            throw new TransformationException("Oracle outer join (+) in a condition with a subquery is not supported "
+                + "(Oracle rejects a column outer-joined to a subquery, ORA-01799): " + conjunct.getText());
+        }
+        Set<Integer> items = new LinkedHashSet<>();
+        for (PlSqlParser.Outer_join_signContext sign : signs) {
+            for (ParseTree p = sign.getParent(); p != conjunct.getParent(); p = p.getParent()) {
+                if (p instanceof PlSqlParser.Logical_expressionContext logical && logical.OR() != null) {
+                    throw new TransformationException("Oracle outer join (+) in an operand of OR is not supported "
+                        + "(Oracle rejects it too, ORA-01719): " + conjunct.getText());
                 }
             }
-
-            return null;
+            if (!(sign.getParent() instanceof PlSqlParser.AtomContext atom) || atom.general_element() == null) {
+                throw new TransformationException("Oracle outer join (+) on something other than a column: "
+                    + sign.getParent().getText());
+            }
+            List<PlSqlParser.General_element_partContext> parts = parts(atom.general_element());
+            if (parts.stream().anyMatch(part -> !part.function_argument().isEmpty())) {
+                throw new TransformationException("Oracle outer join (+) on a function call is not supported: "
+                    + atom.getText());
+            }
+            if (parts.size() < 2) {
+                throw new TransformationException("Oracle outer join (+) on an unqualified column is not supported, "
+                    + "the outer-joined table cannot be determined without column metadata: " + atom.getText());
+            }
+            Integer item = match(parts, parts.size() - 1, keyToItem);
+            if (item == null || item == AMBIGUOUS) {
+                throw new TransformationException("Oracle outer join (+): the qualifier of " + atom.getText()
+                    + (item == null ? " names no item of this FROM clause" : " names more than one item of this FROM clause"));
+            }
+            items.add(item);
         }
-
-        /**
-         * Processes an outer join condition (e.g., a.field = b.field(+)).
-         *
-         * <p>Stores the AST node for the condition, which will be transformed during
-         * the transformation phase. The visitor will handle removing (+) operator.
-         */
-        private void processOuterJoinCondition(PlSqlParser.Relational_expressionContext ctx) {
-            // Grammar: relational_expression relational_operator relational_expression
-
-            if (ctx.relational_operator() == null || ctx.relational_expression().size() != 2) {
-                // Not a simple comparison - skip for now
-                context.addRegularWhereConditionNode(ctx);
-                return;
-            }
-
-            // Check if operator is '='
-            String operator = ctx.relational_operator().getText();
-            if (!"=".equals(operator)) {
-                // Non-equality outer join - not supported, throw exception
-                throw new TransformationException(
-                    "Non-equality outer join not supported: " + ctx.getText() +
-                    ". Only equality (=) is supported with (+) operator."
-                );
-            }
-
-            PlSqlParser.Relational_expressionContext leftExpr = ctx.relational_expression(0);
-            PlSqlParser.Relational_expressionContext rightExpr = ctx.relational_expression(1);
-
-            // Determine which side has (+)
-            boolean leftHasPlus = findOuterJoinSign(leftExpr) != null;
-            boolean rightHasPlus = findOuterJoinSign(rightExpr) != null;
-
-            if (leftHasPlus && rightHasPlus) {
-                throw new TransformationException(
-                    "Both sides of condition have (+): " + ctx.getText()
-                );
-            }
-
-            if (!leftHasPlus && !rightHasPlus) {
-                // No (+) found - this shouldn't happen, but treat as regular condition
-                context.addRegularWhereConditionNode(ctx);
-                return;
-            }
-
-            // Extract table keys from both sides
-            String leftTable = extractTableKey(leftExpr);
-            String rightTable = extractTableKey(rightExpr);
-
-            if (leftTable == null || rightTable == null) {
-                // Can't determine tables - treat as regular condition
-                context.addRegularWhereConditionNode(ctx);
-                return;
-            }
-
-            // Determine join type
-            OuterJoinCondition.JoinType joinType;
-            if (rightHasPlus) {
-                // a.field = b.field(+) → LEFT JOIN
-                joinType = OuterJoinCondition.JoinType.LEFT;
-            } else {
-                // a.field(+) = b.field → RIGHT JOIN
-                joinType = OuterJoinCondition.JoinType.RIGHT;
-            }
-
-            // Register outer join with AST node (visitor will handle removing (+) during transformation)
-            context.registerOuterJoin(leftTable, rightTable, joinType, ctx);
-
-            // Mark original condition for removal from WHERE (using text for comparison)
-            context.markConditionForRemoval(ctx.getText());
+        if (items.size() > 1) {
+            throw new TransformationException("Oracle outer join (+) on columns of two different tables in one condition "
+                + "(Oracle rejects it too, ORA-01468): " + conjunct.getText());
         }
+        return items.iterator().next();
+    }
 
-        /**
-         * Extracts the table key (alias or table name) from an expression.
-         * Looks for patterns like "a.field" or "alias.column".
-         */
-        private String extractTableKey(PlSqlParser.Relational_expressionContext ctx) {
-            // Get the text and look for qualified column reference (table.column)
-            String text = ctx.getText();
-
-            // Remove (+) if present
-            text = text.replace("(+)", "");
-
-            // Look for first dot
-            int dotIndex = text.indexOf('.');
-            if (dotIndex > 0) {
-                return text.substring(0, dotIndex).trim();
+    /**
+     * FROM positions of every item the conjunct references through a qualified name.
+     *
+     * <p>Read off the tokens — {@code name . name} — not off parser rules: a column reference is
+     * not always a {@code general_element} (the first argument of {@code TO_CHAR} is a
+     * {@code table_element}), and a reference missed here would make an outer join look like a
+     * filter, i.e. an inner join. A false positive merely orders the join later.
+     */
+    private static Set<Integer> referencedItems(ParserRuleContext conjunct, Map<String, Integer> keyToItem) {
+        List<TerminalNode> tokens = collect(conjunct, TerminalNode.class);
+        Set<Integer> items = new HashSet<>();
+        for (int i = 0; i + 2 < tokens.size(); i++) {
+            if (!".".equals(tokens.get(i + 1).getText()) || (i > 0 && ".".equals(tokens.get(i - 1).getText()))) {
+                continue;
             }
-
-            return null;
+            String first = IdentifierHelper.canonical(tokens.get(i).getText());
+            Integer item = null;
+            if (i + 4 < tokens.size() && ".".equals(tokens.get(i + 3).getText())) {
+                item = keyToItem.get(first + "." + IdentifierHelper.canonical(tokens.get(i + 2).getText()));
+            }
+            if (item == null) {
+                item = keyToItem.get(first);
+            }
+            if (item != null && item != AMBIGUOUS) {
+                items.add(item);
+            }
         }
+        return items;
+    }
 
-        /**
-         * Checks if a parse tree contains ROWNUM pseudocolumn.
-         *
-         * <p>ROWNUM conditions are handled by RownumAnalyzer and should not be
-         * stored as regular WHERE conditions when outer joins are present.
-         *
-         * @param ctx Parse tree to check
-         * @return true if tree contains ROWNUM
-         */
-        private boolean containsRownum(org.antlr.v4.runtime.tree.ParseTree ctx) {
-            // Simple text-based check - ROWNUM is always uppercase in Oracle
-            return ctx.getText().toUpperCase().contains("ROWNUM");
+    /** Longest prefix of at most {@code maxLength} parts that names a FROM item. */
+    private static Integer match(List<PlSqlParser.General_element_partContext> parts, int maxLength,
+                                 Map<String, Integer> keyToItem) {
+        for (int length = maxLength; length >= 1; length--) {
+            String key = parts.subList(0, length).stream()
+                .map(part -> IdentifierHelper.canonical(part.id_expression()))
+                .collect(Collectors.joining("."));
+            Integer item = keyToItem.get(key);
+            if (item != null) {
+                return item;
+            }
+        }
+        return null;
+    }
+
+    private static List<PlSqlParser.General_element_partContext> parts(PlSqlParser.General_elementContext element) {
+        List<PlSqlParser.General_element_partContext> parts = new ArrayList<>();
+        if (element.general_element() != null) {
+            parts.addAll(parts(element.general_element()));
+        }
+        parts.addAll(element.general_element_part());
+        return parts;
+    }
+
+    // ========== Tree search ==========
+
+    /**
+     * Collects nodes of {@code type}, never descending into a nested query: its (+) markers and
+     * names belong to its own query block, which gets its own analysis. A nested query's root
+     * node itself is still collected, so this also detects one.
+     */
+    private static <T extends ParseTree> List<T> collect(ParseTree tree, Class<T> type) {
+        List<T> out = new ArrayList<>();
+        collectInto(tree, type, out);
+        return out;
+    }
+
+    private static <T extends ParseTree> void collectInto(ParseTree tree, Class<T> type, List<T> out) {
+        if (type.isInstance(tree)) {
+            out.add(type.cast(tree));
+        }
+        if (tree instanceof PlSqlParser.SubqueryContext || tree instanceof PlSqlParser.Query_blockContext) {
+            return;
+        }
+        for (int i = 0; i < tree.getChildCount(); i++) {
+            collectInto(tree.getChild(i), type, out);
         }
     }
 }

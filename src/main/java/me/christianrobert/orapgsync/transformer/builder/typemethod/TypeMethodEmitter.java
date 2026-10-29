@@ -104,8 +104,10 @@ public final class TypeMethodEmitter {
         }
 
         if (parameters != null) {
-            for (PlSqlParser.Type_elements_parameterContext paramCtx : parameters) {
-                renderedParams.add(VisitTypeElementsParameter.v(paramCtx, b));
+            boolean[] withDefault = VisitTypeElementsParameter.emittableDefaults(parameters);
+            for (int i = 0; i < parameters.size(); i++) {
+                PlSqlParser.Type_elements_parameterContext paramCtx = parameters.get(i);
+                renderedParams.add(VisitTypeElementsParameter.v(paramCtx, b, withDefault[i]));
                 if (VisitTypeElementsParameter.isOutMode(paramCtx)) {
                     outParamCount++;
                     if (outParamCount == 1) {

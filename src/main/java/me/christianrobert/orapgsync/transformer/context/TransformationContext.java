@@ -620,6 +620,15 @@ public class TransformationContext {
     }
 
     /**
+     * Gets type information for a column of a table or a view — for {@code %TYPE} anchors only.
+     *
+     * @see TransformationIndices#getRelationColumnType
+     */
+    public TransformationIndices.ColumnTypeInfo getRelationColumnType(String qualifiedRelation, String columnName) {
+        return indices.getRelationColumnType(qualifiedRelation, columnName);
+    }
+
+    /**
      * Checks if a type has a specific method (for disambiguation).
      *
      * @param qualifiedType Type name in "schema.typename" format
@@ -1163,21 +1172,82 @@ public class TransformationContext {
      *        layer uses the fallback because it is mid-expression and must emit something; a
      *        caller that can refuse should tell the two apart, because a guessed {@code jsonb} in
      *        a signature is the "stub and implementation disagree" failure waiting to happen.
+     * @param aliasOf set when the type is a {@code SUBTYPE} whose base leaves the declaring package
+     *        and is not a built-in or object type — another package's type, or a {@code %TYPE}
+     *        anchor. The base is handed back as written, for
+     *        {@link me.christianrobert.orapgsync.transformer.util.TypeResolver} to resolve exactly as
+     *        it would resolve that text anywhere else; {@code postgresType} is then null.
      */
     public record PackageTypeResolution(String postgresType, InlineTypeDefinition inlineType,
-                                        boolean fromMetadata) {
+                                        boolean fromMetadata, String aliasOf) {
         public static PackageTypeResolution ofType(String postgresType) {
-            return new PackageTypeResolution(postgresType, null, true);
+            return new PackageTypeResolution(postgresType, null, true, null);
         }
 
         public static PackageTypeResolution ofInlineType(InlineTypeDefinition inlineType) {
-            return new PackageTypeResolution("jsonb", inlineType, true);
+            return new PackageTypeResolution("jsonb", inlineType, true, null);
         }
 
         /** The {@code jsonb} taken when nothing could place the package type. */
         public static PackageTypeResolution ofUnknownPackageType() {
-            return new PackageTypeResolution("jsonb", null, false);
+            return new PackageTypeResolution("jsonb", null, false, null);
         }
+
+        /** A subtype whose base the caller must resolve; see {@code aliasOf}. */
+        public static PackageTypeResolution ofAlias(String baseOracleType) {
+            return new PackageTypeResolution(null, null, true, baseOracleType);
+        }
+    }
+
+    /**
+     * Resolves a <em>bare</em> type name against the package being transformed: its spec and its
+     * body declarations.
+     *
+     * <p>That is the first scope Oracle searches for a type named inside a package, ahead of schema
+     * objects and {@code STANDARD}, so a package may declare {@code Label} or {@code SlotCache} and
+     * use it unqualified everywhere. Nothing looked there: a bare name went straight to the object
+     * type and built-in lookups, missed, and was refused in a signature and passed through bare in a
+     * body — the largest cause of refused package contexts, and of failed stubs for package-private
+     * members, until ROADMAP P1.5.
+     *
+     * <p>Two sources, which must agree: the live {@link PackageContext} the implementation job builds
+     * from the spec and the reduced body, and the step-22 index, which is all the stub job has. Both
+     * carry body declarations, and only this lookup — made from inside the package — sees them.
+     *
+     * @param typeName the type as written
+     * @return the resolution, or null if this is not a bare name, no package is being transformed, or
+     *         the package declares no such type
+     */
+    public PackageTypeResolution resolveEnclosingPackageType(String typeName) {
+        if (currentPackageName == null || typeName == null) {
+            return null;
+        }
+        String name = typeName.trim();
+        if (name.isEmpty() || name.contains(".") || name.contains("%") || name.contains("(")
+                || name.contains("\"")) {
+            return null;
+        }
+
+        PackageContext pkgCtx = getPackageContext(currentPackageName);
+        PackageTypeMetadata declared = indices.getPackageTypes(
+                (currentSchema + "." + currentPackageName).toLowerCase());
+
+        if (pkgCtx != null && pkgCtx.hasType(name)) {
+            return PackageTypeResolution.ofInlineType(pkgCtx.getType(name));
+        }
+        if (pkgCtx != null && pkgCtx.hasSubtype(name)) {
+            return resolveSubtypeAlias(pkgCtx.getSubtypeBaseType(name), pkgCtx, declared, true);
+        }
+        if (declared != null) {
+            if (declared.declaresStructuredType(name, true)) {
+                return PackageTypeResolution.ofType("jsonb");
+            }
+            String baseType = declared.findSubtype(name, true);
+            if (baseType != null) {
+                return resolveSubtypeAlias(baseType, pkgCtx, declared, true);
+            }
+        }
+        return null;
     }
 
     /**
@@ -1187,14 +1257,14 @@ public class TransformationContext {
      * <ul>
      *   <li>Schema-qualified object types (e.g., "HR.ADDRESS_TYPE") → returns null (use TypeConverter)</li>
      *   <li>Package-qualified types (e.g., "packageName.typeName") → resolves via PackageContext or defaults to jsonb</li>
-     *   <li>Oracle compatibility package types (e.g., "HTP.PageType") → oracle_compat.htp__pagetype</li>
+     *   <li>Types Oracle's own packages declare (e.g., "OWA.VC_ARR") → jsonb, from {@link OracleBuiltinPackageTypes}</li>
      * </ul>
      *
      * <p>Resolution order:</p>
      * <ol>
      *   <li>Check if type contains "." (dotted notation)</li>
      *   <li>Check if it's a known object type (schema.type) → return null (use normal path)</li>
-     *   <li>Check if it's an Oracle compatibility package → oracle_compat.package__type</li>
+     *   <li>Check if it's an Oracle compatibility package → its documented declaration, or unknown</li>
      *   <li>Resolve package name via synonym lookup to find actual schema</li>
      *   <li>Try to resolve from PackageContext (inline type like RECORD) → jsonb with InlineTypeDefinition</li>
      *   <li>Package type not found → default to jsonb</li>
@@ -1254,11 +1324,13 @@ public class TransformationContext {
         String packageName = firstPart;
         String typeName = secondPart;
 
-        // STEP 3: Check if it's an Oracle compatibility package
+        // STEP 3: A type one of Oracle's own packages declares. The compatibility layer installs
+        // functions only, so there is no oracle_compat.pkg__type to name; these resolve like any
+        // other package type, from Oracle's documented declarations. A type not listed there is
+        // as undeclared as any other: a guess mid-expression, refused in a signature.
         if (isOracleCompatibilityPackage(packageName)) {
-            // Oracle compat types go to oracle_compat schema
-            String flattenedType = "oracle_compat." + packageName.toLowerCase() + "__" + typeName.toLowerCase();
-            return PackageTypeResolution.ofType(flattenedType);
+            PackageTypeResolution builtin = OracleBuiltinPackageTypes.resolve(packageName, typeName);
+            return builtin != null ? builtin : PackageTypeResolution.ofUnknownPackageType();
         }
 
         // STEP 4: Resolve package name via synonym lookup to find actual schema
@@ -1293,7 +1365,7 @@ public class TransformationContext {
         // means the parameter is text, and answering jsonb below would be a different type with a
         // different set of operators.
         if (pkgCtx != null && pkgCtx.hasSubtype(typeName)) {
-            return resolveSubtypeAlias(pkgCtx.getSubtypeBaseType(typeName), pkgCtx, null);
+            return resolveSubtypeAlias(pkgCtx.getSubtypeBaseType(typeName), pkgCtx, null, false);
         }
 
         // STEP 5c: The enclosing PackageContext only ever holds the package currently being
@@ -1301,17 +1373,22 @@ public class TransformationContext {
         // answers for all of them, from the spec types extracted at step 22 — which is what makes
         // `otherPkg.rec_t` resolve at all in the stub job, and makes it resolve the *same way*
         // here regardless of which packages happen to have been processed first.
+        // Body declarations are private: visible to `ownpkg.t` written inside the package, never to
+        // another unit.
         PackageTypeMetadata declared = indices.getPackageTypes(resolvedSchema + "." + resolvedPackageName);
+        boolean fromInside = currentPackageName != null
+                && resolvedSchema.equals(currentSchema.toLowerCase())
+                && resolvedPackageName.equals(currentPackageName.toLowerCase());
         if (declared != null) {
-            if (declared.getStructuredTypes().contains(typeName.toLowerCase())) {
+            if (declared.declaresStructuredType(typeName, fromInside)) {
                 // A structure, and every one of them is jsonb. The index deliberately carries no
                 // field list: a signature needs none, and a declaration site of *another* package's
                 // record keeps the initializer-less jsonb it already had.
                 return PackageTypeResolution.ofType("jsonb");
             }
-            String baseType = declared.getSubtypes().get(typeName.toLowerCase());
+            String baseType = declared.findSubtype(typeName, fromInside);
             if (baseType != null) {
-                return resolveSubtypeAlias(baseType, pkgCtx, declared);
+                return resolveSubtypeAlias(baseType, pkgCtx, declared, fromInside);
             }
         }
 
@@ -1325,20 +1402,24 @@ public class TransformationContext {
     /**
      * Follows a {@code SUBTYPE} alias to something emittable.
      *
-     * <p>Chased one hop at a time, and only within the package that declared it: a chain leaving
-     * the package stops and falls through to the built-in mapping, which is no worse than the
-     * answer given before subtypes were extracted at all. The hop limit guards a spec that aliases
-     * in a cycle — illegal in Oracle, but this runs against whatever the database holds.
+     * <p>Chased one hop at a time within the package that declared it. The hop limit guards a spec
+     * that aliases in a cycle — illegal in Oracle, but this runs against whatever the database holds.
+     * A base that leaves the package and is neither a built-in nor an object type — another
+     * package's type, a {@code %TYPE} anchor — is returned as {@link PackageTypeResolution#ofAlias}
+     * for {@code TypeResolver} to resolve, rather than answered here with a second, partial copy of
+     * its chain.
      *
      * @param pkgCtx  the live context, if the subtype came from one; may be null
      * @param declared the indexed declarations, if it came from those; may be null
+     * @param includeBody whether the package's body declarations are visible to the lookup
      */
     private PackageTypeResolution resolveSubtypeAlias(String baseType, PackageContext pkgCtx,
-                                                      PackageTypeMetadata declared) {
+                                                      PackageTypeMetadata declared,
+                                                      boolean includeBody) {
         for (int hop = 0; baseType != null && hop < 16; hop++) {
             String next = pkgCtx != null && pkgCtx.hasSubtype(baseType)
                     ? pkgCtx.getSubtypeBaseType(baseType)
-                    : (declared != null ? declared.getSubtypes().get(baseType.toLowerCase()) : null);
+                    : (declared != null ? declared.findSubtype(baseType, includeBody) : null);
             if (next == null) {
                 break;
             }
@@ -1354,7 +1435,7 @@ public class TransformationContext {
         if (pkgCtx != null && pkgCtx.hasType(baseType)) {
             return PackageTypeResolution.ofInlineType(pkgCtx.getType(baseType));
         }
-        if (declared != null && declared.getStructuredTypes().contains(baseType.toLowerCase())) {
+        if (declared != null && declared.declaresStructuredType(baseType, includeBody)) {
             return PackageTypeResolution.ofType("jsonb");
         }
         String qualifiedBase = qualifyTypeName(baseType);
@@ -1365,6 +1446,6 @@ public class TransformationContext {
         String builtIn = TypeConverter.toPostgreOrNull(baseType);
         return builtIn != null
                 ? PackageTypeResolution.ofType(builtIn)
-                : PackageTypeResolution.ofUnknownPackageType();
+                : PackageTypeResolution.ofAlias(baseType);
     }
 }

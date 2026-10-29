@@ -82,7 +82,7 @@ class PostgresFunctionImplementationJobTest {
     //
     // The 2026-08-28 run recorded 56,338 function failures, of which 44,693 (79%) were one
     // package's context failure copied onto each of its member functions, with the package never
-    // named. 5,913 identical `schema "type" does not exist` entries came from 300 packages.
+    // named. 5,913 identical `schema "kindlib" does not exist` entries came from 300 packages.
 
     private static FunctionMetadata member(String name) {
         FunctionMetadata function = new FunctionMetadata("hr", name, "FUNCTION");

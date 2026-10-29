@@ -41,8 +41,8 @@ class PostgresFunctionStubTypeResolutionTest {
      * a subtype and a record, the two shapes step 22 indexes.
      */
     private static TransformationIndices indices() {
-        PackageTypeMetadata typePkg = new PackageTypeMetadata("lending", "type");
-        typePkg.addSubtype("string", "VARCHAR2(4000)");
+        PackageTypeMetadata typePkg = new PackageTypeMetadata("lending", "kindlib");
+        typePkg.addSubtype("label", "VARCHAR2(4000)");
 
         PackageTypeMetadata componentPkg = new PackageTypeMetadata("lending", "uicomponent");
         componentPkg.addStructuredType("component");
@@ -54,7 +54,7 @@ class PostgresFunctionStubTypeResolutionTest {
                 Set.of(),
                 Map.of("public", Map.of("numberlist", "common_types.numberlist")),
                 Map.of(),
-                Set.of("common_types.numberlist", "common_types.langtype"),
+                Set.of("common_types.numberlist", "common_types.i18ntext"),
                 Set.of(),
                 Set.of(),
                 Map.of(typePkg.getQualifiedName(), typePkg,
@@ -118,11 +118,39 @@ class PostgresFunctionStubTypeResolutionTest {
     @DisplayName("A %TYPE anchor keeps its anchor and gains the table's schema")
     void anchoredTypeIsQualifiedNotFlattened() {
         FunctionMetadata f = function("academic", "check_semester");
-        f.addParameter(param("psemester", "semester_def.nr%TYPE"));
+        f.addParameter(param("ptermdef", "semester_def.nr%TYPE"));
 
         String sql = job.generateCreateFunctionStubSQL(f);
 
-        assertTrue(sql.contains("psemester academic.semester_def.nr%TYPE"), sql);
+        assertTrue(sql.contains("ptermdef academic.semester_def.nr%TYPE"), sql);
+    }
+
+    /** The private-member extractor upper-cases what it reads off the parse tree (P1.4). */
+    @Test
+    @DisplayName("An upper-case %TYPE anchor and an anchored return type are qualified the same way")
+    void upperCaseAnchoredTypeIsQualified() {
+        FunctionMetadata f = function("academic", "current_semester");
+        f.setReturnDataType("SEMESTER_DEF.NR%TYPE");
+        f.addParameter(param("ptermdef", "SEMESTER_DEF.NR%TYPE"));
+
+        String sql = job.generateCreateFunctionStubSQL(f);
+
+        assertTrue(sql.contains("ptermdef academic.semester_def.nr%TYPE"), sql);
+        assertTrue(sql.contains("RETURNS academic.semester_def.nr%TYPE"), sql);
+    }
+
+    /** PostgreSQL does not accept %ROWTYPE in a signature; see TypeResolver. */
+    @Test
+    @DisplayName("A %ROWTYPE parameter is refused by name")
+    void rowtypeParameterIsRefusedByName() {
+        FunctionMetadata f = function("academic", "check_row");
+        f.addParameter(param("prow", "SEMESTER_DEF%ROWTYPE"));
+
+        PostgresFunctionStubCreationJob.TypeResolutionException e = assertThrows(
+                PostgresFunctionStubCreationJob.TypeResolutionException.class,
+                () -> job.generateCreateFunctionStubSQL(f));
+
+        assertTrue(e.getMessage().contains("SEMESTER_DEF%ROWTYPE"), e.getMessage());
     }
 
     @Test
@@ -145,11 +173,11 @@ class PostgresFunctionStubTypeResolutionTest {
     @DisplayName("A migrated object type is emitted schema-qualified")
     void objectTypeIsQualified() {
         FunctionMetadata f = function("academic", "get_text");
-        f.addParameter(customParam("plang", "common_types", "langtype"));
+        f.addParameter(customParam("ptext", "common_types", "i18ntext"));
 
         String sql = job.generateCreateFunctionStubSQL(f);
 
-        assertTrue(sql.contains("plang common_types.langtype"), sql);
+        assertTrue(sql.contains("ptext common_types.i18ntext"), sql);
     }
 
     @Test
@@ -191,7 +219,7 @@ class PostgresFunctionStubTypeResolutionTest {
     @DisplayName("Another package's SUBTYPE resolves to its base type")
     void packageSubtypeResolvesFromTheIndex() {
         FunctionMetadata f = function("lending", "get_label");
-        f.addParameter(param("plabel", "type.string"));
+        f.addParameter(param("plabel", "kindlib.label"));
 
         String sql = job.generateCreateFunctionStubSQL(f);
 

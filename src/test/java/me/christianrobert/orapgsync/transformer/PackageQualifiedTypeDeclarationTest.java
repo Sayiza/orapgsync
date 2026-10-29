@@ -100,7 +100,7 @@ class PackageQualifiedTypeDeclarationTest {
     @Test
     void packageQualifiedType_defaultsToJsonb() {
         String plsql = """
-            PROCEDURE runprocess(pProcessNr NUMBER) IS
+            PROCEDURE runprocess(pBatchRef NUMBER) IS
               vProcess packageName.typeName;
             BEGIN
               NULL;
@@ -130,16 +130,17 @@ class PackageQualifiedTypeDeclarationTest {
     }
 
     /**
-     * Test: Oracle compatibility package type.
+     * Test: a collection type Oracle's own OWA package declares (ROADMAP P1.7).
      *
-     * <p>Oracle: vPage HTP.PageType;</p>
-     * <p>PostgreSQL: vpage oracle_compat.htp__pagetype;</p>
+     * <p>Oracle: vNames OWA.VC_ARR;  (TABLE OF VARCHAR2(32000) INDEX BY BINARY_INTEGER)</p>
+     * <p>PostgreSQL: vnames jsonb := '{}'::jsonb; — as any package's associative array.
+     * It used to name oracle_compat.owa__vc_arr, which nothing creates.</p>
      */
     @Test
-    void oracleCompatPackageType_usesOracleCompatSchema() {
+    void oracleCompatPackageType_isDeclaredCollection() {
         String plsql = """
             PROCEDURE test_proc IS
-              vPage HTP.PageType;
+              vNames OWA.VC_ARR;
             BEGIN
               NULL;
             END;
@@ -156,13 +157,14 @@ class PackageQualifiedTypeDeclarationTest {
 
         String postgresSql = builder.visit(parseResult.getTree());
 
-        System.out.println("=== Transformed HTP Type ===");
+        System.out.println("=== Transformed OWA Type ===");
         System.out.println(postgresSql);
         System.out.println("============================");
 
-        // Should use oracle_compat schema for HTP package types
-        assertTrue(postgresSql.toLowerCase().contains("oracle_compat.htp__pagetype"),
-            "HTP package type should use oracle_compat schema");
+        assertTrue(postgresSql.toLowerCase().contains("vnames jsonb := '{}'::jsonb"),
+            "OWA.VC_ARR is an associative array: jsonb with an empty-object initializer");
+        assertFalse(postgresSql.toLowerCase().contains("oracle_compat"),
+            "the compatibility layer creates no types");
     }
 
     /**
@@ -282,15 +284,20 @@ class PackageQualifiedTypeDeclarationTest {
     }
 
     /**
-     * Test: Multiple Oracle compat packages (HTP, DBMS_OUTPUT, etc.)
+     * Test: types of several Oracle compat packages, and one that no Oracle package declares.
+     *
+     * <p>UTL_FILE.FILE_TYPE is the handle the compat layer's utl_file__fopen returns as integer.
+     * HTP.PageType is not a type HTP declares, so it is not guessed into existence: the visitor
+     * layer gets the jsonb any undeclared package type gets.</p>
      */
     @Test
     void multipleOracleCompatPackageTypes() {
         String plsql = """
             PROCEDURE test_proc IS
+              vLines DBMS_OUTPUT.CHARARR;
+              vNums dbms_utility.number_array;
+              vFile UTL_FILE.FILE_TYPE;
               vPage HTP.PageType;
-              vBuffer DBMS_OUTPUT.BufferType;
-              vLob DBMS_LOB.LobType;
             BEGIN
               NULL;
             END;
@@ -311,13 +318,12 @@ class PackageQualifiedTypeDeclarationTest {
         System.out.println(postgresSql);
         System.out.println("================================================");
 
-        // All should use oracle_compat schema
-        assertTrue(postgresSql.toLowerCase().contains("oracle_compat.htp__pagetype"),
-            "HTP type should use oracle_compat schema");
-        assertTrue(postgresSql.toLowerCase().contains("oracle_compat.dbms_output__buffertype"),
-            "DBMS_OUTPUT type should use oracle_compat schema");
-        assertTrue(postgresSql.toLowerCase().contains("oracle_compat.dbms_lob__lobtype"),
-            "DBMS_LOB type should use oracle_compat schema");
+        String sql = postgresSql.toLowerCase();
+        assertTrue(sql.contains("vlines jsonb := '{}'::jsonb"), "DBMS_OUTPUT.CHARARR");
+        assertTrue(sql.contains("vnums jsonb := '{}'::jsonb"), "DBMS_UTILITY.NUMBER_ARRAY, any case");
+        assertTrue(sql.contains("vfile integer"), "UTL_FILE.FILE_TYPE is the compat layer's handle");
+        assertTrue(sql.contains("vpage jsonb;"), "an undeclared type gets the plain jsonb fallback");
+        assertFalse(sql.contains("oracle_compat"), "the compatibility layer creates no types");
     }
 
     /**
@@ -365,10 +371,10 @@ class PackageQualifiedTypeDeclarationTest {
     @Test
     void fullProcedure_matchesExpectedOutput() {
         String plsql = """
-            PROCEDURE RUNPROCESS(pProcessNr NUMBER) IS
+            PROCEDURE RUNPROCESS(pBatchRef NUMBER) IS
               vProcess packageName.typeName;
             BEGIN
-              vProcess := DocFlow.newProcessByNr(pProcessNr);
+              vProcess := DocFlow.startRunByNr(pBatchRef);
               DocFlow.execute(vProcess);
             END;
             """;
@@ -393,7 +399,7 @@ class PackageQualifiedTypeDeclarationTest {
             "Variable type should default to jsonb");
 
         // Function calls should still be flattened (existing functionality)
-        assertTrue(postgresSql.toLowerCase().contains("docflow__newprocessbynr"),
+        assertTrue(postgresSql.toLowerCase().contains("docflow__startrunbynr"),
             "Function call should be flattened");
         assertTrue(postgresSql.toLowerCase().contains("docflow__execute"),
             "Procedure call should be flattened");
@@ -413,10 +419,10 @@ class PackageQualifiedTypeDeclarationTest {
     @Test
     void synonymResolution_fromDifferentSchema_defaultsToJsonb() {
         String plsql = """
-            PROCEDURE RUNPROCESS(pProcessNr NUMBER) IS
+            PROCEDURE RUNPROCESS(pBatchRef NUMBER) IS
               vProcess packageName.typeName;
             BEGIN
-              vProcess := DocFlow.newProcessByNr(pProcessNr);
+              vProcess := DocFlow.startRunByNr(pBatchRef);
               DocFlow.execute(vProcess);
             END;
             """;
@@ -445,7 +451,7 @@ class PackageQualifiedTypeDeclarationTest {
             "Unresolved package type should default to jsonb");
 
         // Function calls should still use synonym-resolved schema
-        assertTrue(postgresSql.toLowerCase().contains("test_schema_name.docflow__newprocessbynr"),
+        assertTrue(postgresSql.toLowerCase().contains("test_schema_name.docflow__startrunbynr"),
             "Function call should use schema from synonym resolution");
     }
 
@@ -489,13 +495,13 @@ class PackageQualifiedTypeDeclarationTest {
     /**
      * Test: Function parameter with Oracle compat package type.
      *
-     * <p>Oracle: FUNCTION render_page(pPage HTP.PageType) RETURN NUMBER</p>
-     * <p>PostgreSQL: FUNCTION render_page(ppage oracle_compat.htp__pagetype) RETURNS numeric</p>
+     * <p>Oracle: FUNCTION render_page(name_array OWA.VC_ARR) RETURN NUMBER</p>
+     * <p>PostgreSQL: FUNCTION render_page(name_array jsonb) RETURNS numeric</p>
      */
     @Test
-    void parameterWithOracleCompatType_usesOracleCompatSchema() {
+    void parameterWithOracleCompatType_isJsonb() {
         String plsql = """
-            FUNCTION render_page(pPage HTP.PageType) RETURN NUMBER IS
+            FUNCTION render_page(name_array OWA.VC_ARR) RETURN NUMBER IS
             BEGIN
               RETURN 1;
             END;
@@ -516,9 +522,8 @@ class PackageQualifiedTypeDeclarationTest {
         System.out.println(postgresSql);
         System.out.println("=========================================");
 
-        // Parameter type should use oracle_compat schema
-        assertTrue(postgresSql.toLowerCase().contains("ppage oracle_compat.htp__pagetype"),
-            "Parameter with Oracle compat type should use oracle_compat schema");
+        assertTrue(postgresSql.toLowerCase().contains("name_array jsonb"),
+            "OWA.VC_ARR parameter is jsonb");
     }
 
     // ========== Return Type Tests ==========
@@ -561,13 +566,13 @@ class PackageQualifiedTypeDeclarationTest {
     /**
      * Test: Function return type with Oracle compat package type.
      *
-     * <p>Oracle: FUNCTION create_page RETURN HTP.PageType</p>
-     * <p>PostgreSQL: FUNCTION create_page() RETURNS oracle_compat.htp__pagetype</p>
+     * <p>Oracle: FUNCTION create_page RETURN HTP.HTBUF_ARR</p>
+     * <p>PostgreSQL: FUNCTION create_page() RETURNS jsonb</p>
      */
     @Test
-    void returnTypeWithOracleCompatType_usesOracleCompatSchema() {
+    void returnTypeWithOracleCompatType_isJsonb() {
         String plsql = """
-            FUNCTION create_page RETURN HTP.PageType IS
+            FUNCTION create_page RETURN HTP.HTBUF_ARR IS
             BEGIN
               RETURN NULL;
             END;
@@ -588,9 +593,8 @@ class PackageQualifiedTypeDeclarationTest {
         System.out.println(postgresSql);
         System.out.println("===========================================");
 
-        // Return type should use oracle_compat schema
-        assertTrue(postgresSql.toLowerCase().contains("returns oracle_compat.htp__pagetype"),
-            "Return type with Oracle compat type should use oracle_compat schema");
+        assertTrue(postgresSql.toLowerCase().contains("returns jsonb"),
+            "HTP.HTBUF_ARR return type is jsonb");
     }
 
     /**

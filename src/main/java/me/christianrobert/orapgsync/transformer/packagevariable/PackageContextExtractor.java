@@ -16,7 +16,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Extracts package variable declarations and type definitions from Oracle package specifications.
+ * Extracts package variable declarations and type definitions from Oracle package specifications
+ * and package bodies.
  *
  * <p>This class parses package specs using ANTLR and extracts:
  * <ul>
@@ -59,7 +60,7 @@ public class PackageContextExtractor {
      * @param schema Schema name (e.g., "HR")
      * @param packageName Package name (e.g., "EMP_PKG")
      * @param packageSpecSql Package spec SQL (CREATE [OR REPLACE] PACKAGE ... END;)
-     * @return PackageContext with extracted variables (from spec only - call extractBodyVariables for body)
+     * @return PackageContext with extracted declarations (from spec only - call extractBodyDeclarations for body)
      * @throws TransformationException if parsing fails
      */
     public PackageContext extractContext(String schema, String packageName, String packageSpecSql) {
@@ -102,40 +103,44 @@ public class PackageContextExtractor {
     }
 
     /**
-     * Extracts package variable declarations from a package body.
-     * This should be called after extractContext() to get body variables in addition to spec variables.
+     * Extracts the package-level declarations of a package body: variables, {@code TYPE}s and
+     * {@code SUBTYPE}s. Call after {@link #extractContext}, which reads the same three from the spec.
      *
-     * <p>In Oracle, packages can declare variables in both:
-     * <ul>
-     *   <li>Package specification - Public variables (extracted by extractContext())</li>
-     *   <li>Package body - Private variables (extracted by this method)</li>
-     * </ul>
+     * <p>Both halves land in the same {@link PackageContext} and are treated identically from inside
+     * the package: a body variable gets helper functions like a spec variable, and a body type
+     * resolves for a bare name like a spec type. The types matter as much as the variables — a
+     * private variable is usually declared with a private type ({@code TYPE t IS TABLE OF … INDEX BY
+     * …; gSlots t;}), and with only the variable extracted its type could not be placed and the
+     * whole package was refused (ROADMAP P1.5).
      *
-     * <p>Both types of variables are stored in the same PackageContext and treated identically
-     * for transformation purposes (both get helper functions).
+     * <p>Declarations are read in source order, which is the order Oracle requires them in.
      *
      * @param bodyAst Parsed package body AST (from AntlrParser.parsePackageBody())
-     * @param context PackageContext to add body variables to
+     * @param context PackageContext to add body declarations to
      */
-    public void extractBodyVariables(PlSqlParser.Create_package_bodyContext bodyAst, PackageContext context) {
+    public void extractBodyDeclarations(PlSqlParser.Create_package_bodyContext bodyAst, PackageContext context) {
         if (bodyAst == null || bodyAst.package_obj_body() == null) {
-            log.debug("No package body or no body objects to extract variables from");
+            log.debug("No package body or no body objects to extract declarations from");
             return;
         }
 
-        int bodyVariableCount = 0;
+        int declarationCount = 0;
 
-        // Iterate through package body objects
         for (PlSqlParser.Package_obj_bodyContext bodyObjCtx : bodyAst.package_obj_body()) {
-            // Extract variable declarations (package-level body variables)
             if (bodyObjCtx.variable_declaration() != null) {
                 extractVariableDeclaration(bodyObjCtx.variable_declaration(), context);
-                bodyVariableCount++;
+                declarationCount++;
+            } else if (bodyObjCtx.type_declaration() != null) {
+                extractTypeDeclaration(bodyObjCtx.type_declaration(), context);
+                declarationCount++;
+            } else if (bodyObjCtx.subtype_declaration() != null) {
+                extractSubtypeDeclaration(bodyObjCtx.subtype_declaration(), context);
+                declarationCount++;
             }
         }
 
-        log.debug("Extracted {} variables from package body {}.{}",
-                  bodyVariableCount, context.getSchema(), context.getPackageName());
+        log.debug("Extracted {} declarations from package body {}.{}",
+                  declarationCount, context.getSchema(), context.getPackageName());
     }
 
     /**

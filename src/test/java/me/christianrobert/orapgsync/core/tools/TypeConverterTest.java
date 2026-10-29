@@ -3,6 +3,7 @@ package me.christianrobert.orapgsync.core.tools;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
  * Unit tests for TypeConverter.toPostgre() method.
@@ -227,5 +228,36 @@ class TypeConverterTest {
     void toPostgre_plsqlRecordPassesThroughForTypeResolverToPlace() {
         assertEquals("pl/sql record", TypeConverter.toPostgre("PL/SQL RECORD"),
                 "A package-declared type is not a built-in and must not be guessed at here");
+    }
+
+    // Built-ins written with a length that the prefix families (VARCHAR2, NUMBER, CHAR, ...) do not
+    // cover (ROADMAP P1.9). PL/SQL code writes them in package variables, private signatures and
+    // locals; unmapped, each blocked its whole package or reached PostgreSQL verbatim.
+    @Test
+    void toPostgreOrNull_varcharWithLengthIsVarchar2sSynonym() {
+        assertEquals("varchar", TypeConverter.toPostgreOrNull("VARCHAR(20)"));
+        assertEquals("varchar", TypeConverter.toPostgreOrNull("varchar(20 CHAR)"));
+        assertEquals("varchar", TypeConverter.toPostgreOrNull("VARCHAR(20CHAR)"),
+                "getText() on a type_spec drops the space between length and unit");
+    }
+
+    @Test
+    void toPostgreOrNull_stringWithLengthIsVarchar() {
+        assertEquals("varchar", TypeConverter.toPostgreOrNull("STRING(60)"));
+    }
+
+    @Test
+    void toPostgreOrNull_integerWithPrecisionIsNumericNotInteger() {
+        assertEquals("numeric", TypeConverter.toPostgreOrNull("INTEGER(11)"),
+                "INTEGER(11) is NUMBER(11,0); eleven digits do not fit a PostgreSQL integer");
+        assertEquals("numeric", TypeConverter.toPostgreOrNull("int(4)"));
+        assertEquals("integer", TypeConverter.toPostgreOrNull("INTEGER"), "the unconstrained mapping is unchanged");
+    }
+
+    @Test
+    void toPostgreOrNull_unlistedTypeWithLengthStaysUnrecognised() {
+        assertNull(TypeConverter.toPostgreOrNull("FLOAT(126)"),
+                "a length can change what a type is; an unlisted one is refused, not stripped");
+        assertNull(TypeConverter.toPostgreOrNull("my_subtype(10)"));
     }
 }

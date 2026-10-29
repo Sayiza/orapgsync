@@ -1,5 +1,6 @@
 package me.christianrobert.orapgsync.function.service;
 
+import me.christianrobert.orapgsync.antlr.PlSqlParser;
 import me.christianrobert.orapgsync.core.job.model.function.FunctionMetadata;
 import me.christianrobert.orapgsync.core.job.model.function.FunctionParameter;
 import me.christianrobert.orapgsync.core.job.model.function.PackageTypeMetadata;
@@ -14,6 +15,7 @@ import me.christianrobert.orapgsync.transformer.parser.FunctionBoundaryScanner;
 import me.christianrobert.orapgsync.transformer.parser.FunctionStubGenerator;
 import me.christianrobert.orapgsync.transformer.parser.PackageBodyReducer;
 import me.christianrobert.orapgsync.transformer.parser.PackageSegments;
+import me.christianrobert.orapgsync.transformer.parser.ParseResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -36,8 +38,10 @@ public class OracleFunctionExtractor {
      * hold no per-parse state — the tree lives in the returned {@link PackageContext}, which this
      * class discards — so one instance serves the whole run rather than one per package.
      */
+    private static final AntlrParser BODY_PARSER = new AntlrParser();
+
     private static final PackageContextExtractor SPEC_TYPE_EXTRACTOR =
-            new PackageContextExtractor(new AntlrParser());
+            new PackageContextExtractor(BODY_PARSER);
 
     /**
      * Extracts all functions and procedures for the specified schemas from Oracle.
@@ -75,8 +79,9 @@ public class OracleFunctionExtractor {
             functionMetadataList.addAll(privateFunctions);
             log.info("Extracted {} private functions/procedures from Oracle schema {}", privateFunctions.size(), schema);
 
-            // Step 3: Extract the types each package spec declares, so every later job places a
-            // pkg.type reference the same way. Independent of steps 1 and 2 and of their outcome.
+            // Step 3: Extract the types each package declares, so every later job places a pkg.type
+            // reference the same way. Reads the reduced bodies step 2 stored, for body-declared
+            // types; otherwise independent of steps 1 and 2 and of their outcome.
             extractPackageSpecTypesForSchema(oracleConn, schema, stateService);
 
             long afterSchema = MemoryMonitor.logAndGetUsedMemory("After schema: " + schema);
@@ -90,7 +95,8 @@ public class OracleFunctionExtractor {
         functionMetadataList.sort(Comparator
             .comparing(FunctionMetadata::getSchema)
             .thenComparing(f -> f.getPackageName() != null ? f.getPackageName() : "")
-            .thenComparing(FunctionMetadata::getObjectName));
+            .thenComparing(FunctionMetadata::getObjectName)
+            .thenComparingInt(FunctionMetadata::getOverloadNumber));
 
         log.info("Sorted {} functions/procedures for deterministic ordering", functionMetadataList.size());
 
@@ -296,14 +302,11 @@ public class OracleFunctionExtractor {
 
         List<FunctionMetadata> privateFunctions = new ArrayList<>();
 
-        // Build set of public function names for fast lookup (schema.package.function)
-        Set<String> publicFunctionKeys = new HashSet<>();
+        // Public members per package, for pairing each body with its dictionary overload
+        Map<String, List<FunctionMetadata>> publicMembersByPackage = new HashMap<>();
         for (FunctionMetadata func : publicFunctions) {
             if (func.isPackageMember()) {
-                String key = schema.toLowerCase() + "." +
-                            func.getPackageName().toLowerCase() + "." +
-                            func.getObjectName().toLowerCase();
-                publicFunctionKeys.add(key);
+                publicMembersByPackage.computeIfAbsent(func.getPackageName().toLowerCase(), k -> new ArrayList<>()).add(func);
             }
         }
 
@@ -334,7 +337,8 @@ public class OracleFunctionExtractor {
                         // Process the previous package if exists
                         if (currentPackageName != null && currentPackageBody != null) {
                             List<FunctionMetadata> packageFunctions = parseAndExtractPackageFunctions(
-                                currentPackageName, currentPackageBody.toString(), schema, publicFunctionKeys, stateService
+                                currentPackageName, currentPackageBody.toString(), schema,
+                                publicMembersByPackage.getOrDefault(currentPackageName.toLowerCase(), List.of()), stateService
                             );
                             privateFunctions.addAll(packageFunctions);
                             packageCount++;
@@ -361,7 +365,8 @@ public class OracleFunctionExtractor {
                 // Process last package
                 if (currentPackageName != null && currentPackageBody != null) {
                     List<FunctionMetadata> packageFunctions = parseAndExtractPackageFunctions(
-                        currentPackageName, currentPackageBody.toString(), schema, publicFunctionKeys, stateService
+                        currentPackageName, currentPackageBody.toString(), schema,
+                                publicMembersByPackage.getOrDefault(currentPackageName.toLowerCase(), List.of()), stateService
                     );
                     privateFunctions.addAll(packageFunctions);
                     packageCount++;
@@ -448,7 +453,15 @@ public class OracleFunctionExtractor {
     }
 
     /**
-     * Parses one package spec and records what it declares.
+     * Parses one package spec and records what it declares, together with what the package body
+     * declares at package level.
+     *
+     * <p>The body is read from the reduced body step 2 stored — the package with its members cut
+     * out, which is all that holds package-level declarations and is small to parse. Body types are
+     * recorded as such, visible only to lookups from inside the package. They are what a
+     * package-private member's signature names, and without them its stub could not be created
+     * (ROADMAP P1.5). A body that does not parse costs only its own entries: the spec's are still
+     * indexed, and the implementation job refuses that package by name anyway.
      *
      * <p>Package-private so a test can drive spec source → stored metadata without a database.
      *
@@ -473,6 +486,7 @@ public class OracleFunctionExtractor {
             PackageTypeMetadata types = new PackageTypeMetadata(schema, packageName);
             context.getSubtypes().forEach(types::addSubtype);
             context.getTypes().keySet().forEach(types::addStructuredType);
+            indexPackageBodyTypes(schema, packageName, types, stateService);
             stateService.storePackageTypes(types);
             return true;
         } catch (Exception e) {
@@ -484,26 +498,62 @@ public class OracleFunctionExtractor {
     }
 
     /**
-     * Scans a single package body and extracts private functions using lightweight scanner.
-     * Stores segmented package data (full/stub/reduced) in StateService for later use.
-     * Separated into its own method to enable streaming and improve GC.
-     *
-     * NEW APPROACH (Package Segmentation):
-     * 1. Scan function boundaries (FunctionBoundaryScanner - handles comments via ANTLR lexer)
-     * 3. Extract full functions + generate stubs + generate reduced body
-     * 4. Store in StateService (for transformation job)
-     * 5. Parse stubs (tiny, fast) to extract metadata
-     * 6. Return only private functions
-     *
-     * @param packageName Name of the package
-     * @param bodySource Package body source code (without CREATE OR REPLACE)
-     * @param schema Schema name
-     * @param publicFunctionKeys Set of public function keys for filtering
-     * @param stateService State service for storing segmented package data
-     * @return List of FunctionMetadata for private functions in this package
+     * Adds the package-level types of a package's reduced body to {@code types}, if the body was
+     * stored and parses. Never throws: this fills an index, and a missing entry degrades to the
+     * caller refusing a type by name.
      */
-    private static List<FunctionMetadata> parseAndExtractPackageFunctions(
-            String packageName, String bodySource, String schema, Set<String> publicFunctionKeys, StateService stateService) {
+    private static void indexPackageBodyTypes(String schema, String packageName,
+                                              PackageTypeMetadata types, StateService stateService) {
+        String reducedBody = stateService.getReducedPackageBody(schema, packageName);
+        if (reducedBody == null || reducedBody.isBlank()) {
+            return;
+        }
+        try {
+            ParseResult parsed = BODY_PARSER.parsePackageBody(reducedBody);
+            if (parsed.hasErrors()) {
+                // Never build on a failed parse: a recovered tree holds invented declarations.
+                log.debug("Reduced package body did not parse, body types not indexed for {}.{}: {}",
+                          schema, packageName, parsed.getErrorMessage());
+                return;
+            }
+            PackageContext bodyDeclarations = new PackageContext(schema, packageName);
+            SPEC_TYPE_EXTRACTOR.extractBodyDeclarations(
+                    (PlSqlParser.Create_package_bodyContext) parsed.getTree(), bodyDeclarations);
+            bodyDeclarations.getSubtypes().forEach(types::addBodySubtype);
+            bodyDeclarations.getTypes().keySet().forEach(types::addBodyStructuredType);
+        } catch (Exception e) {
+            log.debug("Body types not indexed for {}.{}: {}", schema, packageName, e.getMessage());
+        }
+    }
+
+    /**
+     * Scans a single package body, pairs each body with its dictionary overload, and returns the
+     * package-private members. Stores each name's full sources and the reduced body in StateService.
+     *
+     * <ol>
+     *   <li>Scan member boundaries ({@link FunctionBoundaryScanner}).</li>
+     *   <li>Parse every member's header (its stub, so the body is never parsed here).</li>
+     *   <li>Per name, pair bodies with the public overloads of that name ({@link FunctionSourcePairing})
+     *       and record on each public member which body is its source, or why none is.</li>
+     *   <li>Bodies no public overload claims are the private members.</li>
+     * </ol>
+     *
+     * <p>Sources are stored per name <b>as a list in body order</b>, never keyed by name alone:
+     * a package may declare many members under one name, and a name-keyed map kept only the last.
+     *
+     * @param packageName   name of the package
+     * @param bodySource    package body source code (without CREATE OR REPLACE)
+     * @param schema        schema name
+     * @param publicMembers this package's members from the data dictionary; gain a source ordinal
+     *                      or a pairing error
+     * @param stateService  state service for storing segmented package data
+     * @return FunctionMetadata for the package-private members
+     *
+     * <p>Package-private so a test can drive the real extraction of a private member's signature.
+     */
+    static List<FunctionMetadata> parseAndExtractPackageFunctions(
+            String packageName, String bodySource, String schema, List<FunctionMetadata> publicMembers,
+            StateService stateService) {
 
         List<FunctionMetadata> functions = new ArrayList<>();
 
@@ -530,85 +580,66 @@ public class OracleFunctionExtractor {
                 return functions;
             }
 
-            // STEP 3: Extract full functions and generate stubs
-            Map<String, String> fullSources = new HashMap<>();
-            Map<String, String> stubSources = new HashMap<>();
+            // STEP 2: Per name, every body in body order: its full source and its parsed header
+            Map<String, List<String>> fullSources = new LinkedHashMap<>();
+            Map<String, List<FunctionMetadata>> headers = new LinkedHashMap<>();
             FunctionStubGenerator stubGenerator = new FunctionStubGenerator();
+            AntlrParser parser = new AntlrParser();
 
             for (PackageSegments.FunctionSegment segment : segments.getFunctions()) {
-                // Extract full function source
+                String name = memberKey(segment.getName());
                 String fullFunctionSource = fullSource.substring(segment.getStartPos(), segment.getEndPos());
-                fullSources.put(segment.getName().toLowerCase(), fullFunctionSource);
-
-                // Generate stub
+                fullSources.computeIfAbsent(name, k -> new ArrayList<>()).add(fullFunctionSource);
                 String stubSource = stubGenerator.generateStub(fullFunctionSource, segment);
-                stubSources.put(segment.getName().toLowerCase(), stubSource);
-
-                log.trace("Extracted function {}.{}.{} (full: {} chars, stub: {} chars)",
-                         schema, packageName, segment.getName(),
-                         fullFunctionSource.length(), stubSource.length());
+                headers.computeIfAbsent(name, k -> new ArrayList<>())
+                        .add(parseHeader(parser, stubSource, segment.isFunction(), schema, packageName, name));
             }
 
-            // STEP 4: Generate reduced package body (all functions removed)
+            // STEP 3: Generate reduced package body (all functions removed)
             PackageBodyReducer reducer = new PackageBodyReducer();
             String reducedBody = reducer.removeAllFunctions(fullSource, segments);
 
             log.debug("Generated reduced package body for {}.{} ({} chars -> {} chars, {} functions removed)",
                      schema, packageName, fullSource.length(), reducedBody.length(), segments.getFunctionCount());
 
-            // STEP 5: Store in StateService (for transformation job later)
-            stateService.storePackageFunctions(schema, packageName, fullSources, stubSources, reducedBody);
+            // STEP 4: Store in StateService (for transformation job later)
+            stateService.storePackageFunctions(schema, packageName, fullSources, reducedBody);
 
-            log.debug("Stored {} functions in StateService for package {}.{}",
-                     fullSources.size(), schema, packageName);
+            // STEP 5: Pair bodies with public overloads, name by name; what is left is private
+            Map<String, List<FunctionMetadata>> publicByName = new HashMap<>();
+            for (FunctionMetadata member : publicMembers) {
+                publicByName.computeIfAbsent(memberKey(member.getObjectName()), k -> new ArrayList<>()).add(member);
+            }
 
-            // STEP 6: Parse stubs to extract metadata (fast, tiny memory footprint)
-            me.christianrobert.orapgsync.transformer.parser.AntlrParser parser =
-                new me.christianrobert.orapgsync.transformer.parser.AntlrParser();
+            for (Map.Entry<String, List<FunctionMetadata>> entry : headers.entrySet()) {
+                String name = entry.getKey();
+                List<FunctionMetadata> bodies = entry.getValue();
+                List<FunctionMetadata> overloads = publicByName.getOrDefault(name, List.of());
 
-            for (Map.Entry<String, String> stubEntry : stubSources.entrySet()) {
-                String functionName = stubEntry.getKey();
-                String stubSource = stubEntry.getValue();
+                FunctionSourcePairing.Result pairing = FunctionSourcePairing.pair(overloads, bodies);
+                for (int i = 0; i < overloads.size(); i++) {
+                    overloads.get(i).setSourceOrdinal(pairing.ordinals()[i]);
+                    overloads.get(i).setSourcePairingError(pairing.errors()[i]);
+                }
+                if (pairing.unaccounted() > 0) {
+                    log.warn("Package {}.{}: {} bodies named {} are neither paired with a specification overload nor "
+                            + "known to be private, because an overload could not be paired", schema, packageName,
+                            pairing.unaccounted(), name);
+                }
 
-                try {
-                    // Parse stub (tiny, <1ms per stub)
-                    // Note: Stub already starts with FUNCTION/PROCEDURE keyword (no CREATE OR REPLACE needed)
-                    // Try as function first, then as procedure if that fails
-                    me.christianrobert.orapgsync.transformer.parser.ParseResult stubParseResult;
-
-                    // Check if stub starts with FUNCTION or PROCEDURE keyword
-                    String trimmedStub = stubSource.trim().toUpperCase();
-                    if (trimmedStub.startsWith("FUNCTION")) {
-                        stubParseResult = parser.parseFunctionBody(stubSource);
-                    } else if (trimmedStub.startsWith("PROCEDURE")) {
-                        stubParseResult = parser.parseProcedureBody(stubSource);
-                    } else {
-                        log.warn("Unknown stub type for {}.{}.{}: does not start with FUNCTION or PROCEDURE",
-                                schema, packageName, functionName);
-                        continue;
+                // Private overloads are numbered after the public ones, so every member of a name
+                // has its own number wherever a name holds more than one.
+                int nextOverload = overloads.stream().mapToInt(FunctionMetadata::getOverloadNumber).max().orElse(0) + 1;
+                boolean numbered = overloads.size() + pairing.privateOrdinals().size() > 1;
+                for (int ordinal : pairing.privateOrdinals()) {
+                    FunctionMetadata metadata = bodies.get(ordinal);
+                    metadata.setPackagePrivate(true);
+                    metadata.setSourceOrdinal(ordinal);
+                    if (numbered) {
+                        metadata.setOverloadNumber(nextOverload++);
                     }
-
-                    if (stubParseResult.hasErrors()) {
-                        log.warn("Failed to parse stub for {}.{}.{}: {}",
-                                schema, packageName, functionName, stubParseResult.getErrorMessage());
-                        continue;
-                    }
-
-                    // Check if this is a private function (not in public list)
-                    String key = schema.toLowerCase() + "." + packageName.toLowerCase() + "." + functionName;
-                    if (!publicFunctionKeys.contains(key)) {
-                        // Extract metadata from stub
-                        FunctionMetadata metadata = extractMetadataFromFunctionStub(
-                            stubParseResult.getTree(), schema, packageName);
-                        if (metadata != null) {
-                            metadata.setPackagePrivate(true);
-                            functions.add(metadata);
-                            log.trace("Extracted private function metadata: {}.{}.{}", schema, packageName, functionName);
-                        }
-                    }
-
-                } catch (Exception e) {
-                    log.warn("Error parsing stub for {}.{}.{}: {}", schema, packageName, functionName, e.getMessage());
+                    functions.add(metadata);
+                    log.trace("Extracted private function metadata: {}.{}.{}", schema, packageName, name);
                 }
             }
 
@@ -620,6 +651,39 @@ public class OracleFunctionExtractor {
         }
 
         return functions;
+    }
+
+    /**
+     * The key a member's bodies and overloads are grouped under: the name as the dictionary stores
+     * it, lower-cased, so a quoted name in the source ({@code "Get Value"}) meets its dictionary row.
+     */
+    private static String memberKey(String name) {
+        String s = name.trim();
+        if (s.length() >= 2 && s.startsWith("\"") && s.endsWith("\"")) {
+            s = s.substring(1, s.length() - 1);
+        }
+        return s.toLowerCase();
+    }
+
+    /**
+     * Parses one member's stub into its signature, or {@code null} if the header does not parse.
+     * Never throws: a header that does not parse leaves its overload unpaired, which is reported.
+     */
+    private static FunctionMetadata parseHeader(AntlrParser parser, String stubSource, boolean isFunction,
+                                                String schema, String packageName, String name) {
+        try {
+            ParseResult result = isFunction
+                    ? parser.parseFunctionBody(stubSource)
+                    : parser.parseProcedureBody(stubSource);
+            if (result.hasErrors()) {
+                log.warn("Failed to parse stub for {}.{}.{}: {}", schema, packageName, name, result.getErrorMessage());
+                return null;
+            }
+            return extractMetadataFromFunctionStub(result.getTree(), schema, packageName);
+        } catch (Exception e) {
+            log.warn("Error parsing stub for {}.{}.{}: {}", schema, packageName, name, e.getMessage());
+            return null;
+        }
     }
 
     /**
@@ -654,7 +718,7 @@ public class OracleFunctionExtractor {
                 (me.christianrobert.orapgsync.antlr.PlSqlParser.Function_bodyContext) parseTree;
 
             // Extract function name from identifier rule (not function_name!)
-            String functionName = funcCtx.identifier().getText().toLowerCase();
+            String functionName = memberKey(funcCtx.identifier().getText());
 
             // Create metadata
             FunctionMetadata metadata = new FunctionMetadata(schema.toLowerCase(), functionName, "FUNCTION");
@@ -681,7 +745,7 @@ public class OracleFunctionExtractor {
                 (me.christianrobert.orapgsync.antlr.PlSqlParser.Procedure_bodyContext) parseTree;
 
             // Extract procedure name from identifier rule (not procedure_name!)
-            String procedureName = procCtx.identifier().getText().toLowerCase();
+            String procedureName = memberKey(procCtx.identifier().getText());
 
             // Create metadata
             FunctionMetadata metadata = new FunctionMetadata(schema.toLowerCase(), procedureName, "PROCEDURE");
@@ -700,7 +764,7 @@ public class OracleFunctionExtractor {
                 (me.christianrobert.orapgsync.antlr.PlSqlParser.Create_function_bodyContext) parseTree;
 
             // Extract function name from function_name rule
-            String functionName = funcCtx.function_name().getText().toLowerCase();
+            String functionName = memberKey(funcCtx.function_name().getText());
 
             // Create metadata
             FunctionMetadata metadata = new FunctionMetadata(schema.toLowerCase(), functionName, "FUNCTION");
@@ -727,7 +791,7 @@ public class OracleFunctionExtractor {
                 (me.christianrobert.orapgsync.antlr.PlSqlParser.Create_procedure_bodyContext) parseTree;
 
             // Extract procedure name from procedure_name rule
-            String procedureName = procCtx.procedure_name().getText().toLowerCase();
+            String procedureName = memberKey(procCtx.procedure_name().getText());
 
             // Create metadata
             FunctionMetadata metadata = new FunctionMetadata(schema.toLowerCase(), procedureName, "PROCEDURE");
@@ -771,9 +835,18 @@ public class OracleFunctionExtractor {
                 return "INTERVAL";
             }
         } else if (typeSpecCtx.type_name() != null) {
-            // User-defined type (custom type or ROWTYPE)
-            // For now, return the text representation
-            return typeSpecCtx.type_name().getText().toUpperCase();
+            // User-defined type, or an anchor. The anchor is a sibling token of type_name, not part
+            // of it, and dropping it turns `term_def.nr%TYPE` ("the type of this column") into
+            // `TERM_DEF.NR` — a package type that does not exist. TypeResolver keeps a %TYPE
+            // anchor and qualifies its table; a %ROWTYPE is refused there by name.
+            String typeName = typeSpecCtx.type_name().getText().toUpperCase();
+            if (typeSpecCtx.PERCENT_TYPE() != null) {
+                return typeName + "%TYPE";
+            }
+            if (typeSpecCtx.PERCENT_ROWTYPE() != null) {
+                return typeName + "%ROWTYPE";
+            }
+            return typeName;
         }
 
         // Fallback: return the entire text
@@ -859,6 +932,7 @@ public class OracleFunctionExtractor {
 
             // Create and add parameter
             FunctionParameter param = new FunctionParameter(paramName, position, dataType, inOut);
+            param.setDefaulted(paramCtx.default_value_part() != null);
 
             // Check for custom (user-defined) types.
             //

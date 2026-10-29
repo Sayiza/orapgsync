@@ -181,6 +181,24 @@ class TypeMethodStubSignatureAgreementTest {
                 """);
     }
 
+    /**
+     * PostgreSQL rejects a default before a required input parameter, which Oracle allows; the
+     * implementation keeps only the trailing run, the same rule as the function side (P1.2).
+     */
+    @Test
+    @DisplayName("STATIC FUNCTION — only trailing defaults survive")
+    void staticFunctionDefaults() {
+        String sql = emitted("""
+                STATIC FUNCTION make_code(p_prefix varchar2 DEFAULT 'X', p_raw varchar2, p_len number := 8)
+                  RETURN varchar2 IS
+                BEGIN
+                  RETURN p_prefix || p_raw;
+                END;
+                """);
+
+        assertTrue(signatureOf(sql).contains("(p_prefix text, p_raw text, p_len numeric DEFAULT 8)"), sql);
+    }
+
     @Test
     @DisplayName("STATIC PROCEDURE — no outputs at all, so RETURNS void")
     void staticProcedure() {

@@ -6,6 +6,7 @@ import me.christianrobert.orapgsync.antlr.PlSqlParserBaseVisitor;
 import me.christianrobert.orapgsync.transformer.builder.outerjoin.OuterJoinContext;
 import me.christianrobert.orapgsync.transformer.builder.rownum.RownumContext;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
+import me.christianrobert.orapgsync.transformer.context.TransformationException;
 import me.christianrobert.orapgsync.transformer.packagevariable.PackageContext;
 
 import java.util.ArrayDeque;
@@ -886,11 +887,16 @@ public class PostgresCodeBuilder extends PlSqlParserBaseVisitor<String> {
 
     @Override
     public String visitOuter_join_sign(PlSqlParser.Outer_join_signContext ctx) {
-        // Oracle outer join operator: (+)
-        // PostgreSQL uses ANSI JOIN syntax instead
-        // Strip this operator - it's handled by OuterJoinAnalyzer and converted to ANSI JOIN
-        // Return empty string to remove it from the output
-        return "";
+        // Oracle outer join operator (+). OuterJoinAnalyzer turns the conditions carrying it into
+        // ANSI LEFT JOINs and claims their markers; only a claimed marker may be dropped. Anything
+        // else would silently become an inner join, so it is refused.
+        for (OuterJoinContext outerJoinContext : outerJoinContextStack) {
+            if (outerJoinContext.isClaimed(ctx)) {
+                return "";
+            }
+        }
+        throw new TransformationException("Oracle outer join (+) in a position that is not translated "
+            + "(only top-level AND conditions of a WHERE clause are): " + ctx.getParent().getText());
     }
 
     // ========== STANDARD FUNCTIONS ==========

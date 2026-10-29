@@ -50,7 +50,7 @@ public class PackageHelperGenerator {
      * @param context Package context with variable declarations
      * @param transformationContext metadata for type resolution; without it only Oracle built-ins
      *        can be placed, which is what produced helpers reading
-     *        {@code RETURNS type.string} and {@code RETURNS propmap}
+     *        {@code RETURNS kindlib.label} and {@code RETURNS propmap}
      * @return List of SQL statements (CREATE OR REPLACE FUNCTION) to execute
      * @throws TransformationException if a variable's type cannot be placed
      */

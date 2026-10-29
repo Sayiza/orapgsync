@@ -35,18 +35,18 @@ class PackageContextExtractorSubtypeTest {
     }
 
     private PackageContext extract(String declarations) {
-        String spec = "CREATE OR REPLACE PACKAGE type AS\n" + declarations + "\nEND type;\n";
-        return extractor.extractContext("HR", "type", spec);
+        String spec = "CREATE OR REPLACE PACKAGE kindlib AS\n" + declarations + "\nEND kindlib;\n";
+        return extractor.extractContext("HR", "kindlib", spec);
     }
 
     // ========== Extraction ==========
 
     @Test
     void extractsScalarSubtype() {
-        PackageContext ctx = extract("  SUBTYPE string IS VARCHAR2(4000);");
+        PackageContext ctx = extract("  SUBTYPE label IS VARCHAR2(4000);");
 
-        assertTrue(ctx.hasSubtype("string"));
-        assertEquals("VARCHAR2(4000)", ctx.getSubtypeBaseType("string"));
+        assertTrue(ctx.hasSubtype("label"));
+        assertEquals("VARCHAR2(4000)", ctx.getSubtypeBaseType("label"));
     }
 
     @Test
@@ -59,9 +59,9 @@ class PackageContextExtractorSubtypeTest {
 
     @Test
     void subtypesAreNotInlineTypes() {
-        PackageContext ctx = extract("  SUBTYPE string IS VARCHAR2(4000);");
+        PackageContext ctx = extract("  SUBTYPE label IS VARCHAR2(4000);");
 
-        assertFalse(ctx.hasType("string"),
+        assertFalse(ctx.hasType("label"),
                 "A subtype is an alias, not a structure; keeping it out of the inline-type map is "
                         + "what stops it being answered with jsonb");
         assertEquals(1, ctx.getSubtypes().size());
@@ -71,12 +71,12 @@ class PackageContextExtractorSubtypeTest {
     @Test
     void extractsSubtypeAlongsideVariablesAndTypes() {
         PackageContext ctx = extract("""
-                  SUBTYPE string IS VARCHAR2(4000);
+                  SUBTYPE label IS VARCHAR2(4000);
                   TYPE rec_t IS RECORD ( a NUMBER, b VARCHAR2(10) );
                   gCounter NUMBER := 0;
                 """);
 
-        assertTrue(ctx.hasSubtype("string"));
+        assertTrue(ctx.hasSubtype("label"));
         assertTrue(ctx.hasType("rec_t"));
         assertTrue(ctx.hasVariable("gCounter"));
     }
@@ -102,27 +102,27 @@ class PackageContextExtractorSubtypeTest {
 
     @Test
     void scalarSubtypeResolvesToItsBaseTypeNotJsonb() {
-        PackageContext pkg = extract("  SUBTYPE string IS VARCHAR2(4000);");
+        PackageContext pkg = extract("  SUBTYPE label IS VARCHAR2(4000);");
 
-        assertEquals("text", TypeResolver.toPostgres("type.string", contextWith(pkg)),
-                "type.string is VARCHAR2, so it must reach PostgreSQL as text");
+        assertEquals("text", TypeResolver.toPostgres("kindlib.label", contextWith(pkg)),
+                "kindlib.label is VARCHAR2, so it must reach PostgreSQL as text");
     }
 
     @Test
     void numericSubtypeResolvesToNumeric() {
         PackageContext pkg = extract("  SUBTYPE nr IS NUMBER(10);");
 
-        assertEquals("numeric", TypeResolver.toPostgres("type.nr", contextWith(pkg)));
+        assertEquals("numeric", TypeResolver.toPostgres("kindlib.nr", contextWith(pkg)));
     }
 
     @Test
     void subtypeChainResolvesThroughToTheBuiltIn() {
         PackageContext pkg = extract("""
-                  SUBTYPE string IS VARCHAR2(4000);
-                  SUBTYPE short_string IS string;
+                  SUBTYPE label IS VARCHAR2(4000);
+                  SUBTYPE short_label IS label;
                 """);
 
-        assertEquals("text", TypeResolver.toPostgres("type.short_string", contextWith(pkg)),
+        assertEquals("text", TypeResolver.toPostgres("kindlib.short_label", contextWith(pkg)),
                 "An alias of an alias resolves one hop at a time");
     }
 
@@ -133,15 +133,15 @@ class PackageContextExtractorSubtypeTest {
                   SUBTYPE rec_alias IS rec_t;
                 """);
 
-        assertEquals("jsonb", TypeResolver.toPostgres("type.rec_alias", contextWith(pkg)),
+        assertEquals("jsonb", TypeResolver.toPostgres("kindlib.rec_alias", contextWith(pkg)),
                 "A subtype naming a structure is still a structure");
     }
 
     @Test
     void unknownPackageTypeStillFallsBackToJsonb() {
-        PackageContext pkg = extract("  SUBTYPE string IS VARCHAR2(4000);");
+        PackageContext pkg = extract("  SUBTYPE label IS VARCHAR2(4000);");
 
-        assertEquals("jsonb", TypeResolver.toPostgres("type.never_declared", contextWith(pkg)),
+        assertEquals("jsonb", TypeResolver.toPostgres("kindlib.never_declared", contextWith(pkg)),
                 "Subtype extraction must not change the answer for types it does not cover");
     }
 }

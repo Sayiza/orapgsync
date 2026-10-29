@@ -117,7 +117,7 @@ class TriggerReturnInjectorTest {
         // Real-world example similar to user's trigger
         String input = """
             BEGIN
-              SELECT person_uid INTO v_person_uid FROM users WHERE id = NEW.user_id;
+              SELECT member_uid INTO v_member_uid FROM users WHERE id = NEW.user_id;
               INSERT INTO revisions VALUES (NEW.study_id, 1);
             EXCEPTION
               WHEN OTHERS THEN
@@ -128,7 +128,7 @@ class TriggerReturnInjectorTest {
         String result = TriggerReturnInjector.injectReturn(input, "AFTER", "ROW");
 
         // Verify structure
-        assertTrue(result.contains("SELECT person_uid"));
+        assertTrue(result.contains("SELECT member_uid"));
         assertTrue(result.contains("INSERT INTO revisions"));
         assertTrue(result.contains("EXCEPTION"));
         assertTrue(result.contains("log_error"));

@@ -9,6 +9,7 @@ import me.christianrobert.orapgsync.core.job.model.synonym.SynonymMetadata;
 import me.christianrobert.orapgsync.core.job.model.table.ColumnMetadata;
 import me.christianrobert.orapgsync.core.job.model.table.TableMetadata;
 import me.christianrobert.orapgsync.core.job.model.typemethod.TypeMethodMetadata;
+import me.christianrobert.orapgsync.core.job.model.view.ViewMetadata;
 import me.christianrobert.orapgsync.core.service.StateService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -96,13 +97,16 @@ public class MetadataIndexBuilder {
         Map<String, PackageTypeMetadata> packageTypes =
                 indexPackageTypes(stateService, normalizedSchemas);
 
-        log.info("Indices built: {} tables, {} types with methods, {} package functions, {} standalone functions, "
+        Map<String, Map<String, TransformationIndices.ColumnTypeInfo>> viewColumns =
+                indexViewColumns(stateService, normalizedSchemas);
+
+        log.info("Indices built: {} tables, {} views, {} types with methods, {} package functions, {} standalone functions, "
                         + "{} no-arg-callable routines, {} synonym schemas, {} object types, {} packages with types",
-                tableColumns.size(), typeMethods.size(), packageFunctions.size(), standaloneFunctions.size(),
+                tableColumns.size(), viewColumns.size(), typeMethods.size(), packageFunctions.size(), standaloneFunctions.size(),
                 noArgCallableRoutines.size(), synonyms.size(), objectTypeNames.size(), packageTypes.size());
 
         return new TransformationIndices(tableColumns, typeMethods, packageFunctions, synonyms, typeFieldTypes,
-                objectTypeNames, standaloneFunctions, noArgCallableRoutines, packageTypes);
+                objectTypeNames, standaloneFunctions, noArgCallableRoutines, packageTypes, viewColumns);
     }
 
     /**
@@ -133,7 +137,6 @@ public class MetadataIndexBuilder {
             StateService stateService, Set<String> schemas) {
 
         Map<String, Map<String, TransformationIndices.ColumnTypeInfo>> index = new HashMap<>();
-        int columnCount = 0;
 
         for (TableMetadata table : stateService.getOracleTableMetadata()) {
             String normalizedSchema = table.getSchema().toLowerCase();
@@ -142,28 +145,48 @@ public class MetadataIndexBuilder {
                 continue; // Skip tables not in target schemas
             }
 
-            String qualifiedTable = normalizedSchema + "." + table.getTableName().toLowerCase();
-            Map<String, TransformationIndices.ColumnTypeInfo> columns = new HashMap<>();
-
-            for (ColumnMetadata column : table.getColumns()) {
-                String columnName = column.getColumnName().toLowerCase();
-                String typeName = column.getDataType();
-                String typeOwner = column.getDataTypeOwner();
-
-                // Normalize type owner (may be null for built-in types)
-                if (typeOwner != null) {
-                    typeOwner = typeOwner.toLowerCase();
-                }
-
-                columns.put(columnName, new TransformationIndices.ColumnTypeInfo(typeName, typeOwner));
-                columnCount++;
-            }
-
-            index.put(qualifiedTable, columns);
+            index.put(normalizedSchema + "." + table.getTableName().toLowerCase(), columnTypes(table.getColumns()));
         }
 
-        log.debug("Indexed {} columns across {} tables", columnCount, index.size());
+        log.debug("Indexed columns of {} tables", index.size());
         return index;
+    }
+
+    /**
+     * Builds view column index: "schema.view" → column → type info. Same shape as the table index;
+     * see {@link TransformationIndices#getRelationColumnType} for why it is kept apart.
+     */
+    private static Map<String, Map<String, TransformationIndices.ColumnTypeInfo>> indexViewColumns(
+            StateService stateService, Set<String> schemas) {
+
+        Map<String, Map<String, TransformationIndices.ColumnTypeInfo>> index = new HashMap<>();
+
+        for (ViewMetadata view : stateService.getOracleViewMetadata()) {
+            String normalizedSchema = view.getSchema().toLowerCase();
+
+            if (!schemas.contains(normalizedSchema)) {
+                continue;
+            }
+
+            index.put(normalizedSchema + "." + view.getViewName().toLowerCase(), columnTypes(view.getColumns()));
+        }
+
+        log.debug("Indexed columns of {} views", index.size());
+        return index;
+    }
+
+    private static Map<String, TransformationIndices.ColumnTypeInfo> columnTypes(List<ColumnMetadata> columnList) {
+        Map<String, TransformationIndices.ColumnTypeInfo> columns = new HashMap<>();
+        if (columnList == null) {
+            return columns;
+        }
+        for (ColumnMetadata column : columnList) {
+            // Type owner is null for built-in types
+            String typeOwner = column.getDataTypeOwner();
+            columns.put(column.getColumnName().toLowerCase(), new TransformationIndices.ColumnTypeInfo(
+                    column.getDataType(), typeOwner == null ? null : typeOwner.toLowerCase()));
+        }
+        return columns;
     }
 
     /**

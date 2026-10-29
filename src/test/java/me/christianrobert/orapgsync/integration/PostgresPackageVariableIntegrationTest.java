@@ -409,7 +409,7 @@ public class PostgresPackageVariableIntegrationTest extends PostgresSqlValidatio
             (me.christianrobert.orapgsync.antlr.PlSqlParser.Create_package_bodyContext) bodyParseResult.getTree();
 
         // Extract body variables
-        extractor.extractBodyVariables(bodyAst, packageContext);
+        extractor.extractBodyDeclarations(bodyAst, packageContext);
 
         // Should now have 3 variables total (1 from spec + 2 from body)
         assertEquals(3, packageContext.getVariables().size(), "Should have 3 variables total (spec + body)");

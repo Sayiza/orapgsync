@@ -14,6 +14,7 @@ import me.christianrobert.orapgsync.transformer.context.MetadataIndexBuilder;
 import me.christianrobert.orapgsync.transformer.context.TransformationContext;
 import me.christianrobert.orapgsync.transformer.context.TransformationIndices;
 import me.christianrobert.orapgsync.transformer.type.SimpleTypeEvaluator;
+import me.christianrobert.orapgsync.transformer.util.ParameterDefaults;
 import me.christianrobert.orapgsync.transformer.util.TypeResolver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -318,9 +319,20 @@ public class PostgresFunctionStubCreationJob extends AbstractDatabaseWriteJob<Fu
         sql.append("(");
 
         // Add parameters
+        List<FunctionParameter> params = function.getParameters();
+        boolean[] withDefault = ParameterDefaults.emittable(params.stream()
+                .map(p -> new ParameterDefaults.Param(ParameterDefaults.isInput(p.getInOut()), p.isDefaulted()))
+                .toList());
         List<String> paramDefinitions = new ArrayList<>();
-        for (FunctionParameter param : function.getParameters()) {
-            String paramDef = generateParameterDefinition(param, function);
+        for (int i = 0; i < params.size(); i++) {
+            String paramDef = generateParameterDefinition(params.get(i), function);
+            // The dictionary says *that* a parameter is defaulted, not to what
+            // (ALL_ARGUMENTS.DEFAULT_VALUE is reserved and empty). NULL lets callers that omit the
+            // argument resolve against the stub; step 28 replaces it with the real expression,
+            // which CREATE OR REPLACE allows — it only refuses to drop a default.
+            if (withDefault[i]) {
+                paramDef += " DEFAULT NULL";
+            }
             paramDefinitions.add(paramDef);
         }
         sql.append(String.join(", ", paramDefinitions));
@@ -426,12 +438,13 @@ public class PostgresFunctionStubCreationJob extends AbstractDatabaseWriteJob<Fu
     }
 
     /**
-     * Resolves an Oracle type against this function's schema, or refuses.
+     * Resolves an Oracle type against this function's schema and package, or refuses.
      *
      * @throws TypeResolutionException if neither metadata nor the built-in mapping can place it
      */
     private String resolveOrRefuse(String oracleType, FunctionMetadata function, String position) {
-        String resolved = TypeResolver.toPostgresOrNull(oracleType, contextFor(function.getSchema()));
+        String resolved = TypeResolver.toPostgresOrNull(oracleType,
+                contextFor(function.getSchema(), function.getPackageName()));
         if (resolved == null) {
             throw new TypeResolutionException(String.format(
                     "cannot resolve Oracle type '%s' for %s", oracleType, position));
@@ -453,14 +466,25 @@ public class PostgresFunctionStubCreationJob extends AbstractDatabaseWriteJob<Fu
     }
 
     /**
-     * The resolution context for a schema, created on first use.
+     * The resolution context for a schema and, for a package member, its package; created on first
+     * use.
      *
-     * <p>Only the schema varies. A stub carries no package variables and no enclosing routine, so
-     * the remaining context slots are genuinely empty here rather than merely unpopulated.
+     * <p>The package matters for a bare type name. A package-private member's signature is read off
+     * the package body, where its types are written as the package declares them — {@code Label},
+     * {@code SlotCache} — and only the enclosing package can place those (ROADMAP P1.5). Public
+     * members are unaffected: {@code ALL_ARGUMENTS} qualifies their package types already.
+     *
+     * <p>A stub carries no package variables and no enclosing routine, so the remaining context
+     * slots are genuinely empty here rather than merely unpopulated: the package's declarations come
+     * from the step-22 index, the same data the implementation job's live context is built from.
      */
-    private TransformationContext contextFor(String schema) {
-        return schemaContexts.computeIfAbsent(schema.toLowerCase(),
-                s -> new TransformationContext(s, indices, new SimpleTypeEvaluator(s, indices)));
+    private TransformationContext contextFor(String schema, String packageName) {
+        String key = (schema + "." + (packageName != null ? packageName : "")).toLowerCase();
+        return schemaContexts.computeIfAbsent(key, k -> {
+            String s = schema.toLowerCase();
+            return new TransformationContext(s, indices, new SimpleTypeEvaluator(s, indices), null,
+                    null, packageName != null ? packageName.toLowerCase() : null);
+        });
     }
 
     /**

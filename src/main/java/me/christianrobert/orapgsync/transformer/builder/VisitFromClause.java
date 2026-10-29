@@ -3,15 +3,10 @@ package me.christianrobert.orapgsync.transformer.builder;
 import me.christianrobert.orapgsync.antlr.PlSqlParser;
 import me.christianrobert.orapgsync.transformer.builder.outerjoin.OuterJoinCondition;
 import me.christianrobert.orapgsync.transformer.builder.outerjoin.OuterJoinContext;
-import me.christianrobert.orapgsync.transformer.builder.outerjoin.TableInfo;
 import me.christianrobert.orapgsync.transformer.context.TransformationException;
 
 import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 
 public class VisitFromClause {
   public static String v(PlSqlParser.From_clauseContext ctx, PostgresCodeBuilder b) {
@@ -33,117 +28,113 @@ public class VisitFromClause {
 
     // Check if we have outer join context
     OuterJoinContext outerJoinCtx = b.getOuterJoinContext();
-    if (outerJoinCtx == null || !outerJoinCtx.hasOuterJoins()) {
+    if (outerJoinCtx == null || !outerJoinCtx.isFor(ctx) || !outerJoinCtx.hasOuterJoins()) {
       // No outer joins - leave as implicit joins (comma-separated tables)
       // This is perfectly valid PostgreSQL syntax for INNER JOINs
       return String.join(", ", tableRefs);
     }
 
     // We have outer joins - generate ANSI JOIN syntax
-    return generateAnsiJoinSyntax(outerJoinCtx, tableRefs, b);
+    return generateAnsiJoinSyntax(ctx, outerJoinCtx, tableRefs, b);
   }
 
   /**
-   * Generates ANSI JOIN syntax from outer join context.
+   * Generates the join tree for a FROM clause with Oracle (+) outer joins.
    *
-   * <p>Algorithm:
-   * <ol>
-   *   <li>Start with the first table (root)</li>
-   *   <li>For each outer join, append the appropriate JOIN clause</li>
-   *   <li>Keep remaining tables as comma-separated (implicit joins)</li>
-   * </ol>
+   * <p>Items keep their FROM order. An outer-joined item becomes {@code LEFT JOIN item ON ...};
+   * one listed before an item its condition references is moved to just after the last such
+   * item. That is the only reordering, and since a bare {@code SELECT *} returns columns in FROM
+   * order — and both a view wrapper and {@code SELECT * INTO} read them by position — a bare
+   * {@code *} over a reordered FROM is refused.
    *
-   * <p>Example:
+   * <p>Other items join with {@code CROSS JOIN} while a later ON still references something
+   * before them, and with a comma once nothing does. A comma cannot be used throughout:
+   * PostgreSQL scopes {@code ON} to its own join tree, so {@code FROM a, c LEFT JOIN b ON a.k = b.k}
+   * fails. The condition-free remainder stays comma-separated, so the planner's
+   * {@code join_collapse_limit} is not reached on account of tables no ON needs.
+   *
+   * <p>Example (Oracle: {@code FROM a, c, d, h WHERE a.c = c.nr AND a.d = d.nr AND d.h = h.nr(+)}):
    * <pre>
-   * FROM a, b, c
-   * WHERE a.field1 = b.field1(+)
-   *   AND TRUNC(b.field2) = TRUNC(c.field2(+))
-   *
-   * Becomes:
-   * FROM a LEFT JOIN b ON a.field1 = b.field1
-   *          LEFT JOIN c ON DATE_TRUNC('day', b.field2)::DATE = DATE_TRUNC('day', c.field2)::DATE
+   * FROM a, c, d LEFT JOIN h ON d.h = h.nr WHERE a.c = c.nr AND a.d = d.nr
    * </pre>
-   *
-   * @param ctx Outer join context with AST nodes
-   * @param tableRefs Table references
-   * @param builder PostgresCodeBuilder for transforming AST nodes
-   * @return ANSI JOIN syntax with all transformations applied
    */
-  private static String generateAnsiJoinSyntax(OuterJoinContext ctx, List<String> tableRefs,
-                                                PostgresCodeBuilder builder) {
-    List<TableInfo> allTables = ctx.getAllTables();
-    List<OuterJoinCondition> outerJoins = ctx.getOuterJoins();
-
-    if (allTables.isEmpty()) {
-      throw new TransformationException("No tables found in outer join context");
+  private static String generateAnsiJoinSyntax(PlSqlParser.From_clauseContext fromCtx, OuterJoinContext ctx,
+                                                List<String> tableRefs, PostgresCodeBuilder builder) {
+    int n = tableRefs.size();
+    if (ctx.getAllTables().size() != n) {
+      throw new TransformationException("Mismatch between table count in outer join context and transformed refs");
     }
 
-    if (tableRefs.size() != allTables.size()) {
-      throw new TransformationException("Mismatch between table count in context and transformed refs");
-    }
-
-    // Build a map from table key to transformed table reference
-    // tableRefs are in the same order as allTables (both from table_ref_list)
-    Map<String, String> keyToTransformedRef = new java.util.HashMap<>();
-    for (int i = 0; i < allTables.size(); i++) {
-      keyToTransformedRef.put(allTables.get(i).getKey(), tableRefs.get(i));
-    }
-
-    // Track which tables have been joined
-    Set<String> joinedTables = new HashSet<>();
-
-    // Start with the first table (use transformed reference with schema qualification)
-    TableInfo firstTable = allTables.get(0);
-    StringBuilder result = new StringBuilder();
-    result.append(keyToTransformedRef.get(firstTable.getKey()));
-    joinedTables.add(firstTable.getKey());
-
-    // Add outer joins in order
-    for (OuterJoinCondition join : outerJoins) {
-      String table1Key = join.getTableKey1();
-      String table2Key = join.getTableKey2();
-
-      // Determine which table to join (the one not yet joined)
-      TableInfo tableToJoin = null;
-      String baseTableKey = null;
-
-      if (joinedTables.contains(table1Key) && !joinedTables.contains(table2Key)) {
-        // Join table2 to table1
-        tableToJoin = ctx.getTable(table2Key);
-        baseTableKey = table1Key;
-      } else if (joinedTables.contains(table2Key) && !joinedTables.contains(table1Key)) {
-        // Join table1 to table2
-        tableToJoin = ctx.getTable(table1Key);
-        baseTableKey = table2Key;
-      } else if (!joinedTables.contains(table1Key) && !joinedTables.contains(table2Key)) {
-        // Neither table joined yet - this shouldn't happen with proper join ordering
-        // For now, just join table2
-        tableToJoin = ctx.getTable(table2Key);
-        baseTableKey = table1Key;
+    // Emission order: the first item in FROM order that can be emitted, repeatedly
+    List<Integer> order = new ArrayList<>();
+    boolean[] emitted = new boolean[n];
+    while (order.size() < n) {
+      int pick = -1;
+      for (int i = 0; i < n && pick < 0; i++) {
+        if (emitted[i]) {
+          continue;
+        }
+        OuterJoinCondition join = ctx.getOuterJoin(i);
+        if (join == null || join.getDependencies().stream().allMatch(d -> emitted[d])) {
+          pick = i;
+        }
       }
-
-      if (tableToJoin != null) {
-        // Add the JOIN clause
-        String joinType = join.getJoinType() == OuterJoinCondition.JoinType.LEFT ? "LEFT JOIN" : "RIGHT JOIN";
-        result.append(" ").append(joinType).append(" ");
-        // Use transformed table reference (with schema qualification)
-        result.append(keyToTransformedRef.get(tableToJoin.getKey()));
-        // Transform join conditions (converts Oracle functions to PostgreSQL and removes (+))
-        result.append(" ON ").append(join.getCombinedConditions(builder));
-
-        joinedTables.add(tableToJoin.getKey());
+      if (pick < 0) {
+        throw new TransformationException("Oracle outer join (+): tables are outer-joined to each other "
+            + "(Oracle rejects it too, ORA-01416): " + fromCtx.getText());
       }
+      order.add(pick);
+      emitted[pick] = true;
     }
 
-    // Add any remaining tables as comma-separated (implicit joins)
-    for (TableInfo table : allTables) {
-      if (!joinedTables.contains(table.getKey())) {
-        // Use transformed table reference (with schema qualification)
-        result.append(", ").append(keyToTransformedRef.get(table.getKey()));
-        joinedTables.add(table.getKey());
+    boolean reordered = false;
+    for (int k = 0; k < n; k++) {
+      reordered |= order.get(k) != k;
+    }
+    if (reordered && selectsBareAsterisk(fromCtx)) {
+      throw new TransformationException("Oracle outer join (+): an outer-joined table precedes the table it joins to, "
+          + "so its join changes the FROM order, and SELECT * would return the columns in a different order");
+    }
+
+    // A comma may precede position k only if no ON at k or later references a position before k
+    int[] position = new int[n];
+    for (int k = 0; k < n; k++) {
+      position[order.get(k)] = k;
+    }
+    int[] earliestReferenceFrom = new int[n + 1];
+    earliestReferenceFrom[n] = Integer.MAX_VALUE;
+    for (int k = n - 1; k >= 0; k--) {
+      int earliest = Integer.MAX_VALUE;
+      OuterJoinCondition join = ctx.getOuterJoin(order.get(k));
+      if (join != null) {
+        for (int dependency : join.getDependencies()) {
+          earliest = Math.min(earliest, position[dependency]);
+        }
+      }
+      earliestReferenceFrom[k] = Math.min(earliest, earliestReferenceFrom[k + 1]);
+    }
+
+    StringBuilder result = new StringBuilder(tableRefs.get(order.get(0)));
+    for (int k = 1; k < n; k++) {
+      int item = order.get(k);
+      OuterJoinCondition join = ctx.getOuterJoin(item);
+      if (join != null) {
+        result.append(" LEFT JOIN ").append(tableRefs.get(item))
+            .append(" ON ").append(join.getCombinedConditions(builder));
+      } else if (earliestReferenceFrom[k] >= k) {
+        result.append(", ").append(tableRefs.get(item));
+      } else {
+        result.append(" CROSS JOIN ").append(tableRefs.get(item));
       }
     }
-
     return result.toString();
+  }
+
+  private static boolean selectsBareAsterisk(PlSqlParser.From_clauseContext fromCtx) {
+    if (fromCtx.getParent() instanceof PlSqlParser.Query_blockContext queryBlock) {
+      PlSqlParser.Selected_listContext selected = queryBlock.selected_list();
+      return selected != null && selected.select_list_elements().isEmpty();
+    }
+    return false;
   }
 }

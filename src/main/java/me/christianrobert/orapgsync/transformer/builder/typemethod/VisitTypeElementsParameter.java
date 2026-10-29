@@ -3,7 +3,11 @@ package me.christianrobert.orapgsync.transformer.builder.typemethod;
 import me.christianrobert.orapgsync.antlr.PlSqlParser;
 import me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder;
 import me.christianrobert.orapgsync.transformer.util.IdentifierHelper;
+import me.christianrobert.orapgsync.transformer.util.ParameterDefaults;
 import me.christianrobert.orapgsync.transformer.util.TypeResolver;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Static helper for {@code type_elements_parameter} — the parameter rule of object type methods.
@@ -36,6 +40,16 @@ public final class VisitTypeElementsParameter {
      * @return the rendered parameter, never null
      */
     public static String v(PlSqlParser.Type_elements_parameterContext ctx, PostgresCodeBuilder b) {
+        return v(ctx, b, true);
+    }
+
+    /**
+     * As {@link #v(PlSqlParser.Type_elements_parameterContext, PostgresCodeBuilder)}, with the
+     * {@code DEFAULT} emitted only when {@code emitDefault} is set — decided over the whole list by
+     * {@link #emittableDefaults}, since PostgreSQL rejects a default before a required parameter.
+     */
+    public static String v(PlSqlParser.Type_elements_parameterContext ctx, PostgresCodeBuilder b,
+                           boolean emitDefault) {
         StringBuilder result = new StringBuilder();
 
         String mode = mode(ctx);
@@ -46,11 +60,20 @@ public final class VisitTypeElementsParameter {
         result.append(IdentifierHelper.emit(ctx.parameter_name())).append(" ");
         result.append(postgresType(ctx.type_spec(), b));
 
-        if (ctx.default_value_part() != null) {
+        if (emitDefault && ctx.default_value_part() != null) {
             result.append(" DEFAULT ").append(b.visit(ctx.default_value_part().expression()));
         }
 
         return result.toString();
+    }
+
+    /** Which parameters may carry their DEFAULT; see {@link ParameterDefaults}. */
+    public static boolean[] emittableDefaults(List<PlSqlParser.Type_elements_parameterContext> parameters) {
+        List<ParameterDefaults.Param> params = new ArrayList<>();
+        for (PlSqlParser.Type_elements_parameterContext p : parameters) {
+            params.add(new ParameterDefaults.Param(!"OUT".equals(mode(p)), p.default_value_part() != null));
+        }
+        return ParameterDefaults.emittable(params);
     }
 
     /**

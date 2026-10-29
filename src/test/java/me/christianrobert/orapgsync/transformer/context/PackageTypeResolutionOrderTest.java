@@ -17,7 +17,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * {@code pkg.type} resolves to the same thing whatever else happens to be loaded.
  *
  * <p>The implementation job builds a {@link PackageContext} for the package it is currently
- * transforming and caches it, so before the step 22 index existed, whether {@code type.string}
+ * transforming and caches it, so before the step 22 index existed, whether {@code kindlib.label}
  * resolved to {@code text} or fell back to {@code jsonb} depended on whether package {@code type}
  * had already been processed in that schema — an answer that changed with processing order and
  * could not be reproduced from the report. These tests drive the same question through three
@@ -26,10 +26,10 @@ import static org.junit.jupiter.api.Assertions.*;
 class PackageTypeResolutionOrderTest {
 
     private static TransformationIndices indicesWithPackageTypes() {
-        PackageTypeMetadata typePkg = new PackageTypeMetadata("hr", "type");
-        typePkg.addSubtype("string", "VARCHAR2(4000)");
-        typePkg.addSubtype("short_string", "string");
-        typePkg.addStructuredType("rowset");
+        PackageTypeMetadata typePkg = new PackageTypeMetadata("hr", "kindlib");
+        typePkg.addSubtype("label", "VARCHAR2(4000)");
+        typePkg.addSubtype("short_label", "label");
+        typePkg.addStructuredType("row_list");
 
         return new TransformationIndices(
                 Map.of(), Map.of(), Set.of(), Map.of(), Map.of(), Set.of(), Set.of(), Set.of(),
@@ -56,41 +56,41 @@ class PackageTypeResolutionOrderTest {
     @Test
     @DisplayName("Resolves with no package context loaded at all — the stub job's situation")
     void resolvesWithNoContextLoaded() {
-        assertEquals("text", TypeResolver.toPostgres("type.string", contextWith()));
+        assertEquals("text", TypeResolver.toPostgres("kindlib.label", contextWith()));
     }
 
     @Test
     @DisplayName("Resolves the same when an unrelated package has been processed first")
     void resolvesTheSameWithUnrelatedContextLoaded() {
         assertEquals("text",
-                TypeResolver.toPostgres("type.string", contextWith(otherPackage("some_other_pkg"))));
+                TypeResolver.toPostgres("kindlib.label", contextWith(otherPackage("some_other_pkg"))));
     }
 
     @Test
     @DisplayName("Resolves the same when the declaring package's own context is loaded")
     void resolvesTheSameWithTheDeclaringContextLoaded() {
-        PackageContext typePkg = new PackageContext("hr", "type");
-        typePkg.addSubtype("string", "VARCHAR2(4000)");
+        PackageContext typePkg = new PackageContext("hr", "kindlib");
+        typePkg.addSubtype("label", "VARCHAR2(4000)");
 
-        assertEquals("text", TypeResolver.toPostgres("type.string", contextWith(typePkg)));
+        assertEquals("text", TypeResolver.toPostgres("kindlib.label", contextWith(typePkg)));
     }
 
     @Test
     @DisplayName("A subtype chain resolves through the index")
     void subtypeChainResolvesThroughTheIndex() {
-        assertEquals("text", TypeResolver.toPostgres("type.short_string", contextWith()));
+        assertEquals("text", TypeResolver.toPostgres("kindlib.short_label", contextWith()));
     }
 
     @Test
     @DisplayName("An indexed structured type is jsonb")
     void structuredTypeResolvesToJsonb() {
-        assertEquals("jsonb", TypeResolver.toPostgres("type.rowset", contextWith()));
+        assertEquals("jsonb", TypeResolver.toPostgres("kindlib.row_list", contextWith()));
     }
 
     @Test
     @DisplayName("An indexed type is placed by metadata, so a signature may use it")
     void indexedTypeCountsAsPlaced() {
-        assertEquals("text", TypeResolver.toPostgresOrNull("type.string", contextWith()),
+        assertEquals("text", TypeResolver.toPostgresOrNull("kindlib.label", contextWith()),
                 "toPostgresOrNull is what signature-building callers use; an indexed type must "
                         + "not read as a guess");
     }
@@ -98,9 +98,9 @@ class PackageTypeResolutionOrderTest {
     @Test
     @DisplayName("An undeclared type of a known package is still a guess, and refusable")
     void undeclaredTypeIsStillAGuess() {
-        assertNull(TypeResolver.toPostgresOrNull("type.never_declared", contextWith()),
+        assertNull(TypeResolver.toPostgresOrNull("kindlib.never_declared", contextWith()),
                 "knowing the package must not become a licence to guess the type");
-        assertEquals("jsonb", TypeResolver.toPostgres("type.never_declared", contextWith()),
+        assertEquals("jsonb", TypeResolver.toPostgres("kindlib.never_declared", contextWith()),
                 "the visitor layer still gets an answer, because it has nowhere to put a failure");
     }
 

@@ -100,16 +100,14 @@ class PackageSegmentationIntegrationTest {
         assertFalse(reducedBody.contains("PROCEDURE"), "Reduced body should not contain procedures");
 
         // STEP 5: Store in StateService
-        stateService.storePackageFunctions("HR", "EMP_PKG", fullSources, stubSources, reducedBody);
+        stateService.storePackageFunctions("HR", "EMP_PKG", asLists(fullSources), reducedBody);
 
         // STEP 6: Retrieve and verify
-        String getSalaryFull = stateService.getPackageFunctionSource("HR", "EMP_PKG", "get_salary");
+        String getSalaryFull = stateService.getPackageFunctionSource("HR", "EMP_PKG", "get_salary", 0);
         assertNotNull(getSalaryFull);
         assertTrue(getSalaryFull.contains("SELECT salary INTO"));
 
-        Map<String, String> allStubs = stateService.getAllPackageFunctionStubs("HR", "EMP_PKG");
-        assertEquals(3, allStubs.size());
-        assertTrue(allStubs.get("get_salary").contains("RETURN NULL"));
+        assertTrue(stubSources.get("get_salary").contains("RETURN NULL"));
 
         String retrievedReduced = stateService.getReducedPackageBody("HR", "EMP_PKG");
         assertEquals(reducedBody, retrievedReduced);
@@ -211,12 +209,12 @@ class PackageSegmentationIntegrationTest {
         assertFalse(reducedBody.contains("process_order"));
 
         // Store and verify retrieval
-        stateService.storePackageFunctions("SALES", "ORDER_PKG", fullSources, stubSources, reducedBody);
+        stateService.storePackageFunctions("SALES", "ORDER_PKG", asLists(fullSources), reducedBody);
 
         // Verify all functions retrievable
-        assertNotNull(stateService.getPackageFunctionSource("SALES", "ORDER_PKG", "get_total"));
-        assertNotNull(stateService.getPackageFunctionSource("SALES", "ORDER_PKG", "calc_tax"));
-        assertNotNull(stateService.getPackageFunctionSource("SALES", "ORDER_PKG", "process_order"));
+        assertNotNull(stateService.getPackageFunctionSource("SALES", "ORDER_PKG", "get_total", 0));
+        assertNotNull(stateService.getPackageFunctionSource("SALES", "ORDER_PKG", "calc_tax", 0));
+        assertNotNull(stateService.getPackageFunctionSource("SALES", "ORDER_PKG", "process_order", 0));
 
         // Verify stubs are smaller than full sources
         String fullGetTotal = fullSources.get("get_total");
@@ -291,17 +289,17 @@ class PackageSegmentationIntegrationTest {
         }
 
         String reducedBody = reducer.removeAllFunctions(cleaned, segments);
-        stateService.storePackageFunctions("TEST", "TEMP_PKG", fullSources, stubSources, reducedBody);
+        stateService.storePackageFunctions("TEST", "TEMP_PKG", asLists(fullSources), reducedBody);
 
         // Verify data stored
-        assertNotNull(stateService.getPackageFunctionSource("TEST", "TEMP_PKG", "func1"));
+        assertNotNull(stateService.getPackageFunctionSource("TEST", "TEMP_PKG", "func1", 0));
         assertNotNull(stateService.getReducedPackageBody("TEST", "TEMP_PKG"));
 
         // Simulate transformation job clearing storage
         stateService.clearPackageFunctionStorage();
 
         // Verify data cleared
-        assertNull(stateService.getPackageFunctionSource("TEST", "TEMP_PKG", "func1"));
+        assertNull(stateService.getPackageFunctionSource("TEST", "TEMP_PKG", "func1", 0));
         assertNull(stateService.getReducedPackageBody("TEST", "TEMP_PKG"));
     }
 
@@ -362,5 +360,12 @@ class PackageSegmentationIntegrationTest {
 
         System.out.printf("Performance: Full=%d chars, Stub=%d chars, Reduction=%.1f%%%n",
                          fullSize, stubSize, reduction);
+    }
+
+    /** One body per name, as {@code OracleFunctionExtractor} stores a package without overloads. */
+    private static Map<String, java.util.List<String>> asLists(Map<String, String> sources) {
+        Map<String, java.util.List<String>> lists = new java.util.HashMap<>();
+        sources.forEach((name, source) -> lists.put(name, java.util.List.of(source)));
+        return lists;
     }
 }

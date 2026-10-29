@@ -88,7 +88,7 @@ public final class TypeMethodRejection {
      *
      * <p>Oracle collection types (VARRAY, nested table) have no PostgreSQL representation — the
      * object type migration creates composite types, and a collection is not one — so
-     * {@code mBindVars(i) := x} has nothing to assign into.
+     * {@code mSlots(i) := x} has nothing to assign into.
      *
      * <p><b>Why this is a rejection rather than a jsonb_set.</b> The collection-element branch was
      * written for <i>inline</i> types declared inside packages and routines, which genuinely are

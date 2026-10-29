@@ -130,6 +130,23 @@ public class PostgresIdentifierNormalizer {
     }
 
     /**
+     * The PostgreSQL name of a routine: {@code package__member} for a package member, the bare
+     * name for a standalone routine, quoted when the <i>whole</i> name needs it.
+     *
+     * <p>A member name Oracle accepts quoted, such as {@code "skip all"}, must be quoted as part of
+     * the flattened name, never on its own: {@code pkg__"skip all"} is a syntax error, and
+     * {@code "pkg__skip all"} is the name. The stub job and the implementation both call this, so
+     * they agree on the name {@code CREATE OR REPLACE} has to match (ROADMAP P1.7).
+     *
+     * @param packageName the package, or null for a standalone routine
+     * @param routineName the routine name without delimiters
+     * @return the PostgreSQL routine name, without schema
+     */
+    public static String normalizeRoutineName(String packageName, String routineName) {
+        return normalizeIdentifier(packageName == null ? routineName : packageName + "__" + routineName);
+    }
+
+    /**
      * Finds groups of distinct Oracle identifiers that normalize to the same PostgreSQL identifier.
      *
      * <p>Normalization lower-cases, so Oracle's case-sensitive quoted identifiers {@code "Foo"}

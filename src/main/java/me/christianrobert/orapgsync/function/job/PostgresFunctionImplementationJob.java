@@ -6,6 +6,7 @@ import me.christianrobert.orapgsync.core.job.AbstractDatabaseWriteJob;
 import me.christianrobert.orapgsync.core.job.model.JobProgress;
 import me.christianrobert.orapgsync.core.job.model.function.FunctionImplementationResult;
 import me.christianrobert.orapgsync.core.job.model.function.FunctionMetadata;
+import me.christianrobert.orapgsync.core.service.StateService;
 import me.christianrobert.orapgsync.database.service.OracleConnectionService;
 import me.christianrobert.orapgsync.database.service.PostgresConnectionService;
 import me.christianrobert.orapgsync.transformer.context.MetadataIndexBuilder;
@@ -362,16 +363,38 @@ public class PostgresFunctionImplementationJob extends AbstractDatabaseWriteJob<
      * @throws SQLException if function source not found in StateService
      */
     private String extractPackageMemberSource(FunctionMetadata function) throws SQLException {
-        String packageName = extractPackageName(function);
+        return packageMemberSource(stateService, function);
+    }
+
+    /**
+     * The source step 22 paired with a package member, or an exception naming why there is none.
+     *
+     * <p>Package-private so a test can drive the real lookup from step 22's real output.
+     */
+    static String packageMemberSource(StateService stateService, FunctionMetadata function) throws SQLException {
+        String packageName = function.getPackageName();
         if (packageName == null) {
             throw new SQLException("Cannot extract package name from: " + function.getObjectName());
         }
 
-        // Get function source from StateService (stored during extraction job)
+        // Step 22 paired this member with one of the bodies of its name, or said why it could not.
+        // Never fall back to "the body of that name": with overloads that is another member's body.
+        if (function.getSourcePairingError() != null) {
+            throw new SQLException(String.format(
+                "%s %s.%s.%s has no identifiable source: %s",
+                function.isFunction() ? "Function" : "Procedure",
+                function.getSchema(),
+                packageName,
+                function.getObjectName(),
+                function.getSourcePairingError()
+            ));
+        }
+
         String source = stateService.getPackageFunctionSource(
             function.getSchema(),
             packageName,
-            function.getObjectName()
+            function.getObjectName(),
+            function.getSourceOrdinal()
         );
 
         if (source == null) {
@@ -472,7 +495,7 @@ public class PostgresFunctionImplementationJob extends AbstractDatabaseWriteJob<
      *       against the <i>function</i>. Since it is called for every member of a package, one
      *       broken package produced one identical error per member with the package never named —
      *       <b>44,693 of that run's 56,338 recorded failures, 79% of the job</b>, from a few
-     *       hundred root causes. 5,913 identical {@code schema "type" does not exist} entries came
+     *       hundred root causes. 5,913 identical {@code schema "kindlib" does not exist} entries came
      *       from 300 packages.</li>
      *   <li>The cache was populated only on success, so a failing package was retried from
      *       scratch for every one of its members: Oracle spec re-queried, body re-parsed, helpers
@@ -565,8 +588,8 @@ public class PostgresFunctionImplementationJob extends AbstractDatabaseWriteJob<
         log.info("Parsed reduced package body for {}.{} (segmentation optimization: {} chars)",
                  schema, packageName, reducedPackageBody.length());
 
-        // Step 4: Extract body variables (private package variables declared in body)
-        extractor.extractBodyVariables(bodyAst, context);
+        // Step 4: Extract body declarations (private variables, types and subtypes)
+        extractor.extractBodyDeclarations(bodyAst, context);
         log.info("Total variables (spec + body) for package {}.{}: {}",
                  schema, packageName, context.getVariables().size());
 
@@ -634,7 +657,7 @@ public class PostgresFunctionImplementationJob extends AbstractDatabaseWriteJob<
      *
      * <p>This used to log a warning and carry on "best effort". It is not best effort: the tree
      * ANTLR hands back after error recovery is not a partial reading of the package, it contains
-     * invented nodes, and {@link PackageContextExtractor#extractBodyVariables} cannot tell the
+     * invented nodes, and {@link PackageContextExtractor#extractBodyDeclarations} cannot tell the
      * difference. A recovered {@code gitemtab order.tTable;} arrives as a variable *named* {@code .}
      * of type {@code tTable}; a declaration the recovery slid into an exception handler arrives as
      * a variable named {@code exception} of type {@code when}. Those reached PostgreSQL as

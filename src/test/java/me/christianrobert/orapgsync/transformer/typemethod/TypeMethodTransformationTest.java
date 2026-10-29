@@ -185,7 +185,7 @@ class TypeMethodTransformationTest {
     /**
      * The control for the test above, and the reason the diagnosis is a declare-section bug rather
      * than a return-type one: the fluent-setter shape that dominates the failing methods
-     * ({@code linkurl.setBaseUrl}, {@code url.setOnComplete}) returns its own type, and that route
+     * ({@code linkurl.withBase}, {@code url.withCallback}) returns its own type, and that route
      * already qualifies. Without this test the two routes are indistinguishable from the log alone.
      */
     @Test
@@ -354,7 +354,7 @@ class TypeMethodTransformationTest {
 
     /**
      * Indices where the type carries a <b>collection-typed attribute</b>, as every type behind the
-     * 2026-08-27 §12.2 failures does ({@code bindvars.mbindvars}, {@code rowset.vrowcollection},
+     * 2026-08-27 §12.2 failures does ({@code paramset.mslots}, {@code row_list.vrowstash},
      * {@code propmap}'s four {@code pm_*_array} attributes).
      */
     private String transformWithCollectionAttribute(String typeMethodSource) {

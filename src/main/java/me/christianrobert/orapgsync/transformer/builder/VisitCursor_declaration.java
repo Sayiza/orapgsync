@@ -3,6 +3,7 @@ package me.christianrobert.orapgsync.transformer.builder;
 import me.christianrobert.orapgsync.antlr.PlSqlParser;
 import me.christianrobert.orapgsync.transformer.context.TransformationException;
 import me.christianrobert.orapgsync.transformer.util.TypeResolver;
+import me.christianrobert.orapgsync.transformer.util.IdentifierHelper;
 
 /**
  * Static helper for visiting PL/SQL cursor declarations.
@@ -53,7 +54,7 @@ public class VisitCursor_declaration {
         if (ctx.identifier() == null) {
             throw new TransformationException("Cursor declaration missing identifier");
         }
-        String cursorName = ctx.identifier().getText().toLowerCase();
+        String cursorName = IdentifierHelper.declare(ctx.identifier());
 
         // STEP 2: Build PostgreSQL syntax - name CURSOR
         result.append(cursorName).append(" CURSOR");
@@ -73,7 +74,7 @@ public class VisitCursor_declaration {
                 if (paramCtx.parameter_name() == null) {
                     throw new TransformationException("Cursor parameter missing name");
                 }
-                String paramName = paramCtx.parameter_name().getText().toLowerCase();
+                String paramName = IdentifierHelper.declare(paramCtx.parameter_name());
                 result.append(paramName);
 
                 // Extract and convert parameter type

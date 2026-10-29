@@ -125,7 +125,7 @@ class FunctionBodyTransformationTest {
      * <p>This is <b>not</b> a type-method concern, which is why it is pinned here as well as in
      * {@code TypeMethodTransformationTest}: {@code VisitVariable_declaration} is shared by every
      * routine form, so standalone and package functions emit the same unqualified name. The
-     * 2026-08-27 run shows both — the function implementation job failed on {@code optionlist},
+     * 2026-08-27 run shows both — the function implementation job failed on {@code choicelist},
      * {@code url}, {@code cardrow}, {@code propmap} and others with
      * {@code type "X" does not exist}, alongside 184 type-method failures of the same shape.
      *

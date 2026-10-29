@@ -1,6 +1,9 @@
 package me.christianrobert.orapgsync.transformer.builder;
 
 import me.christianrobert.orapgsync.antlr.PlSqlParser;
+import me.christianrobert.orapgsync.core.tools.PostgresIdentifierNormalizer;
+import me.christianrobert.orapgsync.transformer.context.TransformationException;
+import me.christianrobert.orapgsync.transformer.util.IdentifierHelper;
 import me.christianrobert.orapgsync.transformer.util.TypeResolver;
 
 
@@ -54,32 +57,37 @@ public class VisitFunctionBody {
         // STEP 1: Extract function name from AST and build qualified name
         String functionName;
         if (ctx.identifier() != null) {
-            functionName = ctx.identifier().getText().toLowerCase();
+            functionName = IdentifierHelper.unquote(ctx.identifier().getText()).toLowerCase();
         } else {
             throw new IllegalStateException("Function name not found in AST");
+        }
+
+        // A call spec (IS LANGUAGE JAVA NAME '...') parses clean but has no PL/SQL body; without
+        // this check it would become a PostgreSQL function with nothing in it.
+        if (ctx.call_spec() != null) {
+            throw new TransformationException(
+                    "Function '" + functionName + "' is implemented as a call spec (LANGUAGE JAVA / C). "
+                            + "There is no PL/SQL body to transform. Reimplement it in PostgreSQL by hand.",
+                    null, "function: call_spec body");
         }
 
         // Build qualified name based on package membership
         // Package members: schema.packageName__functionName (double underscore convention)
         // Standalone: schema.functionName
-        String qualifiedName;
+        // The stub job names the routine through the same call, so CREATE OR REPLACE finds it; a
+        // name Oracle accepts quoted ("skip all") is quoted as a whole, never as pkg__"skip all".
         String packageName = b.getContext().getCurrentPackageName();
-        if (packageName != null) {
-            // Package member function: include package prefix with double underscore
-            qualifiedName = schema.toLowerCase() + "." +
-                           packageName.toLowerCase() + "__" +
-                           functionName;
-        } else {
-            // Standalone function: just schema.functionName
-            qualifiedName = schema.toLowerCase() + "." + functionName;
-        }
+        String qualifiedName = schema.toLowerCase() + "." + PostgresIdentifierNormalizer.normalizeRoutineName(
+                packageName != null ? packageName.toLowerCase() : null, functionName);
 
         // STEP 2: Build parameter list from AST
         StringBuilder paramList = new StringBuilder();
         if (ctx.parameter() != null && !ctx.parameter().isEmpty()) {
             boolean first = true;
-            for (PlSqlParser.ParameterContext paramCtx : ctx.parameter()) {
-                String paramString = VisitParameter.v(paramCtx, b);
+            boolean[] withDefault = VisitParameter.emittableDefaults(ctx.parameter());
+            for (int i = 0; i < ctx.parameter().size(); i++) {
+                PlSqlParser.ParameterContext paramCtx = ctx.parameter(i);
+                String paramString = VisitParameter.v(paramCtx, b, withDefault[i]);
                 if (paramString != null) {
                     if (!first) {
                         paramList.append(", ");

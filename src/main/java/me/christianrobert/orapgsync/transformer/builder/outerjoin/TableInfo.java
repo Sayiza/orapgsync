@@ -1,89 +1,44 @@
 package me.christianrobert.orapgsync.transformer.builder.outerjoin;
 
-import java.util.Objects;
+import java.util.List;
 
 /**
- * Stores information about a table in the FROM clause.
+ * One comma-separated item of a FROM clause, as far as Oracle (+) outer joins are concerned.
  *
- * <p>Used during outer join transformation to track:
- * <ul>
- *   <li>The actual table name</li>
- *   <li>The alias (if present)</li>
- *   <li>The "table key" used for lookups (alias if present, else table name)</li>
- * </ul>
+ * <p>An item is identified by its position in the FROM list, which is also the position of its
+ * transformed SQL in {@code VisitFromClause}. Its {@code keys} are the canonical names a column
+ * reference can qualify it by: the alias if there is one, otherwise the table name and
+ * {@code SCHEMA.TABLE}. An item with no usable name (an unaliased subquery) has no keys and so
+ * can be neither the outer-joined side nor a dependency of one.
  *
  * <p>Examples:
  * <pre>
- * FROM employees e      → TableInfo(name="employees", alias="e", key="e")
- * FROM departments      → TableInfo(name="departments", alias=null, key="departments")
+ * FROM employees e      → keys [E]
+ * FROM hr.departments   → keys [DEPARTMENTS, HR.DEPARTMENTS]
  * </pre>
  */
 public class TableInfo {
 
-    private final String name;   // Actual table name
-    private final String alias;  // Alias (null if no alias)
+    private final int index;
+    private final List<String> keys;
 
-    /**
-     * Creates table information.
-     *
-     * @param name Actual table name
-     * @param alias Table alias (null if none)
-     */
-    public TableInfo(String name, String alias) {
-        this.name = Objects.requireNonNull(name, "Table name cannot be null");
-        this.alias = alias;  // Can be null
+    public TableInfo(int index, List<String> keys) {
+        this.index = index;
+        this.keys = List.copyOf(keys);
     }
 
-    /**
-     * Returns the table key for lookups.
-     * Uses alias if present, otherwise uses table name.
-     *
-     * @return Table key (alias or name)
-     */
-    public String getKey() {
-        return alias != null ? alias : name;
+    /** Position in the FROM list. */
+    public int getIndex() {
+        return index;
     }
 
-    public String getName() {
-        return name;
-    }
-
-    public String getAlias() {
-        return alias;
-    }
-
-    public boolean hasAlias() {
-        return alias != null;
-    }
-
-    /**
-     * Returns the table reference for SQL (name with optional alias).
-     *
-     * @return SQL table reference (e.g., "employees e" or "departments")
-     */
-    public String toSqlReference() {
-        if (alias != null) {
-            return name + " " + alias;
-        }
-        return name;
+    /** Canonical names a qualified column reference can use for this item. */
+    public List<String> getKeys() {
+        return keys;
     }
 
     @Override
     public String toString() {
-        return String.format("TableInfo{name='%s', alias='%s', key='%s'}", name, alias, getKey());
-    }
-
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-        TableInfo tableInfo = (TableInfo) o;
-        return Objects.equals(name, tableInfo.name) &&
-               Objects.equals(alias, tableInfo.alias);
-    }
-
-    @Override
-    public int hashCode() {
-        return Objects.hash(name, alias);
+        return "TableInfo{index=" + index + ", keys=" + keys + "}";
     }
 }

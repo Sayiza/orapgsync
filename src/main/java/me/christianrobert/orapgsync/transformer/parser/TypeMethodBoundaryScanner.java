@@ -9,9 +9,7 @@ import org.antlr.v4.runtime.Token;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Deque;
 import java.util.List;
 import java.util.Set;
 
@@ -42,9 +40,16 @@ import java.util.Set;
  * <ul>
  *   <li>{@code END IF} / {@code END LOOP} / {@code END CASE} — do not close a {@code BEGIN}</li>
  *   <li>A bare {@code END} closing a <b>CASE expression</b> ({@code x := CASE … END;}), which no
- *       lookahead can distinguish from a block {@code END} — hence the stack of what is open</li>
+ *       lookahead can distinguish from a block {@code END}</li>
  *   <li>Nested {@code BEGIN} blocks, including a block inside a {@code CASE} branch, and local
  *       subprograms declared in a method's DECLARE section</li>
+ * </ul>
+ *
+ * <p>The block structure itself is walked by {@link PlSqlBlockScanner}, shared with
+ * {@link FunctionBoundaryScanner}: the CASE-expression fix above was made here first and never
+ * reached the package-body copy, which is why there is now one copy.
+ *
+ * <ul>
  *   <li>{@code RETURN SELF AS RESULT} — the {@code AS} is part of the signature, not the body</li>
  *   <li>{@code call_spec} bodies ({@code IS LANGUAGE JAVA NAME '…';}) — no {@code BEGIN}/{@code END}
  *       at all; see below</li>
@@ -273,103 +278,36 @@ public class TypeMethodBoundaryScanner {
 
         // call_spec: java_spec is LANGUAGE JAVA NAME '…', c_spec starts with LANGUAGE or EXTERNAL.
         // No block to balance -- the declaration ends at its semicolon.
-        int firstBodyToken = typeAt(tokens, i);
-        if (firstBodyToken == PlSqlLexer.LANGUAGE || firstBodyToken == PlSqlLexer.EXTERNAL) {
+        if (PlSqlBlockScanner.isCallSpec(tokens, i)) {
             return callSpecSegment(tokens, i, start, methodName, bodyStartPos, source);
         }
 
         return blockBodySegment(tokens, i, start, methodName, bodyStartPos, source);
     }
 
-    /**
-     * Walks the block structure to the {@code END} that closes the method.
-     *
-     * <p>A <b>stack</b> of what is open, not a pair of counters. Both {@code BEGIN} and {@code CASE}
-     * can be closed by a bare {@code END}, so the only question a bare {@code END} ever asks is
-     * "what is innermost?" — and two independent depth counters cannot answer it. A {@code BEGIN}
-     * block inside a {@code CASE} branch is where counters get it wrong: the inner block's
-     * {@code END} would be charged to the open CASE, and every {@code END} after it is off by one.
-     *
-     * <p>{@code nestedSubprogramDepth} stays a counter because a local function or procedure
-     * declared before the method's own {@code BEGIN} does not nest inside anything — it empties the
-     * stack and hands it back.
-     */
+    /** Finds the {@code END} that closes the method via the walker shared with package bodies. */
     private ScanResult blockBodySegment(List<Token> tokens, int i, MethodStart start,
                                         String methodName, int bodyStartPos, String source) {
-        Deque<Open> open = new ArrayDeque<>();
-        int nestedSubprogramDepth = 0;
-
-        while (i < tokens.size()) {
-            int type = tokens.get(i).getType();
-
-            if (type == PlSqlLexer.BEGIN) {
-                open.push(Open.BLOCK);
-            } else if (type == PlSqlLexer.CASE) {
-                open.push(Open.CASE);
-            } else if (type == PlSqlLexer.FUNCTION || type == PlSqlLexer.PROCEDURE) {
-                if (isNestedSubprogramDeclaration(tokens, i)) {
-                    nestedSubprogramDepth++;
-                }
-            } else if (type == PlSqlLexer.END) {
-                int next = typeAt(tokens, i + 1);
-
-                if (next == PlSqlLexer.IF || next == PlSqlLexer.LOOP) {
-                    // END IF / END LOOP close a control structure, not a block.
-                    i += 2;
-                    continue;
-                }
-                if (next == PlSqlLexer.CASE) {
-                    if (open.peek() == Open.CASE) {
-                        open.pop();
-                    }
-                    i += 2;
-                    continue;
-                }
-                if (open.isEmpty()) {
-                    // An END with nothing open cannot be this method's: no BEGIN ever opened.
-                    break;
-                }
-                if (open.pop() == Open.CASE) {
-                    // `x := CASE … END` -- the expression form, closed by a bare END.
-                    i++;
-                    continue;
-                }
-
-                if (open.isEmpty()) {
-                    if (nestedSubprogramDepth > 0) {
-                        nestedSubprogramDepth--;
-                        i++;
-                        continue;
-                    }
-                    return finish(tokens, i, start, methodName, bodyStartPos,
-                            tokens.get(i).getStartIndex(), source);
-                }
-            }
-            i++;
+        int endIndex = PlSqlBlockScanner.findBodyEnd(tokens, i);
+        if (endIndex < 0) {
+            log.warn("Could not find the closing END for type method {} starting at position {}",
+                    methodName, start.startPos);
+            return null;
         }
-
-        log.warn("Could not find the closing END for type method {} starting at position {}",
-                methodName, start.startPos);
-        return null;
+        return finish(tokens, endIndex, start, methodName, bodyStartPos,
+                tokens.get(endIndex).getStartIndex(), source);
     }
 
     private ScanResult callSpecSegment(List<Token> tokens, int i, MethodStart start,
                                        String methodName, int bodyStartPos, String source) {
-        int parenDepth = 0;
-        for (int j = i; j < tokens.size(); j++) {
-            int type = tokens.get(j).getType();
-            if (type == PlSqlLexer.LEFT_PAREN) {
-                parenDepth++;
-            } else if (type == PlSqlLexer.RIGHT_PAREN) {
-                parenDepth--;
-            } else if (type == PlSqlLexer.SEMICOLON && parenDepth == 0) {
-                log.debug("Type method {} has a call_spec body (LANGUAGE JAVA / C)", methodName);
-                return record(start, methodName, bodyStartPos,
-                        tokens.get(j).getStartIndex(), tokens.get(j).getStopIndex() + 1, j + 1);
-            }
+        int j = PlSqlBlockScanner.findCallSpecEnd(tokens, i);
+        if (j < 0) {
+            log.warn("Unterminated call spec for type method {}", methodName);
+            return null;
         }
-        log.warn("Unterminated call spec for type method {}", methodName);
-        return null;
+        log.debug("Type method {} has a call_spec body (LANGUAGE JAVA / C)", methodName);
+        return record(start, methodName, bodyStartPos,
+                tokens.get(j).getStartIndex(), tokens.get(j).getStopIndex() + 1, j + 1);
     }
 
     /** Consumes {@code END [name]} through its semicolon and records the segment. */
@@ -414,30 +352,6 @@ public class TypeMethodBoundaryScanner {
             i += 2;
         }
         return name;
-    }
-
-    /**
-     * A nested {@code FUNCTION}/{@code PROCEDURE} with a body (IS/AS before the semicolon) brings its
-     * own {@code BEGIN}…{@code END}; a forward declaration does not.
-     */
-    private boolean isNestedSubprogramDeclaration(List<Token> tokens, int index) {
-        int parenDepth = 0;
-        for (int i = index + 1; i < tokens.size(); i++) {
-            int type = tokens.get(i).getType();
-            if (type == PlSqlLexer.LEFT_PAREN) {
-                parenDepth++;
-            } else if (type == PlSqlLexer.RIGHT_PAREN) {
-                parenDepth--;
-            } else if (parenDepth == 0) {
-                if (type == PlSqlLexer.IS || type == PlSqlLexer.AS) {
-                    return true;
-                }
-                if (type == PlSqlLexer.SEMICOLON) {
-                    return false;
-                }
-            }
-        }
-        return false;
     }
 
     /**
@@ -489,11 +403,6 @@ public class TypeMethodBoundaryScanner {
             default:
                 return start.isFunction ? MethodType.MEMBER_FUNCTION : MethodType.MEMBER_PROCEDURE;
         }
-    }
-
-    /** What a bare {@code END} could be closing. */
-    private enum Open {
-        BLOCK, CASE
     }
 
     private enum Modifier {

@@ -96,10 +96,10 @@ class TriggerTransformerTest {
               vPersRevNr  number  := 1;
               updateStudy boolean := false;
               updatePers  boolean := false;
-              vPersonUid  varchar2(64);
+              vMemberUid  varchar2(64);
             begin
-              select i.PERSON_UID
-              into vPersonUid
+              select i.MEMBER_UID
+              into vMemberUid
               from LEARNER_PERSON_V i
               where i.STUDENT_ID = 1;
 

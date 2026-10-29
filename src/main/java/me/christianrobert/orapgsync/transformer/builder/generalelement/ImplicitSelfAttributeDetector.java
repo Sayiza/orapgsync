@@ -11,7 +11,7 @@ import java.util.Map;
  *
  * <h2>The construct</h2>
  * Oracle gives a member method implicit access to its type's attributes, so a body may write
- * {@code mBindVars := …} or {@code RETURN qty * unit_price;} with no {@code self.} prefix — exactly
+ * {@code mSlots := …} or {@code RETURN qty * unit_price;} with no {@code self.} prefix — exactly
  * as a package member may write a package variable bare. PostgreSQL has no implicit receiver: the
  * instance is an ordinary parameter, so the attribute has to be qualified with it.
  *

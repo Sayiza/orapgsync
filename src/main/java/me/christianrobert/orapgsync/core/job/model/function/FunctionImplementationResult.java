@@ -98,7 +98,7 @@ public class FunctionImplementationResult {
      * function is unimplementable — so without this bucket the same root cause is recorded once per
      * member, against the member's name, with the package never named. On the 2026-08-28 run that
      * turned a few hundred broken packages into <b>44,693 opaque function errors, 79% of the job's
-     * total</b>: 5,913 identical {@code schema "type" does not exist} entries came from 300
+     * total</b>: 5,913 identical {@code schema "kindlib" does not exist} entries came from 300
      * packages, and the taxonomy read as if 5,913 functions each had their own bug.
      *
      * <p>The failing SQL belongs here and nowhere else — it is a property of the package's helper

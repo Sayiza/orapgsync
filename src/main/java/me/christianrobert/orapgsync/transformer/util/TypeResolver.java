@@ -38,8 +38,14 @@ import me.christianrobert.orapgsync.transformer.context.TransformationContext;
  * every route</b>, so the routes cannot answer differently. This class is to types what
  * {@link IdentifierHelper} is to identifiers.
  *
+ * <h2>Bare names inside a package</h2>
+ * A bare name written inside a package is looked up in that package first — spec and body
+ * declarations alike — because that is the scope Oracle searches first. A {@code SUBTYPE} found
+ * there is followed to its base, and a base this class would resolve on its own (another package's
+ * type, a {@code %TYPE} anchor) is resolved by running the chain again on it.
+ *
  * <h2>What it deliberately does not do</h2>
- * Resolution of an <i>unqualified</i> name goes through
+ * Otherwise, resolution of an <i>unqualified</i> name goes through
  * {@link TransformationContext#qualifyTypeName}, which searches synonyms, then the current schema,
  * then {@code PUBLIC}, then {@code SYS}. It does <b>not</b> search the other migrated schemas, so a
  * type owned by a different schema and referenced bare still falls through to the built-in path and
@@ -53,6 +59,9 @@ import me.christianrobert.orapgsync.transformer.context.TransformationContext;
  * once they have ruled one out.
  */
 public final class TypeResolver {
+
+    /** Bounds alias chains crossing packages; Oracle forbids cycles, the database may hold one. */
+    private static final int MAX_ALIAS_DEPTH = 8;
 
     private TypeResolver() {
     }
@@ -102,6 +111,17 @@ public final class TypeResolver {
      */
     private static String resolve(String oracleType, TransformationContext context,
                                   boolean acceptGuessedPackageType) {
+        return resolve(oracleType, context, acceptGuessedPackageType, 0);
+    }
+
+    /**
+     * @param aliasDepth 0 for the type as written; the depth of the subtype chain otherwise. The
+     *        enclosing package is searched only at depth 0: a subtype's base is resolved in the
+     *        declaring package's scope, whose own declarations the alias chase has already covered,
+     *        and searching the <i>current</i> package for it could only find a wrong match.
+     */
+    private static String resolve(String oracleType, TransformationContext context,
+                                  boolean acceptGuessedPackageType, int aliasDepth) {
         if (context == null) {
             return TypeConverter.toPostgreOrNull(oracleType);
         }
@@ -116,6 +136,20 @@ public final class TypeResolver {
             return anchored;
         }
 
+        // A bare name declared by the enclosing package — its spec or its body. Searched before
+        // object types and built-ins, as Oracle does. Nothing here is a guess: a miss returns null
+        // and the chain carries on.
+        if (aliasDepth == 0) {
+            TransformationContext.PackageTypeResolution enclosing =
+                    context.resolveEnclosingPackageType(oracleType);
+            if (enclosing != null) {
+                if (enclosing.aliasOf() == null) {
+                    return enclosing.postgresType();
+                }
+                return resolveAlias(enclosing.aliasOf(), context, aliasDepth);
+            }
+        }
+
         // A package-qualified type is resolved by the package machinery, which knows whether it
         // flattens to a name or collapses to jsonb. Its "unknown package, assume jsonb" fallback
         // is accepted only where there is no alternative: a guessed jsonb in a *signature* is
@@ -125,6 +159,12 @@ public final class TypeResolver {
         TransformationContext.PackageTypeResolution packageType =
                 context.resolvePackageQualifiedType(oracleType);
         if (packageType != null) {
+            if (packageType.aliasOf() != null) {
+                String base = resolveAlias(packageType.aliasOf(), context, aliasDepth);
+                // Before aliases were followed this answered the jsonb guess; the visitor layer
+                // keeps it rather than start emitting the bare subtype name.
+                return base != null || !acceptGuessedPackageType ? base : "jsonb";
+            }
             if (packageType.fromMetadata() || acceptGuessedPackageType) {
                 return packageType.postgresType();
             }
@@ -144,7 +184,22 @@ public final class TypeResolver {
     }
 
     /**
-     * Qualifies the table in a {@code tab.col%TYPE} reference, leaving the anchor intact.
+     * Resolves a subtype's base type. Never accepts a guess: a base nothing can place leaves the
+     * subtype unplaced, which a caller that can refuse then refuses by the subtype's name.
+     */
+    private static String resolveAlias(String baseType, TransformationContext context, int aliasDepth) {
+        return aliasDepth < MAX_ALIAS_DEPTH
+                ? resolve(baseType, context, false, aliasDepth + 1)
+                : null;
+    }
+
+    /**
+     * Qualifies the relation in a {@code rel.col%TYPE} reference, leaving the anchor intact.
+     *
+     * <p>The relation may be a table or a view: Oracle resolves an anchor against either, and a
+     * view's columns are typed in PostgreSQL from the moment its stub exists (step 20). Tables
+     * alone left every anchor on a view unplaceable — refused in a stub signature, and passed
+     * through bare by the visitor layer to fail as {@code relation "x" does not exist}.
      *
      * <p>Only {@code %TYPE} is handled. {@code %ROWTYPE} names a composite whose PostgreSQL
      * spelling depends on where it is being emitted — a declaration site turns it into jsonb plus
@@ -152,7 +207,7 @@ public final class TypeResolver {
      * unresolved rather than approximated.
      *
      * @return the qualified anchored type, or null if this is not a {@code %TYPE} reference or the
-     *         table cannot be placed
+     *         relation cannot be placed
      */
     private static String resolveAnchoredType(String oracleType, TransformationContext context) {
         String trimmed = oracleType.trim();
@@ -168,7 +223,7 @@ public final class TypeResolver {
         // declaring scope can resolve — not this class.
         if (parts.length == 3) {
             String qualifiedTable = parts[0] + "." + parts[1];
-            return context.getColumnType(qualifiedTable, parts[2]) != null
+            return context.getRelationColumnType(qualifiedTable, parts[2]) != null
                     ? qualifiedTable + "." + parts[2] + "%TYPE"
                     : null;
         }
@@ -183,13 +238,13 @@ public final class TypeResolver {
         String synonymTarget = context.resolveSynonym(table);
         if (synonymTarget != null) {
             String qualified = synonymTarget.toLowerCase();
-            if (qualified.contains(".") && context.getColumnType(qualified, column) != null) {
+            if (qualified.contains(".") && context.getRelationColumnType(qualified, column) != null) {
                 return qualified + "." + column + "%TYPE";
             }
         }
 
         String currentSchemaTable = context.getCurrentSchema().toLowerCase() + "." + table;
-        if (context.getColumnType(currentSchemaTable, column) != null) {
+        if (context.getRelationColumnType(currentSchemaTable, column) != null) {
             return currentSchemaTable + "." + column + "%TYPE";
         }
 

@@ -7245,8 +7245,10 @@ datatype
     | INTERVAL (YEAR | DAY) ('(' expression ')')? TO (MONTH | SECOND) ('(' expression ')')?
     ;
 
+// A length may name a constant, including a package-qualified one (varchar2(pkg.c_len CHAR)),
+// which Oracle resolves at compile time.
 precision_part
-    : '(' (numeric | id_expression | ASTERISK) (',' (numeric | id_expression | numeric_negative))? (CHAR | BYTE)? ')'
+    : '(' (numeric | id_expression ('.' id_expression)* | ASTERISK) (',' (numeric | id_expression | numeric_negative))? (CHAR | BYTE)? ')'
     ;
 
 native_datatype_element

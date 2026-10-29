@@ -664,6 +664,38 @@ class TypeMethodBoundaryScannerTest {
         assertTrue(sourceOf(segments.getMethods().get(0), cleaned).contains("ORDER BY hired_on;"));
     }
 
+    @Test
+    void scan_subprogramDeclaredInNestedDeclareBlock_doesNotSwallowNextMethod() {
+        // The block walk is shared with FunctionBoundaryScanner (PlSqlBlockScanner). A local
+        // procedure declared in a nested DECLARE block used to be charged to the method's final END,
+        // so the method ran on into the next one.
+        String typeBody = """
+            CREATE OR REPLACE TYPE BODY ledger_t AS
+                MEMBER PROCEDURE post_all IS
+                BEGIN
+                    DECLARE
+                        PROCEDURE post_one(p_n NUMBER) IS
+                        BEGIN
+                            NULL;
+                        END post_one;
+                    BEGIN
+                        post_one(1);
+                    END;
+                END post_all;
+                MEMBER FUNCTION total RETURN NUMBER IS
+                BEGIN
+                    RETURN 0;
+                END total;
+            END;
+            """;
+
+        TypeBodySegments segments = scanner.scanTypeBody(typeBody);
+
+        assertEquals(2, segments.getMethods().size());
+        assertTrue(sourceOf(segments.getMethods().get(0), typeBody).endsWith("END;\n    END post_all;"));
+        assertEquals("total", segments.getMethods().get(1).getName());
+    }
+
     private static int countOccurrences(String haystack, String needle) {
         int count = 0;
         int from = 0;

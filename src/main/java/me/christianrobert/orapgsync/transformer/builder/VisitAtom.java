@@ -53,14 +53,10 @@ public class VisitAtom {
 
     String result = b.visit(generalElemCtx);
 
-    // Check for outer_join_sign (+) AFTER visiting the general_element
-    // Oracle: column_name(+) in WHERE clause
-    // PostgreSQL: Handled by OuterJoinAnalyzer, converted to ANSI JOIN syntax
-    // The (+) is stripped by the visitor (returns empty string), so we just ignore it here
+    // Oracle column(+): OuterJoinAnalyzer has moved the condition into a LEFT JOIN. Visiting
+    // the marker returns "" if the analysis claimed it, and throws if it did not.
     if (ctx.outer_join_sign() != null) {
-      // The outer_join_sign visitor returns "", so (+) is effectively removed
-      // We already have the column name from general_element, so just return that
-      b.visit(ctx.outer_join_sign());  // Visit but ignore result (returns "")
+      b.visit(ctx.outer_join_sign());
     }
 
     return result;

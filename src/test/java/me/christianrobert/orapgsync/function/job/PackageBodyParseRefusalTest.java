@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.*;
  *
  * <p>{@code buildPackageContext} used to log the parse error and carry on "best effort". The tree
  * ANTLR returns after error recovery is not a partial reading of the package — it contains
- * invented nodes, and {@code extractBodyVariables} cannot tell them from real declarations. On the
+ * invented nodes, and {@code extractBodyDeclarations} cannot tell them from real declarations. On the
  * 2026-08-30 full run that produced 554 packages whose helper SQL read {@code RETURNS .} and 101
  * reading {@code RETURNS when}, blocking 14,781 functions between them with an error describing
  * PostgreSQL's opinion of DDL that should never have been generated.
@@ -67,7 +67,7 @@ class PackageBodyParseRefusalTest {
         ParseResult result = parse(UNPARSEABLE);
 
         PackageContext ctx = new PackageContext("hr", "test_pkg");
-        new PackageContextExtractor(new AntlrParser()).extractBodyVariables(
+        new PackageContextExtractor(new AntlrParser()).extractBodyDeclarations(
                 (PlSqlParser.Create_package_bodyContext) result.getTree(), ctx);
 
         assertTrue(ctx.hasVariable("."),

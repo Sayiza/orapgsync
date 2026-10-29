@@ -19,7 +19,14 @@ public class VisitQueryBlock {
     List<PlSqlParser.Hierarchical_query_clauseContext> hierClauses =
         ctx.hierarchical_query_clause();
     if (hierClauses != null && !hierClauses.isEmpty()) {
-      return HierarchicalQueryTransformer.transform(ctx, b);
+      // Its own, empty outer join context: (+) is not translated under CONNECT BY, and without
+      // this the enclosing query's context would be on top of the stack
+      b.pushOuterJoinContext(OuterJoinContext.none());
+      try {
+        return HierarchicalQueryTransformer.transform(ctx, b);
+      } finally {
+        b.popOuterJoinContext();
+      }
     }
 
     // Get FROM and WHERE clauses

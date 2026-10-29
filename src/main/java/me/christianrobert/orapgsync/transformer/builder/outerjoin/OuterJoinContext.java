@@ -4,279 +4,137 @@ import me.christianrobert.orapgsync.antlr.PlSqlParser;
 import me.christianrobert.orapgsync.transformer.builder.PostgresCodeBuilder;
 import org.antlr.v4.runtime.ParserRuleContext;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.IdentityHashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
- * Context for Oracle (+) outer join transformation.
+ * Result of {@link OuterJoinAnalyzer} for one query block.
  *
- * <p>Stores metadata discovered during the analysis phase:
- * <ul>
- *   <li>Table information (name, alias, key)</li>
- *   <li>Outer join conditions discovered in WHERE clause</li>
- *   <li>Regular WHERE conditions (to be preserved)</li>
- * </ul>
+ * <p>Holds the FROM items, one {@link OuterJoinCondition} per outer-joined item, the WHERE
+ * conjuncts that stay in WHERE, and the (+) markers the analysis accounted for. Stores AST nodes,
+ * not strings, so conditions are transformed by the normal visitor when they are emitted.
  *
- * <p><b>ARCHITECTURE: AST Node Storage</b>
- * <p>This context stores AST nodes rather than pre-transformed strings. This allows
- * conditions to be transformed during the transformation phase, ensuring all Oracle
- * functions (INSTR, TRUNC, etc.) are properly converted to PostgreSQL equivalents.
+ * <p><b>Claimed markers.</b> {@code PostgresCodeBuilder.visitOuter_join_sign} drops a (+) only if
+ * a context on the stack claimed it, and throws otherwise. Every (+) the analysis does not turn
+ * into a join — in the SELECT list, under CONNECT BY, in an ANSI {@code ON} — therefore fails
+ * loudly instead of silently becoming an inner join.
  *
- * <p>Lifecycle:
- * <ol>
- *   <li><b>Created</b> in VisitQueryBlock before visiting FROM/WHERE</li>
- *   <li><b>Populated</b> during analysis phase (OuterJoinAnalyzer scans FROM and WHERE clauses)</li>
- *   <li><b>Used</b> during transformation phase (VisitFromClause generates ANSI JOIN syntax,
- *       VisitWhereClause filters and transforms WHERE conditions)</li>
- * </ol>
- *
- * <p><b>COORDINATION WITH OTHER TRANSFORMATIONS:</b>
- * <ul>
- *   <li><b>AFFECTS:</b> FROM clause (converts to ANSI JOIN), WHERE clause (filters (+) conditions)</li>
- *   <li><b>ROWNUM:</b> No interference - both filter WHERE clause independently via VisitLogicalExpression</li>
- *   <li><b>CONNECT BY (future):</b> No interference - CONNECT BY rewrites entire query first</li>
- *   <li><b>ORDER:</b> Phase 2 (after CONNECT BY rewrite, before ROWNUM LIMIT)</li>
- * </ul>
- *
- * <p>This context is query-local and created fresh for each query/subquery.
+ * <p>Created fresh for each query block (subqueries get their own) and pushed onto the builder's
+ * stack by {@code VisitQueryBlock}.
  */
 public class OuterJoinContext {
 
-    // Table metadata: key → TableInfo
-    private final Map<String, TableInfo> tables;
-
-    // Outer join conditions discovered in WHERE clause
-    private final List<OuterJoinCondition> outerJoins;
-
-    // WHERE conditions that contain (+) and should be removed (stored as raw text for comparison)
-    private final Set<String> conditionsToRemove;
-
-    // Regular WHERE conditions to preserve (non-outer-join)
-    // Store AST nodes to enable transformation during visit phase
-    private final List<ParserRuleContext> regularWhereConditionNodes;
-
-    public OuterJoinContext() {
-        this.tables = new LinkedHashMap<>();  // Preserve insertion order
-        this.outerJoins = new ArrayList<>();
-        this.conditionsToRemove = new HashSet<>();
-        this.regularWhereConditionNodes = new ArrayList<>();
-    }
-
-    // ========== Table Management ==========
+    private final PlSqlParser.From_clauseContext fromClause;
+    private final PlSqlParser.Where_clauseContext whereClause;
+    private final List<TableInfo> tables = new ArrayList<>();
+    private final Map<Integer, OuterJoinCondition> outerJoins = new LinkedHashMap<>();
+    private final List<ParserRuleContext> regularWhereConditionNodes = new ArrayList<>();
+    private final Set<PlSqlParser.Outer_join_signContext> claimedSigns =
+        Collections.newSetFromMap(new IdentityHashMap<>());
 
     /**
-     * Registers a table from the FROM clause.
-     *
-     * @param name Table name
-     * @param alias Table alias (null if none)
+     * @param fromClause the FROM clause this context was built from (null for none)
+     * @param whereClause the WHERE clause this context was built from (null for none)
      */
-    public void registerTable(String name, String alias) {
-        TableInfo tableInfo = new TableInfo(name, alias);
-        tables.put(tableInfo.getKey(), tableInfo);
+    public OuterJoinContext(PlSqlParser.From_clauseContext fromClause, PlSqlParser.Where_clauseContext whereClause) {
+        this.fromClause = fromClause;
+        this.whereClause = whereClause;
     }
 
-    /**
-     * Gets table information by key (alias or name).
-     *
-     * @param key Table key
-     * @return TableInfo or null if not found
-     */
-    public TableInfo getTable(String key) {
-        return tables.get(key);
+    /** A context for a query block that is not analyzed: no outer joins, no claimed markers. */
+    public static OuterJoinContext none() {
+        return new OuterJoinContext(null, null);
     }
 
-    /**
-     * Returns all tables in FROM clause order.
-     *
-     * @return List of TableInfo
-     */
-    public List<TableInfo> getAllTables() {
-        return new ArrayList<>(tables.values());
+    // ========== Analysis-phase population ==========
+
+    void addTable(TableInfo table) {
+        tables.add(table);
     }
 
-    /**
-     * Returns the first table (root table for joins).
-     *
-     * @return First TableInfo or null if no tables
-     */
-    public TableInfo getFirstTable() {
-        return tables.values().stream().findFirst().orElse(null);
+    void addOuterJoinCondition(int optionalItem, ParserRuleContext conditionNode, Set<Integer> dependencies) {
+        outerJoins.computeIfAbsent(optionalItem, OuterJoinCondition::new).addCondition(conditionNode, dependencies);
     }
 
-    // ========== Outer Join Management ==========
-
-    /**
-     * Registers an outer join condition.
-     *
-     * <p>If a join between the same two tables already exists, the condition node
-     * is added to the existing join. Otherwise, a new join is created.
-     *
-     * <p>The condition node will be transformed during the transformation phase,
-     * ensuring all Oracle functions are converted to PostgreSQL equivalents.
-     *
-     * @param tableKey1 First table key
-     * @param tableKey2 Second table key
-     * @param joinType Join type (LEFT or RIGHT)
-     * @param conditionNode AST node for join condition (without (+))
-     */
-    public void registerOuterJoin(String tableKey1, String tableKey2,
-                                   OuterJoinCondition.JoinType joinType,
-                                   PlSqlParser.Relational_expressionContext conditionNode) {
-        // Find existing join between these tables
-        OuterJoinCondition existingJoin = findOuterJoin(tableKey1, tableKey2);
-
-        if (existingJoin != null) {
-            // Add condition to existing join
-            existingJoin.addConditionNode(conditionNode);
-        } else {
-            // Create new join
-            OuterJoinCondition newJoin = new OuterJoinCondition(tableKey1, tableKey2, joinType);
-            newJoin.addConditionNode(conditionNode);
-            outerJoins.add(newJoin);
-        }
+    void addRegularWhereConditionNode(ParserRuleContext conditionNode) {
+        regularWhereConditionNodes.add(conditionNode);
     }
 
-    /**
-     * Finds an existing outer join between two tables.
-     *
-     * @param tableKey1 First table key
-     * @param tableKey2 Second table key
-     * @return OuterJoinCondition or null if not found
-     */
-    private OuterJoinCondition findOuterJoin(String tableKey1, String tableKey2) {
-        for (OuterJoinCondition join : outerJoins) {
-            if ((join.getTableKey1().equals(tableKey1) && join.getTableKey2().equals(tableKey2)) ||
-                (join.getTableKey1().equals(tableKey2) && join.getTableKey2().equals(tableKey1))) {
-                return join;
-            }
-        }
-        return null;
+    void claim(PlSqlParser.Outer_join_signContext sign) {
+        claimedSigns.add(sign);
     }
 
-    /**
-     * Returns all outer join conditions.
-     *
-     * @return List of OuterJoinCondition
-     */
-    public List<OuterJoinCondition> getOuterJoins() {
-        return new ArrayList<>(outerJoins);
-    }
+    // ========== Transformation-phase queries ==========
 
-    /**
-     * Checks if there are any outer joins.
-     *
-     * @return true if outer joins exist
-     */
+    /** True if at least one FROM item is outer-joined, i.e. FROM and WHERE must be rebuilt. */
     public boolean hasOuterJoins() {
         return !outerJoins.isEmpty();
     }
 
-    // ========== WHERE Condition Management ==========
-
     /**
-     * Marks a WHERE condition for removal (because it contains (+) and was converted to JOIN).
-     *
-     * @param condition Condition text to remove
+     * True if this context was built from exactly this FROM clause. A query block transformed
+     * without going through {@code VisitQueryBlock}'s analysis — an inline view under CONNECT BY —
+     * would otherwise find the <em>enclosing</em> query's context on the stack and build its join
+     * tree from another query's conditions.
      */
-    public void markConditionForRemoval(String condition) {
-        if (condition != null && !condition.trim().isEmpty()) {
-            conditionsToRemove.add(condition.trim());
-        }
+    public boolean isFor(PlSqlParser.From_clauseContext ctx) {
+        return fromClause != null && fromClause == ctx;
     }
 
-    /**
-     * Checks if a condition should be removed from WHERE.
-     *
-     * @param condition Condition to check
-     * @return true if should be removed
-     */
-    public boolean shouldRemoveCondition(String condition) {
-        return condition != null && conditionsToRemove.contains(condition.trim());
+    /** True if this context was built from exactly this WHERE clause; see {@link #isFor(PlSqlParser.From_clauseContext)}. */
+    public boolean isFor(PlSqlParser.Where_clauseContext ctx) {
+        return whereClause != null && whereClause == ctx;
     }
 
-    /**
-     * Adds a regular WHERE condition AST node (non-outer-join).
-     *
-     * <p>The node will be transformed during the transformation phase,
-     * ensuring all Oracle functions are converted to PostgreSQL equivalents.
-     *
-     * @param conditionNode AST node for regular WHERE condition
-     */
-    public void addRegularWhereConditionNode(ParserRuleContext conditionNode) {
-        if (conditionNode != null) {
-            regularWhereConditionNodes.add(conditionNode);
-        }
+    /** True if the analysis accounted for this (+) marker, so it may be dropped from the output. */
+    public boolean isClaimed(PlSqlParser.Outer_join_signContext sign) {
+        return claimedSigns.contains(sign);
     }
 
-    /**
-     * Returns all regular WHERE condition nodes.
-     *
-     * @return List of AST nodes representing regular WHERE conditions
-     */
+    public List<TableInfo> getAllTables() {
+        return new ArrayList<>(tables);
+    }
+
+    /** The outer join of the item at this FROM position, or null if it is not outer-joined. */
+    public OuterJoinCondition getOuterJoin(int item) {
+        return outerJoins.get(item);
+    }
+
+    public List<OuterJoinCondition> getOuterJoins() {
+        return new ArrayList<>(outerJoins.values());
+    }
+
     public List<ParserRuleContext> getRegularWhereConditionNodes() {
         return new ArrayList<>(regularWhereConditionNodes);
     }
 
     /**
-     * Transforms and combines all regular WHERE conditions with AND.
+     * Transforms the conjuncts that stay in WHERE and combines them with AND.
      *
-     * <p>This method visits each stored AST node using the provided builder,
-     * ensuring all Oracle-specific functions are transformed to PostgreSQL equivalents.
+     * <p>Each node is a {@code logical_expression}, so ROWNUM conjuncts are filtered by
+     * {@code VisitLogicalExpression} exactly as on the path without outer joins.
      *
-     * <p>Example:
-     * <pre>
-     * Oracle: WHERE INSTR(e.email, '@') > 0 AND TRUNC(e.hire_date) = TRUNC(SYSDATE)
-     * PostgreSQL: WHERE POSITION('@' IN e.email) > 0 AND DATE_TRUNC('day', e.hire_date)::DATE = DATE_TRUNC('day', CURRENT_TIMESTAMP)::DATE
-     * </pre>
-     *
-     * @param builder PostgresCodeBuilder for transforming AST nodes
-     * @return Combined WHERE conditions string with all transformations applied, or null if no conditions
+     * @return the combined condition, or null if nothing remains
      */
     public String buildWhereClause(PostgresCodeBuilder builder) {
-        if (regularWhereConditionNodes.isEmpty()) {
-            return null;
-        }
-
-        List<String> transformedConditions = new ArrayList<>();
+        List<String> transformed = new ArrayList<>();
         for (ParserRuleContext node : regularWhereConditionNodes) {
-            // Visit the node to transform it (converts Oracle functions to PostgreSQL)
-            String transformed = builder.visit(node);
-            if (transformed != null && !transformed.trim().isEmpty()) {
-                transformedConditions.add(transformed);
+            String condition = builder.visit(node);
+            if (condition != null && !condition.isBlank()) {
+                transformed.add(condition);
             }
         }
-
-        return transformedConditions.isEmpty() ? null : String.join(" AND ", transformedConditions);
+        return transformed.isEmpty() ? null : String.join(" AND ", transformed);
     }
-
-    // ========== Debug and Utility ==========
 
     @Override
     public String toString() {
-        return String.format("OuterJoinContext{tables=%s, outerJoins=%s, regularConditions=%d}",
-            tables.keySet(), outerJoins.size(), regularWhereConditionNodes.size());
-    }
-
-    /**
-     * Returns a detailed debug representation.
-     *
-     * @return Detailed string representation
-     */
-    public String toDetailedString() {
-        StringBuilder sb = new StringBuilder("OuterJoinContext{\n");
-        sb.append("  Tables:\n");
-        for (TableInfo table : tables.values()) {
-            sb.append("    ").append(table).append("\n");
-        }
-        sb.append("  Outer Joins:\n");
-        for (OuterJoinCondition join : outerJoins) {
-            sb.append("    ").append(join).append("\n");
-        }
-        sb.append("  Regular WHERE Condition Nodes:\n");
-        for (ParserRuleContext node : regularWhereConditionNodes) {
-            sb.append("    ").append(node.getClass().getSimpleName()).append(": ")
-              .append(node.getText()).append("\n");
-        }
-        sb.append("}");
-        return sb.toString();
+        return "OuterJoinContext{tables=" + tables + ", outerJoins=" + outerJoins.values()
+            + ", regularConditions=" + regularWhereConditionNodes.size() + "}";
     }
 }

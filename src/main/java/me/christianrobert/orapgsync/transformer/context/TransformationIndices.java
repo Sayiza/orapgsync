@@ -35,6 +35,12 @@ public class TransformationIndices {
     // Key: "schema.table" (lowercase), Value: Map of column name → type info
     private final Map<String, Map<String, ColumnTypeInfo>> tableColumns;
 
+    // View → Column → Type mapping, same keys as tableColumns.
+    // Kept apart on purpose: getColumnType answers "is this a table column" for the visitor layer,
+    // where adding views would change disambiguation everywhere at once. Only an anchor
+    // (`v.col%TYPE`) asks the wider question, through getRelationColumnType.
+    private final Map<String, Map<String, ColumnTypeInfo>> viewColumns;
+
     // Type → Method names mapping
     // Key: "schema.typename" (lowercase), Value: Set of method names (lowercase)
     private final Map<String, Set<String>> typeMethods;
@@ -114,8 +120,8 @@ public class TransformationIndices {
     }
 
     /**
-     * Creates indices with all lookup maps.
-     * Maps are defensively copied to ensure immutability.
+     * Creates indices without view columns, so a {@code %TYPE} anchor on a view is unplaceable.
+     * Kept for callers — chiefly tests — that do not exercise that path.
      */
     public TransformationIndices(
             Map<String, Map<String, ColumnTypeInfo>> tableColumns,
@@ -128,7 +134,28 @@ public class TransformationIndices {
             Set<String> noArgCallableRoutines,
             Map<String, PackageTypeMetadata> packageTypes) {
 
+        this(tableColumns, typeMethods, packageFunctions, synonyms, typeFieldTypes, objectTypeNames,
+                standaloneFunctions, noArgCallableRoutines, packageTypes, Collections.emptyMap());
+    }
+
+    /**
+     * Creates indices with all lookup maps, including view columns.
+     * Maps are defensively copied to ensure immutability.
+     */
+    public TransformationIndices(
+            Map<String, Map<String, ColumnTypeInfo>> tableColumns,
+            Map<String, Set<String>> typeMethods,
+            Set<String> packageFunctions,
+            Map<String, Map<String, String>> synonyms,
+            Map<String, Map<String, String>> typeFieldTypes,
+            Set<String> objectTypeNames,
+            Set<String> standaloneFunctions,
+            Set<String> noArgCallableRoutines,
+            Map<String, PackageTypeMetadata> packageTypes,
+            Map<String, Map<String, ColumnTypeInfo>> viewColumns) {
+
         this.tableColumns = deepCopyTableColumns(tableColumns);
+        this.viewColumns = deepCopyTableColumns(viewColumns);
         this.typeMethods = deepCopyTypeMethods(typeMethods);
         this.packageFunctions = Set.copyOf(packageFunctions);
         this.synonyms = deepCopySynonyms(synonyms);
@@ -173,6 +200,26 @@ public class TransformationIndices {
         }
 
         return columns.get(normalizedColumn);
+    }
+
+    /**
+     * Gets the type of a column in a table <em>or a view</em>.
+     *
+     * <p>For anchors only. Oracle resolves {@code x.col%TYPE} against any relation, and a view's
+     * columns have a type in PostgreSQL as soon as its stub exists (step 20), so an anchor on a view
+     * is as placeable as one on a table. Everything else keeps asking {@link #getColumnType}.
+     *
+     * @param qualifiedRelation "schema.relation", case-insensitive
+     * @param columnName Column name, case-insensitive
+     * @return ColumnTypeInfo, or null if neither a table nor a view of that name has the column
+     */
+    public ColumnTypeInfo getRelationColumnType(String qualifiedRelation, String columnName) {
+        ColumnTypeInfo tableColumn = getColumnType(qualifiedRelation, columnName);
+        if (tableColumn != null || qualifiedRelation == null || columnName == null) {
+            return tableColumn;
+        }
+        Map<String, ColumnTypeInfo> columns = viewColumns.get(qualifiedRelation.toLowerCase());
+        return columns == null ? null : columns.get(columnName.toLowerCase());
     }
 
     /**

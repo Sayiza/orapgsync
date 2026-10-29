@@ -128,7 +128,7 @@ This document describes the ANTLR-based transformation module that converts Orac
 **All SQL clauses, operators, and join types fully implemented:**
 
 - Basic SELECT (columns, *, qualified, aliases)
-- FROM clause (table/subquery aliases, implicit/ANSI JOINs, Oracle (+) → LEFT/RIGHT JOIN)
+- FROM clause (table/subquery aliases, implicit/ANSI JOINs, Oracle (+) → LEFT JOIN, see [Oracle `(+)` Outer Joins](#oracle--outer-joins--2026-10-29))
 - WHERE clause (literals, comparison, logical, IN, BETWEEN, LIKE, IS NULL, complex nested)
 - GROUP BY/HAVING (single/multiple columns, position-based, expressions, aggregates)
 - ORDER BY (ASC/DESC, DESC → DESC NULLS FIRST fix, position-based, expressions)
@@ -506,7 +506,7 @@ transformer/
 │   ├── outerjoin/                       # Outer join transformation (4 classes)
 │   │   ├── OuterJoinAnalyzer.java       # Two-phase analyzer (FROM + WHERE)
 │   │   ├── OuterJoinContext.java        # Query-level outer join state
-│   │   ├── OuterJoinCondition.java      # Single outer join relationship
+│   │   ├── OuterJoinCondition.java      # ON clause of one outer-joined FROM item
 │   │   └── TableInfo.java               # Table name + alias
 │   │
 │   ├── rownum/                          # ROWNUM → LIMIT transformation (2 classes)
@@ -527,7 +527,7 @@ transformer/
 │       ├── VisitQueryBlock.java         # SELECT list + FROM + WHERE + ORDER BY
 │       ├── VisitWithClause.java         # CTE handling
 │       ├── VisitFromClause.java         # Outer join generation
-│       ├── VisitWhereClause.java        # Filters out (+) and ROWNUM conditions
+│       ├── VisitWhereClause.java        # WHERE without the conjuncts moved into joins
 │       ├── VisitSelectedList.java
 │       ├── VisitSelectListElement.java  # Column aliases
 │       ├── VisitExpression.java (11-level hierarchy)
@@ -557,7 +557,7 @@ transformer/
 - **VisitQueryBlock**: FROM DUAL handling, ROWNUM LIMIT generation, CONNECT BY detection
 - **VisitWithClause**: CTE handling, recursive detection
 - **VisitOverClause**: Window functions (ROW_NUMBER, RANK, LEAD, LAG, aggregates)
-- **OuterJoinAnalyzer + VisitFromClause**: Oracle (+) → ANSI LEFT/RIGHT JOIN
+- **OuterJoinAnalyzer + VisitFromClause**: Oracle (+) → ANSI LEFT JOIN
 - **RownumAnalyzer + RownumContext**: ROWNUM → LIMIT optimization
 - **HierarchicalQueryTransformer**: CONNECT BY → recursive CTE
 - **DateFunctionTransformer**: ADD_MONTHS, MONTHS_BETWEEN, LAST_DAY, TRUNC, ROUND
@@ -880,6 +880,7 @@ which to use where:
 | `canonical` | metadata lookup keys, comparisons | `"MyCol"` → `MYCOL` |
 | `emit` | anything landing in output SQL | `"RUN_ID"` → `run_id` |
 | `unquote` | name fragments, jsonb keys, flattened names | `"a""b"` → `a"b` |
+| `declare` | the name a local declaration introduces (variable, FOR index or record, cursor, cursor parameter) | `I#` → `"i#"`, `V_X` → `v_x` |
 
 `emit` delegates to `PostgresIdentifierNormalizer` rather than re-deriving the rule — the same
 class that named the objects being referenced, so it is correct by construction whatever its
@@ -911,21 +912,30 @@ creation refuse the object with an error naming both Oracle columns.
   reference site. Pre-existing; neither fixed nor worsened.
 - Oracle resolves an unquoted outer reference to an inner `AS "A"` (both fold to `A`);
   PostgreSQL does not (`a` folds to `a`).
-- **The PL/SQL routine-declaration path lower-cases raw text instead of normalizing.**
-  `VisitFunctionBody.java:59` and `VisitProcedureBody.java:63` read the routine name as
-  `ctx.identifier().getText().toLowerCase()`; `VisitParameter.java:75` emits parameter names the
-  same way. For ordinary names, and for *quoted* names, this coincidentally agrees with
-  `PostgresIdentifierNormalizer` — lower-casing inside the quotes lands on the same PostgreSQL
-  name. It diverges on an **unquoted Oracle name that PostgreSQL needs quoted**: an unquoted
-  `TIMESTAMP` is emitted bare as `timestamp`, while the stub job — which *does* use the normalizer
-  — created `"timestamp"`. Declaration and stub then disagree.
-  **`IdentifierHelper.emit()` is the wrong repair here**: it returns unquoted identifiers untouched
-  by design (that is what keeps bare `USER` and `LEVEL` as keywords), so it would neither fix the
-  reserved-word case nor preserve today's lower-casing — it would emit `MY_FUNC` where every
-  existing test expects `my_func`. A *declaration* is a DDL name, so the authority is
-  `PostgresIdentifierNormalizer`, the same one the stub job calls. Deliberately left unfixed in
-  [type-method Phase 2a](completed/TYPE_METHOD_IMPLEMENTATION_PLAN.md#phase-2a--extract-the-reusable-body-machinery)
-  because it changes emitted SQL and deserves its own decision.
+- **Declarations lower-cased raw text instead of normalizing — fixed for locals and parameters
+  2026-10-28 (ROADMAP P1.13), for routine names 2026-10-28 (ROADMAP P1.7).** Every declaration site read
+  `getText().toLowerCase()`. That agrees with the normalizer for ordinary and quoted names, but
+  not for a name Oracle allows unquoted and PostgreSQL does not: `i# INTEGER` reached PostgreSQL as
+  `i# integer;`, a syntax error rejecting the whole routine, while every *reference* to it was
+  already quoted by `emit`. Two rules now apply, and they differ on purpose:
+  - **Local declarations** use `IdentifierHelper.declare`: lower-cased as before for a plain
+    name, `emit` otherwise. What a local must agree with is its references, and those come from
+    `emit`. The normalizer would quote a reserved-word local the references leave bare.
+  - **Parameters** use `PostgresIdentifierNormalizer`, as the stub does. What a parameter must
+    agree with is the stub's signature, and `CREATE OR REPLACE` refuses to rename one. A
+    parameter named after a PostgreSQL reserved word is now quoted in the signature and still
+    referenced bare in the body. That body was a syntax error before as well.
+
+  The cursor FOR loop also read `c(a, b)` as one name, arguments included, because the grammar
+  makes `cursor_name` a `general_element`. The arguments now go through the visitor, and Oracle's
+  `p => v` becomes PL/pgSQL's `p := v`. Test: `SpecialCharacterIdentifierTest`, with an
+  execution test that replaces the stub and calls the function.
+  **Routine names** (`VisitFunctionBody`, `VisitProcedureBody`) go through
+  `PostgresIdentifierNormalizer.normalizeRoutineName`, as the stub's `FunctionMetadata.getPostgresName`
+  does. It quotes the **whole flattened name**: a member `"skip all"` is `"pkg__skip all"`, never
+  `pkg__"skip all"`, which is a syntax error. Step 22 stores a private member's name without its
+  delimiters, as the dictionary has it. Test: `QuotedRoutineNameTest`. **Call sites still
+  concatenate**, so a call to such a member emits the old, invalid name.
 - **Fixed in Phase 2a:** the same block registered parameters in the variable scope under
   `getText().toLowerCase()`. There the quoted case *was* broken — `"Foo"` registered as the literal
   key `"foo"`, quotes and all, which no lookup could match, so every reference to a quoted-name
@@ -1677,6 +1687,81 @@ in an unintended schema and is its own decision. And Oracle **collection** types
 nested table — `textlist3k`, `pm_key_array`) have no composite type in the target at all,
 which is a modelling question rather than a qualification one.
 
+**`%TYPE` anchors on views — ✅ 2026-10-26 (ROADMAP P1.4).** `TypeResolver` keeps a `rel.col%TYPE`
+anchor and qualifies the relation: through a synonym, then in the current schema, or as written when
+three parts are given. It used to look the relation up among **tables only**, so an anchor on a view
+was unplaceable: refused in a stub signature, and passed through bare by the visitor layer. There
+PostgreSQL rejected it as `relation "x" does not exist`, in the implementation's signature and in
+`DECLARE` alike. Views now count, through `TransformationIndices.getRelationColumnType`. That works
+in PostgreSQL because the view stub (step 20) exists before any function stub (step 23), with typed
+columns.
+
+The view columns are a separate index on purpose. `getColumnType` stays tables only, because the
+visitor layer uses it to disambiguate, for instance in "columns win" for parenthesis-less routines.
+Adding views there would change transformation everywhere at once, and only a run could show
+whether that is better.
+
+`VisitVariable_declaration` still flattens a *table* anchor in a `DECLARE` to the column's type. That
+is harmless, since the type is the same. Every other anchor, including views and synonyms, falls
+through to `TypeResolver`. Test: `ViewAnchoredTypeTest` covers the stub, the implementation, their
+agreement, and an execution test that replaces the stub and calls the function after the view stub
+has been swapped for the real view.
+
+**Bare type names inside a package — ✅ 2026-10-26 (ROADMAP P1.5).** Inside a package, Oracle looks
+a type name up in the package itself first, spec and body alike, before schema objects and
+`STANDARD`. So package code writes `gSlots SlotCache;` and `p_label Label` with no qualifier. Two
+things were missing:
+
+- *Body declarations were not extracted.* `PackageContextExtractor` read variables, `TYPE`s and
+  `SUBTYPE`s from the spec, but only variables from the body. A private variable is usually declared
+  with a private type, and its helper could not be typed, so the whole package was refused.
+  `extractBodyDeclarations` now reads all three, in source order.
+- *A bare name was never searched for in the enclosing package.* `TypeResolver` went from the anchor
+  check straight to package-qualified names, object types and built-ins. It now asks
+  `TransformationContext.resolveEnclosingPackageType` first. A structure there is `jsonb`; a
+  `SUBTYPE` is followed to its base.
+
+Two sources answer that lookup and must agree. The implementation job has the live
+`PackageContext` (spec + reduced body). The stub job has only the step-22 index, so
+`indexPackageSpecTypes` now also parses the reduced body the body scan stored moments earlier and
+records its types in `PackageTypeMetadata` as **body** declarations. Those are private: they resolve
+for a bare name and for `ownpkg.t` written inside the package, never for `pkg.t` from another unit.
+The stub job, which used one context per schema, now uses one per package, because a package-private
+member's signature is read off the body and names these types bare.
+
+A subtype whose base leaves the package — another package's type, a `%TYPE` anchor — used to fall
+through to the built-in mapping and fail. `resolveSubtypeAlias` now hands such a base back
+(`PackageTypeResolution.ofAlias`), and `TypeResolver` runs its chain again on it, depth-bounded.
+The enclosing package is searched only for the type as written, never for an alias's base: the
+alias chase already covered the declaring package, and searching the *current* one could only find
+a wrong match. An alias whose base nothing places is refused in a signature; in the visitor layer the
+qualified form keeps its old `jsonb` fallback, and the bare form falls through to the bare name, so
+it still fails loudly at `CREATE`.
+
+*Not covered:* a subtype of `%ROWTYPE` (`SUBTYPE HoldRow IS tab%ROWTYPE`) still cannot be placed. That
+belongs with `%ROWTYPE` package variables and parameters generally, which are a representation
+decision, not a lookup.
+
+**Types of Oracle's own packages — ✅ 2026-10-28 (ROADMAP P1.7).** `OWA.VC_ARR`, `DBMS_OUTPUT.CHARARR`
+and the like used to be flattened to `oracle_compat.owa__vc_arr`. The compat layer installs no types,
+so that name never existed. They are ordinary package types, declared in Oracle's specs, and those
+specs are never extracted. `transformer/context/OracleBuiltinPackageTypes` therefore lists the
+documented declarations of the compat packages' types:
+- associative arrays → `jsonb` with the `INDEX_BY` definition, so a local gets its initializer;
+- `UTL_FILE.FILE_TYPE` → `integer`, the handle type of the compat layer's `utl_file__fopen`;
+- anything unlisted → the undeclared-type answer: refused in a signature, `jsonb` mid-expression.
+
+Adding a compat package does not add its types: list them here too, from the package's documented
+spec. Test: `CompatPackageTypeTest` (stub↔implementation agreement, execution).
+
+Test: `EnclosingPackageTypeTest`, on the production path (body scan → spec/body index →
+`MetadataIndexBuilder` → stub job; live context → helpers → implementation). It covers extraction,
+body declarations indexed apart, helper types for every shape including a subtype of an anchor and of
+another package's subtype, private visibility, a refused undeclared name, stub↔implementation
+agreement, and an execution test: helpers, stub, implementation, exactly one function, two calls
+sharing package state. Verified by mutation: each of the five changes, reverted alone, fails between
+one and eight of its ten tests.
+
 **Key classes:** `transformer/util/TypeResolver` (the authority);
 `VisitVariable_declaration`, `VisitParameter`, `VisitFunctionBody`, `VisitCursor_declaration`,
 `VisitType_declaration`, `RoutineBodyBuilder`, `typemethod/VisitTypeElementsParameter` (the callers).
@@ -1699,7 +1784,7 @@ grammar rule and needs none**: `BITAND` is a lexer token listed in `non_reserved
 it reaches `general_element_part : id_expression function_argument*` as an ordinary call, and both
 arguments are full `expression`s that must be visited recursively rather than pattern-matched. In the
 real migration they are bit-mask *columns* as often as literals —
-`BITAND(vMaskContainer, inComponent.cClassBitMask)`.
+`BITAND(vBits, accessRules.cAdminMask)`.
 
 **What it did before: emitted a call to a function that does not exist.** With no case in
 `VisitGeneralElement`, BITAND fell through to the "unqualified name is a user function in the current
@@ -1777,6 +1862,96 @@ the body to PL/pgSQL fails that test and only that test.
 reaches `VisitGeneralElement` normally. Verified.
 
 ---
+
+### Oracle `(+)` Outer Joins — ✅ 2026-10-29
+
+**What it did before: translated only the simplest shape, and lost the rest silently.**
+`OuterJoinAnalyzer` recognized `a.k = b.k(+)` as a bare top-level comparison and nothing else.
+`VisitFromClause` built the join tree from the first FROM item and condition order, not from
+which side was marked. The `(+)` visitor returned `""` unconditionally, so every shape the analyzer
+did not recognize lost its marker and became an inner join. All of these compiled and ran:
+
+| Oracle | Emitted | Effect |
+|---|---|---|
+| `( a.k = b.k(+) )`, `a.d BETWEEN b.lo(+) AND b.hi(+)` | `(+)` stripped | inner join |
+| `nvl(b.k(+), 0) = a.k`, `hr.a.k = hr.b.k(+)`, `to_char(…b.d(+)…) = …` | condition dropped | cross join |
+| `a.k(+) = b.k` with `b` not first | `b RIGHT JOIN a` | wrong side preserved |
+| `a.k = b.k(+) AND c.j(+) = b.j` | `… RIGHT JOIN c` | wrong side preserved |
+| `a.j = c.j(+) AND b.m = c.m(+)` | second condition dropped | extra rows |
+| `a.k = b.k(+) AND b.s(+) = 'X'` | filter moved to WHERE | inner join |
+| preserved table not first in FROM | `x LEFT JOIN s ON a.… , a` | PostgreSQL error |
+
+ROADMAP §6.P1.14 has the measurement and how it was found.
+
+**Oracle's rule, which the rewrite implements** (each point verified against Oracle 19c):
+
+- `(+)` marks the **optional** side. Every top-level WHERE conjunct containing `(+)` belongs to
+  the join condition of the one FROM item its `(+)` columns qualify, **whatever its shape**: a
+  comparison of any operator, `BETWEEN`, a function call, a comparison with a constant.
+- A constant condition on the optional side (`b.s(+) = 'X'`) restricts the **join**. In WHERE it
+  would discard exactly the rows the outer join keeps.
+- An item whose `(+)` conjuncts reference **no other item of the same FROM** is not outer-joined at
+  all. Oracle applies them as plain filters, and so does this. That includes `(+)` against a
+  correlated column of an enclosing query.
+- Conjuncts without `(+)` stay in WHERE and apply after the joins, as in Oracle.
+
+**Conjuncts.** The WHERE condition is split on AND, and redundant parentheses are unwrapped, so
+`( a.k = b.k(+) )` and `(a.k = b.k(+) AND a.j = b.j(+))` are ordinary conjuncts. A parenthesized
+OR group keeps its parentheses, since unwrapped it would bind looser than the AND around it.
+
+**Dependencies are read off tokens, not parser rules.** Which items a conjunct references decides
+both where the join goes and whether it is a join at all. A missed reference therefore turns an
+outer join into a filter, i.e. an inner join. Column references are not always
+`general_element`: the first argument of `TO_CHAR` is a `table_element` (the blind spot below).
+So dependencies come from `name . name` token sequences, which no grammar alternative can hide. A
+false positive only orders a join later.
+
+**The join tree.** `LEFT JOIN item ON c1 AND c2 …`, always: the optional side is the side being
+joined, and there is no RIGHT JOIN. Items keep their FROM order. An outer-joined item listed before
+an item it references moves to just after it. Other items join with `CROSS JOIN` while a later ON
+still references an earlier item, and with a comma once nothing does:
+
+```sql
+-- Oracle
+FROM a, c, d, h WHERE a.c = c.nr AND a.d = d.nr AND d.h = h.nr(+)
+-- PostgreSQL
+FROM a, c, d LEFT JOIN h ON d.h = h.nr WHERE a.c = c.nr AND a.d = d.nr
+```
+
+A comma cannot be used throughout, because PostgreSQL scopes `ON` to its own join tree:
+`FROM a, c LEFT JOIN b ON a.k = b.k` fails. Keeping the condition-free rest comma-separated keeps
+tables no ON needs out of the explicit join tree, so they do not count against the planner's
+`join_collapse_limit`.
+
+**A bare `SELECT *` over a reordered FROM is refused.** `*` returns columns in FROM order, and
+both the view wrapper (`… AS subq(c0, c1, …)`) and `SELECT * INTO` read them by position, so a
+reorder would silently swap columns. `a.*` is unaffected.
+
+**Claimed markers: a `(+)` the analysis did not account for throws.** The analyzer records every
+marker it moved into a join, and `visitOuter_join_sign` drops only those. A `(+)` anywhere else
+fails loudly instead of becoming an inner join: in the SELECT list, under CONNECT BY, or in an ANSI
+`ON` of an inner `JOIN` (where Oracle makes the join outer). One case in an ANSI `ON` is accepted:
+a `(+)` on the joined table of a `LEFT JOIN`, which is optional already and on which Oracle gives
+the marker no effect.
+
+**Refused by name**, each also an Oracle error, so valid source never contains it, but a silent
+translation would hide a misreading of the tree: `(+)` in an OR operand (ORA-01719), against a
+subquery (ORA-01799), on two items in one conjunct (ORA-01468), two items outer-joined to each
+other (ORA-01416), together with ANSI joins in one FROM (ORA-25156). Also refused: an
+**unqualified** `(+)` column. Oracle accepts it, but placing it needs column metadata, and no
+view in the source database uses one.
+
+**Each context belongs to one query block.** The analysis result is pushed per query block and
+records the FROM and WHERE nodes it was built from, and the FROM/WHERE visitors apply it only to
+those. An inline view under CONNECT BY is transformed outside `VisitQueryBlock`'s analysis. It used
+to find the enclosing query's context on the stack and build its FROM from another query's
+conditions. A table-count check happened to catch that; had the counts matched, it would have been
+silent. CONNECT BY now pushes its own empty context.
+
+**Tests.** `OuterJoinTransformationTest` covers every shape in the table above plus each refusal.
+`PostgresOuterJoinValidationTest` runs the output over rows that have **no match**. A string test
+cannot tell an outer join from an inner one, but the row count can. Both mutations tried were
+caught: moving constant conditions back to WHERE, and comma-joining everything.
 
 ## Testing
 

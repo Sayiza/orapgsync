@@ -1,5 +1,7 @@
 package me.christianrobert.orapgsync.core.job.model.function;
 
+import me.christianrobert.orapgsync.core.tools.PostgresIdentifierNormalizer;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -20,6 +22,19 @@ public class FunctionMetadata {
     private String returnTypeName; // Name of custom return type
     private int overloadNumber; // Oracle overload number (0 if not overloaded)
     private List<FunctionParameter> parameters;
+
+    /**
+     * Which body segment of this package member's name holds its source: the index among the
+     * segments of that name, in package body order. {@code -1} until step 22 has paired it.
+     *
+     * <p>A name alone cannot identify an overload's source, and neither can position: body order
+     * and the dictionary's overload order disagree for one overloaded name in five. See
+     * {@code FunctionSourcePairing}.
+     */
+    private int sourceOrdinal = -1;
+
+    /** Why step 22 could not pair this member with a body segment; {@code null} if it did not try or succeeded. */
+    private String sourcePairingError;
 
     public FunctionMetadata(String schema, String objectName, String objectType) {
         this.schema = schema;
@@ -110,6 +125,22 @@ public class FunctionMetadata {
         this.overloadNumber = overloadNumber;
     }
 
+    public int getSourceOrdinal() {
+        return sourceOrdinal;
+    }
+
+    public void setSourceOrdinal(int sourceOrdinal) {
+        this.sourceOrdinal = sourceOrdinal;
+    }
+
+    public String getSourcePairingError() {
+        return sourcePairingError;
+    }
+
+    public void setSourcePairingError(String sourcePairingError) {
+        this.sourcePairingError = sourcePairingError;
+    }
+
     public List<FunctionParameter> getParameters() {
         return parameters;
     }
@@ -160,16 +191,16 @@ public class FunctionMetadata {
     }
 
     /**
-     * Gets the PostgreSQL function name (without schema).
+     * Gets the PostgreSQL function name (without schema), as it is written in SQL.
      * For standalone: function_name
      * For package members: packagename__functionname
+     *
+     * <p>Quoted when the name needs it, as a whole: a member Oracle names {@code "skip all"} is
+     * {@code "pkg__skip all"}. {@link #getQualifiedName()} stays unquoted, since it is a lookup key.
      */
     public String getPostgresName() {
-        if (isPackageMember()) {
-            return packageName.toLowerCase() + "__" + objectName.toLowerCase();
-        } else {
-            return objectName.toLowerCase();
-        }
+        return PostgresIdentifierNormalizer.normalizeRoutineName(
+                isPackageMember() ? packageName.toLowerCase() : null, objectName.toLowerCase());
     }
 
     /**
